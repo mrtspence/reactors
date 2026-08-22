@@ -1,40 +1,72 @@
-# SQLite. Versions 3.8.0 and up are supported.
-#   gem install sqlite3
+# PostgreSQL. See docs/architecture.md §5 for what does and does not belong here.
 #
-#   Ensure the SQLite 3 gem is defined in your Gemfile
-#   gem "sqlite3"
+# Match runtime state never touches this database. During play, state lives in the
+# runner's memory and is snapshotted to the compacted `match.snapshots` Kafka topic.
+# What Postgres holds is the durable, low-volume stuff: player progression, and the
+# archived seed + command log that replays are rebuilt from.
 #
+# Four databases, following the Rails 8 layout: the primary plus one each for Solid
+# Cache, Solid Queue and Solid Cable. They are separate so that queue and cable churn
+# never competes with application queries.
+
+# No host, username or password here on purpose. Left unset, libpq connects over the
+# local Unix socket as the current OS user, which is what peer authentication expects
+# in development. Deployments set PGHOST / PGUSER / PGPASSWORD (or DATABASE_URL) and
+# libpq picks those up natively — so this file needs no environment branching.
 default: &default
-  adapter: sqlite3
-  max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
-  timeout: 5000
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
 
 development:
-  <<: *default
-  database: storage/development.sqlite3
-
-# Warning: The database defined as "test" will be erased and
-# re-generated from your development database when you run "rake".
-# Do not set this db to the same as development or production.
-test:
-  <<: *default
-  database: storage/test.sqlite3
-
-# Store production database in the storage/ directory, which by default
-# is mounted as a persistent Docker volume in config/deploy.yml.
-production:
   primary:
     <<: *default
-    database: storage/production.sqlite3
+    database: reactor_development
   cache:
     <<: *default
-    database: storage/production_cache.sqlite3
+    database: reactor_development_cache
     migrations_paths: db/cache_migrate
   queue:
     <<: *default
-    database: storage/production_queue.sqlite3
+    database: reactor_development_queue
     migrations_paths: db/queue_migrate
   cable:
     <<: *default
-    database: storage/production_cable.sqlite3
+    database: reactor_development_cable
+    migrations_paths: db/cable_migrate
+
+# The simulation specs need none of this — they run outside Rails entirely. Only
+# request, component and channel specs touch the database.
+test:
+  primary:
+    <<: *default
+    database: reactor_test
+  cache:
+    <<: *default
+    database: reactor_test_cache
+    migrations_paths: db/cache_migrate
+  queue:
+    <<: *default
+    database: reactor_test_queue
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: reactor_test_cable
+    migrations_paths: db/cable_migrate
+
+production:
+  primary:
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DATABASE", "reactor_production") %>
+  cache:
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DATABASE", "reactor_production") %>_cache
+    migrations_paths: db/cache_migrate
+  queue:
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DATABASE", "reactor_production") %>_queue
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DATABASE", "reactor_production") %>_cable
     migrations_paths: db/cable_migrate

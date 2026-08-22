@@ -1,0 +1,49 @@
+# Redpanda: Kafka wire-compatible, single binary, no ZooKeeper or KRaft wrangling.
+# This is the whole local Kafka footprint (docs/architecture.md §6).
+#
+#   docker compose up -d
+#   ./script/create_topics.sh
+#
+# The console at http://localhost:8080 shows topics, partitions, consumer groups and
+# lag — worth keeping open, since watching partition assignment move between runners
+# is where the ownership model stops being abstract.
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v25.1.1
+    container_name: reactor-redpanda
+    command:
+      - redpanda
+      - start
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=warn
+      # Two listeners: INTERNAL for the console container, EXTERNAL for the app
+      # running on the host. Getting the advertised addresses wrong is the classic
+      # way to end up with a broker that connects and then times out on produce.
+      - --kafka-addr INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
+    ports:
+      - "19092:19092"   # brokers, from the host
+      - "9644:9644"     # admin API
+    healthcheck:
+      test: [ "CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'" ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+
+  console:
+    image: redpandadata/console:v3.1.0
+    container_name: reactor-redpanda-console
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+volumes:
+  redpanda-data:

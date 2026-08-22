@@ -26,7 +26,18 @@ module Reactor
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
-    config.autoload_lib(ignore: %w[assets tasks])
+    #
+    # `reactor_sim` is ignored deliberately. The simulation is a self-contained
+    # library reached by an explicit `require "reactor_sim"`, not a Rails citizen
+    # (docs/architecture.md §3). Letting Zeitwerk manage it would:
+    #
+    #   * fight the explicit require_relative chain in lib/reactor_sim.rb,
+    #   * make the sim reloadable in development, so a long-running match runner
+    #     could end up holding state built from unloaded constants, and
+    #   * quietly erode the boundary the purity spec exists to defend.
+    # Both entries are needed: the ignore list matches exact paths, so `reactor_sim`
+    # covers the directory but not lib/reactor_sim.rb, which is the entry point.
+    config.autoload_lib(ignore: %w[assets tasks reactor_sim reactor_sim.rb])
 
     # Configuration for the application, engines, and railties goes here.
     #

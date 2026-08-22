@@ -1,17 +1,26 @@
-# Async adapter only works within the same process, so for manually triggering cable updates from a console,
-# and seeing results in the browser, you must do so from the web console (running inside the dev process),
-# not a terminal started via bin/rails console! Add "console" to any action or any ERB template view
-# to make the web console appear.
+# Development must NOT use the `async` adapter.
+#
+# Async is in-process only. The match runner is a separate process from Puma, so
+# anything it broadcasts over ActionCable would reach exactly nobody — and it would do
+# so silently, with no error anywhere. That is the single most annoying way to lose an
+# afternoon on this project, so development uses solid_cable like production does.
+# See docs/architecture.md §7 and §9.
+
+default: &default
+  adapter: solid_cable
+  connects_to:
+    database:
+      writing: cable
+  # The runner broadcasts on every tick (4 Hz), so the poll interval is a real part of
+  # the latency budget. 0.1s keeps it well under the tick barrier.
+  polling_interval: 0.1.seconds
+  message_retention: 1.day
+
 development:
-  adapter: async
+  <<: *default
 
 test:
   adapter: test
 
 production:
-  adapter: solid_cable
-  connects_to:
-    database:
-      writing: cable
-  polling_interval: 0.1.seconds
-  message_retention: 1.day
+  <<: *default
