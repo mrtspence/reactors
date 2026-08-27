@@ -10,6 +10,7 @@
 # Specs that genuinely need the app require "rails_helper" instead.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift File.expand_path(__dir__)
 
 RSpec.configure do |config|
   config.expect_with :rspec do |expectations|

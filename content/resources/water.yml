@@ -1,0 +1,29 @@
+# Water and its vapour.
+#
+# `formation_enthalpy_j_per_kg` is enthalpy relative to a 0 K reference, and the gap
+# between the two entries IS the latent heat. That is what makes phase change conserve
+# energy exactly: boiling a kilogram costs precisely what condensing it returns.
+#
+#   h_water(373.15) = 4181 * 373.15               = 1_560_144
+#   h_steam(373.15) = 2010 * 373.15 + 3_067_113   = 3_817_144
+#   difference                                    = 2_257_000  (latent heat)
+
+water:
+  tags: [liquid, coolant, moderator]
+  specific_heat_j_per_kg_k: 4181
+  density_kg_per_m3: 997
+  molar_mass_g_per_mol: 18.015
+  formation_enthalpy_j_per_kg: 0
+  phase:
+    model: saturation
+    vapour: steam
+    latent_heat_j_per_kg: 2257000
+    reference_temperature_k: 373.15
+    reference_pressure_pa: 101325
+
+steam:
+  tags: [gas, working_fluid]
+  specific_heat_j_per_kg_k: 2010
+  density_kg_per_m3: 0.6
+  molar_mass_g_per_mol: 18.015
+  formation_enthalpy_j_per_kg: 3067108.65

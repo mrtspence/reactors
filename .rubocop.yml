@@ -1,8 +1,78 @@
-# Omakase Ruby styling for Rails
+# Omakase handles formatting; this file adds the cops that catch bugs.
+#
+# Omakase on its own enables 45 cops out of ~800, essentially all layout and style. That is
+# the right default for a Rails app — it stops style arguments — but it means a clean run
+# says nothing whatsoever about correctness. The additions below are the families that earn
+# their keep on this codebase, plus documented exemptions where a cop is wrong for it.
+#
+# Deliberately NOT enabled:
+#
+#   Metrics/*  The physics is legitimately dense. `Arbiter#settle_mass` and the tick
+#              pipeline are long because the ORDER of their steps is the load-bearing part;
+#              splitting them to satisfy a line count would scatter the one thing a reader
+#              most needs to see in one place. Length is reviewed by judgement here.
+#   Style/*    Beyond omakase. Bikeshedding, and avoiding it is what omakase is for.
+
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
-# Overwrite or add rules to create your own house style
-#
-# # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
-# Layout/SpaceInsideArrayLiteralBrackets:
-#   Enabled: false
+plugins:
+  - rubocop-performance
+
+AllCops:
+  NewCops: enable
+  Exclude:
+    - bin/**/*
+    - db/schema.rb
+    - db/*_schema.rb
+    - vendor/**/*
+    - tmp/**/*
+
+# Catches real defects: unused arguments, shadowed variables, redundant guards, constructors
+# that skip their parent. Cheap, and this codebase has shipped bugs these would have caught.
+Lint:
+  Enabled: true
+
+# The simulation is measured and allocation-sensitive — building objects inside the
+# saturation solve's inner loop was once 64% of a hundred-node tick. Worth the cop.
+Performance:
+  Enabled: true
+
+Naming:
+  Enabled: true
+
+# `Dir.glob` sorts by default in Ruby 3, so the cop is technically right. Keeping the
+# explicit sort anyway: content load order feeds a library whose entire value proposition is
+# determinism, and depending on an implicit language behaviour for that is exactly the wrong
+# instinct. The two characters are cheaper than the reasoning.
+Lint/RedundantDirGlobSort:
+  Enabled: false
+
+# `dt` is the domain's name for the timestep and appears in nearly every physics signature;
+# `a`/`b` are the two ends of a coupling in Relaxation and the link types. Renaming them to
+# satisfy a length rule would make the equations harder to read, not easier.
+Naming/MethodParameterName:
+  AllowedNames:
+    - a
+    - b
+    - dt
+    - id
+    - kg
+    - op
+    - to
+
+# Method names here are fixed by an interface rather than by what they happen to return.
+# `Display#render` returns whatever that display renders — a number, a string, or a boolean
+# for a lamp — and renaming one implementation to `render?` would break the contract.
+Naming/PredicateMethod:
+  Exclude:
+    - lib/reactor_sim/diagnostics/displays.rb
+    # `Operation#set_control` is a command that reports whether it landed, which is what
+    # `Match#apply` counts to tally applied against rejected. Renaming it `set_control?`
+    # would suggest it asks a question rather than performing a mutation.
+    - lib/reactor_sim/operation.rb
+
+# Specs legitimately define constants inside describe blocks for shared fixtures and
+# forbidden-pattern tables; the alternative is polluting the global namespace.
+Lint/ConstantDefinitionInBlock:
+  Exclude:
+    - spec/**/*

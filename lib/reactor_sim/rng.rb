@@ -47,7 +47,7 @@ module ReactorSim
     end
 
     def between(low, high)
-      low + float * (high - low)
+      low + (float * (high - low))
     end
 
     # Symmetric uniform noise in [-magnitude, +magnitude].

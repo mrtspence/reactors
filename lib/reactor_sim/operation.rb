@@ -1,189 +1,233 @@
 # frozen_string_literal: true
 
 module ReactorSim
-  # One overseer's machine: a chain of mechanisms joined by delayed buffers, plus the
-  # levers and gauges through which a player experiences it.
+  # One overseer's machine: a graph of nodes joined by links, plus the levers through which
+  # a player experiences it.
   #
-  # The tick here is double-buffered. Every mechanism is evaluated against a frozen
-  # snapshot of the previous tick and returns its next state along with the draws and
-  # pushes it *wants*; nothing is applied until every mechanism has been evaluated.
-  # Two consequences worth stating plainly:
+  # The tick is double-buffered. Every node is evaluated against a frozen snapshot of the
+  # previous tick, and nothing is applied until every node has been evaluated. Three
+  # consequences, all load-bearing:
   #
-  #   * Evaluation order cannot affect the result, so the chain has no hidden
-  #     dependence on the order mechanisms happen to be listed in.
-  #   * A change at the top of the chain takes several ticks to be felt at the bottom,
-  #     which is the whole source of tension in overseeing one of these.
+  #   * Evaluation order cannot affect the result, so there is no hidden dependence on the
+  #     order nodes happen to be listed in — and no topological sort to be undefined.
+  #   * **Closed loops just work.** A recirculation loop is a graph where following the
+  #     edges returns you to the start; every node still reads N-1, so nothing special
+  #     happens and nothing needs to.
+  #   * A change at one end of a chain takes one tick per hop to be felt at the other. That
+  #     is where delay comes from now. There is no `delay:` parameter anywhere.
   class Operation
-    attr_reader :id, :type, :mechanisms, :buffers, :control_points, :diagnostics, :state
+    # The per-tick view a node sees. Lives on Tick, aliased here because operations and
+    # specs refer to it by the name they already know.
+    Context = Tick::Context
 
-    def initialize(id:, type:, mechanisms:, buffers:, control_points:, diagnostics:,
-                   power_source:, seed:, state: nil, rngs: nil)
-      @id = id
+    attr_reader :id, :type, :nodes, :links, :thermal_links, :drive_links, :control_points,
+                :diagnostics, :state, :content, :time_scale, :options, :rngs
+
+    def initialize(id:, type:, nodes:, links: [], thermal_links: [], drive_links: [],
+                   control_points: [], diagnostics: [], seed:, content: nil, time_scale: 1.0,
+                   options: {}, state: nil, rngs: nil)
+      @id = id.to_sym
       @type = type
-      @mechanisms = mechanisms
-      @buffers = buffers
-      @control_points = control_points
-      @diagnostics = diagnostics
-      @power_source = power_source # [mechanism_id, field]
+      @nodes = nodes.to_h { |n| [ n.id, n ] }.freeze
+      @links = links.freeze
+      @thermal_links = thermal_links.freeze
+      @drive_links = drive_links.freeze
+      @control_points = control_points.to_h { |c| [ c.id, c ] }.freeze
+      @diagnostics = diagnostics.to_h { |d| [ d.id, d ] }.freeze
       @seed = seed
+      @content = content || Content.default
+      @time_scale = time_scale.to_f
+      # How this operation was configured — which engine variant, which fuel. Snapshotted
+      # and handed back to the builder on restore, because rebuilding an atmospheric engine
+      # as a high-pressure one would be a silent and total divergence.
+      @options = options.to_h { |k, v| [ k.to_sym, v ] }.freeze
 
+      validate_graph!
       @rngs = rngs || build_rngs(seed)
-      # A restored state carries no events (see #to_h), so put the key back rather
-      # than making every reader defend against its absence.
-      @state = state ? state.merge(events: state.fetch(:events, [])).freeze : build_initial_state
+      @state = state ? restore(state) : build_initial_state
     end
 
-    # --- commands -----------------------------------------------------------
+    # --- commands ------------------------------------------------------------
 
-    # Absolute set, clamped. Idempotent by construction, which is what makes replaying
-    # the command log safe (docs/architecture.md §6).
+    # Absolute set, clamped, idempotent by construction — which is what makes replaying the
+    # command log safe. Commands touch `target` only; the lever's actual position is moved
+    # inside the tick (docs/simulation_architecture.md §7).
     def set_control(control_point_id, value)
-      cp = @control_points.find { |c| c.id == control_point_id }
+      cp = @control_points[control_point_id.to_sym]
       return false unless cp
 
-      controls = @state.fetch(:controls).merge(
-        cp.id => cp.set(@state.fetch(:controls).fetch(cp.id), value)
-      )
-      @state = @state.merge(controls: controls).freeze
+      controls = @state.fetch(:controls)
+      @state = @state.merge(
+        controls: controls.merge(cp.id => cp.set_target(controls.fetch(cp.id), value).freeze).freeze
+      ).freeze
       true
     end
 
-    # --- tick ---------------------------------------------------------------
+    # --- tick ----------------------------------------------------------------
 
-    def step!(dt:, tick:)
-      read_mechanisms = @state.fetch(:mechanisms)
-      read_buffers    = @state.fetch(:buffers)
-
-      controls  = control_values
-      available = @buffers.to_h { |b| [ b.id, b.available(read_buffers.fetch(b.id)) ] }.freeze
-      room      = @buffers.to_h { |b| [ b.id, b.capacity - b.available(read_buffers.fetch(b.id)) ] }.freeze
-
-      results = @mechanisms.map do |mechanism|
-        ctx = Mechanism::Context.new(
-          controls: controls, available: available, room: room,
-          rng: @rngs.fetch(mechanism.id), dt: dt, tick: tick
-        )
-        [ mechanism, mechanism.step(read_mechanisms.fetch(mechanism.id), ctx) ]
-      end
-
-      next_mechanisms = results.to_h { |m, r| [ m.id, r.state.freeze ] }.freeze
-      next_buffers    = commit_buffers(read_buffers, results)
-      next_diagnostics = record_diagnostics(next_mechanisms)
-      events = results.flat_map { |_m, r| r.events }
-
-      @state = {
-        mechanisms: next_mechanisms,
-        buffers: next_buffers,
-        controls: @state.fetch(:controls),
-        diagnostics: next_diagnostics,
-        events:
-      }.freeze
-
-      events
+    # The phases themselves live in Tick, which is where the ordering — the most
+    # load-bearing and least obvious part of the engine — can be read in one sitting.
+    # The new state is installed atomically, so a half-finished tick is never observable.
+    def step!(tick:, dt: nil)
+      @state = Tick.new(self, @state).call(tick: tick, dt: dt || (ReactorSim::DT * @time_scale))
+      @state.fetch(:events)
     end
 
-    # --- projection ---------------------------------------------------------
+    # --- observation ---------------------------------------------------------
 
-    # Pure: projecting the same tick twice yields the same view, however many viewers
-    # there are. See the note in Diagnostic.
-    def project(viewer:, tick:)
-      diag_state = @state.fetch(:diagnostics)
+    # The projection. Pure: projecting the same tick twice yields the same view, however
+    # many viewers there are — see the note in Diagnostic about why that matters.
+    def project(viewer: :player, tick: nil)
+      diag_states = @state.fetch(:diagnostics)
 
-      gauges = @diagnostics.to_h do |d|
-        state = diag_state.fetch(d.id)
-        [ d.id, viewer == :spectator ? d.truth(state) : d.reading(state) ]
+      gauges = {}
+      flags = {}
+      @diagnostics.each do |id, diagnostic|
+        diag_state = diag_states.fetch(id)
+        gauges[id] = viewer == :spectator ? diagnostic.truth(diag_state) : diagnostic.read(diag_state)
+        instrument_flags = diagnostic.flags(diag_state)
+        flags[id] = instrument_flags unless instrument_flags.empty? || viewer == :spectator
       end
 
       PlayerView.new(
-        tick:,
-        operation_id: @id,
-        viewer:,
-        gauges:,
-        controls: control_values,
-        incidents: @state.fetch(:events),
-        power:
+        tick: tick, operation_id: @id, viewer: viewer,
+        gauges: gauges.freeze, flags: flags.freeze,
+        controls: @state.fetch(:controls).to_h { |id, s|
+          [ id, { target: s.fetch(:target), actual: s.fetch(:actual) } ]
+        }.freeze,
+        incidents: @state.fetch(:events)
       )
     end
 
-    def power
-      mechanism_id, field = @power_source
-      @state.fetch(:mechanisms).fetch(mechanism_id).fetch(field)
+    # Sent once when a client subscribes, so it can draw the panel. Values stream after.
+    def panel
+      { operation_id: @id,
+        instruments: @diagnostics.values.map(&:chrome),
+        controls: @control_points.values.map { |c|
+          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit }
+        } }
     end
 
-    def failed? = @state.fetch(:mechanisms).values.any? { |s| s[:failed] }
+    # Raw truth, bypassing the instruments entirely. For specs and the runner's stdout —
+    # never for a client, which sees only what #project shows it.
+    def telemetry
+      @nodes.to_h do |id, node|
+        state = @state.fetch(:nodes).fetch(id)
+        [ id, { temperature_k: (node.temperature_k(state, @content) if node.respond_to?(:temperature_k)),
+                pressure_pa: (node.pressure_pa(state, @content) if node.respond_to?(:pressure_pa)),
+                kg: (node.contents_kg(state) if node.respond_to?(:contents_kg)),
+                durability: state[:durability],
+                broken: state[:broken] }.compact ]
+      end
+    end
 
-    # --- serialisation ------------------------------------------------------
+    def broken? = @state.fetch(:nodes).values.any? { |s| s[:broken] }
 
-    # Events are deliberately excluded: they are this tick's *output*, already
-    # published to the event log, not durable state. Leaving them out keeps a snapshot
-    # to a bag of numbers and avoids round-tripping event symbols through JSON.
-    def to_h
-      {
-        id: @id,
-        type: @type,
-        seed: @seed,
-        state: @state.reject { |k, _| k == :events },
-        rngs: @rngs.transform_values(&:state)
+    def ledger = @state.fetch(:ledger)
+
+    # Everything the operation currently contains. The conservation specs compare these
+    # against the ledger; nothing else should need them.
+    def total_mass
+      @state.fetch(:nodes).values.sum { |s| Parcel.total_kg(s.fetch(:parcels, [])) }
+    end
+
+    # Thermal energy, the energy carried by the contents, AND rotational kinetic energy.
+    # A spinning flywheel holds real energy, so leaving it out would make the conservation
+    # spec read every acceleration as drift.
+    def total_joules
+      thermal = @state.fetch(:nodes).values.sum do |s|
+        s.fetch(:joules, 0.0) + Parcel.total_joules(s.fetch(:parcels, []))
+      end
+
+      thermal + @nodes.sum { |id, node|
+        node.respond_to?(:omega) ? node.kinetic_joules(@state.fetch(:nodes).fetch(id)) : 0.0
       }
     end
 
+    # --- serialisation -------------------------------------------------------
+
+    # Events are deliberately excluded: they are this tick's *output*, already published to
+    # the event log, not durable state.
+    def to_h
+      { id: @id, type: @type, seed: @seed, time_scale: @time_scale, options: @options,
+        state: @state.reject { |k, _| k == :events },
+        rngs: @rngs.transform_values(&:state) }
+    end
+
     def self.from_h(hash, registry: ReactorSim::Operations)
-      builder = registry.fetch(hash.fetch(:type))
-      builder.call(
+      registry.fetch(hash.fetch(:type).to_sym).call(
         id: hash.fetch(:id),
         seed: hash.fetch(:seed),
+        time_scale: hash.fetch(:time_scale, 1.0),
+        **hash.fetch(:options, {}),
         state: hash.fetch(:state),
-        rngs: hash.fetch(:rngs).to_h { |name, s| [ name, Rng.new(s) ] }
+        rngs: hash.fetch(:rngs).to_h { |name, s| [ name.to_sym, Rng.new(s) ] }
       )
     end
 
     private
 
-    def control_values
-      @control_points.to_h { |cp| [ cp.id, cp.value(@state.fetch(:controls).fetch(cp.id)) ] }.freeze
-    end
+    # --- phases --------------------------------------------------------------
 
-    def commit_buffers(read_buffers, results)
-      drawn  = Hash.new(0.0)
-      pushed = Hash.new(0.0)
+    # Phase 0. Levers travel toward their targets. All actuation entropy belongs here,
+    # inside the tick — never in command application, which would make replay diverge.
 
-      results.each do |_mechanism, result|
-        result.draws.each  { |id, amount| drawn[id]  += amount }
-        result.pushes.each { |id, amount| pushed[id] += amount }
+    # --- construction --------------------------------------------------------
+
+    def validate_graph!
+      @links.each do |link|
+        source = @nodes[link.from_node] or raise Error, "link #{link.id}: no node #{link.from_node}"
+        sink   = @nodes[link.to_node]   or raise Error, "link #{link.id}: no node #{link.to_node}"
+        raise Error, "link #{link.id}: #{link.from_port} is not an outlet" unless source.port(link.from_port).outlet?
+        raise Error, "link #{link.id}: #{link.to_port} is not an inlet" unless sink.port(link.to_port).inlet?
       end
 
-      @buffers.to_h do |buffer|
-        next_state = buffer.commit(
-          read_buffers.fetch(buffer.id),
-          drawn: drawn[buffer.id], pushed: pushed[buffer.id]
-        )
-        [ buffer.id, next_state.freeze ]
-      end.freeze
+      @thermal_links.each do |link|
+        [ link.a, link.b ].each do |id|
+          raise Error, "thermal link #{link.id}: no node #{id}" unless @nodes.key?(id)
+          raise Error, "thermal link #{link.id}: #{id} is not thermal" unless @nodes.fetch(id).respond_to?(:temperature_k)
+        end
+      end
     end
 
-    def record_diagnostics(next_mechanisms)
-      current = @state.fetch(:diagnostics)
-
-      @diagnostics.to_h do |d|
-        truth = next_mechanisms.fetch(d.mechanism).fetch(d.field)
-        [ d.id, d.record(current.fetch(d.id), truth, @rngs.fetch(d.id)).freeze ]
-      end.freeze
-    end
-
-    # Every mechanism and diagnostic gets its own named stream, so nothing depends on
-    # the order they are evaluated in.
+    # Every node and control point gets its own named stream, so nothing depends on the
+    # order they are evaluated in.
     def build_rngs(seed)
-      (@mechanisms + @diagnostics).to_h { |c| [ c.id, Rng.stream(seed, "#{@id}/#{c.id}") ] }
+      (@nodes.keys + @control_points.keys + @diagnostics.keys)
+        .to_h { |id| [ id, Rng.stream(seed, "#{@id}/#{id}") ] }
+    end
+
+    # A snapshot round-trips through JSON, which stringifies symbol keys — and only keys.
+    # Resource ids live in parcels as *values*, so they come back as strings and then fail
+    # to match anything, sort against symbols, or route by tag. Normalising them here, at
+    # the single entry point for restored state, is what makes restore exact.
+    #
+    # Events are re-added because they are this tick's output rather than durable state and
+    # are excluded from the snapshot; putting the key back beats making every reader defend
+    # against its absence.
+    def restore(state)
+      nodes = state.fetch(:nodes).to_h do |id, node_state|
+        next [ id, node_state ] unless node_state.key?(:parcels)
+
+        [ id, node_state.merge(parcels: Parcel.normalise(node_state.fetch(:parcels))).freeze ]
+      end
+
+      # Instrument flags are symbols living in an array — values, not keys — so they come
+      # back from JSON as strings for exactly the same reason resource ids do.
+      diagnostics = state.fetch(:diagnostics, {}).to_h do |id, diag_state|
+        [ id, diag_state.merge(flags: diag_state.fetch(:flags, []).map(&:to_sym).freeze).freeze ]
+      end
+
+      state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze,
+                  events: state.fetch(:events, [])).freeze
     end
 
     def build_initial_state
-      {
-        mechanisms:  @mechanisms.to_h    { |m| [ m.id, m.initial_state(@rngs.fetch(m.id)).freeze ] }.freeze,
-        buffers:     @buffers.to_h       { |b| [ b.id, b.initial_state(nil).freeze ] }.freeze,
-        controls:    @control_points.to_h { |c| [ c.id, c.initial_state(nil).freeze ] }.freeze,
-        diagnostics: @diagnostics.to_h   { |d| [ d.id, d.initial_state(nil).freeze ] }.freeze,
-        events: []
-      }.freeze
+      { nodes: @nodes.to_h { |id, n| [ id, n.initial_state(@rngs.fetch(id), @content) ] }.freeze,
+        controls: @control_points.to_h { |id, c| [ id, c.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
+        diagnostics: @diagnostics.to_h { |id, d| [ id, d.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
+        ledger: Ledger.initial.freeze,
+        events: [] }.freeze
     end
   end
 end

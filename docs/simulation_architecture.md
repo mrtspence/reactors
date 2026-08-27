@@ -201,8 +201,28 @@ A node holding a boiling mixture simply has two parcels, `water` and `steam`, ta
 `liquid` and `gas`. Tag routing (§6) then separates them for free — which is exactly what a
 drum separator is.
 
+### Reactions have rates
+
+Phase change snaps to equilibrium; **chemistry does not**. An instantaneous reaction has no
+transient, and the transient is the game — a vat that reacts the moment reagents meet gives
+the overseer nothing to steer.
+
+```yaml
+# content/reactions/neutralisation.yml
+neutralisation:
+  consumes:  { vitriol: 1.0, quicklime: 1.1 }     # kg ratios
+  produces:  { brine: 2.1 }
+  enthalpy_j_per_unit: -1.85e6                     # per unit of extent; negative = exothermic
+  rate_per_s:        0.35                          # first-order approach to completion
+  min_temperature_k: 310
+```
+
+`Δextent = (1 − extent) · rate_per_s · dt`, optionally scaled by temperature. Crude by
+design. Because reactions are content records rather than mechanism code, tag-driven
+chemistry — catalysts, inhibitors, competing pathways — is an additive upgrade.
+
 **Deferred:** multi-component distillation, non-equilibrium kinetics, dissolved-species
-chemistry beyond simple threshold reactions.
+chemistry beyond threshold reactions.
 
 ---
 
@@ -241,9 +261,10 @@ lever → gauge  =  minion actuation ticks          (§7)
 
 The RBMK feedwater line — main pump → regenerative heaters → drum separators → reactor —
 is four nodes and three interfaces, so ~7 hops from pump lever to reactor effect. At 4 Hz
-that is 1.75 s before minion and gauge lag. That is a legitimate design choice for a large
-slow system, and a bad one for a small twitchy one. §11 makes it a spec so it cannot drift
-silently.
+that is **1.75 s, and that is the intended feel, not a cost to be minimised**: for a plant
+of that size a few seconds of lag reads as appropriate weight, and instant response would
+read as toy-like. §11 asserts the number so it cannot drift in either direction — a later
+refactor that "optimises" a hop away would be a game-design regression, not a win.
 
 **Interfaces earn their node.** A join becomes a node when it has a control point, can fail,
 or restricts flow. Otherwise it is an edge and costs nothing.
@@ -276,8 +297,9 @@ function over the whole graph.
 │  b) conduction: granted joules move across thermal links             │
 │  c) ambient:    each node leaks to environment → ledger              │
 ├ 5  REACT ───────────────────────────────────────────────────────────┤
-│  per node, per concern: Resources.equilibrate — phase split,         │
-│  threshold chemistry. Local only; no cross-node effects.             │
+│  per node: phase split snaps to saturation equilibrium (fast)        │
+│            chemistry advances by rate · dt toward completion (slow)  │
+│  local only; no cross-node effects, so order cannot matter           │
 ├ 6  STRESS ──────────────────────────────────────────────────────────┤
 │  derived T/P vs limits → durability depletion → failure events       │
 ├ 7  OBSERVE ─────────────────────────────────────────────────────────┤
@@ -541,26 +563,76 @@ observably equivalent, take the approximation and record the difference in the l
 
 ## 9. Performance budget
 
-100 nodes, ~150 mass links, ~150 thermal links, ~40 diagnostics, 4 Hz.
+Measured, not estimated — 100 nodes, 100 mass links, 25 thermal links, 4 Hz, on the dev
+machine. An earlier draft of this section guessed "~5 ms, comfortable with room to spare"
+and was wrong by an order of magnitude, which is why the numbers below come from
+`spec/reactor_sim/performance_spec.rb` rather than from arithmetic.
 
-| Phase | Work per tick |
-|---|---|
-| 0 ACTUATE | ~20 control points |
-| 1 READ | 100 derived scalar computations, cached |
-| 2 PLAN | 100 node calls |
-| 3 SETTLE | two passes over ~300 mass + thermal links (claim, then bound-and-scale) |
-| 4 TRANSFER | ~150 advections + ~150 conductions + 100 ambient |
-| 5 REACT | 100 equilibrations |
-| 6 STRESS | 100 checks |
-| 7 OBSERVE | ~40 sample + filter chains |
-| **Total** | **~1,000 operations/tick → ~4,000/second/match** |
+| Phase | ms/tick | Share |
+|---|---|---|
+| 5 REACT (phase solve) | 20.5 | 37% |
+| 4a TRANSFER (advection) | 9.3 | 17% |
+| 3 SETTLE (mass) | 9.2 | 17% |
+| 4 APPLY (node effects) | 4.8 | 9% |
+| 3 SETTLE (grants) | 3.8 | 7% |
+| 4c AMBIENT | 5.8 | 11% |
+| 3 SETTLE (heat) + 4b CONDUCT | 3.6 | 7% |
+| 6 STRESS, 0 ACTUATE | 0.4 | 1% |
+| **Total** | **≈55 ms** | **22% of the 250 ms budget** |
 
-Comfortable in Ruby with room to spare. **The decisive factor is closed-form heat transfer:**
-at 40 substeps this would be ~40,000 operations per tick and the budget would be gone. That
-is the entire reason §6 uses the exponential rather than Euler.
+**Comfortable, but not free.** One RBMK-scale operation costs about a fifth of a tick. That
+is fine — an operation this size is the stated ceiling, most are far smaller (the Chemical
+Vats are ~8 nodes), and a runner hosting several of them at once would still fit. It is not
+so much headroom that the cost can be ignored.
 
-Measure before assuming — a `Match#step!` benchmark at 100 nodes belongs in the spec suite
-as a guard, not as a one-off.
+Two things dominate, and both are worth knowing:
+
+- **The saturation solve is half the tick.** It bisects for the self-consistent pressure
+  once per phase-changing node (§6). `Saturation::ITERATIONS` is the first dial to turn if a
+  large operation ever needs to be cheaper; dropping it costs precision nothing observes.
+- **Closed-form heat transfer is what makes the rest affordable.** At 40 substeps the
+  thermal phases alone would exceed the entire budget. This is the concrete payoff for §6
+  using the exponential rather than Euler.
+
+Two optimisations already applied, both worth not undoing: the bisection's inner loop runs
+on captured locals rather than a context hash (that alone was ~64% of the tick), and the
+arbiter indexes its adjacency and parcel lookups instead of rescanning per link, which was
+quietly O(n²).
+
+### File layout
+
+The library is outside Zeitwerk's reach by design, so the require chain in `reactor_sim.rb`
+is also the dependency graph — and the folders follow it:
+
+```
+physics/      substances, energy bookkeeping, the relaxation solver — no graph awareness
+graph/        nodes, ports, links, and the arbiter that settles claims between them
+concerns/     composable state+behaviour fragments a node opts into
+nodes/        generic machinery, reusable across operations
+diagnostics/  the instrument chain and the only thing that leaves the simulation
+operations/   specific machines, built from everything above
+tick.rb       the eight phases, in order
+```
+
+Two rules keep it honest:
+
+- **`nodes/` is generic.** A node that belongs in there must make sense outside the
+  operation it was written for, in its code *and* in its comments. `Cylinder` is a gas
+  expander that happens to suit a steam engine, not a steam engine part — its working fluid
+  is configuration, not a hardcoded `:steam`.
+- **Anything genuinely specific lives under its operation.** `operations/steam_engine/`
+  holds the definition and the panel; nothing else knows those exist.
+
+`Parcel` and `Ledger` are modules over plain hashes rather than classes, deliberately.
+Parcels are the hot path — allocation there was once 64% of a hundred-node tick — and both
+are snapshotted every tick, so a class would add a `to_h`/`from_h` round trip to maintain
+and buy nothing. Behaviour lives in the module instead.
+
+**Materials are resources.** Cast iron, steel and babbitt are content records carrying
+`tensile_strength_pa` alongside the density they already had, so a part is configured with
+`material: :cast_iron` and reads both from content. Safety factors stay on the part, since
+how far below the ideal figure a real casting fails is a property of the casting rather than
+of the metal. A foundry operation could one day produce these and nothing would change.
 
 ---
 
@@ -626,43 +698,121 @@ an accident.
 
 Each step is independently valuable and leaves the suite green.
 
-| # | Step | Why here |
-|---|---|---|
-| 1 | SI units: joules and Kelvin throughout; pressure derived | Everything else assumes it |
-| 2 | Delete `delay:` and `transit` | Pure deletion; delay becomes hop count |
-| 3 | Durability replaces wear | Small, unblocks readable diagnostics |
-| 4 | `Concerns`: Thermal, Holds, Wearing, Pressurized | The composition substrate |
-| 5 | `Node` / `Port` / `Link`; `Conduit`; retire `Buffer` | Graph model |
-| 6 | `plan` / `settle` / `apply` + conservation ledger | **Land with 5** — half of this is worse than either end |
-| 7 | Closed-form thermal links, arbitrated, + ambient sink | Reuses 6's arbiter; makes `time_scale` safe |
-| 8 | `Resources` modules + YAML content + saturation model | Phase change, swappable fluids |
-| 9 | Tag-routed ports | The port contract; enables branching topologies |
-| 10 | Diagnostics: source → filters → display | Closes three trace findings |
-| 11 | Minions at control points and at gauges | Needs 10 for the observer path |
+| # | Step | Status | Why here |
+|---|---|---|---|
+| 1 | SI units: joules and Kelvin throughout; pressure derived | **done** | Everything else assumes it |
+| 2 | Delete `delay:` and `transit` | **done** | Pure deletion; delay becomes hop count |
+| 3 | Durability replaces wear | **done** | Small, unblocks readable diagnostics |
+| 4 | `Concerns`: Thermal, Holds, Wearing, Pressurized | **done** | The composition substrate |
+| 5 | `Node` / `Port` / `Link`; `Conduit`, `Vessel`; retire `Buffer` | **done** | Graph model |
+| 6 | `plan` / `settle` / `apply` + conservation ledger | **done** | Landed with 5, as intended |
+| 7 | Closed-form thermal links, arbitrated, + ambient sink | **done** | Reuses 6's arbiter; makes `time_scale` safe |
+| 8 | `Resources` modules + YAML content + saturation model | **done** | Phase change, swappable fluids |
+| 9 | Tag-routed ports | **done** | The port contract; enables branching topologies |
+| 10 | Diagnostics: source → filters → display | **done** | Closes three trace findings |
+| 11 | Rotation, combustion, and the steam engine | **done** | First real operation; see below |
+| 12 | Minions at control points and at gauges | next | Needs 10 for the observer path |
 
-Steps 1–3 are nearly free. **Steps 5 and 6 are the real work and must land together.**
-Steps 8–10 are where the modularity payoff actually arrives.
+### The steam engine increment
+
+`Concerns::Rotating` (angular momentum stored, ω derived), `DriveLink`, `Nodes::Flywheel`,
+`Load`, `Cylinder`, `Atmosphere`, `ReliefValve`, and combustion content. The relaxation
+mathematics is now shared: `Relaxation` is parameterised on `(capacity, potential)` and
+both heat `(C, T)` and rotation `(I, ω)` run through it, bound and all.
+
+Two rules changed as a result, and they have to stay in step:
+
+- **Gases are limited by pressure, not volume.** A gas expands to fill what it is given;
+  charging it against a fixed volume at a nominal density capped a high-pressure cylinder
+  at 1.2 atm. `Holds#room_m3` and `Arbiter#volume_of` both now exempt gases, and
+  `Pressurized#gas_headroom_kg` provides the pressure limit instead.
+- **An active sink is authoritative about its own intake.** Flow used to be
+  `max(push, draw)`, which meant a sink could not refuse — a valve shoving its contents at
+  a cylinder overrode the cylinder's own limit. A node that declares a draw now gets
+  exactly that; a passive tank declares nothing and still accepts whatever arrives.
+
+Also: an empty vessel reports a **vacuum**, not one atmosphere. Reporting 101 kPa for a
+node holding nothing meant a low-pressure boiler could never fill a cylinder, and a
+condenser could not present the vacuum an atmospheric engine works against.
+
+**Energy conservation needed two new declarations**, both found by the drift check rather
+than by reasoning:
+
+- `joules_from_reactions` — parcel enthalpy does not carry chemical bond energy, so
+  combustion is genuinely a source and has to be declared like a burner is.
+- Stoichiometry conserves enthalpy, not temperature. Building products at the reactants'
+  temperature minted ~780 kJ per firing, because eleven kilograms of air and twelve of flue
+  gas are different amounts of energy at the same temperature. `enthalpy_j_per_unit` is now
+  defined to absorb any formation-enthalpy difference, making it the single line where a
+  reaction may change the system's energy.
+
+Steps 1–10 are complete and the suite is green: purity, determinism, order-independence and
+idempotence carried over unbroken, and mass/energy conservation, thermal stability, cycle
+tolerance, the instrument chain and the performance guard are new.
+
+All three v0 diagnostic findings are closed. `Sources` can read levels, contents, rates and
+derived scalars, so a backing-up line is observable at last. `Filters::Range` ships a
+`:pegged_high` flag, so "600 °C" and "at least 600 °C" are finally distinguishable.
+`Filters::Noise` holds its offset until the signal moves past a deadband, so an idle gauge
+stops reporting a change every tick and the delta protocol compresses something real.
+
+One design point that only appeared once it was built: a god-view must skip the filters that
+make a reading *worse* but keep the ones that change what it *means*. `Filters::Base#distortion?`
+draws that line — without it, a `Rate` instrument reported the raw temperature in a box
+labelled K/s.
+
+The old `Mechanism`, `Buffer`, `Diagnostic` and `PlayerView` are deleted, along with the v0
+Chemical Vats. `spec/support/loop_rig.rb` is the fixture the engine is exercised against —
+a boiler → steam line → condenser → return line **closed loop**, which is the topology the
+old paradigm could not have run at all.
 
 The Chemical Vats rebuild comes after step 10, with design input on the operation itself
 before it starts.
 
 ---
 
-## 13. Still open
+## 13. Settled, and still open
 
-Deliberately unresolved, to be settled by building rather than by guessing:
+### Settled — start here, upgrade in stages
 
-1. **Pressure model fidelity.** Ideal gas over free volume plus liquid displacement is the
-   plan. Pump head, hydrostatic pressure, and flow-induced pressure drop are not modelled.
-   That is probably fine for a fantasy plant, but the feedwater line is where it would first
-   look wrong.
-2. **Settlement priority.** Proportional-to-request is the default. Whether declared
-   priority is needed — and whether it is per-port or per-resource — should come from a real
-   operation that needs it.
-3. **Minion progression.** Licences, fatigue, injury, and how they map to filter parameters.
-   Deferred until the operations exist to be staffed.
-4. **Node internal substructure.** Currently one thermal mass per node, split into more nodes
-   when more temperatures are needed. If a 100-node budget starts to bind, sub-masses within
-   a node become the alternative.
-5. **Chemistry beyond thresholds.** Reaction *rates* rather than instantaneous equilibrium.
-   The vats may or may not need this; the RBMK does not.
+1. **Pressure: simple.** Ideal gas over the free volume, plus liquid displacement. No pump
+   head, no hydrostatic term, no flow-induced pressure drop. Because the physics is
+   encapsulated in `Concerns::Pressurized` and `Resources`, each of those is an additive
+   change later rather than a rework.
+2. **Settlement: proportional-to-request.** Declared priority is not built. Changing the
+   split rule later is a change to one pure function, so this is cheap to revisit.
+3. **Reaction rates are modelled, crudely.** Rates are fundamentally important — an
+   instantaneous-equilibrium reaction has no transient to manage, and the transient *is* the
+   game. So the REACT phase splits in two:
+   - **Phase change is instantaneous.** Evaporation and condensation are fast relative to
+     any sane `time_scale`; snapping to saturation equilibrium is both simpler and more
+     accurate than rate-limiting it.
+   - **Chemistry is rate-limited.** First-order approach to completion:
+     `Δextent = (1 − extent) · rate · dt`, with `rate` optionally scaled by temperature.
+     Crude on purpose. Tag-driven chemistry — catalysts, inhibitors, competing pathways —
+     is the upgrade path and needs no structural change to reach.
+4. **One thermal mass per node.** Things that need distinct temperatures are distinct nodes.
+   Sub-masses within a node remain the fallback if the ~100-node budget starts to bind.
+5. **Lever-to-effect latency of ~1.75 s is a target, not a tolerance.** For a large slow
+   plant a few seconds of lag reads as appropriate weight rather than as lag. §11's latency
+   spec exists to stop it drifting in *either* direction.
+
+### Still open
+
+- **Condensate has no way out of a gas-only line.** Tags govern what may be *transported*,
+  not what may *exist*, so steam that condenses inside a cooling pipe becomes liquid water
+  in a conduit whose ports accept only gas — and it can never leave. This is exactly why
+  real plants fit steam traps, so the behaviour is right; what is undecided is whether the
+  answer is a `SteamTrap` node, a port that accepts a phase pair, or simply letting
+  condensate accumulate as a hazard the overseer has to manage. Surfaced by the engine, not
+  predicted — worth deciding when designing the Vats.
+- **Non-condensable gases do not contribute to the saturation solve.** `implied_pressure`
+  accounts only for the pair being solved, so air or a reaction product sharing a vessel
+  with boiling water would not raise its boiling point. Correct for everything planned;
+  wrong the first time a vessel holds steam and something else gaseous at once.
+- **Minion progression.** Licences, fatigue, injury, and how they map to filter parameters.
+  Deferred deliberately: the specifics would slow the engine work down, but the seams
+  (`observer:` on diagnostics, `station:` on minions) are reserved so it lands additively.
+- **Tag-driven chemistry.** Catalysis, competing reactions, dissolved-species behaviour.
+- **Multi-component distillation and non-equilibrium kinetics.** Not needed by any planned
+  operation.

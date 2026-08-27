@@ -11,10 +11,17 @@ module ReactorSim
   class Match
     attr_reader :id, :seed, :tick, :operations
 
-    def self.create(id:, seed:, operations:)
+    def self.create(id:, seed:, operations:, time_scale: 1.0)
       built = operations.map do |spec|
         spec = spec.to_h { |k, v| [ k.to_sym, v ] }
-        Operations.fetch(spec.fetch(:type)).call(id: spec.fetch(:id).to_sym, seed: seed)
+        # Anything beyond id and type is passed through to the builder, so an operation
+        # can be configured at creation — which variant of an engine, for instance.
+        options = spec.reject { |k, _| %i[id type].include?(k) }
+
+        Operations.fetch(spec.fetch(:type)).call(
+          id: spec.fetch(:id).to_sym, seed: seed,
+          **{ time_scale: time_scale }.merge(options)
+        )
       end
 
       new(id: id, seed: seed, tick: 0, operations: built)
@@ -55,7 +62,10 @@ module ReactorSim
 
     # --- tick ---------------------------------------------------------------
 
-    def step!(dt: ReactorSim::DT)
+    # `dt` is simulated seconds. Left unset, each operation advances by its own
+    # `time_scale`, so a slow plant and a fast one can share a match without sharing a
+    # clock.
+    def step!(dt: nil)
       @tick += 1
 
       @operations.flat_map do |operation|
@@ -65,16 +75,22 @@ module ReactorSim
       end
     end
 
-    # --- projection ---------------------------------------------------------
+    # --- observation --------------------------------------------------------
 
+    # What a client is sent. Never raw state: everything here has been through an
+    # instrument, so ground truth stays inside the engine.
     def project(operation_id:, viewer: :player)
-      found = operation(operation_id)
-      raise Error, "no such operation: #{operation_id.inspect}" unless found
-
-      found.project(viewer: viewer, tick: @tick)
+      find!(operation_id).project(viewer: viewer, tick: @tick)
     end
 
-    def total_power = @operations.sum(&:power)
+    # Instrument and lever chrome, sent once on subscribe.
+    def panel(operation_id:) = find!(operation_id).panel
+
+    # Raw truth, bypassing the instruments. Specs and the runner's stdout only.
+    def telemetry(operation_id:) = find!(operation_id).telemetry
+
+    def total_mass   = @operations.sum(&:total_mass)
+    def total_joules = @operations.sum(&:total_joules)
 
     # --- serialisation ------------------------------------------------------
 
@@ -103,6 +119,11 @@ module ReactorSim
     def digest = ReactorSim.canonical(to_h)
 
     private
+
+    def find!(operation_id)
+      operation(operation_id) ||
+        raise(Error, "no such operation: #{operation_id.inspect}")
+    end
 
     def apply_set_control(command)
       found = operation(command.operation_id) if command.operation_id

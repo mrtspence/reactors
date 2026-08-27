@@ -1,0 +1,50 @@
+# Combustion: the reaction the whole game runs on.
+#
+# `enthalpy_j_per_unit` is per unit of reaction extent, NOT per kilogram of anything. One
+# unit of extent consumes the full `consumes` set — so for coal that is 1 kg of coal plus
+# 11 kg of air, releasing 30 MJ. Negative is exothermic.
+#
+# It must ALSO absorb any difference in formation enthalpy between the two sides. The
+# stoichiometry itself conserves enthalpy exactly — products inherit what the reactants
+# had, split by mass — so this figure is the only place a reaction is allowed to change the
+# system's energy. That is what makes combustion a single, ledgerable line rather than a
+# leak spread across every parcel.
+#
+# Mass must balance: the `consumes` ratios and the `produces` ratios sum to the same number,
+# and Content refuses to load a reaction where they do not. An unbalanced reaction would
+# create matter every time it fired, and it would do so from inside a data file where nobody
+# would think to look when the conservation spec started failing.
+#
+# `min_temperature_k` is NOT the local ignition point of the fuel. The firebox is modelled
+# as one lumped temperature, so there is no hot spot to light — the threshold has to mean
+# "the bulk temperature at which this fire sustains itself", which is well below the
+# temperature a match applies to a corner of it. Set at true ignition (700 K for coal) the
+# fire could never be lit at all: the boiler drains heat faster than any plausible firelighter
+# can supply it.
+#
+# Air starvation needs no special handling. The reaction rate is limited by whichever
+# reagent runs out first, so closing the damper chokes the fire through exactly the same
+# code path that an empty fuel bunker does.
+
+coal_combustion:
+  consumes: { coal: 1.0, air: 11.0 }
+  produces: { flue_gas: 11.9, ash: 0.1 }
+  enthalpy_j_per_unit: -30000000
+  # Fast. A firebox burns most of the air it is given within a second — set too slow, the
+  # draught blows through unreacted and the fire starves in the middle of a full grate.
+  rate_per_s: 6.0
+  min_temperature_k: 500       # coal still wants real heat before it will catch
+
+wood_combustion:
+  consumes: { wood: 1.0, air: 6.0 }
+  produces: { flue_gas: 6.97, ash: 0.03 }
+  enthalpy_j_per_unit: -16000000
+  rate_per_s: 9.0              # catches faster and burns away faster than coal
+  min_temperature_k: 400       # and lights far more easily, which matters at startup
+
+oil_combustion:
+  consumes: { fuel_oil: 1.0, air: 14.0 }
+  produces: { flue_gas: 15.0 }
+  enthalpy_j_per_unit: -42000000
+  rate_per_s: 14.0
+  min_temperature_k: 430

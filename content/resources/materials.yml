@@ -1,0 +1,50 @@
+# What machines are made of.
+#
+# These are resources like any other, which is the point: a foundry operation could one day
+# produce cast iron and ship it, and nothing here would need to change. For now they are
+# referenced by parts that need to know how strong they are.
+#
+# `tensile_strength_pa` is the property that decides whether a spinning mass holds together.
+# Hoop stress in a rotating disc goes as ρv², so the two numbers that matter — density and
+# tensile strength — both live here, and the ratio between them is what a part actually
+# cares about. Note how badly cast iron does on that ratio compared with steel: it is
+# excellent in compression and poor in tension, which is precisely the wrong way round for
+# a flywheel.
+#
+# Safety factors are NOT here. How far below the ideal figure a real part fails depends on
+# casting quality, geometry and stress concentrations — properties of the part, not of the
+# metal — so they belong on whatever node is made of this.
+
+cast_iron:
+  tags: [solid, metal, structural]
+  density_kg_per_m3: 7200
+  specific_heat_j_per_kg_k: 460
+  tensile_strength_pa: 150.0e6
+
+wrought_iron:
+  tags: [solid, metal, structural]
+  density_kg_per_m3: 7700
+  specific_heat_j_per_kg_k: 500
+  tensile_strength_pa: 250.0e6
+
+steel:
+  tags: [solid, metal, structural]
+  density_kg_per_m3: 7850
+  specific_heat_j_per_kg_k: 490
+  tensile_strength_pa: 500.0e6
+
+# Soft, and deliberately so: a bearing is meant to be the part that wears out rather than
+# the shaft running in it.
+bronze:
+  tags: [solid, metal, bearing]
+  density_kg_per_m3: 8800
+  specific_heat_j_per_kg_k: 380
+  tensile_strength_pa: 250.0e6
+
+# Softer still, and low-melting — which is the whole reason a hot box destroys itself so
+# quickly once the oil stops arriving.
+babbitt:
+  tags: [solid, metal, bearing]
+  density_kg_per_m3: 7400
+  specific_heat_j_per_kg_k: 230
+  tensile_strength_pa: 70.0e6
