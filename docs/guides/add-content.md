@@ -8,6 +8,7 @@ disk, and only once, never during a tick.
 content/
   resources/   water.yml, combustion.yml, materials.yml
   reactions/   combustion.yml
+  minions/     crew.yml
 ```
 
 Every `*.yml` in a folder is loaded and merged, so file names are organisational only.
@@ -37,8 +38,19 @@ Ports filter on them, so tags are the compatibility system. `:gas` is **structur
 cosmetic — it decides whether something is limited by volume or by pressure, whether it
 occupies room, and whether it can be routed through a gas-only port. Tag a gas `:gas`.
 
-Common tags in use: `liquid`, `gas`, `solid`, `fuel`, `oxidiser`, `exhaust`, `waste`,
-`coolant`, `moderator`, `metal`, `structural`, `bearing`, `working_fluid`.
+The vocabulary is **open** and grows with the content, so the list below is a snapshot rather
+than the contract. Derive the current one:
+
+```sh
+grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
+```
+
+In use at the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`,
+`metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+
+A tag is a vocabulary shared between the content files and every port that filters on one, so
+**introducing a tag means updating this list in the same commit**. An undocumented tag is a
+word only its author knows, and the next person writes a near-synonym instead.
 
 ### Phase pairs
 
@@ -122,6 +134,29 @@ A node is one lumped temperature, so there is no local hot spot to light. This t
 to mean *"the bulk temperature at which this reaction sustains itself"*, which is well below
 the temperature a match applies to a corner. Set at coal's true 700 K, a fire can never be lit
 at all — the boiler drains heat faster than any plausible firelighter supplies it.
+
+---
+
+## A minion archetype
+
+```yaml
+fireman:
+  label: Fireman
+  strength: 1.0        # required
+  tags: [ practised ]
+```
+
+`strength` is what a minion brings to a lever. A control point travels at
+`stiffness × strength × health × (1 − fatigue)`, so the archetype sets the ceiling and the
+minion's condition erodes it.
+
+**Health and fatigue are state, not archetype.** They change during a match and live in
+`state[:minions]`; strength does not and lives here. Getting that backwards would make a
+worn-out minion recover on restore.
+
+Only the actuation path is modelled. Intelligence (which would drive the gauge-reading path
+through a diagnostic's `observer:`), skills, and tags like `undead` / `covetous` / `licensed`
+are designed but not built — see `docs/simulation_architecture.md` §7.
 
 ---
 

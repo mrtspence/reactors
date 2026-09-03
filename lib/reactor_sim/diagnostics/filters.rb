@@ -213,6 +213,47 @@ module ReactorSim
 
     # Rate of change per simulated second. A source cannot do this because it needs memory
     # of the previous tick — which is exactly why rates live here and not there.
+    # The mean of the last `window` readings.
+    #
+    # Exists because a reciprocating engine's cylinder does not settle: it fills, does work,
+    # exhausts and refills, and against a supply read one tick behind it can land in a
+    # period-2 limit cycle — indicated power alternating 14.9 and 21.4 kW, cylinder pressure
+    # 157 and 184 kPa, every tick, indefinitely. Reporting the instantaneous value made a
+    # digital readout unreadable and a needle flicker across half its scale.
+    #
+    # A mean is the honest reading here rather than a cosmetic one. At 4 Hz a tick spans many
+    # power strokes, so "indicated power" is already a quantity averaged over strokes; the
+    # only question is whether the averaging window is one tick or several.
+    #
+    # NOTE this smooths a numerical artefact of the one-tick-per-hop delay. It does not remove
+    # it — see docs/current_progress.md. If the oscillation is ever damped in the physics, the
+    # window can shrink, but the filter is still the right home for the question.
+    class Average < Base
+      def initialize(window)
+        super()
+        @window = Integer(window)
+        raise Error, "average window must be >= 1" if @window < 1
+
+        freeze
+      end
+
+      # Not a distortion: a mean changes what the reading MEANS, it does not make it worse.
+      # A spectator watching raw values alternate between two numbers learns less than one
+      # reading the average, so the god-view wants this too — same reasoning as Rate.
+      def distortion? = false
+
+      def initial_state(_rng) = { history: [] }
+
+      def apply(state, value, _rng, _ctx)
+        history = (state.fetch(:history) + [ value ]).last(@window)
+
+        Result.new(state: { history: history }, value: history.sum / history.size,
+                   # Flagged until the window is full, exactly as Lag does — the first few
+                   # readings are means of fewer samples and are legitimately less settled.
+                   flags: history.size < @window ? [ :warming_up ] : [])
+      end
+    end
+
     class Rate < Base
       # Not a distortion: the rate IS the quantity. Skip it and a god-view reports the
       # underlying value in the rate's units, which is nonsense.

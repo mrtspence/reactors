@@ -50,7 +50,7 @@ module ReactorSim
       Array(commands).each do |raw|
         command = Command.parse(raw)
 
-        if command.type == Command::SET_CONTROL && apply_set_control(command)
+        if dispatch(command)
           applied += 1
         else
           rejected << command
@@ -125,7 +125,32 @@ module ReactorSim
         raise(Error, "no such operation: #{operation_id.inspect}")
     end
 
+    # An unknown type falls through to false and is counted as rejected, which is the same
+    # treatment a well-formed command for a missing operation gets. Nothing here may raise.
+    def dispatch(command)
+      case command.type
+      when Command::SET_CONTROL   then apply_set_control(command)
+      when Command::ASSIGN_MINION then apply_assign_minion(command)
+      else false
+      end
+    end
+
+    def apply_assign_minion(command)
+      found = operation(command.operation_id) if command.operation_id
+      return false unless found
+
+      # The destination rides on `control_point_id` rather than a member of its own, because a
+      # station IS a control point — a second field would let the two disagree.
+      found.assign_minion(command.minion_id, command.control_point_id)
+    end
+
     def apply_set_control(command)
+      # A value that could not be read as a number is rejected here rather than clamped to
+      # something plausible. Command.parse hands back nil for anything non-numeric, and
+      # guessing what the sender meant is worse than counting the command as malformed —
+      # which is what the caller already reports.
+      return false if command.value.nil?
+
       found = operation(command.operation_id) if command.operation_id
       return false unless found
 

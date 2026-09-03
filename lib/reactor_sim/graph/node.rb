@@ -58,7 +58,14 @@ module ReactorSim
       end.freeze
     end
 
-    def base_initial_state(_rng, _content) = {}
+    # A node that hosts reactions carries how much of each one's fuel is alight, in kg.
+    # Everything starts cold: a fire has to be lit, and nothing in the graph starts burning
+    # just because it happens to contain something flammable.
+    def base_initial_state(_rng, _content)
+      return {} if reactions.empty?
+
+      { ignition: reactions.to_h { |id| [ id, Resources::Ignition.initial_state.freeze ] }.freeze }
+    end
 
     # --- tick ----------------------------------------------------------------
 

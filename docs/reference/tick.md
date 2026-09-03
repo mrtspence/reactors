@@ -17,7 +17,7 @@ engine uses 1.0; a mine would use much more.
 
 | # | Phase | What it does | May draw entropy? |
 |---|---|---|---|
-| 0 | `actuate` | Levers travel toward their targets | **yes** |
+| 0 | `actuate` | Levers travel toward their targets, at the rate their minion can manage | **yes** |
 | 1 | read | Freeze tick N−1, build the `Context` every node sees | no |
 | 2 | `plan` | Every node declares intent, independently, against N−1 | no |
 | 3 | settle | One pure function over every claim — mass, heat, momentum | no |
@@ -56,6 +56,38 @@ measures the kinetic energy the shaft *actually* gained, and charges the mover e
 Ledgering before that would miss it entirely — this was a real bug worth ~1.8 MJ/tick.
 
 **`observe` runs last (phase 7).** Instruments must see the settled tick, not a partial one.
+
+---
+
+## Phase 0 consults the crew
+
+A control point travels at `stiffness × rate_multiplier × dt`, and the multiplier comes from
+whichever minion is stood at that lever:
+
+```ruby
+control_points.fetch(id).actuate(cp_state, dt:, rate_multiplier: crew_multiplier(id))
+```
+
+`Tick#station_index` maps station → minion from **state**, not configuration, because a minion
+who has been reassigned is at the post their state names.
+
+A lever with `stiffness: Float::INFINITY` — the default, and what every steam engine lever
+uses — snaps `actual` to `target` and discards the multiplier before it is read. So a crew is
+inert until a control point is given a finite stiffness. That is deliberate: it is what let a
+crew be added to the steam engine without re-measuring its skill gradient.
+
+Current shortcuts, all marked `TODO` at the code:
+
+- An **unmanned** lever moves at full rate rather than not at all.
+- Two minions at one station is **last writer wins**.
+- Nothing advances `fatigue` or `health`, so a minion never tires. Accrual belongs here in
+  phase 0, where actuation entropy is already permitted.
+
+### The state hash must name it
+
+`Tick#call`'s phase-8 return **is** the next state, so a key it does not name is silently
+dropped. `minions:` is passed through untouched for exactly that reason — omitting the line
+deletes the crew on tick 1 and raises on tick 2.
 
 ---
 

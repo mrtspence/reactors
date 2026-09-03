@@ -51,7 +51,7 @@ module ReactorSim
           options: { variant: variant },
           nodes: nodes(spec), links: links(spec), thermal_links: thermal_links,
           drive_links: drive_links, control_points: control_points,
-          diagnostics: diagnostics(spec)
+          diagnostics: diagnostics(spec), minions: crew
         )
       end
 
@@ -62,6 +62,11 @@ module ReactorSim
           burst_pa: 4.0 * Units::STANDARD_PRESSURE_PA,
           exhausts_to: :condenser,
           condenser: true,
+          # A smaller fire than Trevithick's, which is period-correct — Watt's engines were
+          # low-pressure machines — and also as much as this one's condenser can swallow. Fed
+          # the high-pressure draught it makes more steam than the condenser can lay down, and
+          # the vacuum it exists to pull collapses. See the condenser note in current_progress.
+          draught_kg_per_s: 4.0,
           bore_m: 1.3, stroke_m: 2.4,
           flywheel: { mass_kg: 24_000.0, radius_m: 2.8, friction: 40.0 }.freeze,
           load_inertia: 3_000.0, load_torque: 90_000.0
@@ -72,6 +77,7 @@ module ReactorSim
           burst_pa: 14.0 * Units::STANDARD_PRESSURE_PA,
           exhausts_to: :atmosphere,
           condenser: false,
+          draught_kg_per_s: 8.0,
           bore_m: 0.45, stroke_m: 1.1,
           flywheel: { mass_kg: 3_200.0, radius_m: 1.5, friction: 8.0 }.freeze,
           load_inertia: 400.0, load_torque: 5_500.0
@@ -83,7 +89,7 @@ module ReactorSim
       def nodes(spec)
         base = [
           Nodes::Atmosphere.new,
-          fuel_bunker, stoker, damper, firebox, flue,
+          fuel_bunker, stoker, damper(spec), firebox, flue,
           water_supply, feed_pump, boiler(spec), relief_valve(spec), throttle,
           cylinder(spec), flywheel(spec), load(spec)
         ]
@@ -110,13 +116,20 @@ module ReactorSim
         )
       end
 
-      def damper
+      def damper(spec)
         Nodes::Conduit.new(
           # Sized so a fully open damper roughly matches a fully stoked grate. Excess air
           # is not free: every kilogram of it has to be heated to firebox temperature and
-          # then thrown up the chimney.
+          # then thrown up the chimney — and that is not theoretical, it is measurable. A
+          # sweep of this number peaks here: at 12 kg/s the engine makes *less* power than
+          # at 8, because the extra draught leaves as hot flue gas.
+          #
+          # Widened from 4.0 when ignition landed. The fire now has to raise steam on its own,
+          # where before a permanently-held 2.5 MW igniter was quietly doing a third of it.
+          # Note the firebox's own `air_in` port stays at 4.0: this makes the DELIVERY steadier
+          # without over-airing the grate, and raising both together is worse than either.
           id: :damper, label: "Damper", accepts: [ :gas ],
-          max_kg_per_s: 4.0, volume_m3: 1.0, heat_capacity: 2.0e3,
+          max_kg_per_s: spec.fetch(:draught_kg_per_s), volume_m3: 1.0, heat_capacity: 2.0e3,
           control_id: :damper_open
         )
       end
@@ -128,7 +141,14 @@ module ReactorSim
           id: :firebox, label: "Firebox", volume_m3: 6.0,
           heat_capacity: 3.0e4, ambient_conductance: 60.0,
           reactions: %i[coal_combustion wood_combustion oil_combustion],
-          heater_control_id: :igniter, heater_watts: 2.5e6,
+          # A match, not a furnace. The igniter used to be 2.5 MW, which is what it took to
+          # drag six cubic metres of firebox over a bulk ignition threshold — and a player
+          # quickly learned that the way to keep a fire alive was to leave it on, turning the
+          # starting handle into a permanent heat source.
+          #
+          # It now sets a little fuel alight and adds a modest amount of heat, exactly like a
+          # gas pilot: the fire's own combustion does the rest, or it does not catch.
+          heater_control_id: :igniter, heater_watts: 1.2e5, igniter_kg_per_s: 0.02,
           ports: [
             Port.new(id: :fuel_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 2.0),
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 4.0),
@@ -304,6 +324,15 @@ module ReactorSim
 
       # --- controls ------------------------------------------------------------
 
+      # Every lever here keeps the default `stiffness: Float::INFINITY`, so `actual` snaps to
+      # `target` and the crew's rate multiplier is discarded before it is ever used.
+      #
+      # TODO: expedient — this is what makes the crew inert. Giving the work stations
+      # (`:stoking`, `:feed`) a finite stiffness is the one-line change that makes minion
+      # condition matter, and it is deliberately not made here: the skill gradient at
+      # time_scale 1.0 (60/80/60 survives, 80/90/70 bursts the flywheel) was measured with
+      # instant actuation, and a proper implementation re-measures it rather than assuming
+      # a few ticks of lever travel are lost in the noise.
       def control_points
         [
           ControlPoint.new(id: :igniter, label: "Igniter", node: :firebox),
@@ -314,6 +343,27 @@ module ReactorSim
           ControlPoint.new(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0),
           ControlPoint.new(id: :load_demand, label: "Mill Load", node: :load, default: 60.0)
         ]
+      end
+
+      # --- crew ----------------------------------------------------------------
+
+      # Two, deliberately: one minion cannot demonstrate reassignment, and one station cannot
+      # demonstrate the lookup. The other five levers are unmanned, which is harmless because
+      # every lever here is frictionless (see `control_points` above).
+      #
+      # NOTE the ids. The obvious name for the person shovelling coal is `stoker`, and
+      # `:stoker` is already the conduit that carries fuel to the firebox. Ids are shared
+      # across nodes, levers, instruments and crew because they key one rng table, so that
+      # collision would have handed two components the same stream. `validate_graph!` now
+      # refuses it outright.
+      #
+      # TODO: expedient — this roster is fixed, so it stays out of `options:` and is rebuilt
+      # from code like the node list. The moment a crew can be hired, injured or dismissed it
+      # must move into `options:`, or a restored snapshot rebuilds a different crew. Exactly
+      # the trap `variant:` is in `options:` to avoid.
+      def crew
+        [ Minion.new(id: :fireman, archetype: :fireman, station: :stoking),
+          Minion.new(id: :yardhand, archetype: :yardhand, station: :damper_open) ]
       end
     end
   end

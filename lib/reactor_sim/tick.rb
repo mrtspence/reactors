@@ -59,7 +59,7 @@ module ReactorSim
     end
 
     attr_reader :state, :nodes, :links, :thermal_links, :drive_links, :control_points,
-                :diagnostics, :content, :rngs
+                :diagnostics, :minions, :content, :rngs
 
     def initialize(operation, state)
       @state = state
@@ -69,6 +69,7 @@ module ReactorSim
       @drive_links = operation.drive_links
       @control_points = operation.control_points
       @diagnostics = operation.diagnostics
+      @minions = operation.minions
       @content = operation.content
       @rngs = operation.rngs
     end
@@ -98,9 +99,18 @@ module ReactorSim
       next_nodes, wear_events = stress(next_nodes, ctx)          # phase 6
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
 
-      { nodes: next_nodes.freeze,                                # phase 8
+      # Phase 8. Note that this hash IS the next state — a key not named here is silently
+      # dropped, so anything added to state must also be added here even when no phase
+      # touches it.
+      { nodes: next_nodes.freeze,
         controls: controls.freeze,
         diagnostics: next_diagnostics.freeze,
+        # Carried through untouched. Nothing advances fatigue or health yet, so there is no
+        # minion phase — but leaving this line out would delete the crew on tick 1 and raise
+        # on tick 2.
+        # TODO: fatigue accrual belongs in phase 0, alongside the actuation entropy it would
+        # feed. Deferred because the rate at which a minion tires is a balance decision.
+        minions: state.fetch(:minions),
         ledger: ledger.freeze,
         events: (events + wear_events).freeze }.freeze
     end
@@ -109,8 +119,36 @@ module ReactorSim
 
     def actuate(dt)
       state.fetch(:controls).to_h do |id, cp_state|
-        [ id, control_points.fetch(id).actuate(cp_state, dt: dt).freeze ]
+        [ id, control_points.fetch(id)
+                .actuate(cp_state, dt: dt, rate_multiplier: crew_multiplier(id)).freeze ]
       end
+    end
+
+    # Who is stood at this lever, and how fast they can work it.
+    #
+    # Read from STATE rather than configuration, because a station is assignable: a minion who
+    # has been moved is at the post their state names, not the one they were built with.
+    def crew_multiplier(control_point_id)
+      minion_id = station_index[control_point_id]
+      # TODO: expedient — an unmanned lever moves at full rate. It should almost certainly not
+      # move at all, but every steam engine lever is frictionless today and discards this
+      # multiplier entirely, so making it 0.0 now would be an untested change to a value
+      # nothing reads. A proper implementation decides what an unattended control does, which
+      # is a game-design question rather than a mechanical one.
+      return 1.0 unless minion_id
+
+      minions.fetch(minion_id)
+             .rate_multiplier(state.fetch(:minions).fetch(minion_id), content)
+    end
+
+    # TODO: expedient — last writer wins if two minions share a station. A proper
+    # implementation either refuses the assignment or sums their effort; both need a rule for
+    # what a crowd at one lever means, which nothing yet depends on.
+    def station_index
+      @station_index ||= state.fetch(:minions).each_with_object({}) { |(id, minion_state), acc|
+        station = minion_state[:station]
+        acc[station] = id if station
+      }.freeze
     end
 
     def control_values(controls)
@@ -323,11 +361,17 @@ module ReactorSim
       state = state.merge(joules_from_reactions: 0.0)
 
       node.reactions.reduce(state) do |acc, reaction_id|
+        spec = content.reaction(reaction_id)
+        acc = advance_ignition(spec, reaction_id, node, acc, ctx)
+
         parcels, released = Resources::Reaction.advance(
-          content.reaction(reaction_id), acc.fetch(:parcels),
-          temperature_k: node.temperature_k(acc, content), dt: ctx.dt, content: content
+          spec, acc.fetch(:parcels),
+          temperature_k: node.temperature_k(acc, content), dt: ctx.dt, content: content,
+          ignited_fuel_kg: ignited_fuel_kg(spec, reaction_id, acc)
         )
         next acc if released.zero? && parcels.equal?(acc.fetch(:parcels))
+
+        acc = burn_down_ignition(spec, reaction_id, acc, parcels)
 
         # Recorded as well as applied. Combustion is the largest single energy input in the
         # game and it must not arrive silently.
@@ -336,6 +380,67 @@ module ReactorSim
                                  joules_from_reactions: acc.fetch(:joules_from_reactions, 0.0) + released),
                        content)
       end
+    end
+
+    # How much of this reaction's fuel is alight, after spread, quenching and whatever the
+    # igniter managed to seed this tick.
+    #
+    # Runs BEFORE the reaction, so the heat released this tick reflects the fire as it is now
+    # rather than as it was a tick ago. Reactions that do not model ignition are left alone —
+    # their state key stays at zero and Reaction.advance keeps its own temperature gate.
+    def advance_ignition(spec, reaction_id, node, state, ctx)
+      return state unless Resources::Ignition.modelled?(spec)
+
+      advanced = Resources::Ignition.advance(
+        spec, ignition_for(state, reaction_id), state.fetch(:parcels),
+        temperature_k: node.temperature_k(state, content), dt: ctx.dt, content: content,
+        # Set by the node in phase 4 — a pilot light, an arc, a match. Consumed here rather
+        # than added by the node itself, for the same reason `joules_injected` is: a node
+        # records what it did and the tick decides what that means.
+        seed_kg: state.fetch(:ignition_seed_kg, 0.0)
+      )
+
+      with_ignition(state, reaction_id, advanced)
+    end
+
+    # Kilograms of fuel alight, or nil for a reaction that does not model ignition — which is
+    # what tells Reaction.advance to keep its own bulk-temperature gate.
+    def ignited_fuel_kg(spec, reaction_id, state)
+      return nil unless Resources::Ignition.modelled?(spec)
+
+      ignition_for(state, reaction_id).fetch(:kg, 0.0)
+    end
+
+    def ignition_for(state, reaction_id)
+      state.fetch(:ignition, {}).fetch(reaction_id, nil) || Resources::Ignition.initial_state
+    end
+
+    # Fuel that burned away shrinks the fire in PROPORTION, not one kilogram for one.
+    #
+    # Subtracting the burnt mass outright says that burning unlights the rest of the fire,
+    # which is backwards — a flame front consuming a lump moves on to the next one. It also
+    # made ignition impossible: at `rate_per_s: 6.0` a small ember is fuel-limited and burns
+    # away inside a tick, so every seed the igniter laid was eaten before it could spread, and
+    # the fire could never establish however long the match was held to it.
+    #
+    # Scaling by what remains keeps the lit FRACTION across a burn, and still takes the fire to
+    # zero as the last of the fuel goes.
+    def burn_down_ignition(spec, reaction_id, state, next_parcels)
+      return state unless Resources::Ignition.modelled?(spec)
+
+      before = Resources::Ignition.fuel_mass(spec, state.fetch(:parcels), content)
+      after = Resources::Ignition.fuel_mass(spec, next_parcels, content)
+      return state unless before.positive? && after < before
+
+      ignition = ignition_for(state, reaction_id)
+      with_ignition(state, reaction_id,
+                    ignition.merge(kg: ignition.fetch(:kg, 0.0) * (after / before)))
+    end
+
+    def with_ignition(state, reaction_id, ignition)
+      state.merge(
+        ignition: state.fetch(:ignition, {}).merge(reaction_id => ignition.freeze).freeze
+      )
     end
 
     # Phase change is solved against the volume it actually happens in, so pressure and the

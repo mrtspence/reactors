@@ -21,11 +21,11 @@ module ReactorSim
     Context = Tick::Context
 
     attr_reader :id, :type, :nodes, :links, :thermal_links, :drive_links, :control_points,
-                :diagnostics, :state, :content, :time_scale, :options, :rngs
+                :diagnostics, :minions, :state, :content, :time_scale, :options, :rngs
 
     def initialize(id:, type:, nodes:, links: [], thermal_links: [], drive_links: [],
-                   control_points: [], diagnostics: [], seed:, content: nil, time_scale: 1.0,
-                   options: {}, state: nil, rngs: nil)
+                   control_points: [], diagnostics: [], minions: [], seed:, content: nil,
+                   time_scale: 1.0, options: {}, state: nil, rngs: nil)
       @id = id.to_sym
       @type = type
       @nodes = nodes.to_h { |n| [ n.id, n ] }.freeze
@@ -34,6 +34,7 @@ module ReactorSim
       @drive_links = drive_links.freeze
       @control_points = control_points.to_h { |c| [ c.id, c ] }.freeze
       @diagnostics = diagnostics.to_h { |d| [ d.id, d ] }.freeze
+      @minions = minions.to_h { |m| [ m.id, m ] }.freeze
       @seed = seed
       @content = content || Content.default
       @time_scale = time_scale.to_f
@@ -59,6 +60,26 @@ module ReactorSim
       controls = @state.fetch(:controls)
       @state = @state.merge(
         controls: controls.merge(cp.id => cp.set_target(controls.fetch(cp.id), value).freeze).freeze
+      ).freeze
+      true
+    end
+
+    # Move a minion to a lever. Absolute and idempotent for the same reason `set_control` is —
+    # it names the destination, not a direction — so it rides the same at-least-once log.
+    #
+    # An unknown minion or an unknown station is refused rather than clamped, because there is
+    # nothing sane to clamp a station to: unlike a number out of range, a mistyped lever has no
+    # nearest valid neighbour.
+    def assign_minion(minion_id, station_id)
+      minion = @minions[minion_id&.to_sym]
+      return false unless minion
+
+      station = station_id&.to_sym
+      return false unless station.nil? || @control_points.key?(station)
+
+      minions = @state.fetch(:minions)
+      @state = @state.merge(
+        minions: minions.merge(minion.id => minion.assign(minions.fetch(minion.id), station).freeze).freeze
       ).freeze
       true
     end
@@ -175,6 +196,24 @@ module ReactorSim
     # --- construction --------------------------------------------------------
 
     def validate_graph!
+      # Nodes, levers, instruments and crew share one flat id namespace, because they share
+      # one rng table — `build_rngs` keys every stream by component id. A collision hands two
+      # components the same stream, which is silent, survives a snapshot, and quietly destroys
+      # the order-independence the per-name streams exist to provide.
+      #
+      # Not hypothetical: the obvious name for a steam engine's fireman is `stoker`, and
+      # `:stoker` is already the node that carries fuel to the firebox.
+      ids = @nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys
+      duplicates = ids.tally.select { |_, count| count > 1 }.keys
+      raise Error, "duplicate component ids: #{duplicates.join(', ')}" if duplicates.any?
+
+      @minions.each_value do |minion|
+        station = minion.default_station
+        next if station.nil? || @control_points.key?(station)
+
+        raise Error, "minion #{minion.id}: no control point #{station}"
+      end
+
       @links.each do |link|
         source = @nodes[link.from_node] or raise Error, "link #{link.id}: no node #{link.from_node}"
         sink   = @nodes[link.to_node]   or raise Error, "link #{link.id}: no node #{link.to_node}"
@@ -190,10 +229,15 @@ module ReactorSim
       end
     end
 
-    # Every node and control point gets its own named stream, so nothing depends on the
-    # order they are evaluated in.
+    # Every node, control point, instrument and minion gets its own named stream, so nothing
+    # depends on the order they are evaluated in.
+    #
+    # Streams are derived from the NAME, never from position, which is why adding a crew to an
+    # existing operation perturbs no stream that was already there — and therefore changes no
+    # physics. That property is what made it safe to give the steam engine a crew without
+    # re-tuning it.
     def build_rngs(seed)
-      (@nodes.keys + @control_points.keys + @diagnostics.keys)
+      (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys)
         .to_h { |id| [ id, Rng.stream(seed, "#{@id}/#{id}") ] }
     end
 
@@ -218,14 +262,27 @@ module ReactorSim
         [ id, diag_state.merge(flags: diag_state.fetch(:flags, []).map(&:to_sym).freeze).freeze ]
       end
 
+      # `station` is a control point id living as a VALUE, so JSON hands it back as a string.
+      # Third instance of this trap, after parcel resource ids and instrument flags — and the
+      # quietest of the three: `Tick` would index the crew by "stoking" while looking them up
+      # by :stoking, every lookup would miss, and the whole crew would silently stop working.
+      #
+      # The digest cannot catch it either. `canonical` runs through JSON.generate, where
+      # :stoking and "stoking" are the same string, so a round-trip spec passes with the bug
+      # present. Only an identity assertion finds it.
+      minions = state.fetch(:minions, {}).to_h do |id, minion_state|
+        [ id, minion_state.merge(station: minion_state[:station]&.to_sym).freeze ]
+      end
+
       state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze,
-                  events: state.fetch(:events, [])).freeze
+                  minions: minions.freeze, events: state.fetch(:events, [])).freeze
     end
 
     def build_initial_state
       { nodes: @nodes.to_h { |id, n| [ id, n.initial_state(@rngs.fetch(id), @content) ] }.freeze,
         controls: @control_points.to_h { |id, c| [ id, c.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         diagnostics: @diagnostics.to_h { |id, d| [ id, d.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
+        minions: @minions.to_h { |id, m| [ id, m.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         ledger: Ledger.initial.freeze,
         events: [] }.freeze
     end

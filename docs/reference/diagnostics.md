@@ -69,7 +69,23 @@ Anything needing memory is a **filter**, not a source — that is why `Rate` is 
 | `Bands.new([thresholds])` | Collapses a value to a band index — pair with `Prose`. |
 | `Stick.new(chance:, release_chance:)` | Needle catches and holds. Flags `:stuck`. |
 | `Misread.new(chance:, magnitude:)` | An observer occasionally and confidently wrong. Flags `:misread`. |
+| `Average.new(window)` | Mean of the last `window` readings. Flags `:warming_up` until full. |
 | `Rate.new` | Change per simulated second. |
+
+### Average is for oscillation, not for taste
+
+`Average` exists because the cylinder genuinely alternates between two values on successive
+ticks — a period-2 limit cycle against a supply it reads one tick behind — which made a digital
+readout unreadable and a needle flicker across half its scale.
+
+Reach for it when the underlying quantity oscillates, not when a reading merely feels busy. A
+twitchy needle is a legitimate diagnostic signal and smoothing it away costs the player
+information. Note also that averaging an oscillation is honest at 4 Hz — a tick spans many
+power strokes, so indicated power is already a mean over strokes and the only question is the
+window — whereas averaging *noise* would be laundering a distortion into apparent precision.
+
+Put it **first** in the chain. Lagging or quantising an oscillation just gives you a lagged
+oscillation.
 
 ### The noise deadband matters
 
@@ -84,7 +100,7 @@ A god-view skips filters that make a reading **worse** but keeps those that chan
 **means**.
 
 - `distortion? == true` (default): Lag, Noise, Range, Quantize, Stick, Misread
-- `distortion? == false`: **Bands, Rate**
+- `distortion? == false`: **Bands, Rate, Average**
 
 Get this wrong and a rate instrument reports the raw temperature in a box labelled K/s.
 `Diagnostic#record` runs two parallel chains — one full, one distortion-free — each with its
@@ -133,6 +149,24 @@ still travelling.
 
 Spectators get `truth` (undistorted, transforms applied) and no instrument flags — they have
 no instrument.
+
+### `flags` is sparse, and the delta says so explicitly
+
+An instrument with nothing to say has **no key** in `flags` — `project` only writes one when
+the list is non-empty. That makes the map cheap, and it makes one thing easy to get wrong.
+
+Rejecting unchanged entries is not sufficient on its own, because `reject` iterates the
+*current* flags and an instrument whose flags cleared is no longer among them. The clear was
+therefore never mentioned, and a client merging deltas went on showing `:pegged_high` forever
+after a single pressure excursion. `:warming_up` was worse: every lagged gauge raises it for
+its first few ticks, so a fresh panel lit up with warnings that could never be retracted.
+
+`delta_from` emits an **explicit empty list** for an instrument that fell silent, so a merge
+clears it. `unchanged_from?` reads the same path, which is what stops the runner skipping a
+broadcast that would have cleared a warning.
+
+A client may therefore merge each section of a delta over its previous state and never needs
+to diff flags itself.
 
 ---
 

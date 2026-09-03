@@ -91,6 +91,12 @@ Commands carry absolute values and are safe to deliver twice.
   operator lag and (later) minion mishaps belong.
 - Out-of-range values are clamped, not rejected.
 - A malformed command is counted as rejected, never raised.
+- **`value` is coerced to a number in `Command.parse`, or the command is rejected.** It was
+  once the only field that reached the simulation uninspected, and it ends up at
+  `ControlPoint#set_target`, which calls `.to_f` — so a `value` of `{"a": 1}` raised
+  `NoMethodError` straight out of `Match#apply`, which does not rescue. In the runner that is
+  the process and every match on it, killed by one line in a log that anything can produce to.
+  A non-numeric value is now rejected and counted like any other malformed command.
 
 This is what lets the runner commit Kafka offsets *after* snapshotting: redelivery is a
 no-op, so at-least-once delivery needs no dedup table.

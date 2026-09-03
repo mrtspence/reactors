@@ -19,14 +19,14 @@ module ReactorSim
       include Concerns::Pressurized
 
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
-                  :reactions, :heater_control_id, :heater_watts,
+                  :reactions, :heater_control_id, :heater_watts, :igniter_kg_per_s,
                   :max_pressure_pa, :max_temperature_k, :stress_rate
 
       def initialize(id:, label: nil, volume_m3:, ports: [],
                      heat_capacity: 5.0e5, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K,
                      initial_temperature_k: nil, initial_contents: [], reactions: [],
-                     heater_control_id: nil, heater_watts: 0.0,
+                     heater_control_id: nil, heater_watts: 0.0, igniter_kg_per_s: 0.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
                      stress_rate: 0.0)
         super(id: id, label: label, ports: ports)
@@ -39,6 +39,7 @@ module ReactorSim
         @reactions = reactions.map(&:to_sym).freeze
         @heater_control_id = heater_control_id&.to_sym
         @heater_watts = heater_watts.to_f
+        @igniter_kg_per_s = igniter_kg_per_s.to_f
         @max_pressure_pa = max_pressure_pa.to_f
         @max_temperature_k = max_temperature_k.to_f
         @stress_rate = stress_rate.to_f
@@ -64,10 +65,17 @@ module ReactorSim
       # lever's *actual* position, so a dial a minion is still turning up delivers only the
       # power it has actually reached.
       def apply(state, ctx, _grant)
-        return state.merge(joules_injected: 0.0) if @heater_control_id.nil? || broken?(state)
+        if @heater_control_id.nil? || broken?(state)
+          return state.merge(joules_injected: 0.0, ignition_seed_kg: 0.0)
+        end
 
         fraction = (ctx.controls.fetch(@heater_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
         joules = @heater_watts * fraction * ctx.dt
+
+        # A pilot light sets a little fuel alight; it does not heat the whole firebox to
+        # ignition. Recorded here and consumed in phase 5, the same way `joules_injected` is —
+        # a node reports what it did and the tick decides what that means.
+        state = state.merge(ignition_seed_kg: @igniter_kg_per_s * fraction * ctx.dt)
         return state.merge(joules_injected: 0.0) if joules <= 0.0
 
         # Recorded, not just applied. Energy entering the system is declared in the ledger

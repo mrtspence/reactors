@@ -32,19 +32,32 @@ RSpec.describe "the Rails environment" do
 
   # `lib` itself is an autoload path, which is fine for ordinary app-adjacent code.
   # The simulation specifically must stay out of Zeitwerk's hands, or it becomes a
-  # reloadable Rails constant and the boundary quietly stops being a boundary.
+  # reloadable Rails constant and the boundary quietly stops being a boundary — a
+  # long-running runner would end up holding state built from unloaded constants.
   #
-  # Tested by consequence rather than by inspecting the loader: if Zeitwerk were
-  # managing lib/reactor_sim.rb, eager loading the app would define ReactorSim all on
-  # its own, with nobody having required it. A fresh process is needed because by the
-  # time this spec runs, other specs have required the sim legitimately.
-  it "is not pulled into the constant graph by eager loading the application" do
+  # This used to be tested by consequence: eager load the app in a fresh process and fail
+  # if ReactorSim was defined with nobody having required it. That proxy died the moment
+  # the delivery tier legitimately required the sim (config/initializers/reactor_sim.rb),
+  # because "defined" no longer distinguishes "we asked for it" from "Zeitwerk took it".
+  #
+  # `unloadable_cpaths` is the direct question instead: it lists exactly the constants
+  # Zeitwerk owns and will unload on reload. The two positive controls matter — without
+  # them a typo'd constant name would make this pass while checking nothing.
+  it "is not managed by Zeitwerk, however it came to be loaded" do
     script = <<~RUBY
       require File.expand_path("config/environment", Dir.pwd)
       Rails.application.eager_load!
+      require "reactor_sim"
 
-      if Object.const_defined?(:ReactorSim)
-        warn "ReactorSim was defined by eager loading — Zeitwerk is managing the simulation"
+      owned = Rails.autoloaders.main.unloadable_cpaths
+
+      unless owned.include?("ApplicationController") && owned.include?("DevMatch")
+        warn "control failed: Zeitwerk does not own app/ either, so this check proves nothing"
+        exit 2
+      end
+
+      if owned.include?("ReactorSim")
+        warn "Zeitwerk is managing the simulation — it is reloadable and the boundary is gone"
         exit 1
       end
       exit 0

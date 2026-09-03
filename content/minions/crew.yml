@@ -1,0 +1,22 @@
+# Minion archetypes. Data rather than code, for the same reason substances are: rebalancing a
+# crew should be a diff, not a migration (docs/architecture.md §5).
+#
+# `strength` is what a minion brings to a lever. The rate a control point actually travels at
+# is `stiffness × strength × health × (1 − fatigue)`, so an archetype sets the ceiling and the
+# minion's condition erodes it (docs/simulation_architecture.md §7).
+#
+# TODO: expedient — only `strength` is modelled, because only the actuation path exists.
+# The design also calls for intelligence (which drives the gauge-reading path via a
+# diagnostic's `observer:`), skills, and tags like `undead` / `covetous` / `licensed`.
+# A proper implementation needs those, plus what makes fatigue accrue and health decline —
+# nothing advances either today, so a minion never tires.
+
+fireman:
+  label: Fireman
+  strength: 1.0
+  tags: [ practised ]
+
+yardhand:
+  label: Yardhand
+  strength: 0.7
+  tags: [ green ]

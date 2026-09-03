@@ -1,0 +1,17 @@
+<section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3">
+  <h2 class="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Crew</h2>
+  <ul class="flex flex-col gap-2">
+    <% minions.each do |minion| %>
+      <li class="flex items-center gap-2 text-sm" data-minion-id="<%= minion.id %>">
+        <span class="text-slate-200 grow"><%= minion.name %></span>
+        <select class="bg-slate-900 text-slate-200 text-xs rounded px-1 py-0.5 ring-1 ring-slate-700"
+                data-minion-station data-action="change->console#assign">
+          <option value="">— stood down —</option>
+          <% controls.each do |control| %>
+            <option value="<%= control.fetch(:id) %>"><%= control.fetch(:label) %></option>
+          <% end %>
+        </select>
+      </li>
+    <% end %>
+  </ul>
+</section>

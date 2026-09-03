@@ -240,4 +240,30 @@ RSpec.describe "the steam engine" do
       expect(ReactorSim.canonical(restored.to_h)).to eq(ReactorSim.canonical(watt.to_h))
     end
   end
+
+  # The crew is wired up but deliberately inert: every lever here is frictionless, so the
+  # rate multiplier a minion contributes is discarded before it is used. That is what let a
+  # crew be added without re-measuring the skill gradient — and it is also why the seam
+  # itself is proved in minion_spec, on a rig with a stiff lever, rather than here.
+  describe "the crew" do
+    it "posts everyone to a lever that exists" do
+      op = engine
+      stations = op.state.fetch(:minions).values.filter_map { |m| m.fetch(:station) }
+
+      expect(stations).to all(satisfy { |s| op.control_points.key?(s) })
+      expect(stations).not_to be_empty
+    end
+
+    # Pins the inertness deliberately, so that giving a work station a finite stiffness shows
+    # up here as a failing expectation rather than as a quietly shifted skill gradient.
+    it "leaves a manned lever frictionless, so the minion cannot yet slow it down" do
+      op = engine
+      op.set_control(:stoking, 100.0)
+      op.step!(tick: 1)
+      lever = op.state.fetch(:controls).fetch(:stoking)
+
+      expect(op.state.fetch(:minions).fetch(:fireman).fetch(:station)).to eq(:stoking)
+      expect(lever.fetch(:actual)).to eq(lever.fetch(:target))
+    end
+  end
 end

@@ -58,6 +58,19 @@ RSpec.describe ReactorSim::Content do
 
       expect { registry.resource(:nope) }.to raise_error(ReactorSim::Error, /unknown resource/)
     end
+
+    it "rejects a minion archetype with no strength to work a lever with" do
+      expect {
+        described_class.build(minions: { idler: { label: "Idler" } })
+      }.to raise_error(ReactorSim::Error, /idler: missing strength/)
+    end
+
+    it "raises on an unknown minion archetype rather than returning nil" do
+      registry = described_class.build(minions: {})
+
+      expect { registry.minion_archetype(:nope) }
+        .to raise_error(ReactorSim::Error, /unknown minion archetype/)
+    end
   end
 
   describe "the shipped content" do

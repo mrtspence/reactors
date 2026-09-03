@@ -126,6 +126,46 @@ RSpec.describe ReactorSim::Diagnostic do
     end
   end
 
+  describe ReactorSim::Filters::Average do
+    it "reports the mean of the readings so far while the window is filling" do
+      readings = drive(instrument(filters: [ described_class.new(4) ]), [ 10.0, 20.0, 30.0 ])
+
+      expect(readings.map { |r| r[:value] }).to eq([ 10.0, 15.0, 20.0 ])
+    end
+
+    it "flags warming_up until it has a full window to average" do
+      readings = drive(instrument(filters: [ described_class.new(3) ]), [ 1.0, 2.0, 3.0, 4.0 ])
+
+      expect(readings.map { |r| r[:flags] }).to eq([ [ :warming_up ], [ :warming_up ], [], [] ])
+    end
+
+    it "forgets readings that fall out of the window" do
+      readings = drive(instrument(filters: [ described_class.new(2) ]), [ 100.0, 0.0, 0.0 ])
+
+      expect(readings.last[:value]).to eq(0.0)
+    end
+
+    # The reason this filter exists: a cylinder alternating between two values on successive
+    # ticks made a readout unreadable. An even window over a period-2 swing lands exactly in
+    # the middle and stays there.
+    it "settles a value that alternates every tick" do
+      readings = drive(instrument(filters: [ described_class.new(4) ]),
+                       [ 15.0, 21.0 ] * 6)
+
+      expect(readings.last(6).map { |r| r[:value] }).to all(eq(18.0))
+    end
+
+    # A mean changes what the reading MEANS rather than making it worse, so a spectator wants
+    # it too — same reasoning as Rate. Get this wrong and the god-view shows the raw swing.
+    it "is a transform rather than a distortion" do
+      expect(described_class.new(4).distortion?).to be(false)
+    end
+
+    it "refuses a window it cannot average over" do
+      expect { described_class.new(0) }.to raise_error(ReactorSim::Error, /window/)
+    end
+  end
+
   describe ReactorSim::Filters::Misread do
     it "is occasionally and confidently wrong" do
       readings = drive(instrument(filters: [ described_class.new(chance: 0.5, magnitude: 50.0) ]),

@@ -60,6 +60,7 @@ require "json"
 #   physics/      substances, energy bookkeeping, the relaxation solver — no graph awareness
 #   graph/        nodes, ports, links, and the arbiter that settles every claim between them
 #   concerns/     composable state+behaviour fragments a node opts into
+#   minion.rb     who stands at a lever — peer to control_point, no graph awareness
 #   nodes/        generic machinery, reusable across operations
 #   diagnostics/  the instrument chain and the only thing that leaves the simulation
 #   operations/   specific machines, built from everything above
@@ -71,6 +72,7 @@ require_relative "reactor_sim/physics/parcel"
 require_relative "reactor_sim/physics/resources"
 require_relative "reactor_sim/physics/resources/saturation"
 require_relative "reactor_sim/physics/resources/reaction"
+require_relative "reactor_sim/physics/resources/ignition"
 require_relative "reactor_sim/physics/ledger"
 require_relative "reactor_sim/physics/relaxation"
 
@@ -95,6 +97,7 @@ require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 
 require_relative "reactor_sim/control_point"
+require_relative "reactor_sim/minion"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"
 require_relative "reactor_sim/diagnostics/displays"

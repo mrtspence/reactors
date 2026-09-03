@@ -26,13 +26,17 @@ module ReactorSim
       def load(dir)
         Registry.new(
           resources: read_all(File.join(dir, "resources")),
-          reactions: read_all(File.join(dir, "reactions"))
+          reactions: read_all(File.join(dir, "reactions")),
+          minions: read_all(File.join(dir, "minions"))
         ).freeze
       end
 
-      # Test seam: build a registry from literals with no filesystem involved.
-      def build(resources: {}, reactions: {})
-        Registry.new(resources: deep_sym(resources), reactions: deep_sym(reactions)).freeze
+      # Test seam: build a registry from literals with no filesystem involved. Every keyword
+      # defaults, so a spec asks for the one table it cares about and gets empty ones for the
+      # rest — which is what keeps an unrelated substance from boiling mid-test.
+      def build(resources: {}, reactions: {}, minions: {})
+        Registry.new(resources: deep_sym(resources), reactions: deep_sym(reactions),
+                     minions: deep_sym(minions)).freeze
       end
 
       private
@@ -60,12 +64,14 @@ module ReactorSim
     class Registry
       REQUIRED_RESOURCE_KEYS = %i[specific_heat_j_per_kg_k density_kg_per_m3].freeze
       REQUIRED_REACTION_KEYS = %i[consumes produces rate_per_s enthalpy_j_per_unit].freeze
+      REQUIRED_MINION_KEYS   = %i[label strength].freeze
 
-      attr_reader :resources, :reactions
+      attr_reader :resources, :reactions, :minions
 
-      def initialize(resources:, reactions:)
+      def initialize(resources:, reactions:, minions: {})
         @resources = resources.freeze
         @reactions = reactions.freeze
+        @minions = minions.freeze
         @phase_pairs = index_phase_pairs.freeze
         @tags = @resources.to_h { |id, spec| [ id, spec.fetch(:tags, []).map(&:to_sym).freeze ] }.freeze
         validate!
@@ -77,6 +83,10 @@ module ReactorSim
 
       def reaction(id)
         @reactions.fetch(id.to_sym) { raise Error, "unknown reaction: #{id.inspect}" }
+      end
+
+      def minion_archetype(id)
+        @minions.fetch(id.to_sym) { raise Error, "unknown minion archetype: #{id.inspect}" }
       end
 
       # Precomputed. This is called once per parcel per port per link per tick, and the
@@ -116,6 +126,7 @@ module ReactorSim
       def freeze
         @resources.freeze
         @reactions.freeze
+        @minions.freeze
         super
       end
 
@@ -153,6 +164,11 @@ module ReactorSim
           next if (consumed - produced).abs <= 1e-9
 
           raise Error, "reaction #{id}: mass not conserved — consumes #{consumed}, produces #{produced}"
+        end
+
+        @minions.each do |id, spec|
+          missing = REQUIRED_MINION_KEYS.reject { |k| spec.key?(k) }
+          raise Error, "minion #{id}: missing #{missing.join(', ')}" if missing.any?
         end
       end
     end

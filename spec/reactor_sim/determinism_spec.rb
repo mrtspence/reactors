@@ -120,6 +120,29 @@ RSpec.describe "determinism" do
       expect(result[:applied]).to eq(1)
       expect(result[:rejected].size).to eq(1)
     end
+
+    # The value used to be the one field that reached the simulation uninspected. It ends up
+    # at ControlPoint#set_target, which calls `.to_f`, and a Hash does not answer to that —
+    # so one bad record raised NoMethodError out of #apply, which does not rescue. In the
+    # runner that is the process and every match on it, killed from a line in the log that
+    # anyone who can reach the topic could write.
+    it "rejects a non-numeric value rather than raising out of apply" do
+      m = match
+
+      [ { "a" => 1 }, [ 1 ], "abc", true, nil ].each do |bad|
+        result = nil
+        expect { result = m.apply([ command(:burner, bad) ]) }.not_to raise_error
+        expect(result[:applied]).to eq(0), "expected #{bad.inspect} to be rejected"
+      end
+    end
+
+    it "still accepts a numeric value that arrived as a string over JSON" do
+      m = match
+      result = m.apply([ command(:burner, "60") ])
+
+      expect(result[:applied]).to eq(1)
+      expect(m.operation(:rig).state.fetch(:controls).fetch(:burner).fetch(:target)).to eq(60.0)
+    end
   end
 
   # Observation must not advance the simulation. A tick may be projected any number of

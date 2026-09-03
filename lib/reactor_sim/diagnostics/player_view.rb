@@ -26,7 +26,7 @@ module ReactorSim
 
       { tick: tick,
         gauges: gauges.reject { |id, v| previous.gauges[id] == v },
-        flags: flags.reject { |id, v| previous.flags[id] == v },
+        flags: flag_delta(previous),
         controls: controls.reject { |id, v| previous.controls[id] == v },
         incidents: incidents }
     end
@@ -38,6 +38,26 @@ module ReactorSim
       delta = delta_from(previous)
       delta[:gauges].empty? && delta[:flags].empty? &&
         delta[:controls].empty? && delta[:incidents].empty?
+    end
+
+    private
+
+    # `flags` is SPARSE — an instrument with nothing to say has no key at all, because
+    # Operation#project only writes the key when the flag list is non-empty.
+    #
+    # So rejecting unchanged entries is not enough: `reject` iterates the CURRENT flags, and
+    # an instrument whose flags cleared is not in them. The cleared flag was therefore never
+    # mentioned in the delta, and a client merging deltas went on showing `:pegged_high`
+    # forever after a single pressure excursion. `:warming_up` was worse — every lagged gauge
+    # raises it for its first few ticks, so a fresh panel lit up with warnings that could
+    # never be retracted.
+    #
+    # Instruments that fell silent are emitted explicitly as an empty list, so a merge clears
+    # them. This is what makes `unchanged_from?` honest too, since it reads this.
+    def flag_delta(previous)
+      changed = flags.reject { |id, v| previous.flags[id] == v }
+      previous.flags.each_key { |id| changed[id] = [].freeze unless flags.key?(id) }
+      changed
     end
   end
 end

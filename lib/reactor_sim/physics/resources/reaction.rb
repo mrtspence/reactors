@@ -13,15 +13,34 @@ module ReactorSim
       module_function
 
       # Returns [new_parcels, joules_released].
-      def advance(spec, parcels, temperature_k:, dt:, content:)
-        return [ parcels, 0.0 ] if temperature_k < spec.fetch(:min_temperature_k, 0.0).to_f
+      #
+      # `ignited_fuel_kg` is how much of the fuel is actually alight (Resources::Ignition).
+      # When it is given, IT is the gate and `min_temperature_k` is not applied here — the
+      # ignited mass already encodes the temperature history, and an ember must keep burning
+      # below a threshold it has fallen under. When it is nil the reaction is not modelling
+      # ignition and the old bulk-temperature gate stands, so nothing that predates ignition
+      # behaves differently.
+      def advance(spec, parcels, temperature_k:, dt:, content:, ignited_fuel_kg: nil)
+        if ignited_fuel_kg.nil?
+          return [ parcels, 0.0 ] if temperature_k < spec.fetch(:min_temperature_k, 0.0).to_f
+        elsif ignited_fuel_kg <= Parcel::EPSILON
+          return [ parcels, 0.0 ]
+        end
 
         consumes = spec.fetch(:consumes)
         held = parcels.to_h { |p| [ p.fetch(:resource), p ] }
 
         # How far the reaction could possibly go, set by whichever reagent runs out first.
+        #
+        # Only the LIT fuel counts. Capping the fuel term here rather than scaling the finished
+        # extent matters more than it looks: `limit` is frequently set by the air, and scaling
+        # an already-air-limited extent by the lit fraction charges the fire for its draught
+        # twice. A grate with 46 kg of coal and 0.25 kg alight then burned half a percent of
+        # what the air allowed, and produced 9 kJ a tick instead of megawatts.
         limit = consumes.map { |resource, ratio|
-          (held[resource]&.fetch(:kg) || 0.0) / ratio.to_f
+          available = held[resource]&.fetch(:kg) || 0.0
+          available = [ available, ignited_fuel_kg ].min if ignited_fuel_kg && fuel?(resource, content)
+          available / ratio.to_f
         }.min
         return [ parcels, 0.0 ] if limit.nil? || limit <= Parcel::EPSILON
 
@@ -36,6 +55,8 @@ module ReactorSim
         [ apply_stoichiometry(spec, parcels, extent, temperature_k, content),
           -spec.fetch(:enthalpy_j_per_unit, 0.0).to_f * extent ]
       end
+
+      def fuel?(resource, content) = content.tags(resource).include?(:fuel)
 
       # Products carry the ENTHALPY the reactants had, not their temperature.
       #

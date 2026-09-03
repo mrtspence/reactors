@@ -110,7 +110,12 @@ module ReactorSim
         Diagnostic.new(
           id: :engine_power, label: "Indicated Power",
           source: Sources::Field.new(:cylinder, :indicated_power_w),
-          filters: [ Filters::Lag.new(1), Filters::Quantize.new(500.0) ],
+          # Averaged BEFORE anything else. The cylinder alternates between two power figures on
+          # successive ticks (a period-2 limit cycle against a supply read one tick behind),
+          # and lagging or quantising an oscillation just gives you a lagged oscillation.
+          # Eight ticks is two seconds — long enough to settle the swing, short enough that
+          # opening the throttle still reads as immediate.
+          filters: [ Filters::Average.new(8), Filters::Quantize.new(500.0) ],
           display: Displays::Digital.new(unit: "kW", convert: :kilo, precision: 1)
         )
       end
@@ -119,7 +124,9 @@ module ReactorSim
         Diagnostic.new(
           id: :cylinder_pressure, label: "Cylinder Pressure",
           source: Sources::Derived.new(:cylinder, :pressure_pa),
-          filters: [ Filters::Noise.new(5_000.0) ],
+          # Same oscillation, same treatment. The average comes first so the noise lands on a
+          # settled reading rather than being lost inside a swing several times its size.
+          filters: [ Filters::Average.new(8), Filters::Noise.new(5_000.0) ],
           display: Displays::Digital.new(unit: "kPa", convert: :kpa, precision: 0)
         )
       end

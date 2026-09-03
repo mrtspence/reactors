@@ -20,6 +20,7 @@ Operation.new(
   drive_links:    [...],   # where torque is transmitted
   control_points: [...],   # the levers
   diagnostics:    [...],   # the instruments
+  minions:        [...],   # who stands at the levers
   time_scale:     1.0,     # simulated seconds per wall tick, ÷ 0.25
   options:        {},      # builder config that must survive a snapshot
   content:        nil,     # defaults to Content.default
@@ -86,6 +87,31 @@ will drive `actual` later without anything else changing.
 
 The interesting design work. See [`../reference/diagnostics.md`](../reference/diagnostics.md).
 Give the two things that will kill the player the best instruments — and even those late.
+
+---
+
+## Crew
+
+```ruby
+Minion.new(id: :fireman, archetype: :fireman, station: :stoking)
+```
+
+The archetype names an entry in `content/minions/`; `station:` is the lever they start at.
+Where they *are* lives in `state[:minions]`, because assignment is a command
+(`assign_minion`, absolute and idempotent like `set_control`).
+
+Three things to know:
+
+- **Ids are one flat namespace** with nodes, control points and diagnostics, because they key
+  one RNG table. `validate_graph!` refuses a duplicate. The natural name for a steam engine's
+  fireman is `stoker` — which is already the conduit feeding the firebox, so it is `:fireman`.
+- **A crew only matters if a lever has finite `stiffness`.** The default is
+  `Float::INFINITY`, which snaps `actual` to `target` and discards the minion's rate entirely.
+  Giving a work station a finite stiffness is what makes minion condition felt — and it shifts
+  the machine's skill gradient, so re-measure it.
+- **A fixed roster stays out of `options:`**, because it is rebuilt from code like the node
+  list. The moment a crew can be hired, injured or dismissed it must move into `options:`, or
+  a restored snapshot rebuilds a different crew — the same trap `variant:` is there to avoid.
 
 ---
 

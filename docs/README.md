@@ -37,6 +37,14 @@ These two are **design rationale** — longer, historical, and explaining *why*:
 Design sketches and working notes live in [`design_sketches/`](design_sketches/) and are
 input to design, not a description of what exists.
 
+## `CLAUDE.md`
+
+Each working directory carries a `CLAUDE.md` summarising the local non-negotiables and
+pointing back here for detail — root, `lib/reactor_sim/` and each of its subdirectories,
+`content/`, `spec/`, `app/`, and this folder. AI instances load them automatically when they
+touch that directory. They are summaries, deliberately: **when a rule changes, update the
+reference doc here first**, then the summary if it has gone stale.
+
 Three further files are **historical** — they record how the design got here and describe
 code that in places no longer exists. Read them for context on *why* a decision was made, and
 never as a description of the current system:
@@ -59,6 +67,7 @@ lib/reactor_sim/
   tick.rb       the eight phases, in order
   operation.rb  config, commands, projection, serialisation
   match.rb      many operations advanced in lockstep
+  minion.rb     who stands at a lever — peer to control_point
 ```
 
 The require chain in `lib/reactor_sim.rb` is deliberately explicit and doubles as the
