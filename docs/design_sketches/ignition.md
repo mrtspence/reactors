@@ -1,6 +1,25 @@
 # Ignition
 
-**Status: design input, not built.** Nothing described here exists.
+**Status: BUILT (2026-09-03).** `lib/reactor_sim/physics/resources/ignition.rb`, specced in
+`spec/reactor_sim/ignition_spec.rb`. This file is kept as the record of *why*; the current
+reference is [`../reference/physics.md`](../reference/physics.md#ignition).
+
+Three things changed on contact with reality, each after the model failed a run:
+
+1. **Spread must not depend on bulk temperature.** The first implementation gated spread on
+   `min_temperature_k` and failed in exactly the way the model it replaced did — a fire cannot
+   reach 500 K without spreading, and cannot spread without reaching 500 K. A flame front is
+   hot even when the room is cold. Bulk temperature moved to the *quench* side.
+2. **The ignited fraction caps the FUEL term, not the finished extent.** Scaling the extent
+   double-charges a fire for its draught, because `limit` is usually set by the air already. A
+   grate with 46 kg of coal and 0.25 kg alight burned half a percent of what the air allowed
+   and produced 9 kJ a tick instead of megawatts.
+3. **The fire needs a short memory of the draught.** Air passes *through* a firebox and its
+   standing inventory oscillates to zero every other tick. Read instantaneously, that says
+   "starved" about a fire consuming barely one percent of what blows past it.
+
+Measured outcome: the igniter is now held for ~150 ticks and then never again, and the engine
+reaches 440 K / 747 kPa, 72 rpm, 54 kW on its own. Before, it had to be held at 100% forever.
 
 ## The problem, measured
 

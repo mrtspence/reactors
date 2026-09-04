@@ -160,6 +160,7 @@ was refused with 422 and never reached the topic.
 | Phase solve dominates the tick | ~50% of a 100-node step. `Saturation::ITERATIONS` (currently 20) is the dial. |
 | `min_temperature_k` is a modelling compromise | Means "bulk temperature at which the reaction sustains", not ignition — a lumped-temperature node has no hot spot to light. |
 | Suite is slow | ~2.5 min, dominated by the steam engine's long startup runs. |
+| The atmospheric engine's condenser is capacity-limited | ~0.18 kg/tick of steam, set by `ambient_conductance × ΔT` over the latent heat. Fed the high-pressure draught it cannot keep up and the vacuum it exists to pull collapses, so the variant runs a smaller fire (`draught_kg_per_s: 4.0`). **Investigated and NOT a phase-solve bug** — in isolation a cold vessel condenses 2.3 kg of steam to 0.26 kg over 12 ticks, pressure falling 104 → 12 kPa. A more powerful Watt engine needs a bigger condenser, not a fix. |
 
 ---
 
@@ -187,11 +188,14 @@ What remains, in dependency order:
 
 In rough priority order. The first two are the ones that most damage the game as a game.
 
-1. **Ignition is not modelled; the igniter is a throttle.** A player has to hold it at 100%
-   more or less permanently. Designed in [`design_sketches/ignition.md`](design_sketches/ignition.md)
-   — carry an *ignited fraction* per node so a fire can be seeded, spread, bank and be nursed
-   back, instead of the whole grate being all-or-nothing at a bulk temperature it cannot
-   honestly represent. **Needs review before implementation.**
+1. ~~**Ignition is not modelled; the igniter is a throttle.**~~ **Done.** `Resources::Ignition`
+   carries the lit fuel mass per node; the igniter seeds it and the fire spreads, banks and can
+   be nursed back. Measured: the igniter is held for ~150 ticks and then never again, and the
+   engine reaches 440 K / 747 kPa, 72 rpm, 54 kW on its own. See
+   [`design_sketches/ignition.md`](design_sketches/ignition.md) for the three things the sketch
+   got wrong, and [`reference/physics.md`](reference/physics.md#ignition) for what is true now.
+   The firebox draught widened from 4 to 8 kg/s to go with it — the fire now has to raise steam
+   itself, where a permanently-held 2.5 MW igniter was quietly doing a third of it.
 2. **Incidents have no consequence.** A player can power through a vessel rupture and a
    flywheel burst and keep going, provided the igniter stays on. `broken` stops a node planning
    but evidently does not stop the machine being useful. Until this bites, the whole
@@ -200,12 +204,48 @@ In rough priority order. The first two are the ones that most damage the game as
    someone who knows the simulation, useless to anyone else. Wants hover copy per instrument
    and per lever — which likely means the operation declaring a description alongside each
    diagnostic and control point, rather than the view layer inventing one.
-4. **The cylinder sits in a period-2 limit cycle** — indicated power alternating 14.9/21.4 kW
-   and cylinder pressure 157/184 kPa on successive ticks, indefinitely. It is a numerical
-   artefact of the one-tick-per-hop delay: the cylinder sizes its draw to equalise with the
-   throttle's *previous* pressure, empties it, and finds it refilled a tick later.
-   `Filters::Average` now settles the gauges, but **the oscillation itself is untouched** and
-   will resurface anywhere a node sizes a draw against a supply it reads one tick late.
+4. **Period-2 limit cycles, and the starvation they cause. Needs a proper investigation —
+   this is the most load-bearing item on the list.**
+
+   **Investigated and written up in
+   [`design_sketches/flow_through_issue_draft.md`](design_sketches/flow_through_issue_draft.md)**
+   (2026-09-03) — mechanism, measurements and diagrams. A solution is proposed in
+   [`design_sketches/transport_model.md`](design_sketches/transport_model.md): **mass joins
+   `Relaxation`** alongside heat and rotation, conduits become zero-residence but still failable
+   nodes, and `cap_gas_by_pressure` is deleted rather than fixed. Awaiting review; nothing built.
+   Three findings that were
+   not known when the summary below was written: the oscillation is **undamped by construction**
+   (`Conduit#plan`'s inventory map is `h ↦ T − h`, an involution with eigenvalue −1);
+   `Arbiter.cap_gas_by_pressure` **amplifies** it by sampling both ends of a link in antiphase,
+   making the saturated full/empty orbit an attractor; and a conduit therefore delivers only
+   about **half its rated throughput**. There is also a third instance, live and unfixed: the
+   **Draught gauge can only ever read "choked"**, on either variant, at any lever setting.
+
+   Two confirmed instances, both from the one-tick-per-hop delay:
+
+   - **The cylinder.** Indicated power alternates 14.9/21.4 kW and cylinder pressure 157/184
+     kPa on successive ticks, indefinitely. It sizes its draw to equalise with the throttle's
+     *previous* pressure, empties it, and finds it refilled a tick later.
+   - **The firebox draught.** Air alternates 0.84 kg / 0.000 kg every tick. This one did real
+     damage: `Ignition` read the instantaneous inventory, concluded "starved" every other tick,
+     and killed the fire two ticks at a time — on a fire consuming barely 1% of the air blowing
+     past it.
+
+   **The generalisation is the dangerous part.** Any node that reads an *instantaneous
+   inventory* of a **flow-through** quantity will hit this, because the standing amount of
+   something passing through a node is not a measure of its supply. The failure is silent: no
+   error, no conservation violation, just a system that quietly starves.
+
+   Two workarounds are in place and neither addresses the cause:
+   `Filters::Average` settles the gauges, and `Ignition` keeps a short memory of the draught.
+   The memory is independently justifiable — a fuel bed genuinely does have thermal inertia —
+   but it should not have been *necessary*.
+
+   Worth investigating: whether the oscillation can be damped at source (a node sizing a draw
+   against a supply it reads one tick late is the common shape); whether nodes should expose a
+   *flow* rather than an inventory for this kind of question; and whether anything else already
+   reads an inventory where it means a rate. What ignition taught us — that supply must be
+   judged against demand, over a window, not against zero — is probably the reusable part.
 
 Every shortcut taken for the prototype is marked `TODO:` at the code with what it does, why,
 and what a proper implementation must solve. `grep -rn "TODO:" app/ lib/ content/` is the list.

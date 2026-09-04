@@ -36,6 +36,7 @@ instead of writing a second one.
 | `diagnostic_spec` | The instrument chain, `record` vs `read`, `distortion?` |
 | `player_view_spec` | The wire protocol — that merging deltas equals receiving a full view |
 | `minion_spec` | The crew, and the actuation seam nothing else can reach |
+| `ignition_spec` | That a fire needs a spark, spreads in a cold box, and dies without air |
 | `performance_spec` | ~55 ms/tick at 100 nodes against a 250 ms budget |
 | `steam_engine_spec` | The operation end to end — startup, output, failure, conservation |
 

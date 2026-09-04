@@ -71,6 +71,29 @@ saturation temperature, which condenses it all again — makes a vessel flip bet
 Known limitation: non-condensables are ignored, so air sharing a vessel with boiling water
 does not raise its boiling point.
 
+## Ignition
+
+`Resources::Ignition`. A reaction declaring an `ignition:` block carries **how many kilograms
+of its fuel are alight**, and only that mass reacts. Opt-in: without the block, the old
+bulk-temperature gate stands.
+
+Four things that were each got wrong first, and will be again:
+
+- **The lit mass caps the FUEL term of `limit`**, never the finished extent. `limit` is usually
+  set by the air already, so scaling the extent charges a fire for its draught twice.
+- **Spread does not depend on bulk temperature.** Gate it there and a fire can never bootstrap:
+  it cannot reach the threshold without spreading. Bulk temperature belongs on the quench side.
+- **Starvation scales spread down as well as quench up**, or a fire cut off from air dies at
+  only `quench − spread`.
+- **The fire keeps a short memory of the draught**, because air passes *through* a node and its
+  standing inventory oscillates to zero every other tick.
+
+Spread is closed-form logistic — exact at any `dt`, cannot overshoot, and from exactly zero
+stays at zero, which is what makes an igniter a match rather than a switch.
+
+**It does not replace distinct nodes for distinct temperatures.** A reactor's fuel pin is
+genuinely hundreds of kelvin above its coolant; no ignited fraction expresses that.
+
 ## Reactions
 
 Chemistry has a **rate**; phase change does not. An instantaneous reaction has no transient,

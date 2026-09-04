@@ -128,6 +128,24 @@ split by mass), so this is the only place a reaction may change the system's ene
 available reaction happens per tick — a firebox set that slow starves in the middle of a full
 grate, because draught passes through faster than it can burn. Combustion wants ~6–14.
 
+### `ignition:` makes a fire something you light
+
+```yaml
+  ignition:
+    spread_per_s: 0.30   # how fast burning fuel lights its neighbours
+    quench_per_s: 0.45   # how fast it dies when cold or starved of air
+```
+
+**Opt-in.** A reaction without this block keeps the old bulk-temperature gate and behaves
+exactly as before, so adding it to one reaction cannot disturb another.
+
+With it, the reaction carries how much of its fuel is alight and only that portion burns. The
+fuel is inferred from the `:fuel` tag, so nothing has to be declared twice. See
+[`../reference/physics.md`](../reference/physics.md#ignition).
+
+**Set `quench_per_s` above `spread_per_s`**, or a cold box can never put a fire out — at
+equilibrium the two balance, and a fire settles where its draught can support it.
+
 ### `min_temperature_k` is not the ignition point
 
 A node is one lumped temperature, so there is no local hot spot to light. This threshold has

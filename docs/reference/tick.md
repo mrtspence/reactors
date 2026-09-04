@@ -26,7 +26,7 @@ engine uses 1.0; a mine would use much more.
 | 4c | `shed_to_ambient` | Waste heat leaves for the environment → ledger | no |
 | 4d | `drive` | Angular momentum crosses the drivetrain; friction → ledger | no |
 | 4e | `apply_nodes` → `transmit_torque` | Node-specific effects, then prime movers pay for their torque | no |
-| 5 | `react` | Phase change and chemistry, local to each node | no |
+| 5 | `react` | Ignition spreads, then chemistry, then phase change — local to each node | no |
 | — | `record_injections` | Everything injected or extracted goes on the ledger | no |
 | 6 | `stress` | Durability, overload, failure events | no |
 | 7 | `observe` | Instruments sample; their filters advance | **yes** |

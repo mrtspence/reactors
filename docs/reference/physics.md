@@ -175,6 +175,44 @@ Closed-form first order: unconditionally stable, never overshoots, at any `dt`.
 **Air starvation needs no special case.** `limit` is set by whichever reagent runs out first,
 so choking a damper throttles a fire through exactly the same code path an empty bunker does.
 
+### Ignition
+
+`Resources::Ignition`. A reaction that declares an `ignition:` block carries, per node, **how
+many kilograms of its fuel are alight** — `state[:ignition][reaction_id] = { kg:, oxidiser_kg: }`.
+Only that lit mass reacts.
+
+Combustion used to be gated on the node's bulk temperature, which a lumped-temperature node
+cannot represent honestly: a match does not raise a firebox to 700 K, it raises a few grams.
+As a bulk threshold the fire was all-or-nothing — above the line the whole grate burned, below
+it nothing did and nothing ever could again, so the only winning move was to leave the igniter
+on permanently, turning a match into a throttle.
+
+Four rules, each of which was got wrong first:
+
+- **Only the lit fuel counts, and it caps the FUEL term** — `limit` becomes
+  `min(ignited_kg, air/ratio)`, not the finished extent scaled by a fraction. Scaling the
+  extent charges the fire for its draught twice, because `limit` is usually air-set already.
+- **Spread does not depend on bulk temperature.** A flame front is hot even when the room is
+  cold. Gate spread on `min_temperature_k` and a fire can never bootstrap. Bulk temperature
+  belongs on the quench side, where `min_temperature_k` sets the scale.
+- **Starvation cuts both ways** — it scales spread down *and* quench up. Otherwise the net
+  rate bottoms out at `quench − spread` and a fire cut off from air dies far too slowly.
+- **The fire remembers the draught.** Air passes *through* a node, so its standing inventory
+  is a poor instantaneous signal; see the oscillation note in
+  [`../current_progress.md`](../current_progress.md).
+
+Spread is **closed-form logistic**, so it is exact at any `dt` and cannot overshoot. Logistic
+because a fire spreads from its *edges* — and because from exactly zero it stays at zero, which
+is what makes an igniter a match rather than a switch.
+
+Storing the lit **mass** and deriving the fraction is the same choice made everywhere else in
+the physics, and it pays twice: shovelling cold fuel on dilutes the fire for free, and fuel
+that burns away takes its share of the fire with it.
+
+**This does not replace modelling genuinely distinct temperatures as distinct nodes.** A
+reactor's fuel pin really is hundreds of kelvin above its coolant, and no ignited fraction can
+express that. The two answer different questions and are meant to coexist.
+
 ### Two rules that keep the books straight
 
 **Stoichiometry conserves enthalpy, not temperature.** Products inherit the reactants' energy,
