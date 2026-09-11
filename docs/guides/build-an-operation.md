@@ -42,8 +42,12 @@ Work backwards from what the player is managing. Each node is something that hol
 moves it, transforms it, or spins.
 
 **A join earns a node only when it is interesting** — it carries a control point, it can fail,
-or it restricts flow. A plain weld is an edge and costs nothing. This matters because *delay
-is one tick per hop*: every node you insert adds 250 ms of lag at `time_scale` 1.
+or it restricts flow. A plain weld is an edge and costs nothing.
+
+*Delay is one tick per hop*, and **a hop is one `Path`: holder to holder.** A `Conduit` is a
+transport node — it is resolved *through* rather than stopped at — so a valve or a length of
+pipe costs no latency at all. Every node that actually **holds** material adds 250 ms at
+`time_scale` 1, so that is the count to keep down.
 
 Reach for stock nodes first (`Vessel`, `Conduit`, `Atmosphere`, `Flywheel`, `Load`,
 `ReliefValve`, `Cylinder`). Write a new one only when the behaviour genuinely does not exist.

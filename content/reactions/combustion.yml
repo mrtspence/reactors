@@ -37,14 +37,42 @@
 # Air starvation needs no special handling. The reaction rate is limited by whichever
 # reagent runs out first, so closing the damper chokes the fire through exactly the same
 # code path that an empty fuel bunker does.
+#
+# ## `rate_per_s` changed meaning when ignition landed, and it was not re-tuned
+#
+# It used to cap the reaction at the *available reagents*, and with air almost always the
+# limiting one it meant "how much of the draught blowing past gets burnt". You wanted it high:
+# at 0.8 a firebox starved in the middle of a full grate because air blew through unreacted.
+# Coal sat at **6.0** for that reason.
+#
+# Ignition capped the fuel term at the mass actually ALIGHT, and the same number silently
+# became "how fast lit fuel is consumed" — where 6.0/s means 78% of the fire disappears every
+# tick. Lit mass could then never accumulate: it burned away faster than `spread_per_s` could
+# grow it, so the fire sat pinned at ~0.12 kg alight while `oxidiser_demand` — computed from
+# that same rate — asked for **1 kg of air per tick** to sustain it. Everything downstream
+# read as air starvation, and it was tuned around for a long time (a 25 m³ firebox, an 8 kPa
+# blower) before anyone measured the fire itself.
+#
+# Measured, at the original geometry with a 600 Pa blower — boiler pressure after 4000 ticks:
+#
+#     rate  0.5  fire dies      rate  1.5  605 kPa, 110 rpm
+#     rate  0.7  168 kPa        rate  1.8  607 kPa, 110 rpm
+#     rate  1.0  298 kPa        rate  2.0  600 kPa, 110 rpm
+#                               rate  2.5  fire dies
+#
+# **It is sharply peaked, and both cliffs are failures rather than degradations.** Too slow and
+# the fire cannot heat the box faster than the boiler drains it; too fast and the lit mass
+# outruns spread and goes out. The plateau is 1.5–2.0 and these values sit in the middle of it.
+# If you change `spread_per_s`, `quench_per_s` or the firebox geometry, re-measure this — a
+# number that only works on a plateau is a number that will drift off one.
 
 coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }
   enthalpy_j_per_unit: -30000000
-  # Fast. A firebox burns most of the air it is given within a second — set too slow, the
-  # draught blows through unreacted and the fire starves in the middle of a full grate.
-  rate_per_s: 6.0
+  # How fast LIT fuel is consumed. Read the note at the top of this file before touching it —
+  # the meaning of this number changed when ignition landed and it is now sharply peaked.
+  rate_per_s: 1.5
   min_temperature_k: 500       # coal wants real heat before a flame front will travel
   ignition:
     # Slow to take hold and slow to let go — a coal fire is banked overnight and still there
@@ -62,7 +90,7 @@ wood_combustion:
   consumes: { wood: 1.0, air: 6.0 }
   produces: { flue_gas: 6.97, ash: 0.03 }
   enthalpy_j_per_unit: -16000000
-  rate_per_s: 9.0              # catches faster and burns away faster than coal
+  rate_per_s: 2.2              # catches faster and burns away faster than coal
   min_temperature_k: 400       # and lights far more easily, which matters at startup
   ignition:
     # Catches readily and dies readily. Kindling: the reason you light a coal fire with wood.
@@ -73,7 +101,7 @@ oil_combustion:
   consumes: { fuel_oil: 1.0, air: 14.0 }
   produces: { flue_gas: 15.0 }
   enthalpy_j_per_unit: -42000000
-  rate_per_s: 14.0
+  rate_per_s: 3.5
   min_temperature_k: 430
   ignition:
     # A sprayed liquid fuel takes the whole burner almost at once and goes out just as fast

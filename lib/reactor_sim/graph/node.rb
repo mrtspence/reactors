@@ -47,6 +47,35 @@ module ReactorSim
     def inlets  = @ports.values.select(&:inlet?)
     def outlets = @ports.values.select(&:outlet?)
 
+    # Does material pass THROUGH this node rather than stopping in it?
+    #
+    # A transport node is never an endpoint for a flow: `Path` resolves straight past it to
+    # the holders on either side, and it contributes only a rate limit, a lever and a wall.
+    # Almost nothing should say yes — see `Nodes::Conduit` for why holding material in an
+    # intermediate node cannot produce a steady flow.
+    def transport? = false
+
+    # What this part does to the **composition** of a stream crossing one of its ports.
+    #
+    # `{}` means no opinion, which is almost every node. Otherwise a hash of tag (or exact
+    # resource) to a multiplier: below 1.0 holds a substance back, above 1.0 carries more of it
+    # than its share. `Arbiter` multiplies these along every port on a path.
+    #
+    # **This changes the mix and never the total.** Throughput belongs to rates and
+    # conductances; two numbers describing one restriction is a mistake this engine has already
+    # made twice. See `docs/reference/settlement.md`.
+    #
+    # Per PORT, not per node, because a part's outlets have to be able to disagree — that is
+    # what makes a sorter expressible at all.
+    def transport_affinity(_port_id, _state, _ctx) = {}
+
+    # How fast reactions hosted here may run, as a multiple. 1.0 unless a node has a reason to
+    # say otherwise — a bed choked with its own ash is the one that does. A multiplier on `dt`
+    # rather than a cap on the extent, because choking slows a reaction down; it does not put a
+    # ceiling on it. (Scaling the extent would charge a fire for its draught twice, which is the
+    # mistake `Resources::Ignition` records having made with the lit-mass term.)
+    def reaction_throttle(_state, _content) = 1.0
+
     # --- lifecycle -----------------------------------------------------------
 
     # Merges every included concern's fragment over the node's own base state, so a node

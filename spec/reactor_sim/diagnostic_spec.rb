@@ -270,10 +270,42 @@ RSpec.describe ReactorSim::Diagnostic do
       m.operation(:rig).tap { |o| o.set_control(:burner, 100) }
     end
 
-    it "can gauge how full a line is" do
+    # **A level is the liquid, and this example used to pass by reading the steam.** `Level`
+    # divided `contents_volume` by the node's volume, and `contents_volume` prices every parcel
+    # at its nominal density — gases included — which is meaningless for something that expands
+    # to fill whatever it is put in. On the steam engine's boiler that reads **317% full**.
+    #
+    # Corrected, the rig's condenser holds real condensate in three cubic metres of vessel: a
+    # true level under a tenth of a percent, which the gauge's own quantiser and its needle's
+    # precision then both round to nothing. So this asserts on the **source**, which is what
+    # this group is about — the end-to-end instrument path is covered by the examples either
+    # side of it.
+    it "can gauge how full a vessel is" do
       120.times { |i| op.step!(tick: i + 1) }
 
-      expect(op.project.gauges.fetch(:steam_line_level)).to be > 0
+      node = op.nodes.fetch(:condenser)
+      state = op.state.fetch(:nodes).fetch(:condenser)
+      liquid = node.volume_m3 - node.room_m3(state, op.content)
+      reading = ReactorSim::Sources::Level.new(:condenser)
+                                          .sample(op.nodes, op.state.fetch(:nodes), op.content)
+
+      expect(liquid).to be > 0.0
+      expect(reading.available).to be true
+      expect(reading.value).to be_within(1e-9).of(liquid / node.volume_m3 * 100.0)
+    end
+
+    # The half that made the old reading wrong: a vessel holding nothing but gas has no level,
+    # and must not report the gas as one.
+    it "reads an empty level for a vessel holding only gas" do
+      node = op.nodes.fetch(:condenser)
+      states = { condenser: node.initial_state(ReactorSim::Rng.stream(1, :lvl), op.content)
+                                .merge(parcels: [ ReactorSim::Parcel.build(
+                                  resource: :steam, kg: 5.0, temperature_k: 400.0, content: op.content
+                                ) ]) }
+
+      reading = ReactorSim::Sources::Level.new(:condenser).sample(op.nodes, states, op.content)
+
+      expect(reading.value).to eq(0.0)
     end
 
     it "can gauge one substance inside a mixture" do

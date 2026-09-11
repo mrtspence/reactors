@@ -33,7 +33,9 @@ to the builder.
 
 1. **What are the nodes?** A join earns a node only when it is *interesting* — it carries a
    control point, it can fail, or it restricts flow. A plain weld is an edge and costs nothing.
-   This matters because **delay is one tick per hop**: every node adds 250 ms of lag at
+   This matters because **delay is one tick per hop**, where a hop is a `Path` from one
+   *holder* to the next — a conduit is resolved through and costs nothing. Every holder adds
+   250 ms of lag at
    `time_scale` 1. Reach for stock nodes first.
 2. **How are they wired?** Tag ports so incompatible things cannot flow. Tags govern
    *transport*, not existence — steam condensing inside a gas-only pipe is correct and

@@ -129,6 +129,21 @@ module ReactorSim
       parcels.sum { |p| p.fetch(:kg) * content.formation_enthalpy(p.fetch(:resource)) }
     end
 
+    # Moles of gas only. Pressure is a function of moles, so this is what mass transport
+    # settles in — see `Concerns::Pressurized#mole_capacity_per_pa`. Condensed phases are
+    # skipped rather than being counted as vapour.
+    def total_moles(parcels, content)
+      parcels.sum do |p|
+        resource = p.fetch(:resource)
+        next 0.0 unless content.tags(resource).include?(:gas)
+
+        grams = content.resource(resource).fetch(:molar_mass_g_per_mol) do
+          raise Error, "resource #{resource} is tagged :gas but has no molar_mass_g_per_mol"
+        end
+        p.fetch(:kg) / (grams.to_f / 1000.0)
+      end
+    end
+
     def matching(parcels, tags, content)
       return parcels if tags.nil? || tags.empty?
 

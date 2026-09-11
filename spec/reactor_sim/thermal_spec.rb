@@ -53,13 +53,23 @@ RSpec.describe "thermal integration" do
       end
     end
 
+    # The tolerance is a **relative** one, and that is the point: the solver is backward
+    # Euler over the whole network, which leaves `1/(1 + dt/τ)` of the gap after one step
+    # rather than closing it exactly. Here τ = 125 s, so a 1 Ms step lands 0.0125 K short of
+    # the midpoint — converged to 1 part in 8000, and approaching from the correct side.
+    #
+    # It used to be `be_within(0.01)`, calibrated to the exact pairwise closed form that
+    # `Relaxation` used before mass joined it. Asserting an absolute figure that only an
+    # exact integrator can hit tests the scheme rather than the guarantee; what actually
+    # matters is that an enormous step converges monotonically instead of diverging, which
+    # is what explicit Euler does not do.
     it "reaches equilibrium rather than diverging when the timestep is enormous" do
       op = pair(t_a: 500.0, t_b: 300.0)
       op.step!(tick: 1, dt: 1_000_000.0)
       t = temperatures(op)
 
-      expect(t[:a]).to be_within(0.01).of(400.0)
-      expect(t[:b]).to be_within(0.01).of(400.0)
+      expect(t[:a]).to be_between(400.0, 400.1), "node a did not converge: #{t[:a]}"
+      expect(t[:b]).to be_between(399.9, 400.0), "node b did not converge: #{t[:b]}"
     end
   end
 

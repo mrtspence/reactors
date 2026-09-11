@@ -29,7 +29,7 @@ RSpec.describe "tick performance" do
         ]
       )
       pipe_a = ReactorSim::Nodes::Conduit.new(
-        id: :"pipe_a_#{i}", max_kg_per_s: 4.0, volume_m3: 0.5,
+        id: :"pipe_a_#{i}", max_kg_per_s: 4.0,
         heat_capacity: 1.0e4, ambient_conductance: 8.0
       )
       drum = ReactorSim::Nodes::Vessel.new(
@@ -41,7 +41,7 @@ RSpec.describe "tick performance" do
         ]
       )
       pipe_b = ReactorSim::Nodes::Conduit.new(
-        id: :"pipe_b_#{i}", max_kg_per_s: 4.0, volume_m3: 0.5,
+        id: :"pipe_b_#{i}", max_kg_per_s: 4.0,
         heat_capacity: 1.0e4, ambient_conductance: 8.0
       )
 
@@ -78,6 +78,37 @@ RSpec.describe "tick performance" do
     # number to care about is the order of magnitude, not the digit.
     expect(per_tick_ms).to be < 120.0,
       format("%.1f ms per tick at 100 nodes — measured ~55 ms; something got much slower", per_tick_ms)
+  end
+
+  # The rig above has 25 thermal components of two nodes each, which is the shape most
+  # operations have and the cheap case for `Relaxation`. This is the expensive one: ONE
+  # connected network spanning every node, so the elimination is a single 100×100 system
+  # rather than 25 tiny ones.
+  #
+  # Worth guarding separately, because the two differ by more than 4×: measured 13.2 ms for
+  # one 100-node component against 3.0 ms for the same nodes as 50 pairs. Nothing in the game
+  # is wired this way today — it is the bound, not the expectation.
+  it "solves one fully connected 100-node thermal network inside the budget" do
+    nodes = (0...100).map do |i|
+      ReactorSim::Nodes::Vessel.new(
+        id: :"chain_#{i}", volume_m3: 3.0, heat_capacity: 2.0e5,
+        ambient_conductance: 30.0, initial_temperature_k: 320.0 + i,
+        initial_contents: [ { resource: :water, kg: 40.0, temperature_k: 320.0 + i } ]
+      )
+    end
+    thermal = (0...99).map do |i|
+      ReactorSim::ThermalLink.new(a: :"chain_#{i}", b: :"chain_#{i + 1}", conductance: 500.0)
+    end
+    op = ReactorSim::Operation.new(id: :chain, type: :chain, seed: 3, nodes: nodes,
+                                   thermal_links: thermal, time_scale: 4.0)
+    op.step!(tick: 0)
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    20.times { |i| op.step!(tick: i + 1) }
+    per_tick_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) / 20 * 1000
+
+    expect(per_tick_ms).to be < 150.0,
+      format("%.1f ms per tick for one 100-node network — measured ~52 ms", per_tick_ms)
   end
 
   it "still conserves mass exactly at a hundred nodes" do

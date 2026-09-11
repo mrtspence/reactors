@@ -382,6 +382,14 @@ converges cleanly to `T_eq = 366.67` and conserves energy to the bit at every ti
 
 ### Heat is arbitrated, exactly like mass
 
+> **Historical from here to the end of this section.** The diagnosis below is right and the
+> remedy is not: the conductance-weighted bound it describes was deleted in September 2026.
+> It was correct only where one body's capacity dwarfs the other's, and wrong by a factor of
+> two otherwise — it moves a sender to the receiver's *current* potential without allowing for
+> the receiver rising, so two equal bodies **swap**. Heat, rotation and mass now go through one
+> implicit solve of the whole network. See
+> [`reference/settlement.md`](reference/settlement.md).
+
 Pairwise closed form alone is **not** sufficient in a network. Each link independently
 computes "I will move most of the way to *my* pairwise equilibrium," so several hot
 neighbours converging on one small-heat-capacity node each contribute nearly a full

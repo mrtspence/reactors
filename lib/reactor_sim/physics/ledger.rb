@@ -29,7 +29,10 @@ module ReactorSim
         # the bonds themselves.
         joules_from_reactions: 0.0,
         joules_to_ambient: 0.0,   # waste heat: radiation and convection
-        joules_to_friction: 0.0,  # bearing drag, belt slip — kinetic energy dissipated
+        # Bearing drag, belt slip, and the kinetic energy of anything that comes apart —
+        # everything mechanical that is dissipated rather than delivered. A flywheel at its
+        # burst speed holds megajoules and they have to land somewhere on the books.
+        joules_to_friction: 0.0,
         joules_to_work: 0.0,      # useful shaft work delivered out of the operation
         joules_advected_out: 0.0, # energy carried out with departing mass
         mass_added: 0.0,          # feedstock arriving from outside the operation

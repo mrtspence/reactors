@@ -32,9 +32,7 @@ module ReactorSim
         return Float::INFINITY unless content.tags(resource).include?(:gas)
 
         held = parcels(state)
-        liquid_volume = held.reject { |p| content.tags(p.fetch(:resource)).include?(:gas) }
-                            .sum { |p| Parcel.volume_m3(p, content) }
-        free = [ volume_m3 - liquid_volume, volume_m3 * MINIMUM_FREE_VOLUME_FRACTION ].max
+        free = free_volume(state, content)
 
         temperature = temperature_k(state, content)
         return Float::INFINITY if temperature <= 0.0
@@ -45,6 +43,25 @@ module ReactorSim
                          .sum { |p| p.fetch(:kg) }
 
         [ capacity_kg - present_kg, 0.0 ].max
+      end
+
+      # How many moles this node takes on per pascal of pressure rise, at fixed volume and
+      # temperature. This is the **capacity** term for mass transport, exactly as heat capacity
+      # is for heat: `P = nRT/V_free`, so `dn/dP = V_free/(R·T)`.
+      #
+      # Deliberately in MOLES rather than kilograms. Pressure is a function of moles — Dalton's
+      # law — so a molar capacity is exact for any mixture, where the kg form `V_free·M/(R·T)`
+      # needs a mean molar mass and is wrong by the spread of the composition. Measured at about
+      # 0.8% on a firebox holding air, flue gas and CO₂ together, which is small but is an error
+      # with no reason to exist.
+      #
+      # `Arbiter.settle_gas` converts the resulting mole transfer back to kg using the source's
+      # own composition, which is exact for the same reason.
+      def mole_capacity_per_pa(state, content)
+        temperature = temperature_k(state, content)
+        return 0.0 if temperature <= 0.0
+
+        free_volume(state, content) / (Units::GAS_CONSTANT * temperature)
       end
 
       # An empty vessel is a VACUUM, not a vessel full of air.
@@ -62,10 +79,7 @@ module ReactorSim
         gases = held.select { |p| content.tags(p.fetch(:resource)).include?(:gas) }
         return 0.0 if gases.empty?
 
-        liquid_volume = held.reject { |p| content.tags(p.fetch(:resource)).include?(:gas) }
-                            .sum { |p| Parcel.volume_m3(p, content) }
-        free = [ volume_m3 - liquid_volume,
-                 volume_m3 * MINIMUM_FREE_VOLUME_FRACTION ].max
+        free = free_volume(state, content)
 
         moles = gases.sum do |p|
           p.fetch(:kg) / molar_mass_kg(p.fetch(:resource), content)
@@ -75,6 +89,15 @@ module ReactorSim
       end
 
       private
+
+      # Whatever room the condensed phases are not occupying, floored so the ideal gas law
+      # cannot run away to infinity as the last of it disappears.
+      def free_volume(state, content)
+        liquid = parcels(state).reject { |p| content.tags(p.fetch(:resource)).include?(:gas) }
+                               .sum { |p| Parcel.volume_m3(p, content) }
+
+        [ volume_m3 - liquid, volume_m3 * MINIMUM_FREE_VOLUME_FRACTION ].max
+      end
 
       def molar_mass_kg(resource, content)
         grams = content.resource(resource).fetch(:molar_mass_g_per_mol) do

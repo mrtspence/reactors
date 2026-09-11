@@ -15,6 +15,7 @@ module ReactorSim
     class Vessel < Node
       include Concerns::Thermal
       include Concerns::Holds
+      include Concerns::Obstructs
       include Concerns::Wearing
       include Concerns::Pressurized
 
@@ -27,10 +28,18 @@ module ReactorSim
                      ambient_k: Units::STANDARD_TEMPERATURE_K,
                      initial_temperature_k: nil, initial_contents: [], reactions: [],
                      heater_control_id: nil, heater_watts: 0.0, igniter_kg_per_s: 0.0,
+                     obstruction_tags: [], void_fraction: 1.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
                      stress_rate: 0.0)
         super(id: id, label: label, ports: ports)
         @volume_m3 = volume_m3.to_f
+        # What clogs this vessel, and how much of it there is room for before it does. Empty
+        # tags mean nothing obstructs anything, which is the case for almost every vessel — a
+        # tank does not care what shape its contents are.
+        @obstruction_tags = obstruction_tags.map(&:to_sym).freeze
+        # The share of the volume that is open space the process needs. A grate is mostly gaps:
+        # air has to reach the fuel through them, and ash filling them is what smothers a fire.
+        @void_fraction = void_fraction.to_f
         @heat_capacity = heat_capacity.to_f
         @ambient_conductance = ambient_conductance.to_f
         @ambient_k = ambient_k.to_f
@@ -46,6 +55,27 @@ module ReactorSim
       end
 
       def initial_temperature_k = @initial_temperature_k
+
+      attr_reader :obstruction_tags
+
+      # The open space the process needs, which is a share of the vessel rather than all of it.
+      def obstruction_volume_m3 = @volume_m3 * @void_fraction
+
+      # **A choked bed reacts more slowly**, and this is the second thing `Obstructs` was
+      # written for — the first being water in a cylinder, which shares none of this code and
+      # none of its consequences. If the abstraction only ever had one caller it would not have
+      # earned a file.
+      #
+      # Ash filling the gaps between the fuel is what smothers a fire: the air cannot reach what
+      # is left to burn. Expressed as a slowdown rather than as a cap, because that is what
+      # choking is — the fuel and the air are both still there, they are just no longer meeting.
+      # Linear in the free void, and it reaches zero only when the bed is solid.
+      def reaction_throttle(state, content)
+        return 1.0 if @obstruction_tags.empty?
+
+        [ 1.0 - occupancy(state, content), 0.0 ].max
+      end
+
 
       # A vessel may start with something in it — a tank of feedwater, a hopper of ore, a
       # drum of reagent. Declared as `{resource:, kg:, temperature_k:}` and turned into parcels at

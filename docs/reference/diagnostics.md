@@ -46,10 +46,14 @@ Diagnostic.new(
 | `Broken.new(node)` | 1.0 / 0.0 — feeds a lamp |
 | `Aggregate.new([sources], operation: :sum \| :max \| :min)` | One number across many nodes |
 
-`Derived` accepts only the quantities in `Sources::Derived::SIGNATURES`:
-`temperature_k`, `pressure_pa`, `contents_volume`, `room_m3`, `contents_kg`, `omega`, `rpm`,
-`rim_speed`, `kinetic_joules`, `stress_fraction`, `integrity`. **Add new ones there** with
-the right arity (`:with_content` or `:state_only`) or the source will not build.
+`Derived` accepts only the quantities in `Sources::Derived::SIGNATURES` — a snapshot, and
+`ruby -Ilib -e 'require "reactor_sim"; puts ReactorSim::Sources::Derived::SIGNATURES.keys'`
+is the truth: `temperature_k`, `pressure_pa`, `contents_volume`, `room_m3`, `occupancy`,
+`compression_pressure_pa`, `effective_fill`, `contents_kg`, `omega`, `rpm`, `rim_speed`,
+`kinetic_joules`,
+`stress_fraction`, `integrity`.
+**Add new ones there** with the right arity (`:with_content` or `:state_only`) or the source
+will not build — it raises at construction rather than reading nothing at runtime.
 
 A source that cannot read reports unavailable, and the diagnostic flags `:offline` rather
 than reporting a fabricated zero.

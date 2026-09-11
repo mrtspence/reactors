@@ -64,32 +64,42 @@ module ReactorSim
 
       def gas_headroom_kg(_state, _target_pa, _content, _resource) = Float::INFINITY
 
+      # The capacity term for pressure-driven transport. Enormous rather than literally
+      # infinite: `Relaxation` divides by it, and a finite figure this large already puts the
+      # equilibrium of any coupling within float noise of ambient — which is what "the outside
+      # world does not pressurise because you vented into it" means numerically.
+      def mole_capacity_per_pa(_state, _content)
+        @volume_m3 / (Units::GAS_CONSTANT * @ambient_k)
+      end
+
       def plan(_state, _ctx) = Intent.none
 
-      # Restore the baseline and record what crossed. Positive delta means the operation
-      # took air from outside; negative means it dumped something into it.
+      # Restore the baseline and record what crossed.
+      #
+      # **The crossings are read from the grant, not from this node's own before/after
+      # totals.** A delta is the NET of everything that happened in the tick, and air coming in
+      # nets against flue gas going out: measured over 200 ticks of a running engine, 68.06 kg
+      # drawn in and 103.12 kg pushed out were booked as `mass_added` **0.00** and
+      # `mass_vented` 35.06. The conservation invariant survived that — the net is exactly what
+      # it constrains — but every figure was useless as a measurement, so no fuel gauge,
+      # air-supply gauge or efficiency readout could be built on the ledger at all.
+      #
+      # `grant.sent` is what the operation drew out of the sky and `grant.received` is what it
+      # dumped into it, each with the energy that travelled with it. Both are gross.
       #
       # **The structure's own energy is reset too, not just the contents.** That is not a
       # detail: this node has an enormous heat capacity so its temperature never budges, so
       # anything hot vented into it warmed it by about a millionth of a degree — which, at
       # 10¹² J/K, is nearly two megajoules a tick sitting in `joules` that nothing ledgered
       # and nothing could see. Resetting the parcels alone left it there to accumulate.
-      def apply(state, ctx, _grant)
-        held = state.fetch(:parcels)
-        restored = baseline(ctx.content)
-        baseline_joules = heat_capacity * @ambient_k
-
-        mass_delta = Parcel.total_kg(restored) - Parcel.total_kg(held)
-        joules_delta = (baseline_joules + Parcel.total_joules(restored)) -
-                       (state.fetch(:joules) + Parcel.total_joules(held))
-
+      def apply(state, ctx, grant)
         state.merge(
-          parcels: restored,
-          joules: baseline_joules,
-          mass_injected: [ mass_delta, 0.0 ].max,
-          mass_vented: [ -mass_delta, 0.0 ].max,
-          joules_injected: [ joules_delta, 0.0 ].max,
-          joules_discarded: [ -joules_delta, 0.0 ].max
+          parcels: baseline(ctx.content),
+          joules: heat_capacity * @ambient_k,
+          mass_injected: grant.total_sent,
+          mass_vented: grant.total_received,
+          joules_injected: grant.total_sent_joules,
+          joules_discarded: grant.total_received_joules
         )
       end
 

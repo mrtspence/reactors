@@ -14,7 +14,9 @@
 #   4. IDEMPOTENCE   Commands carry absolute values and set targets only, so at-least-once
 #                    delivery from the log is harmless without a dedup table.
 #
-# Delay is not configured anywhere. It emerges from graph shape, one tick per hop.
+# Delay is not configured anywhere. It emerges from graph shape, one tick per hop — where a
+# hop is one Path, from one node that HOLDS material to the next. Conduits are resolved
+# through and cost nothing.
 #
 # See docs/simulation_architecture.md.
 module ReactorSim
@@ -78,11 +80,13 @@ require_relative "reactor_sim/physics/relaxation"
 
 require_relative "reactor_sim/graph/port"
 require_relative "reactor_sim/graph/link"
+require_relative "reactor_sim/graph/path"
 require_relative "reactor_sim/graph/intent"
 require_relative "reactor_sim/graph/arbiter"
 
 require_relative "reactor_sim/concerns/thermal"
 require_relative "reactor_sim/concerns/holds"
+require_relative "reactor_sim/concerns/obstructs"
 require_relative "reactor_sim/concerns/wearing"
 require_relative "reactor_sim/concerns/pressurized"
 require_relative "reactor_sim/concerns/rotating"
@@ -90,6 +94,7 @@ require_relative "reactor_sim/concerns/rotating"
 require_relative "reactor_sim/graph/node"
 require_relative "reactor_sim/nodes/conduit"
 require_relative "reactor_sim/nodes/vessel"
+require_relative "reactor_sim/nodes/boiler"
 require_relative "reactor_sim/nodes/flywheel"
 require_relative "reactor_sim/nodes/load"
 require_relative "reactor_sim/nodes/atmosphere"

@@ -13,12 +13,31 @@ module ReactorSim
     #
     # A separate node rather than a property of the rotating mass, so the coupling between
     # them is a DriveLink that can slip, be disengaged, or later snap.
+    # ## What it absorbs depends on how fast it is going
+    #
+    # A load has a **torque curve**, and it is what gives the machine an operating point at
+    # all. A constant-torque brake has no stable intersection with a prime mover's torque
+    # curve: the engine either overcomes it and accelerates without limit, or it does not and
+    # stalls. That is what this was, and it is why the engine sat on a knife edge — throttle 80
+    # settled at 452 rpm and throttle 100 ran away to 1211 rpm, with all the speed stability in
+    # the machine coming from the cylinder's own breathing rather than from what it was driving.
+    #
+    #     :fan        τ ∝ ω²    pumps, fans, blowers, paddle agitators
+    #     :viscous    τ ∝ ω     line shafting, churns, anything dragging through fluid
+    #     :constant   τ         hoists, presses, a screw jack — the honest exception
+    #
+    # `max_torque` is what the load absorbs at `rated_omega`, so the two together name a duty
+    # point rather than a ceiling.
     class Load < Node
       include Concerns::Rotating
 
-      attr_reader :moment_of_inertia, :radius_m, :friction, :control_id, :max_torque
+      CURVES = %i[fan viscous constant].freeze
+
+      attr_reader :moment_of_inertia, :radius_m, :friction, :control_id, :max_torque,
+                  :rated_omega, :curve
 
       def initialize(id:, label: nil, moment_of_inertia: 50.0, max_torque:,
+                     rated_omega: 10.0, curve: :fan,
                      control_id: nil, friction: 0.0, radius_m: 1.0)
         super(id: id, label: label)
         @moment_of_inertia = moment_of_inertia.to_f
@@ -26,7 +45,19 @@ module ReactorSim
         @friction = friction.to_f
         @control_id = control_id&.to_sym
         @max_torque = max_torque.to_f
+        @rated_omega = rated_omega.to_f
+        @curve = curve.to_sym
+        raise Error, "unknown load curve #{@curve.inspect}" unless CURVES.include?(@curve)
+
         freeze
+      end
+
+      # Torque absorbed at a given speed, before the operator's demand is applied.
+      def torque_at(omega)
+        return @max_torque if @curve == :constant || @rated_omega <= 0.0
+
+        ratio = omega.abs / @rated_omega
+        @max_torque * (@curve == :fan ? ratio * ratio : ratio)
       end
 
       # Work is measured as the kinetic energy actually removed, not as `torque × ω × dt`.
@@ -34,7 +65,7 @@ module ReactorSim
       # small — taking the difference keeps the books exact at any dt.
       def apply(state, ctx, _grant)
         demand = @control_id ? (ctx.controls.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
-        torque = @max_torque * demand
+        torque = torque_at(omega(state)) * demand
         return state.merge(joules_extracted: 0.0) if torque <= 0.0
 
         before = kinetic_joules(state)

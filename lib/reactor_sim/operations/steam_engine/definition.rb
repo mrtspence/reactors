@@ -23,11 +23,33 @@ module ReactorSim
     # ## The chain
     #
     #   bunker ─stoker─➤ firebox ◄─damper─ atmosphere        (fuel meets air)
-    #                    firebox ═heat═➤ boiler              (fire heats water)
-    #   supply ─feed──➤ boiler ─throttle─➤ cylinder          (water becomes steam becomes work)
+    #   firebox ─tubes─➤ flue ─➤ atmosphere                  (the gas leaves, via the water)
+    #                    firebox ═radiant═➤ boiler           (the fire glows at the water legs)
+    #               boiler_tubes ═convective═➤ boiler        (the gas scrubs through the tubes)
+    #   supply ─feed──➤ injector ─➤ boiler ─throttle─➤ chest ─➤ cylinder   (water → steam → work)
+    #                  boiler ─➤ injector                    (live steam does the pumping)
     #                            cylinder ═torque═➤ flywheel ═drive═➤ load
     #
     # Everything after the firebox is the same in both engines. Only the exhaust path moves.
+    #
+    # **The injector is why the feed lever is a decision.** Cold water straight into a hot drum
+    # put the fire out — at feed 100 the boiler fell to 376 K and the engine stopped — which made
+    # a high water level and a working engine mutually exclusive, and priming therefore
+    # unreachable. A real injector is pumped by live steam that condenses into the feedwater, so
+    # it costs almost no heat and a great deal of *steam*: filling the boiler and pulling hard now
+    # draw on the same supply. See `docs/design_sketches/injector.md`.
+    #
+    # **The steam chest is not decoration.** A regulator that rations mass without setting a
+    # pressure cannot affect torque, so the cylinder's diagram had nothing to read but the
+    # boiler, and a conservation clamp quietly became the throttle. The chest gives the two
+    # laws somewhere to meet: a gradient decides what gets into it, geometry decides what is
+    # taken out, and its pressure is the negotiation. See `nodes/CLAUDE.md`.
+    #
+    # **Two heat paths, not one.** With a single conduction link the firebox temperature is
+    # pinned at `T_boiler + Q/k`, so a realistic fire and a well-fed boiler were mutually
+    # exclusive. Giving the flue gas a route past the water — which is what boiler tubes are —
+    # buys both, and needs no new machinery: a conduit already has a wall the stream mixes
+    # into, and a ThermalLink already couples that wall to the water.
     module SteamEngine
       TYPE = :steam_engine
 
@@ -62,14 +84,22 @@ module ReactorSim
           burst_pa: 4.0 * Units::STANDARD_PRESSURE_PA,
           exhausts_to: :condenser,
           condenser: true,
+          # Watt's engine sends its exhaust to the condenser — that vacuum IS the engine — so
+          # there is nothing left to throw up the chimney. It draws on stack height alone, which
+          # is why a beam engine was built with a tall one and lit with a blower.
+          blastpipe: false,
           # A smaller fire than Trevithick's, which is period-correct — Watt's engines were
           # low-pressure machines — and also as much as this one's condenser can swallow. Fed
           # the high-pressure draught it makes more steam than the condenser can lay down, and
           # the vacuum it exists to pull collapses. See the condenser note in current_progress.
-          draught_kg_per_s: 4.0,
+          #
+          # Halved from 4.0 with the rest of the flow ratings when transport moved to paths.
+          draught_kg_per_s: 2.0, damper_conductance: 0.1,
           bore_m: 1.3, stroke_m: 2.4,
           flywheel: { mass_kg: 24_000.0, radius_m: 2.8, friction: 40.0 }.freeze,
-          load_inertia: 3_000.0, load_torque: 90_000.0
+          # A beam engine turns over slowly — Watt's ran at twenty-odd rpm — so its mill is
+          # rated at 2.5 rad/s where Trevithick's is rated at 10.
+          load_inertia: 3_000.0, load_torque: 90_000.0, load_rated_omega: 2.5
         }.freeze,
         # High boiler pressure, exhaust straight to the sky. No condenser at all.
         high_pressure: {
@@ -77,21 +107,60 @@ module ReactorSim
           burst_pa: 14.0 * Units::STANDARD_PRESSURE_PA,
           exhausts_to: :atmosphere,
           condenser: false,
-          draught_kg_per_s: 8.0,
+          # Trevithick threw the condenser away, which left the exhaust needing somewhere to go
+          # — and putting it up the chimney turned a liability into the engine's lungs.
+          blastpipe: true,
+          draught_kg_per_s: 4.0, damper_conductance: 0.2,
           bore_m: 0.45, stroke_m: 1.1,
           flywheel: { mass_kg: 3_200.0, radius_m: 1.5, friction: 8.0 }.freeze,
-          load_inertia: 400.0, load_torque: 5_500.0
+          # **Rated for the engine, and the engine got its pressure back.** 5500 was chosen when
+          # the cylinder's diagram ran on its own held charge — a release-condition pressure at
+          # roughly 30% of the boiler's — so the mill was sized against a prime mover throwing
+          # away two thirds of its admission pressure. With the diagram reading the supply, full
+          # gear at an open regulator burst the flywheel on every run.
+          load_inertia: 400.0, load_torque: 14_000.0, load_rated_omega: 10.0
         }.freeze
       }.freeze
 
+      # --- how the gas conductances were chosen ---------------------------------
+      #
+      # `damper_conductance`, the flue's and the safety valve's are **one tenth** of what they
+      # were before mass transport became an implicit network solve, and the factor is not a
+      # fudge — it is the difference between a number that was doing nothing and a number that
+      # sets the draught.
+      #
+      # Under the old explicit law the flow was decided by a stability limiter rather than by
+      # conductance (the flue asked for 1972 mol and was granted 1.8), so these could be
+      # anything. They were: at 2.0 mol/(Pa·s) the damper reaches 4 kg/s on **70 Pa**, which
+      # puts the firebox 35 kPa above atmospheric — a third of an atmosphere of overpressure
+      # inside a box with a chimney on it.
+      #
+      # Now they decide the flow directly, so they are set where the firebox sits within about
+      # a kilopascal of ambient, which is the regime a real furnace runs in. Measured across
+      # the band as a multiple of what is shipped here, at 60/60/80 after 3600 ticks:
+      #
+      #     ×10    firebox +35 kPa   10.8 MW    (saturated; the flue empties the box every tick
+      #                                          and the conductance is inert again)
+      #     ×3     firebox +1.1 kPa   6.0 MW
+      #     ×1     firebox +0.5 kPa   2.9 MW    <- here
+      #     ×0.5   firebox   ~0 Pa    0.1 MW    fire will not sustain
+      #
+      # Re-confirmed after the boiler tubes landed: ×1.5 and above simply pins the boiler on
+      # its safety valve and the engine stops gaining anything, so there is nothing to buy by
+      # opening the gas path further.
+      #
+      # **Re-measure this if the stack height, the blastpipe rating or the firebox volume
+      # changes**, because all three move the head this conductance is solved against.
+      #
       # --- nodes ---------------------------------------------------------------
 
       def nodes(spec)
         base = [
           Nodes::Atmosphere.new,
-          fuel_bunker, stoker, damper(spec), firebox, flue,
-          water_supply, feed_pump, boiler(spec), relief_valve(spec), throttle,
-          cylinder(spec), flywheel(spec), load(spec)
+          fuel_bunker, stoker, damper(spec), firebox, ash_pan, boiler_tubes, flue(spec),
+          water_supply, feed_pump, injector, injector_steam,
+          boiler(spec), relief_valve(spec), throttle, steam_chest,
+          cylinder(spec), drain_cocks, cylinder_relief(spec), flywheel(spec), load(spec)
         ]
         spec.fetch(:condenser) ? base + [ condenser, condensate_return ] : base
       end
@@ -111,7 +180,7 @@ module ReactorSim
       def stoker
         Nodes::Conduit.new(
           id: :stoker, label: "Stoking Line", accepts: [ :fuel ],
-          max_kg_per_s: 0.6, volume_m3: 0.5, heat_capacity: 2.0e3,
+          max_kg_per_s: 0.6, heat_capacity: 2.0e3,
           control_id: :stoking
         )
       end
@@ -120,16 +189,25 @@ module ReactorSim
         Nodes::Conduit.new(
           # Sized so a fully open damper roughly matches a fully stoked grate. Excess air
           # is not free: every kilogram of it has to be heated to firebox temperature and
-          # then thrown up the chimney — and that is not theoretical, it is measurable. A
-          # sweep of this number peaks here: at 12 kg/s the engine makes *less* power than
-          # at 8, because the extra draught leaves as hot flue gas.
+          # then thrown up the chimney — and that is not theoretical, it is measurable.
           #
-          # Widened from 4.0 when ignition landed. The fire now has to raise steam on its own,
-          # where before a permanently-held 2.5 MW igniter was quietly doing a third of it.
-          # Note the firebox's own `air_in` port stays at 4.0: this makes the DELIVERY steadier
-          # without over-airing the grate, and raising both together is worse than either.
+          # **Halved from 8.0 when transport moved to paths.** A conduit used to deliver about
+          # HALF its rating, because it spent every other tick drawing rather than pushing — so
+          # this number, and the 4 → 8 widening before it, were tuned around a factor of two
+          # nobody could see. Now that a path delivers what it says, 4.0 rated is 4.0 delivered,
+          # which is what 8.0 rated used to mean. The firebox's `air_in` port is also 4.0, and
+          # the two agreeing is no longer a coincidence.
           id: :damper, label: "Damper", accepts: [ :gas ],
-          max_kg_per_s: spec.fetch(:draught_kg_per_s), volume_m3: 1.0, heat_capacity: 2.0e3,
+          max_kg_per_s: spec.fetch(:draught_kg_per_s), heat_capacity: 2.0e3,
+          conductance: spec.fetch(:damper_conductance),
+          # Forced draught. A cold chimney does not draw — buoyancy needs a hot stack, and a
+          # hot stack needs a fire — so a naturally-drawn firebox physically cannot light
+          # itself. Real practice is a blower, and this is it: hold it on to get the fire
+          # established, then shut it and let the stack take over.
+          # A modest blower, which is all a coal fire should ever need. It exists because the
+          # blastpipe cannot help until the engine is already turning and a cold stack has no
+          # buoyancy — so something has to raise the first steam.
+          head_pa: 600.0, head_control_id: :blower,
           control_id: :damper_open
         )
       end
@@ -141,6 +219,22 @@ module ReactorSim
           id: :firebox, label: "Firebox", volume_m3: 6.0,
           heat_capacity: 3.0e4, ambient_conductance: 60.0,
           reactions: %i[coal_combustion wood_combustion oil_combustion],
+          # **Ash smothers a fire, and until now it could not.** Both combustion reactions
+          # produce it, nothing consumes it and no operation removes it, so it accumulated
+          # forever and did nothing but add thermal mass — 10.8 kg in normal running, which is
+          # 0.26% of six cubic metres and therefore invisible against the vessel's own volume.
+          #
+          # Measured against the **void** instead, it is the fire's own waste filling the gaps
+          # the air has to come through, which is what banking a grate with ash actually does.
+          # 12% of the box is the space between the fuel; the rest is fuel, walls and gas.
+          #
+          # **`:waste`, not `:solid`, and the difference is deliberate.** Coal is tagged
+          # `[solid, fuel]`, so `:solid` would make the fuel itself an obstruction — which is
+          # not wrong (over-filling a grate really does choke it) but would silently introduce a
+          # *second* mechanism for the stoking inversion already recorded in
+          # `current_progress.md` and not yet attributed. One mechanism at a time; a bed choked
+          # by its own fuel is a separate change with its own measurements.
+          obstruction_tags: [ :waste ], void_fraction: 0.12,
           # A match, not a furnace. The igniter used to be 2.5 MW, which is what it took to
           # drag six cubic metres of firebox over a bulk ignition threshold — and a player
           # quickly learned that the way to keep a fire alive was to leave it on, turning the
@@ -155,15 +249,68 @@ module ReactorSim
             # Accepts any gas, not just combustion products. Air that has been drawn in
             # but not burnt has to be able to leave again — restricting this to :exhaust
             # meant unburnt draught piled up in the firebox and swallowed the fire's heat.
-            Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 12.0)
+            Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 12.0),
+            Port.new(id: :ash_out, direction: :outlet, accepts: [ :waste ], max_kg_per_s: 0.5)
           ]
         )
       end
 
-      def flue
+      # **This is where most of the fuel's energy actually reaches the water**, and it is what
+      # boiler tubes *are*: the fire's gas is dragged through a bundle of tubes surrounded by
+      # water, giving up its heat on the way to the chimney.
+      #
+      # Without it the only fire→water path was one conduction link, and the arithmetic of that
+      # is unforgiving. A single link makes the firebox temperature `T_boiler + Q/k`, so the
+      # only way to get heat into the water is to hold the fire cold: at k = 9000 the box sat
+      # at 676 K against a 420 K boiler, and **90% of the fuel went up the chimney** — 3311 kW
+      # burnt, 2989 kW advected away, 33 kW of shaft work. Weakening the link to make the fire
+      # hotter simply starved the boiler (measured: k = 1000 gave the same 692 K on a fifth of
+      # the burn, and the engine never turned).
+      #
+      # A stream that gives up its heat as it passes needs no new machinery: a conduit already
+      # has a wall that `Tick#carry_through` mixes the stream into, and a `ThermalLink` already
+      # couples that wall to the water. The gas leaves the firebox at fire temperature and
+      # reaches the chimney at not much above the water's.
+      #
+      # It also restores the trade-off that makes firing a boiler a skill: more draught is a
+      # hotter fire but a shorter time in the tubes, so past a point the extra heat goes out of
+      # the stack instead of into the water.
+      def boiler_tubes
         Nodes::Conduit.new(
-          id: :flue, label: "Chimney", accepts: [ :gas ],
-          max_kg_per_s: 12.0, volume_m3: 3.0, heat_capacity: 5.0e3,
+          id: :boiler_tubes, label: "Boiler Tubes", accepts: [ :gas ],
+          max_kg_per_s: 12.0, conductance: 4.0,
+          # The tube bundle's own metal. Large against the gas crossing it, so the stream
+          # leaves at close to the tube temperature rather than dragging it about.
+          heat_capacity: 5.0e4, ambient_conductance: 0.0
+        )
+      end
+
+      def flue(spec)
+        Nodes::Conduit.new(
+          # **Wet, not dry.** This was `[:gas]`, and because `Arbiter` requires every port on a
+          # path to accept a resource, that one tag meant condensate had no route out of the
+          # cylinder — the only liquid outlet the high-pressure engine has is up this chimney.
+          # The cylinder flooded to 22 kg of water and a liquid fraction of 1.455 on a perfectly
+          # ordinary run, and the atmospheric variant did not, purely because its condenser
+          # inlet is permissive.
+          #
+          # Real exhaust is wet steam and a blastpipe genuinely throws water, so this is honest
+          # rather than expedient. What it does not yet express is *how much* of the condensate
+          # the stroke carries away: `Parcel.draw` splits proportionally by mass, which sweeps
+          # out preferentially what is a thousand times denser than the carrier — backwards, and
+          # it makes hydraulic lock nearly unreachable. The entrainment rule in
+          # `design_sketches/transport_model.md` §5 is what sets that fraction properly.
+          id: :flue, label: "Chimney", accepts: [ :gas, :liquid ],
+          # The stack is the engine's lungs. Its height is what turns a hot fire into draught
+          # (see `Arbiter.path_head`), so it is deliberately a number a player can reason about
+          # and an operation can vary: a taller chimney is a better-breathing engine.
+          max_kg_per_s: 12.0, heat_capacity: 5.0e3, conductance: 0.4, stack_height_m: 10.0,
+          # The blastpipe, on the engines that have one. Buoyancy alone cannot feed this fire:
+          # it is weakest when the stack is cold, which is exactly when a cold engine needs
+          # draught most, so a naturally-drawn firebox lights and then suffocates. Exhausting up
+          # the chimney ties draught to how hard the engine is working instead.
+          blast_from: (:cylinder if spec.fetch(:blastpipe)),
+          blast_pa_per_kg_per_s: 600.0,
           ambient_conductance: 200.0
         )
       end
@@ -180,10 +327,72 @@ module ReactorSim
         )
       end
 
+      # **2.0 kg/s, down from 2.5.** The pump has to be able to outrun evaporation or the glass
+      # has no upward authority at all — but at 2.5 against roughly 1 kg/s of steaming it had
+      # *two and a half times* the authority, which made the usable band 0–40 on the lever and
+      # everything above it deliberate flooding. The whole top half of a control doing nothing
+      # but harm is a control with no middle.
+      #
+      # This number is only half the ratio, and the other half is the fire: see `damper`. Raising
+      # evaporation and lowering the pump both close the same gap, and the two were moved
+      # together so the band lands somewhere a player can work in.
       def feed_pump
         Nodes::Conduit.new(
           id: :feed_pump, label: "Feed Pump", accepts: [ :liquid ],
-          max_kg_per_s: 2.5, volume_m3: 0.2, heat_capacity: 2.0e3,
+          max_kg_per_s: 2.0, heat_capacity: 2.0e3,
+          control_id: :feed
+        )
+      end
+
+      # **The injector, and it costs steam rather than heat.**
+      #
+      # Cold feedwater straight into a hot drum was putting the fire out: at feed 100 the boiler
+      # fell from 432 K to 376 K, its pressure from 608 to 116 kPa, and the engine stopped. That
+      # made a high water level and a working engine **mutually exclusive**, which in turn made
+      # priming unreachable — every route to a full glass killed the fire that would have to
+      # swell it. Design and the rejected cheap version:
+      # [`docs/design_sketches/injector.md`](../../../../docs/design_sketches/injector.md).
+      #
+      # An injector is thermally almost perfect and that is *not* its cost. Every joule the live
+      # steam carries goes into the feedwater and back into the drum it came from. What it costs
+      # is **steam that could have gone to the cylinder** — so filling the boiler and pulling hard
+      # now compete for the same steam, which is the trade this lever never had.
+      #
+      # No new node class: an injector is a place where steam and cold water meet and leave
+      # together, which is a holder. The steam condenses because a small vessel full of cold water
+      # sits below its saturation pressure, and the latent heat lands in the water exactly,
+      # because `h = c·T + h_f` makes it so. The existing physics does all of it.
+      def injector
+        Nodes::Vessel.new(
+          id: :injector, label: "Injector", volume_m3: 0.3,
+          heat_capacity: 4.0e3, ambient_conductance: 20.0,
+          ports: [
+            Port.new(id: :steam_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 1.0),
+            Port.new(id: :water_in, direction: :inlet, accepts: [ :liquid ], max_kg_per_s: 2.5),
+            # Delivers liquid only. Any steam that failed to condense stays here rather than
+            # being blown into the drum, which is what a real injector does when it "knocks off".
+            Port.new(id: :out, direction: :outlet, accepts: [ :liquid ], max_kg_per_s: 3.0)
+          ]
+        )
+      end
+
+      # The steam pipe to the injector, on the same lever as the water.
+      #
+      # **Rate-driven, not pressure-driven.** An injector is a fixed-geometry nozzle passing a
+      # fixed ratio of steam to water; giving it a conductance as well would be two numbers for
+      # one restriction, which this engine has already got wrong twice. The ratio is the design
+      # figure — **1 kg of steam to 10 of water**, which lands the delivery near 360 K.
+      #
+      # **0.20, and it is a ratio rather than a rate.** It was 0.28 against a 2.5 kg/s pump,
+      # which is 11% of the water but about **28% of everything the boiler could raise** — the
+      # injector was quietly the largest single consumer of steam on the engine. Real injectors
+      # sit nearer a tenth, and they sit there because their pumps are not oversized. Moving the
+      # pump to 2.0 and this to 0.20 keeps the 1:10 nozzle ratio and takes the bite out of the
+      # fire. **Re-derive this if `feed_pump` moves again** — the two are one part.
+      def injector_steam
+        Nodes::Conduit.new(
+          id: :injector_steam, label: "Injector Steam", accepts: [ :gas ],
+          max_kg_per_s: 0.20, heat_capacity: 1.0e3, ambient_conductance: 10.0,
           control_id: :feed
         )
       end
@@ -191,7 +400,7 @@ module ReactorSim
       # The dangerous part. Relief pressure is where it starts hurting itself; burst
       # pressure is where it stops being a boiler.
       def boiler(spec)
-        Nodes::Vessel.new(
+        Nodes::Boiler.new(
           id: :boiler, label: "Boiler", volume_m3: 5.0,
           heat_capacity: 6.0e5, ambient_conductance: 90.0,
           initial_contents: [ { resource: :water, kg: 2_000.0 } ],
@@ -199,30 +408,204 @@ module ReactorSim
           # well above that. Setting the two equal left no margin at all — the shell began
           # taking damage on the same tick the valve first cracked open.
           max_pressure_pa: spec.fetch(:relief_pa) * 1.5, stress_rate: 90.0,
+          # **Priming.** Overfill it and the water comes over with the steam, past the throttle,
+          # into the chest and on to the cylinder, where it is the road to hydraulic lock. Below
+          # 55% full this is a 99.5%-dry boiler and invisible in play. See `Nodes::Boiler`.
+          #
+          # **Swell** is what makes priming an event rather than a level. Scaled by how fast the
+          # drum is losing pressure, so steady running of any intensity costs nothing and only a
+          # sharp demand change lifts the water — which is exactly the case the sources name.
+          # **Measured, not guessed.** Slamming this regulator from 60 to 100 drops the drum at
+          # about 8.8 kPa/s, and lighting up — opening it from shut — saturates. So 8 kPa/s is
+          # "a hard pull", an eased regulator is a fraction of it, and steady running of any
+          # intensity is zero. A first guess of 20 kPa/s put a hard slam at 20% swell, which never
+          # reached the offtake at any glass a working engine holds.
+          #
+          # Note the safety comes from the **glass**, not from the swell: the biggest swell in a
+          # normal run is the initial opening, and that is survivable because the level is low.
+          # A full glass alone is survivable, and a sharp opening alone is survivable.
+          # **0.20, down from 0.45.** At 0.45 the glass reads `1/(1−0.45)` = 1.82× the true
+          # level on a saturating pull, which is not a gauge being misleading, it is a gauge
+          # being useless — the needle spent its time somewhere the water had never been. Real
+          # swell on a drum this size is tens of percent, and 0.20 reads 1.25× at saturation:
+          # enough to fool a driver who is not watching the fire, not enough to be noise.
+          steam_port: :steam_out, wetness: 0.005, foaming_wetness: 0.30, onset_fill: 0.55,
+          priming_wetness: 0.97, swell_pa_per_s: 8_000.0, max_swell: 0.20,
+          # Real drums take tens of seconds to settle after a demand change, and it has to be
+          # long enough for water to actually go somewhere — at 8 s the slug was over before the
+          # chest had filled.
+          swell_settle_s: 12.0,
           ports: [
             Port.new(id: :feed_in, direction: :inlet, accepts: [ :liquid ], max_kg_per_s: 2.5),
-            Port.new(id: :steam_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 2.5),
-            Port.new(id: :relief_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 3.0)
+            # **Wet, because the whole steam line has to be.** `accepts:` is a structural gate
+            # and it runs before any affinity, so a `[:gas]` outlet makes carryover impossible
+            # no matter what the drum is doing. The tag says water *may* cross; `carryover`
+            # above decides how much, and at a calm level that is half a percent.
+            # **Rated for water, not for steam.** On a pressure-driven path conductance rates the
+            # gas and this figure now bounds only the liquid riding with it (`Arbiter.entrained`),
+            # so it is the bore of the main steam pipe rather than a steam allowance: a 150 mm
+            # offtake passing water at a few metres a second is tens of kg/s. At 2.5 it silently
+            # capped a priming slug at a quarter of what the drum could actually throw.
+            Port.new(id: :steam_out, direction: :outlet, accepts: [ :gas, :liquid ],
+                     max_kg_per_s: 25.0),
+            Port.new(id: :relief_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 3.0),
+            # **Its own pipe from the steam space, deliberately not `steam_out`.** The drum's
+            # carryover affinity is keyed to `steam_port`, so a separate port is fed dry steam
+            # rather than priming water — which is what the machine has, and what keeps the
+            # injector working precisely when the boiler is misbehaving.
+            Port.new(id: :injector_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 1.0)
           ]
         )
       end
 
       # Sized so it can pass rather more steam than the fire can raise, but not without
       # limit — a badly stoked boiler can still outrun it.
+      #
+      # **The easing lever is not chrome.** Every boiler of this period had a handle to lift its
+      # safety valve by hand, and a driver used it for real reasons: to prove the valve is not
+      # stuck to its seat, and to blow pressure down deliberately before it reaches the setting.
+      # It can only open the valve further than the spring already has (see
+      # `ReliefValve#open_fraction`), so it is a way to spend steam, never a way to hold the
+      # boiler shut — the cost is on the ledger as vented mass and in the glass as a falling
+      # level, which is exactly the trade a driver was making.
       def relief_valve(spec)
         Nodes::ReliefValve.new(
           id: :relief, label: "Safety Valve", senses: :boiler,
-          relief_pressure_pa: spec.fetch(:relief_pa),
-          accepts: [ :gas ], max_kg_per_s: 3.0, volume_m3: 0.2,
+          relief_pressure_pa: spec.fetch(:relief_pa), ease_control_id: :ease_safety,
+          accepts: [ :gas ], max_kg_per_s: 3.0, conductance: 0.05,
           heat_capacity: 1.0e3, ambient_conductance: 50.0
         )
       end
 
+      # **A restriction, not a ration.** This used to be a rate cap, which is the wrong kind of
+      # number for a valve: it decided *how much* steam reached the cylinder but nothing at all
+      # about the pressure it arrived at, so the diagram went on reading the boiler and the
+      # regulator had no effect on torque whatsoever. What actually held the engine back was the
+      # `extractable_joules` bound in `Tick#transmit_torque` — measured discarding **30 to 50%
+      # of the declared work** (scale 0.496 at throttle 20, 0.698 at 60), with the declared
+      # torque nearly flat across the range. A conservation clamp was standing in for the entire
+      # throttling mechanism.
+      #
+      # As a conductance it does the real thing. Flow through it costs a pressure drop that
+      # grows with the flow, so the steam chest behind it sits below the boiler by an amount
+      # the driver controls — which is wire-drawing, and it is what a regulator physically is.
+      #
+      # `max_kg_per_s` does not apply to a conduit that declares a conductance (see
+      # `docs/reference/nodes.md`); it is left here only as a sanity bound on the ports.
       def throttle
         Nodes::Conduit.new(
-          id: :throttle, label: "Throttle Valve", accepts: [ :gas ],
-          max_kg_per_s: 2.5, volume_m3: 0.3, heat_capacity: 3.0e3,
+          # Wet, like the rest of the steam line. A regulator does not dry steam, and a
+          # `[:gas]` tag anywhere between the drum and the cylinder makes priming impossible
+          # no matter what the drum is doing — `accepts:` is checked at **every** port on a
+          # path, so one dry tag in the middle silently repeals the mechanic.
+          id: :throttle, label: "Throttle Valve", accepts: [ :gas, :liquid ],
+          # Two numbers for one restriction, and deliberately so: `conductance` rates the steam,
+          # `max_kg_per_s` the water it carries. They are not redundant since `Arbiter.entrained`
+          # started bounding liquid by the bore. Sized to match the steam line either side.
+          max_kg_per_s: 25.0, conductance: 1.5e-3, heat_capacity: 3.0e3,
+          # **Equal-percentage trim, because a linear regulator is not a linear control here.**
+          # Wide open, `k·dt·ΣC⁻¹` is 1.76 — past 1, so the chest equalises with the drum inside
+          # a tick and the valve has stopped being the restriction. Measured on linear trim: the
+          # chest was at 85% of boiler pressure by lever 30, and the top 70% of the travel bought
+          # 21% of the power. The full-open figure is untouched by this; only the intermediate
+          # positions move, which is the whole point of trim. See `Conduit#open_fraction`.
+          #
+          # **8 was picked from a sweep, not from the algebra.** The first attempt at 50 simply
+          # moved the dead zone from the top of the travel to the bottom — the engine would not
+          # turn at all below lever 30, because it needs about 4.5% of full conductance to beat
+          # the load and this curve does not reach that until then. Measured power per notch in
+          # the upper half, linear against 8: +17/+11/+7/+6 becomes +35/+25/+19/+15, with the
+          # engine still pulling 84 rpm at lever 10. At 15 it is dead there.
+          rangeability: 8.0,
           control_id: :throttle_open
+        )
+      end
+
+      # **The steam chest: the part that was missing, and the reason three things were wrong.**
+      #
+      # A real engine does not admit steam from its boiler. It admits from a chest held between
+      # the regulator and the valve gear, and the pressure in that chest — not the boiler's — is
+      # what the indicator diagram starts from. Without it the cylinder had nowhere to read an
+      # admission pressure from except its own settled charge, which is a post-expansion,
+      # mid-exhaust condition at roughly 30% of boiler pressure; and once it read the boiler
+      # instead, the regulator stopped affecting torque at all.
+      #
+      # With it, the loop closes on its own and needs no bound: if the cylinder swallows faster
+      # than the throttle can pass, the chest depletes, its pressure falls, and **both** the
+      # demand (through admission density) and the MEP (through P₁) fall with it on the next
+      # tick. That is the engine physically unable to work steam it did not receive.
+      #
+      # Sized generously on purpose — 1 m³ is the chest *and* the main steam pipe behind it,
+      # which is honest, and it has to hold several ticks of admission or the cylinder's
+      # positive-displacement draw empties it inside one and the pressure rings. At full gear
+      # the cylinder takes about 0.25 kg a tick and this holds ten times that.
+      #
+      # **The outlet is permissive, and that is deliberate.** A gas-only tag here would trap
+      # condensate exactly the way the chimney's did — see the note on `flue`. Wet steam
+      # reaching the valve is real, and it is the road by which priming becomes hydraulic lock.
+      def steam_chest
+        Nodes::Vessel.new(
+          id: :steam_chest, label: "Steam Chest", volume_m3: 1.0,
+          heat_capacity: 2.0e4, ambient_conductance: 40.0,
+          ports: [
+            Port.new(id: :in, direction: :inlet, accepts: [ :gas, :liquid ], max_kg_per_s: 25.0),
+            Port.new(id: :out, direction: :outlet, max_kg_per_s: 25.0)
+          ]
+        )
+      end
+
+      # Raking out the ashpan. **Not optional chrome** — it is the remedy that makes the choked
+      # grate a mechanic rather than a slow dead end. Ash is produced by both combustion
+      # reactions and consumed by nothing, so without a way out the fire quietly strangles
+      # itself over a long game and no lever a player can reach will help.
+      #
+      # A work station like the stoker, not a valve: `ash_raking` is somebody's effort with a
+      # shovel, and it takes the fire's own waste out to the yard.
+      def ash_pan
+        Nodes::Conduit.new(
+          id: :ash_pan, label: "Ashpan", accepts: [ :waste ],
+          max_kg_per_s: 0.5, heat_capacity: 1.0e3, ambient_conductance: 40.0,
+          control_id: :ash_raking
+        )
+      end
+
+      # **Cylinder cocks**, and they are a decision rather than a safety net.
+      #
+      # A cold or standing cylinder fills with its own condensate — the charge gives up heat to
+      # the walls and to the work it is doing, which is genuine expansion cooling and the reason
+      # a saturated engine loses so much steam to the cylinder in the first place. While the
+      # engine is turning, the exhaust stroke sweeps that water out with the steam. While it is
+      # standing, **the exhaust carries nothing at all**, because `exhaust_demand_kg` scales
+      # with revolutions — so the water simply collects.
+      #
+      # Permissive on purpose. Real cocks blow steam as well as water, and that is what makes
+      # leaving them open a choice instead of a free win: open, the cylinder cannot hold a
+      # charge and the engine will not pull; shut, it is efficient and it is accumulating. Open
+      # them to warm through and before moving off, shut them once it is hot.
+      def drain_cocks
+        Nodes::Conduit.new(
+          id: :drain_cocks, label: "Cylinder Cocks",
+          max_kg_per_s: 0.25, heat_capacity: 5.0e2, ambient_conductance: 20.0,
+          control_id: :cylinder_cocks
+        )
+      end
+
+      # **The last chance before a cylinder end goes**, and it works only because it is pointed
+      # at the right quantity. A valve sensing `pressure_pa` would be useless here: the charge
+      # spread over the whole cylinder barely moves as the clearance fills, so the plain vessel
+      # pressure gives no warning at all of the thing that destroys it. `compression_pressure_pa`
+      # is what the charge reaches at top dead centre, and it is 2.2× the dry figure on half a
+      # clearance of water and 13.6× on nine tenths.
+      #
+      # Set above the highest compression the engine reaches in normal work, so it costs nothing
+      # until something is wrong. Permissive, because what it has to pass is water.
+      def cylinder_relief(spec)
+        Nodes::ReliefValve.new(
+          id: :cylinder_relief, label: "Cylinder Relief Valve",
+          senses: :cylinder, senses_quantity: :compression_pressure_pa,
+          relief_pressure_pa: spec.fetch(:relief_pa) * 1.5,
+          max_kg_per_s: 2.0, conductance: 0.02,
+          heat_capacity: 5.0e2, ambient_conductance: 20.0
         )
       end
 
@@ -230,9 +613,17 @@ module ReactorSim
         Nodes::Cylinder.new(
           id: :cylinder, label: "Cylinder",
           bore_m: spec.fetch(:bore_m), stroke_m: spec.fetch(:stroke_m),
-          drives: :flywheel, exhausts_to: spec.fetch(:exhausts_to), supplied_by: :boiler,
+          # **`supplied_by:` is the steam chest, not the boiler**, and that one word is what
+          # makes the regulator a real control. It is the node the indicator diagram takes its
+          # admission pressure from and the node whose density sizes the intake, so pointing it
+          # at the boiler meant the throttle could not touch either.
+          drives: :flywheel, exhausts_to: spec.fetch(:exhausts_to), supplied_by: :steam_chest,
           cutoff_control_id: :cutoff, efficiency: 0.82,
-          inlet_kg_per_s: 2.5, exhaust_kg_per_s: 6.0
+          # The intake is rated for the port, not for the stroke — `admission_kg` sizes the
+          # charge and this only stops the valve passing more than the pipe can. It has to admit
+          # water at the rate the steam line can deliver it, or a slug simply cannot reach the
+          # piston and hydraulic lock stays a standing-engine curiosity.
+          inlet_kg_per_s: 25.0, exhaust_kg_per_s: 6.0
         )
       end
 
@@ -254,10 +645,21 @@ module ReactorSim
         )
       end
 
+      # A mill on a line shaft: paddles, stones and belts all dragging, so what it absorbs
+      # climbs with the square of the speed. `load_torque` is what it takes at
+      # `load_rated_omega`, not a ceiling.
+      #
+      # **This is what makes shedding the load dangerous rather than raising it.** As a
+      # constant-torque brake — which it used to be — the load had no stable intersection with
+      # the cylinder's torque curve, so more demand simply meant a slower engine and full
+      # demand was the *safe* setting. Under a fan law the mill holds the engine at its duty
+      # point and it is taking the load AWAY that lets everything the boiler is pouring in go
+      # into acceleration, with only the wheel's tensile limit in the way.
       def load(spec)
         Nodes::Load.new(
           id: :load, label: "Mill Drive", moment_of_inertia: spec.fetch(:load_inertia),
-          max_torque: spec.fetch(:load_torque), control_id: :load_demand, friction: 3.0
+          max_torque: spec.fetch(:load_torque), rated_omega: spec.fetch(:load_rated_omega),
+          curve: :fan, control_id: :load_demand, friction: 3.0
         )
       end
 
@@ -279,7 +681,7 @@ module ReactorSim
       def condensate_return
         Nodes::Conduit.new(
           id: :hotwell, label: "Hotwell Return", accepts: [ :liquid ],
-          max_kg_per_s: 4.0, volume_m3: 0.4, heat_capacity: 2.0e3,
+          max_kg_per_s: 4.0, heat_capacity: 2.0e3,
           ambient_conductance: 400.0
         )
       end
@@ -292,14 +694,40 @@ module ReactorSim
           Link.new(from: [ :stoker, :outlet ],       to: [ :firebox, :fuel_in ]),
           Link.new(from: [ :atmosphere, :intake ],   to: [ :damper, :inlet ]),
           Link.new(from: [ :damper, :outlet ],       to: [ :firebox, :air_in ]),
-          Link.new(from: [ :firebox, :flue_out ],    to: [ :flue, :inlet ]),
+          # Through the tubes on the way to the chimney, which is where the water gets most of
+          # its heat. The blastpipe still joins at the chimney, downstream of the tubes, which
+          # is where a locomotive puts it.
+          Link.new(from: [ :firebox, :ash_out ],     to: [ :ash_pan, :inlet ]),
+          Link.new(from: [ :ash_pan, :outlet ],      to: [ :atmosphere, :exhaust ]),
+          Link.new(from: [ :firebox, :flue_out ],    to: [ :boiler_tubes, :inlet ]),
+          Link.new(from: [ :boiler_tubes, :outlet ], to: [ :flue, :inlet ]),
           Link.new(from: [ :flue, :outlet ],         to: [ :atmosphere, :exhaust ]),
-          Link.new(from: [ :supply, :out ],          to: [ :feed_pump, :inlet ]),
-          Link.new(from: [ :feed_pump, :outlet ],    to: [ :boiler, :feed_in ]),
+          # Water and steam meet in the injector; hot water goes on to the drum. Boiler →
+          # injector → boiler is a closed loop, which needs no special handling — paths are
+          # resolved holder to holder and nothing here depends on a topological order.
+          Link.new(from: [ :supply, :out ],           to: [ :feed_pump, :inlet ]),
+          Link.new(from: [ :feed_pump, :outlet ],     to: [ :injector, :water_in ]),
+          Link.new(from: [ :boiler, :injector_out ],  to: [ :injector_steam, :inlet ]),
+          Link.new(from: [ :injector_steam, :outlet ], to: [ :injector, :steam_in ]),
+          Link.new(from: [ :injector, :out ],         to: [ :boiler, :feed_in ]),
           Link.new(from: [ :boiler, :steam_out ],    to: [ :throttle, :inlet ]),
           Link.new(from: [ :boiler, :relief_out ],   to: [ :relief, :inlet ]),
           Link.new(from: [ :relief, :outlet ],       to: [ :atmosphere, :exhaust ]),
-          Link.new(from: [ :throttle, :outlet ],     to: [ :cylinder, :inlet ])
+          # Boiler → regulator → chest is **pressure-driven**, because the throttle declares a
+          # conductance and a passive vessel sits at each end. Chest → cylinder is
+          # **rate-driven**, because the cylinder declares a positive-displacement draw. Two
+          # laws either side of one node, which is exactly what the chest is for: the gradient
+          # decides what can get in, the geometry decides what is taken out, and the pressure
+          # between them is where the two negotiate.
+          Link.new(from: [ :throttle, :outlet ],     to: [ :steam_chest, :in ]),
+          Link.new(from: [ :steam_chest, :out ],     to: [ :cylinder, :inlet ]),
+          # Straight to the ground, which is where cylinder cocks blow. What leaves this way is
+          # gone — it reaches `Atmosphere` and lands on the ledger as `mass_vented`, not back in
+          # the water supply.
+          Link.new(from: [ :cylinder, :drain ],      to: [ :drain_cocks, :inlet ]),
+          Link.new(from: [ :drain_cocks, :outlet ],  to: [ :atmosphere, :exhaust ]),
+          Link.new(from: [ :cylinder, :relief ],     to: [ :cylinder_relief, :inlet ]),
+          Link.new(from: [ :cylinder_relief, :outlet ], to: [ :atmosphere, :exhaust ])
         ]
 
         # The one line that decides which engine this is.
@@ -310,12 +738,34 @@ module ReactorSim
             Link.new(from: [ :hotwell, :outlet ],   to: [ :supply, :in ])
           ]
         else
-          base + [ Link.new(from: [ :cylinder, :exhaust ], to: [ :atmosphere, :exhaust ]) ]
+          # Up the chimney, not out to the sky. This is the one link that makes the engine
+          # self-draughting — see the blastpipe note on `flue`.
+          base + [ Link.new(from: [ :cylinder, :exhaust ], to: [ :flue, :inlet ]) ]
         end
       end
 
+      # Two paths from the fire to the water, which is how a boiler actually works.
+      #
+      #   radiant     the firebox glowing straight at the water legs around it
+      #   convective  the flue gas scrubbing through the tube bundle on its way out
+      #
+      # The split matters more than either number. With only the radiant path, the firebox
+      # temperature is pinned at `T_boiler + Q/k` — so a hot fire and a well-fed boiler were
+      # mutually exclusive, and the engine could only have one by giving up the other.
+      # Measured at 60/60/80, total heat reaching the water and what the engine did with it:
+      #
+      #     radiant only, k=9000    firebox  676 K   2300 kW   41.0 kW   (before the tubes)
+      #     radiant 2000 + tubes    firebox 1036 K   2191 kW   24.2 kW
+      #     radiant 3500 + tubes    firebox  895 K   2332 kW   47.3 kW   <- here
+      #
+      # The middle row is the trade the single link used to force: a realistic fire bought by
+      # starving the boiler. With two paths the engine gets both — a fire at 895 K instead of
+      # 676, the same heat into the water, and more power out.
       def thermal_links
-        [ ThermalLink.new(a: :firebox, b: :boiler, conductance: 9_000.0) ]
+        [ ThermalLink.new(a: :firebox, b: :boiler, conductance: 3_500.0),
+          # Strong, so the tube metal sits near the water rather than near the fire. What
+          # limits the transfer is the enthalpy the gas is carrying, not this number.
+          ThermalLink.new(a: :boiler_tubes, b: :boiler, conductance: 20_000.0) ]
       end
 
       def drive_links
@@ -337,10 +787,21 @@ module ReactorSim
         [
           ControlPoint.new(id: :igniter, label: "Igniter", node: :firebox),
           ControlPoint.new(id: :stoking, label: "Stoking Effort", node: :stoker),
+          ControlPoint.new(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan),
           ControlPoint.new(id: :damper_open, label: "Damper", node: :damper, default: 50.0),
+          ControlPoint.new(id: :blower, label: "Blower", node: :damper),
           ControlPoint.new(id: :feed, label: "Feed Pump", node: :feed_pump),
           ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle),
           ControlPoint.new(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0),
+          # **Defaults shut, and that is not the safe setting.** A standing engine should have
+          # its cocks open; this defaults closed because that is the state the engine's whole
+          # balance was measured in, and a lever whose default silently changes every other
+          # number is worse than one a player has to learn. Opening them is part of the
+          # starting procedure, not a correction to it.
+          ControlPoint.new(id: :cylinder_cocks, label: "Cylinder Cocks", node: :drain_cocks),
+          # Lifts the safety valve by hand. Defaults shut, and it only ever opens the valve
+          # further than the spring already has — see `relief_valve`.
+          ControlPoint.new(id: :ease_safety, label: "Ease the Safety Valve", node: :relief),
           ControlPoint.new(id: :load_demand, label: "Mill Load", node: :load, default: 60.0)
         ]
       end

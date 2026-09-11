@@ -116,5 +116,30 @@ RSpec.describe "conservation" do
 
       expect(held + out - added).to be_within(1e-9).of(400.0)
     end
+
+    # **Balance is not the same as measurement, and only balance was ever guarded.**
+    #
+    # `Atmosphere#apply` used to derive its ledger lines from its own before/after totals,
+    # which is the NET of everything that crossed in the tick — so air drawn in cancelled flue
+    # gas pushed out. Measured on a running engine over 200 ticks: 68.06 kg in and 103.12 kg
+    # out were booked as `mass_added` **0.00** and `mass_vented` 35.06. Every conservation
+    # spec above passed throughout, because the net is exactly what they constrain.
+    #
+    # Nothing could be measured from the ledger while that was true. This is the spec that
+    # notices.
+    it "records both directions across the boundary, not their net" do
+      op = ReactorSim::Match
+           .create(id: "b", seed: 3, operations: [ { id: "eng", type: :steam_engine } ])
+           .operation(:eng)
+      { igniter: 100, blower: 100, damper_open: 85, stoking: 70 }.each { |k, v| op.set_control(k, v) }
+      400.times { |i| op.step!(tick: i + 1) }
+
+      # The engine breathes: it draws air in and throws flue gas out, continuously and at
+      # once. Both lines must be moving, whatever the net between them happens to be.
+      expect(op.ledger.fetch(:mass_added)).to be > 0.0, "nothing recorded as drawn in"
+      expect(op.ledger.fetch(:mass_vented)).to be > 0.0, "nothing recorded as vented"
+      expect(op.ledger.fetch(:joules_added)).to be > 0.0, "air arrives carrying enthalpy"
+      expect(op.ledger.fetch(:joules_advected_out)).to be > 0.0, "flue gas leaves carrying it"
+    end
   end
 end

@@ -21,7 +21,7 @@ RSpec.describe ReactorSim::Minion do
     op = ReactorSim::Operation.new(
       id: :rig, type: :test, seed: 1, content: content,
       nodes: [ ReactorSim::Nodes::Conduit.new(id: :pipe, label: "Pipe", accepts: [ :liquid ],
-                                              max_kg_per_s: 1.0, volume_m3: 1.0) ],
+                                              max_kg_per_s: 1.0) ],
       control_points: [ ReactorSim::ControlPoint.new(id: :valve, node: :pipe,
                                                      stiffness: stiffness) ],
       minions: [ described_class.new(id: :worker, archetype: :hand, station: station) ]
@@ -163,8 +163,7 @@ RSpec.describe ReactorSim::Minion do
       expect {
         ReactorSim::Operation.new(
           id: :rig, type: :test, seed: 1,
-          nodes: [ ReactorSim::Nodes::Conduit.new(id: :stoker, accepts: [], max_kg_per_s: 1.0,
-                                                  volume_m3: 1.0) ],
+          nodes: [ ReactorSim::Nodes::Conduit.new(id: :stoker, accepts: [], max_kg_per_s: 1.0) ],
           control_points: [ ReactorSim::ControlPoint.new(id: :valve, node: :stoker) ],
           minions: [ described_class.new(id: :stoker, archetype: :hand, station: :valve) ]
         )
@@ -175,8 +174,7 @@ RSpec.describe ReactorSim::Minion do
       expect {
         ReactorSim::Operation.new(
           id: :rig, type: :test, seed: 1,
-          nodes: [ ReactorSim::Nodes::Conduit.new(id: :pipe, accepts: [], max_kg_per_s: 1.0,
-                                                  volume_m3: 1.0) ],
+          nodes: [ ReactorSim::Nodes::Conduit.new(id: :pipe, accepts: [], max_kg_per_s: 1.0) ],
           minions: [ described_class.new(id: :worker, archetype: :hand, station: :nowhere) ]
         )
       }.to raise_error(ReactorSim::Error, /no control point nowhere/)

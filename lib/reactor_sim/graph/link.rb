@@ -8,8 +8,12 @@ module ReactorSim
   # the wire, and a join earns promotion to a node only when it is interesting
   # (docs/simulation_architecture.md §5).
   #
-  # Because every node reads the previous tick's state, a link costs exactly one tick of
+  # Because every node reads the previous tick's state, a hop costs exactly one tick of
   # delay. That is where delay comes from now; there is no `delay:` parameter anywhere.
+  #
+  # A hop is one `Path` — holder to holder — not one link. Links through a `Conduit` are
+  # resolved into a single path and cross in one tick together, so a valve in a line no longer
+  # adds latency to it.
   class Link
     attr_reader :from_node, :from_port, :to_node, :to_port
 

@@ -122,11 +122,27 @@ air. **It must also absorb any formation-enthalpy difference between the two sid
 stoichiometry itself conserves enthalpy exactly (products inherit what the reactants had,
 split by mass), so this is the only place a reaction may change the system's energy.
 
-### `rate_per_s` must suit the timestep
+### `rate_per_s` must suit the timestep — and it means something different once a reaction ignites
 
-`extent = limit × (1 − e^(−rate × dt))`. At `rate 0.8` and `dt 0.25` only 18% of the
-available reaction happens per tick — a firebox set that slow starves in the middle of a full
-grate, because draught passes through faster than it can burn. Combustion wants ~6–14.
+`extent = limit × (1 − e^(−rate × dt))`.
+
+Without an `ignition:` block, `limit` is the available reagents, so this is "how much of what
+is present reacts per second" and it wants to be **high**: at `rate 0.8` and `dt 0.25` only 18%
+happens per tick, and a firebox set that slow starves in the middle of a full grate because
+draught blows past unreacted.
+
+**With `ignition:`, `limit` is capped by the mass actually alight, so the same number becomes
+"how fast lit fuel is consumed" — and it wants to be far lower.** Coal was left at `6.0` across
+that change, which meant 78% of the fire vanished every tick; the lit mass could never
+accumulate, and `oxidiser_demand` (derived from the same rate) then asked for a kilogram of air
+per tick to sustain a 0.12 kg fire. The whole engine read as air-starved.
+
+It is also **sharply peaked rather than forgiving** — too slow and the fire cannot outpace the
+boiler draining it, too fast and the lit mass outruns `spread_per_s` and goes out. Coal's
+plateau is 1.5–2.0 and both edges are outright failures. Measurements are in
+[`content/reactions/combustion.yml`](../../content/reactions/combustion.yml).
+
+**Re-measure it whenever you change `spread_per_s`, `quench_per_s`, or the firebox geometry.**
 
 ### `ignition:` makes a fire something you light
 

@@ -31,7 +31,9 @@ RSpec.describe "the operation graph" do
       op.set_control(:burner, 50)
       100.times { |i| op.step!(tick: i + 1) }
 
-      in_loop = %i[steam_line condenser return_line].sum { |id| op.telemetry.fetch(id)[:kg].to_f }
+      # Only holders are counted: `steam_line` and `return_line` are conduits, and a conduit
+      # stops nothing on its way past.
+      in_loop = op.telemetry.fetch(:condenser)[:kg].to_f
 
       expect(in_loop).to be > 0.0, "nothing ever left the boiler"
       expect(op.telemetry.fetch(:boiler)[:kg]).to be < 400.0
@@ -77,21 +79,39 @@ RSpec.describe "the operation graph" do
   # tick per hop, and the latency budget is therefore a design decision made by choosing
   # topology (docs/simulation_architecture.md §5).
   describe "delay emerges from hop count" do
-    it "takes one tick per hop for an effect to travel down the chain" do
-      op = rig
-      op.set_control(:burner, 100)
+    # A hop is now one PATH, not one node. Conduits are resolved through rather than stopped
+    # at, so `a -> [pipe] -> b -> [pipe] -> c` is two hops and takes two ticks — where it used
+    # to be four. Holders are the only thing that can be observed, which is the point: they
+    # are the only thing that ever really held anything.
+    it "takes one tick per hop for material to travel down the chain" do
+      tank = lambda do |id, contents|
+        ReactorSim::Nodes::Vessel.new(
+          id: id, volume_m3: 4.0, initial_temperature_k: 300.0, initial_contents: contents,
+          ports: [ ReactorSim::Port.new(id: :in, direction: :inlet, max_kg_per_s: 2.0),
+                   ReactorSim::Port.new(id: :out, direction: :outlet, max_kg_per_s: 2.0) ]
+        )
+      end
+      pipe = ->(id) { ReactorSim::Nodes::Conduit.new(id: id, max_kg_per_s: 2.0) }
 
-      downstream = %i[steam_line condenser return_line]
+      op = ReactorSim::Operation.new(
+        id: :chain, type: :chain, seed: 1,
+        nodes: [ tank.call(:a, [ { resource: :water, kg: 100.0, temperature_k: 300.0 } ]),
+                 pipe.call(:ab), tank.call(:b, []), pipe.call(:bc), tank.call(:c, []) ],
+        links: [ ReactorSim::Link.new(from: [ :a, :out ],   to: [ :ab, :inlet ]),
+                 ReactorSim::Link.new(from: [ :ab, :outlet ], to: [ :b, :in ]),
+                 ReactorSim::Link.new(from: [ :b, :out ],   to: [ :bc, :inlet ]),
+                 ReactorSim::Link.new(from: [ :bc, :outlet ], to: [ :c, :in ]) ]
+      )
+
       first_nonzero = {}
-      (1..40).each do |t|
+      watched = %i[b c]
+      (1..10).each do |t|
         op.step!(tick: t)
-        downstream.each do |id|
-          first_nonzero[id] ||= t if op.telemetry.fetch(id)[:kg].to_f > 1e-6
-        end
+        watched.each { |id| first_nonzero[id] ||= t if op.telemetry.fetch(id)[:kg].to_f > 1e-6 }
       end
 
-      expect(first_nonzero[:steam_line]).to be < first_nonzero[:condenser]
-      expect(first_nonzero[:condenser]).to be < first_nonzero[:return_line]
+      expect(first_nonzero[:b]).to eq(1)
+      expect(first_nonzero[:c]).to eq(2)
     end
   end
 
@@ -105,7 +125,7 @@ RSpec.describe "the operation graph" do
       op.set_control(:steam_valve, 0)
       200.times { |i| op.step!(tick: i + 1) }
 
-      expect(op.telemetry.fetch(:steam_line)[:kg].to_f).to be_within(1e-9).of(0.0)
+      expect(op.telemetry.fetch(:condenser)[:kg].to_f).to be_within(1e-9).of(0.0)
       expect(op.telemetry.fetch(:boiler)[:kg].to_f).to be_within(1e-9).of(400.0)
     end
 
@@ -143,8 +163,12 @@ RSpec.describe "the operation graph" do
         id: :source, volume_m3: 4.0, initial_contents: contents, initial_temperature_k: 300.0,
         ports: [ ReactorSim::Port.new(id: :out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 5.0) ]
       )
-      sink = ReactorSim::Nodes::Conduit.new(
-        id: :sink, accepts: [ :gas ], max_kg_per_s: 5.0, volume_m3: 4.0
+      # A holder, not a conduit: the tag filter under test lives on the port either way, and
+      # only a holder has contents to assert on.
+      sink = ReactorSim::Nodes::Vessel.new(
+        id: :sink, volume_m3: 4.0, initial_temperature_k: 300.0,
+        ports: [ ReactorSim::Port.new(id: :inlet, direction: :inlet, accepts: [ :gas ],
+                                      max_kg_per_s: 5.0) ]
       )
       op = ReactorSim::Operation.new(
         id: :tags, type: :tags, seed: 1, nodes: [ source, sink ], content: content,

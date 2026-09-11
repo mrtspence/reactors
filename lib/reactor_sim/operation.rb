@@ -14,14 +14,16 @@ module ReactorSim
   #     edges returns you to the start; every node still reads N-1, so nothing special
   #     happens and nothing needs to.
   #   * A change at one end of a chain takes one tick per hop to be felt at the other. That
-  #     is where delay comes from now. There is no `delay:` parameter anywhere.
+  #     is where delay comes from now. There is no `delay:` parameter anywhere. A hop is one
+  #     `Path` — holder to holder — since conduits are resolved through, not stopped at.
   class Operation
     # The per-tick view a node sees. Lives on Tick, aliased here because operations and
     # specs refer to it by the name they already know.
     Context = Tick::Context
 
-    attr_reader :id, :type, :nodes, :links, :thermal_links, :drive_links, :control_points,
-                :diagnostics, :minions, :state, :content, :time_scale, :options, :rngs
+    attr_reader :id, :type, :nodes, :links, :paths, :thermal_links, :drive_links,
+                :control_points, :diagnostics, :minions, :state, :content, :time_scale,
+                :options, :rngs
 
     def initialize(id:, type:, nodes:, links: [], thermal_links: [], drive_links: [],
                    control_points: [], diagnostics: [], minions: [], seed:, content: nil,
@@ -44,6 +46,9 @@ module ReactorSim
       @options = options.to_h { |k, v| [ k.to_sym, v ] }.freeze
 
       validate_graph!
+      # Routes are derived from the graph, which is configuration rather than state, so this
+      # is computed once here and never per tick.
+      @paths = Path.resolve(nodes: @nodes, links: @links)
       @rngs = rngs || build_rngs(seed)
       @state = state ? restore(state) : build_initial_state
     end
@@ -219,6 +224,17 @@ module ReactorSim
         sink   = @nodes[link.to_node]   or raise Error, "link #{link.id}: no node #{link.to_node}"
         raise Error, "link #{link.id}: #{link.from_port} is not an outlet" unless source.port(link.from_port).outlet?
         raise Error, "link #{link.id}: #{link.to_port} is not an inlet" unless sink.port(link.to_port).inlet?
+      end
+
+      # A transport node is resolved *through*, so `Path` has to know which single link
+      # continues the route. More than one outlet is ambiguous and no inlet is a dead end;
+      # both are caught here rather than surfacing as a confusing walk failure.
+      @nodes.each_value do |node|
+        next unless node.transport?
+        next if node.inlets.length == 1 && node.outlets.length == 1
+
+        raise Error, "transport node #{node.id} needs exactly one inlet and one outlet, " \
+                     "has #{node.inlets.length} and #{node.outlets.length}"
       end
 
       @thermal_links.each do |link|

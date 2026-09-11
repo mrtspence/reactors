@@ -45,6 +45,26 @@ module ReactorSim
       end
 
       def full?(state, content) = room_m3(state, content) <= Parcel::EPSILON
+
+      # Mean density of everything held, over the node's whole volume.
+      #
+      # **What a positive-displacement machine downstream actually swallows.** A piston sweeps a
+      # *volume* and gets whatever is in it, so the mass it takes per stroke is this figure times
+      # that volume — not the ideal-gas density of the working fluid, which is the same
+      # mass-for-volume confusion that priced a cylinder's clearance as 0.029 kg of steam.
+      #
+      # Dry, this is the gas density and nothing changes. Wet, it climbs with the condensate the
+      # supply is holding, which is the whole point: a steam chest carrying water hands the
+      # cylinder a far heavier charge, and that is how a priming slug reaches a piston.
+      #
+      # `content` is unused today — the parcels already carry their mass — but it is in the
+      # signature because `Tick::Context#node_reading` passes it, and every other derived
+      # quantity reachable that way takes it.
+      def bulk_density_kg_m3(state, _content = nil)
+        return 0.0 if volume_m3 <= 0.0
+
+        contents_kg(state) / volume_m3
+      end
     end
   end
 end

@@ -30,15 +30,20 @@ instead of writing a second one.
 | `purity_spec` | Boots the sim in a bare Ruby subprocess **and** sweeps the source statically |
 | `determinism_spec` | Same seed + commands → byte-identical state; snapshot round-trip; idempotence |
 | `graph_spec` | Shuffles node and link order and compares digests |
+| `transport_spec` | That a conduit holds nothing, delivers its **full** rating, and leaves no node alternating — plus path resolution, chains, cycles and dead ends. Also the gas solver: two vessels equalise at **every** conductance, flow reverses when the gradient does, a check valve refuses to, and the same interval settles the same at any `dt` |
 | `conservation_spec` | Mass and energy balance against the ledger |
 | `thermal_spec` | Relaxation, ambient loss, rebalancing |
+| `transport_affinity_spec` | `Node#transport_affinity` — that a neutral opinion is **bit-identical** to no opinion, that a weight changes the mix and never the total on a rate-driven path, the max-within-a-port / product-across-ports combining rule, and that `Boiler` declares a steam quality rather than the unguessable multiplier. **Built on an inert two-liquid registry**: a rig made of real water measures evaporation as well as apportionment, and drifted 90% → 82% while nothing under test had moved |
+| `steam_engine_spec` → "priming and hydraulic lock" | The failure chain end to end: flood the glass while running hard, slam the regulator, and the drum swells past its offtake into the cylinder. **Assert the peak, not the end state** — a broken cylinder declares `Intent.none` and drains, so it read 0.21 on a run that had been at 4.06 and was already destroyed |
+| `entrainment_spec` | `Arbiter.entrained` — the **pressure-driven** half of settlement, which had no coverage of any kind until the cylinder relief valve was found to pass water in exactly zero states. That the gas figure the solve settled survives any weight the clamp allows, that liquid is additive but bounded by the bore, and that a path with no declared opinion still passes what is in it. **Its rig declares a `conductance:` and that is the entire point** — `transport_affinity_spec`'s does not, which is why all 13 of its examples test the other branch |
+| `obstruction_spec` | `Concerns::Obstructs` — occupancy against a **characteristic** volume, the derived top-dead-centre pressure, hydraulic lock graded by the driveline's stored energy, and that a relief valve sensing the wrong quantity stays shut on a state that would destroy the part. Also the concern's second caller, a bed choked by its own ash — **if it only ever had one it would not have earned a file** |
 | `content_spec` | Eager validation, mass balance, latent-heat encoding |
 | `diagnostic_spec` | The instrument chain, `record` vs `read`, `distortion?` |
 | `player_view_spec` | The wire protocol — that merging deltas equals receiving a full view |
 | `minion_spec` | The crew, and the actuation seam nothing else can reach |
 | `ignition_spec` | That a fire needs a spark, spreads in a cold box, and dies without air |
 | `performance_spec` | ~55 ms/tick at 100 nodes against a 250 ms budget |
-| `steam_engine_spec` | The operation end to end — startup, output, failure, conservation |
+| `steam_engine_spec` | The operation end to end — startup, output, wire-drawing, failure, conservation. **Move one lever per example**: it used to raise the throttle and the stoking together and passed on the balance between two effects that oppose each other |
 
 ## The delivery tier
 

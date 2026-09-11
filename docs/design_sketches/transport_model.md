@@ -1,6 +1,27 @@
 # Transport model: mass joins Relaxation
 
-**Status: design proposal, revision 2. Nothing here is built.**
+**Status: design proposal, revision 2. Steps 1, 2 and 4 are built; §3.1's central claim was
+wrong and is superseded.**
+
+> **Read this warning before using §3.1 as a specification.** It asserts that mass joining
+> `Relaxation.settle` "inherits both of Relaxation's guarantees: unconditionally stable at any
+> `dt` and exactly conservative." **The first half did not survive implementation.** The
+> pairwise closed form cannot represent flow *through* a node, so mass shipped on the linear
+> law `k·ΔP·dt` instead — which is explicit Euler — and the stability guarantee left with the
+> exponential without anyone noticing. Every gas coupling in the steam engine then ran 400–600×
+> past the limit, propped up by a per-node bound that was itself wrong by a factor of two.
+>
+> The guarantee is back, and it took a different mechanism: `Relaxation` now solves the whole
+> coupling network **implicitly**, in one linear system per connected component, for heat,
+> rotation and gas alike. `flow_bounds`, `node_headroom`, `pairwise` and `bounds` are deleted.
+> See [`../reference/settlement.md`](../reference/settlement.md) for what is true now.
+>
+> Two other decisions in the table below also inverted under measurement:
+> **`one_way: true` by default was wrong** (a network of diodes has no equilibrium, so a single
+> overshoot latches permanently — it is now opt-in per conduit), and **`max_kg_per_s` really
+> does have to go for pressure-driven paths**, not be kept as a choke: two disagreeing numbers
+> for one restriction leave the throat choked at every reachable pressure, and a choked
+> coupling carries a fixed flow, which removes the pressure feedback entirely.
 
 Input: [`flow_through_issue_draft.md`](flow_through_issue_draft.md), which established that
 `Conduit#plan`'s inventory map is `h ↦ T − h` — an involution with eigenvalue exactly −1, so the
@@ -406,13 +427,22 @@ ever say "choked". It also replaces `loop_rig`'s `Sources::Level(:steam_line)`.
 
 Staged so the engine runs again as early as possible:
 
-1. **Paths, still rate-driven.** Conduits go zero-residence; the arbiter settles over precomputed
-   paths. **The oscillation dies here** and the engine should run. Largest structural step,
-   independently verifiable.
-2. **Gas relaxation.** Add `mass_capacity_kg_per_pa` to `Pressurized`; delete
-   `cap_gas_by_pressure`; `one_way` clamping.
+1. ~~**Paths, still rate-driven.**~~ **DONE (2026-09-04).** Conduits are zero-residence; `Path`
+   resolves holder to holder; the arbiter settles over precomputed paths. The oscillation is
+   gone — the damper no longer alternates and firebox air is smoothly monotonic. A conduit now
+   delivers its **full** rating, so the engine's flow constants were re-measured (damper 8.0 →
+   4.0, throttle 2.5 → 1.0, atmospheric draught 4.0 → 2.0) and the gradient re-established at
+   60/60/80 surviving (~212 rpm, 103 kW) and 80/70/90 bursting. `transport_spec` guards it.
+   The "condensate stuck in a gas-only line" gap (§7.8) closed exactly as predicted.
+2. ~~**Gas relaxation.**~~ **DONE (2026-09-05), differently.** `Pressurized` gained
+   `mole_capacity_per_pa` rather than a kg form — pressure is a function of moles, so a molar
+   capacity is exact for a mixture where a mass one needs a mean molar mass. `Relaxation`
+   became an implicit network solve; `cap_gas_by_pressure` survives but no longer runs on a
+   pressure-driven path. `one_way` is opt-in, not the default. See the warning at the top.
 3. **Liquid relaxation.** `height_m` on vessels, hydrostatic potential, gas/liquid coupling.
-4. **`head_pa`** — chimney buoyancy, pump head, optional blower. §4 becomes real here.
+4. ~~**`head_pa`**~~ **DONE.** Chimney buoyancy, blastpipe, and a blower on the damper's lever.
+   §4's prediction held: measured 69 Pa of stack effect at 705 K over 10 m, and the firebox now
+   sits between −333 Pa and +389 Pa of ambient across the damper's travel.
 5. **Cylinder and relief valve** onto conductance, with the exhaust kept as rate.
 6. **`Sources::Flow`**, then pull both workarounds and re-point the Draught gauge.
 7. **Re-measure the skill gradient** and rewrite the balance constants from scratch.

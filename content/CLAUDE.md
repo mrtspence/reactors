@@ -12,6 +12,13 @@ Ports filter on tags, so tags are the compatibility system. **`:gas` is structur
 cosmetic** — it decides whether something is limited by volume or by pressure, whether it
 occupies room, and whether it can be routed through a gas-only port. Tag a gas `:gas`.
 
+**A second structural use arrived with `Concerns::Obstructs`**: a node declares which tags
+*clog* it, so a tag now also decides whether a substance can obstruct a mechanism. The
+distinction between `:solid` and `:waste` is doing real work in the steam engine's firebox —
+ash chokes the grate, coal does not, and both are solid. **Tag a resource for what it is, then
+let the node pick the tag it cares about**; broadening a node's filter is a physics change, not
+a tidying-up.
+
 The tag vocabulary is **open** — it grows with the content, so any written list of it is a
 snapshot rather than the contract. Derive the current one:
 

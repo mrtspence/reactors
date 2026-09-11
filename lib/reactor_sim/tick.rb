@@ -40,11 +40,24 @@ module ReactorSim
                          keyword_init: true) do
       def node_omega(id) = ask(id, :omega)
 
+      # What a shaft has stored, which is what decides whether it can force a stalling machine
+      # through. A locked cylinder is not destroyed by *speed* — it is destroyed by a driveline
+      # with enough energy to drive the piston into an incompressible charge instead of stopping
+      # against it. See `Cylinder#overload?`.
+      def node_kinetic_joules(id) = ask(id, :kinetic_joules)
+
       def node_pressure(id) = ask(id, :pressure_pa, content)
 
       def node_temperature(id) = ask(id, :temperature_k, content)
 
       def node_state(id) = states[id]
+
+      # Any other derived quantity, for a node that has **declared** what it is watching.
+      # `ReliefValve#senses` is the case this exists for: a safety device does not always
+      # protect against the plain vessel pressure — a cylinder is destroyed by the pressure at
+      # top dead centre, which no node's `pressure_pa` reports. The declaration is what keeps
+      # this from being a licence to reach anywhere.
+      def node_reading(id, quantity) = ask(id, quantity, content)
 
       private
 
@@ -58,13 +71,14 @@ module ReactorSim
       end
     end
 
-    attr_reader :state, :nodes, :links, :thermal_links, :drive_links, :control_points,
+    attr_reader :state, :nodes, :links, :paths, :thermal_links, :drive_links, :control_points,
                 :diagnostics, :minions, :content, :rngs
 
     def initialize(operation, state)
       @state = state
       @nodes = operation.nodes
       @links = operation.links
+      @paths = operation.paths
       @thermal_links = operation.thermal_links
       @drive_links = operation.drive_links
       @control_points = operation.control_points
@@ -84,19 +98,19 @@ module ReactorSim
       intents = nodes.to_h { |id, node| [ id, node.plan(read.fetch(id), ctx) ] }  # phase 2
 
       settlement = Arbiter.settle(                              # phase 3
-        nodes: nodes, states: read, links: links, thermal_links: thermal_links,
-        drive_links: drive_links, intents:, content: content, dt:
+        nodes: nodes, states: read, paths: paths, thermal_links: thermal_links,
+        drive_links: drive_links, intents:, content: content, dt:, ctx: ctx
       )
 
-      next_nodes = advect(read, settlement.flows)                # phase 4a
+      next_nodes, delivered = advect(read, settlement.flows)      # phase 4a
       next_nodes = conduct(next_nodes, settlement.heat)          # phase 4b
       next_nodes, ledger = shed_to_ambient(next_nodes, settlement.ambient)         # phase 4c
       next_nodes, ledger = drive(next_nodes, read, settlement.drive, ledger, ctx)  # phase 4d
-      next_nodes, events = apply_nodes(next_nodes, settlement.flows, ctx)
+      next_nodes, events = apply_nodes(next_nodes, settlement.flows, delivered, ctx)
       next_nodes = transmit_torque(next_nodes, ctx)              # phase 4e
       next_nodes = react(next_nodes, ctx)                        # phase 5
       ledger = record_injections(ledger, next_nodes)
-      next_nodes, wear_events = stress(next_nodes, ctx)          # phase 6
+      next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx)  # phase 6
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
 
       # Phase 8. Note that this hash IS the next state — a key not named here is silently
@@ -158,24 +172,70 @@ module ReactorSim
     # Phase 4a. Granted parcels move, carrying their energy with them. Ungranted mass
     # simply stays where it was — that is back-pressure, and it is why nothing is ever
     # silently destroyed.
+    #
+    # Material crosses a whole PATH in one tick: out of one holder, through however many
+    # conduits, into the next holder. A conduit stops nothing (see `Nodes::Conduit` for what
+    # holding it cost us) but it does touch what passes, so the stream is walked through each
+    # wall in turn.
+    # Returns [next_states, delivered], where `delivered` is `{node => {port => parcels}}` —
+    # what actually ARRIVED at each inlet, after the walls have had their share.
+    #
+    # That distinction is not pedantry. What a sink receives is not what the source dispatched:
+    # the stream gives up energy to every conduit it crosses, so flue gas that left the firebox
+    # at 700 K reaches the sky cooler, with the difference sitting in the chimney's wall.
+    # Reporting the dispatched parcels as "received" quietly credits the sink with energy that
+    # is still in the pipe — invisible until `Atmosphere` began ledgering the enthalpy it was
+    # handed, at which point the energy books drifted by about 4 kJ a tick.
     def advect(read, flows)
       removals  = Hash.new { |h, k| h[k] = [] }
       additions = Hash.new { |h, k| h[k] = [] }
+      delivered = Hash.new { |h, k| h[k] = Hash.new { |i, j| i[j] = [] } }
+      walls = {}
 
       flows.each do |flow|
         next if flow.parcels.empty?
 
-        removals[flow.link.from_node].concat(flow.parcels)
-        additions[flow.link.to_node].concat(flow.parcels)
+        removals[flow.source_node].concat(flow.parcels)
+
+        carried = flow.parcels
+        # `flow.conduits`, not `path.conduits` — a reversed flow crosses the same walls in the
+        # opposite order, and on a multi-conduit line that decides which wall sees the stream
+        # while it is still hot.
+        flow.conduits.each do |conduit_id|
+          carried, walls[conduit_id] =
+            carry_through(nodes.fetch(conduit_id), walls[conduit_id] || read.fetch(conduit_id), carried)
+        end
+
+        additions[flow.sink_node].concat(carried)
+        delivered[flow.sink_node][flow.sink_port].concat(carried)
       end
 
-      read.to_h do |id, state|
+      next_states = read.to_h do |id, state|
+        state = walls.fetch(id, state)
         next [ id, state ] unless state.key?(:parcels)
 
         held = Parcel.subtract(state.fetch(:parcels), removals[id])
         held = Parcel.normalise(held + additions[id])
         [ id, nodes.fetch(id).rebalance(state.merge(parcels: held), content) ]
       end
+
+      [ next_states, delivered ]
+    end
+
+    # A conduit holds nothing, but it is still metal that the stream is in contact with.
+    # Mixing the two to a single temperature is the same lumped-body rule every other node
+    # obeys — we removed the *residence*, not the thermal contact.
+    #
+    # This is not decoration. Without it a chimney would stop cooling its flue gas, the
+    # hotwell would stop cooling condensate, and a conduit could never rupture from
+    # over-temperature because its wall would never see anything hot.
+    #
+    # `rebalance` only redistributes, so energy is conserved exactly. The parcels come back
+    # out at the mixed temperature and the wall keeps the rest; the `:parcels` key is dropped
+    # again so nothing is ever left behind in a conduit.
+    def carry_through(conduit, wall_state, parcels)
+      mixed = conduit.rebalance(wall_state.merge(parcels: parcels), content)
+      [ mixed.fetch(:parcels), mixed.reject { |key, _| key == :parcels }.freeze ]
     end
 
     # Phase 4b. Granted heat is deposited. Accumulated per node first so a node touched by
@@ -254,6 +314,10 @@ module ReactorSim
 
         shaft = nodes[driver.drives]
         next acc unless shaft.respond_to?(:omega)
+        # Nothing drives a wheel that has come apart. The driver keeps its computed torque —
+        # a cylinder still has pressure across its piston — but there is no longer anything
+        # on the other end of the crank for it to do work on.
+        next acc if acc.fetch(driver.drives)[:broken]
 
         before = shaft.kinetic_joules(acc.fetch(driver.drives))
         spun = shaft.apply_torque(acc.fetch(driver.drives), torque, ctx.dt)
@@ -268,10 +332,22 @@ module ReactorSim
           work = shaft.kinetic_joules(spun) - before
         end
 
+        # `work_joules` is what the shaft actually gained; `shaft_power_w` is the same figure as
+        # a rate, because that is what an instrument wants and dividing by `dt` outside the
+        # simulation would need the observer to know the timestep.
+        #
+        # **This is not the same number as the driver's own `indicated_power_w`, and an
+        # instrument must not use that one.** A prime mover computes its torque from a cycle
+        # that knows only pressures; the budget above is what its charge could actually pay for.
+        # While the two disagree the gauge reading the diagram is not merely optimistic, it is
+        # anti-correlated — measured at 566 kW and 167 rpm against 479 kW and 187 rpm, so it
+        # fell as the engine sped up. Indicated power is a real and different quantity from
+        # shaft power in a real engine; here the gap is a modelling artifact and it is this
+        # figure that is honest.
         acc.merge(
           driver.drives => spun.freeze,
           id => driver.add_joules(acc.fetch(id), -work, ctx.content)
-                      .merge(work_joules: work).freeze
+                      .merge(work_joules: work, shaft_power_w: work / ctx.dt).freeze
         )
       end
     end
@@ -295,8 +371,8 @@ module ReactorSim
 
     # Node-specific effects, given what settlement actually granted. The parcel bookkeeping
     # is already done, so a node only implements what makes it that node.
-    def apply_nodes(states, flows, ctx)
-      grants = grants_from(flows)
+    def apply_nodes(states, flows, delivered, ctx)
+      grants = grants_from(flows, delivered)
       events = []
 
       next_states = states.to_h do |id, state|
@@ -326,21 +402,24 @@ module ReactorSim
                          joules_from_reactions: burnt)
     end
 
-    def grants_from(flows)
-      received = Hash.new { |h, k| h[k] = Hash.new { |i, j| i[j] = [] } }
-      sent     = Hash.new { |h, k| h[k] = Hash.new(0.0) }
+    # `delivered` comes from advection because only advection knows what survived the walls;
+    # `sent` and `rejected` come from the flows, because those are what left and what could
+    # not. Taking both from the flows credited a sink with energy still sitting in the pipe.
+    def grants_from(flows, delivered)
+      sent     = Hash.new { |h, k| h[k] = Hash.new { |i, j| i[j] = [] } }
       rejected = Hash.new { |h, k| h[k] = Hash.new(0.0) }
 
       flows.each do |flow|
-        link = flow.link
-        received[link.to_node][link.to_port].concat(flow.parcels)
-        sent[link.from_node][link.from_port] += flow.granted_kg
-        rejected[link.from_node][link.from_port] += flow.rejected_kg
+        # The parcels themselves, not just their mass: a node that ships material also ships
+        # its enthalpy, and the boundary nodes have to declare both.
+        sent[flow.source_node][flow.source_port].concat(flow.parcels)
+        rejected[flow.source_node][flow.source_port] += flow.rejected_kg
       end
 
       nodes.keys.to_h do |id|
-        [ id, Grant.new(received: received[id].transform_values { |ps| Parcel.normalise(ps) },
-                        sent: sent[id], rejected: rejected[id]) ]
+        [ id, Grant.new(received: delivered[id].transform_values { |ps| Parcel.normalise(ps) },
+                        sent: sent[id].transform_values { |ps| Parcel.normalise(ps) },
+                        rejected: rejected[id]) ]
       end
     end
 
@@ -364,9 +443,13 @@ module ReactorSim
         spec = content.reaction(reaction_id)
         acc = advance_ignition(spec, reaction_id, node, acc, ctx)
 
+        # A bed choked with its own ash reacts more slowly, because the air can no longer reach
+        # what is left to burn. Applied to `dt` so the closed form stays a closed form and
+        # stays exact — a reaction that gets a shorter effective second is the same reaction.
         parcels, released = Resources::Reaction.advance(
           spec, acc.fetch(:parcels),
-          temperature_k: node.temperature_k(acc, content), dt: ctx.dt, content: content,
+          temperature_k: node.temperature_k(acc, content),
+          dt: ctx.dt * node.reaction_throttle(acc, content), content: content,
           ignited_fuel_kg: ignited_fuel_kg(spec, reaction_id, acc)
         )
         next acc if released.zero? && parcels.equal?(acc.fetch(:parcels))
@@ -466,8 +549,9 @@ module ReactorSim
     # Phase 6. Durability depletes from operating conditions; a node fails when it hits
     # zero. Never a per-tick dice roll — the player must be able to learn "I ran it too hot
     # for too long" rather than being told the dice disliked them.
-    def stress(states, ctx)
+    def stress(states, ledger, ctx)
       events = []
+      before = rotating_kinetic_joules(states)
 
       next_states = states.to_h do |id, state|
         node = nodes.fetch(id)
@@ -475,10 +559,22 @@ module ReactorSim
 
         worn, node_events = node.apply_wear(state, ctx)
         events.concat(node_events)
+        # **A part that has let go stops being a machine.** A burst flywheel is not a
+        # flywheel spinning with a `broken` flag on it — it is scrap, and it does not keep
+        # turning. `Wearing` set the flag and nothing anywhere acted on it, so a wheel that
+        # burst at 400.8 rpm against a 321.6 limit was doing **2364.7 rpm and 3.97 MW** six
+        # hundred ticks later.
+        worn = worn.merge(angular_momentum: 0.0) if worn[:broken] && worn.key?(:angular_momentum)
         [ id, worn.freeze ]
       end
 
-      [ next_states, events ]
+      # The energy that wheel was carrying went into wrecking the shop. Ledgered rather than
+      # dropped, for the same reason belt slip is: an explicit line nobody can miss beats a
+      # silent hole, and this one is large — a flywheel at its burst speed holds megajoules.
+      wrecked = before - rotating_kinetic_joules(next_states)
+      ledger = Ledger.add(ledger, joules_to_friction: wrecked) if wrecked.abs > Parcel::EPSILON
+
+      [ next_states, ledger, events ]
     end
 
     # Phase 7. Each instrument samples its source and advances its filter chain. The only

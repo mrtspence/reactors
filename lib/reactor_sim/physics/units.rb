@@ -16,12 +16,16 @@ module ReactorSim
     STANDARD_TEMPERATURE_K = 293.15  # 20 °C
     STANDARD_PRESSURE_PA   = 101_325.0
     GAS_CONSTANT           = 8.314462618 # J/(mol·K)
+    GRAVITY_M_PER_S2       = 9.80665     # what makes a chimney draw and a header tank feed
 
     module_function
 
     def c_to_k(celsius) = celsius - ABSOLUTE_ZERO_C
     def k_to_c(kelvin)  = kelvin + ABSOLUTE_ZERO_C
     def kpa(pascals)    = pascals / 1000.0
+    # For the derived quantities that are already fractions — a level, an occupancy, an
+    # integrity — so a gauge can show them the way an operator reads them.
+    def percent(fraction) = fraction * 100.0
     def kilo(value)     = value / 1000.0
   end
 end

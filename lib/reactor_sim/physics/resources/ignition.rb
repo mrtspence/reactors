@@ -36,14 +36,21 @@ module ReactorSim
 
       # How quickly the fire's view of the draught catches up with the draught itself.
       #
-      # Air passes THROUGH a firebox, and the standing inventory oscillates hard: the damper
-      # delivers a slug, the flue clears it, and one tick in two the node genuinely holds no
-      # air at all — a period-2 limit cycle from the one-tick-per-hop delay, the same one the
-      # cylinder sits in. Read instantaneously, that says "starved" every other tick, on a fire
-      # consuming barely one percent of what blows past it.
+      # **This is deliberate fuel-bed inertia, and it is no longer load-bearing.** It was
+      # written as a workaround: air passes THROUGH a firebox, and the standing inventory used
+      # to oscillate hard — the damper delivered a slug, the flue cleared it, and one tick in
+      # two the node genuinely held no air at all. Read instantaneously that said "starved"
+      # every other tick, on a fire consuming barely one percent of what blew past it.
       #
-      # So the fire remembers. This is not a smoothing convenience: a bed of burning coal has
-      # real thermal inertia and does not go out because the draught faltered for 250 ms.
+      # That oscillation was a symptom of an unstable mass solver and is gone: transport is
+      # settled implicitly now, and the firebox's air is steady to a coefficient of variation
+      # of 0.0001 with no sign reversals. **Measured: disabling this memory entirely leaves the
+      # steam engine bit-identical** — same fire temperature, same burn rate, same speed.
+      #
+      # It stays because the physics is defensible on its own terms rather than because
+      # anything depends on it: a bed of burning coal does not go out because the draught
+      # faltered for 250 ms. `ignition_spec` pins that behaviour. If it ever gets in the way,
+      # delete it and the spec together — it is no longer propping anything up.
       OXIDISER_MEMORY_PER_S = 1.5
 
       def initial_state = { kg: 0.0, oxidiser_kg: 0.0 }

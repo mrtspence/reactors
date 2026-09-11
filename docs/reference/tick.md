@@ -21,12 +21,12 @@ engine uses 1.0; a mine would use much more.
 | 1 | read | Freeze tick N−1, build the `Context` every node sees | no |
 | 2 | `plan` | Every node declares intent, independently, against N−1 | no |
 | 3 | settle | One pure function over every claim — mass, heat, momentum | no |
-| 4a | `advect` | Granted parcels move, carrying their energy | no |
+| 4a | `advect` | Granted parcels cross a whole **path**, carrying their energy. Returns what was *delivered* per inlet, which is what the walls left of it | no |
 | 4b | `conduct` | Granted heat moves across thermal links | no |
 | 4c | `shed_to_ambient` | Waste heat leaves for the environment → ledger | no |
 | 4d | `drive` | Angular momentum crosses the drivetrain; friction → ledger | no |
 | 4e | `apply_nodes` → `transmit_torque` | Node-specific effects, then prime movers pay for their torque | no |
-| 5 | `react` | Ignition spreads, then chemistry, then phase change — local to each node | no |
+| 5 | `react` | Ignition spreads, then chemistry (scaled by the node's `reaction_throttle`), then phase change — local to each node | no |
 | — | `record_injections` | Everything injected or extracted goes on the ledger | no |
 | 6 | `stress` | Durability, overload, failure events | no |
 | 7 | `observe` | Instruments sample; their filters advance | **yes** |
@@ -41,8 +41,23 @@ pure — see [`invariants.md`](invariants.md#2-determinism).
 
 These are the parts most likely to be broken by a well-meaning rearrangement.
 
+**A choked node reacts on a shorter second.** `run_reactions` scales `dt` by
+`Node#reaction_throttle` (1.0 unless a node says otherwise), which is how a grate banked with
+its own ash smothers its fire: the air can no longer reach the fuel. Applied to `dt` rather than
+to the finished extent **on purpose** — the closed form stays a closed form and stays exact, and
+scaling the extent would charge a fire for its draught twice, which is the mistake
+`Resources::Ignition` records having made with the lit-mass term.
+
 **Mass moves before heat (4a before 4b).** A parcel carries its own energy, so advection must
 happen first or a parcel's energy arrives without it.
+
+**Material crosses a whole path in one tick.** Settlement resolves from one node that *holds*
+material to the next, straight through any conduits between them, so a valve or a length of
+pipe adds no delay. `Tick#carry_through` then mixes the stream with each conduit's wall to a
+single temperature on the way past — that is what keeps a chimney cooling its flue gas and
+lets a hot line still rupture, now that nothing lingers in one. See
+[`settlement.md`](settlement.md#mass-settles-over-paths-not-links) for why a conduit may not
+hold material.
 
 **Torque is transmitted after node effects (4e after `apply_nodes`).** A prime mover computes
 its torque in `apply`; `transmit_torque` then applies that impulse to the driven shaft,

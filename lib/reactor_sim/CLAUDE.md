@@ -26,7 +26,7 @@ how many people happened to be watching would change the match.
 
 ```
 physics/      substances, energy bookkeeping, the relaxation solver — no graph awareness
-graph/        nodes, ports, links, and the arbiter that settles every claim between them
+graph/        nodes, ports, links, paths, and the arbiter that settles every claim between them
 concerns/     composable state+behaviour fragments a node opts into
 nodes/        generic machinery, reusable across operations
 diagnostics/  the instrument chain — the only thing that leaves the simulation

@@ -47,6 +47,13 @@ module ReactorSim
         pressure_pa: :with_content,
         contents_volume: :with_content,
         room_m3: :with_content,
+        # How full of incompressible liquid a positive-displacement machine's clearance space
+        # is. 1.0 is hydraulic lock.
+        occupancy: :with_content,
+        compression_pressure_pa: :with_content,
+        # Where the water in a drum actually stands, bubbles included — which is what a real
+        # gauge glass shows and why a swelling boiler reads high. See `Nodes::Boiler`.
+        effective_fill: :with_content,
         contents_kg: :state_only,
         # Rotation and wear. All state-only, because none of them need to know what the
         # node is holding — a flywheel's speed does not depend on the weather.
@@ -80,6 +87,15 @@ module ReactorSim
 
     # How full something is, 0..100. The instrument the old engine structurally could not
     # provide, and the one a backing-up line most needs.
+    #
+    # **A level is the condensed phases and nothing else.** It used to read `contents_volume`,
+    # which prices every parcel at its nominal density — gases included — and a gas has no
+    # business being measured that way, because it expands to fill whatever it is in rather than
+    # occupying a fixed share of it. On the steam engine's boiler that reads **317% full**.
+    #
+    # `room_m3` is where the right rule already lives (see `Holds`), so a level is what a node
+    # has not left room for. Nodes that report unlimited room — `Atmosphere` — have no
+    # meaningful level and say so rather than returning a nonsense number.
     class Level < Base
       def initialize(node)
         super()
@@ -90,10 +106,13 @@ module ReactorSim
       def sample(nodes, states, content)
         node = nodes[@node] or return Reading.missing
         state = states[@node] or return Reading.missing
-        return Reading.missing unless node.respond_to?(:contents_volume) && node.respond_to?(:volume_m3)
+        return Reading.missing unless node.respond_to?(:room_m3) && node.respond_to?(:volume_m3)
         return Reading.of(0.0) if node.volume_m3 <= 0.0
 
-        Reading.of(node.contents_volume(state, content) / node.volume_m3 * 100.0)
+        room = node.room_m3(state, content)
+        return Reading.missing unless room.finite?
+
+        Reading.of((node.volume_m3 - room) / node.volume_m3 * 100.0)
       end
     end
 

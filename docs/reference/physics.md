@@ -31,7 +31,8 @@ convention in the physics:
 - Pressure is never stored. A stored pressure drifts from the state causing it and nothing
   tells you.
 
-`Units.k_to_c`, `Units.c_to_k`, `Units.kpa`, `Units.kilo` exist for display conversion.
+`Units.k_to_c`, `Units.c_to_k`, `Units.kpa`, `Units.kilo`, `Units.percent` exist for display
+conversion.
 
 ---
 
@@ -87,7 +88,8 @@ temperatures are **distinct nodes**.
 the mix. `add_joules` calls it for you. The engine calls it after advection, reactions and
 phase change — you rarely need to.
 
-Heat transfer between nodes and to ambient is closed-form relaxation — see
+Heat transfer between nodes is an implicit solve over the whole thermal network; loss to
+ambient stays closed form, because a fixed-potential reservoir cannot be overshot. See
 [`settlement.md`](settlement.md#heat-and-rotation-settle_heat-settle_drive).
 
 ---
@@ -111,8 +113,14 @@ Two behaviours that will surprise you if you don't know them:
 - **Gases are not limited by volume.** `Holds#room_m3` counts only condensed phases;
   `gas_headroom_kg(state, target_pa, content, resource)` provides the pressure limit instead.
 
-Not modelled: pump head, hydrostatic pressure, flow-induced pressure drop. All are additive
-changes here later.
+Gas **transport** is driven by this pressure through the same network solve as heat, with
+`mole_capacity_per_pa` (`dn/dP = V_free/(R·T)`) as the capacity term. Conductance is the whole
+restriction on such a path — a port's `max_kg_per_s` governs rate-driven paths only, and
+applying both makes every throat permanently choked, which removes the pressure feedback
+entirely. See [`settlement.md`](settlement.md#heat-and-rotation-settle_heat-settle_drive).
+
+Not modelled: hydrostatic pressure, flow-induced pressure drop. Pump and fan head exist as a
+conduit's `head_pa`; a chimney earns its own from buoyancy.
 
 ---
 
@@ -130,9 +138,9 @@ rim_speed(state)      # ω × radius — what actually tears a spinning mass apa
 `friction_loss` relaxes toward rest in closed form, so a wheel coasts to a stop and never
 through it into running backwards.
 
-Coupling is `DriveLink(a:, b:, stiffness:, max_torque:)`, settled by the same relaxation as
-heat. `stiffness` is how hard the two ends are held to a common speed — a keyed shaft is
-stiff, a leather belt is not, and the difference is one number rather than one class.
+Coupling is `DriveLink(a:, b:, stiffness:, max_torque:)`, settled by the same network solve as
+heat and gas. `stiffness` is how hard the two ends are held to a common speed — a keyed shaft
+is stiff, a leather belt is not, and the difference is one number rather than one class.
 
 ---
 

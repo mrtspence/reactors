@@ -26,6 +26,11 @@ module ReactorSim
   # not push STAYS WITH THE SENDER, and the sender is told. That is back-pressure — a
   # blocked line backs up all the way to its source instead of quietly annihilating mass,
   # which is precisely what the old engine got wrong.
+  # `sent` mirrors `received`: the actual PARCELS that left through each outlet, not a bare
+  # kilogram figure. That is what lets a node account for the energy it shipped as well as the
+  # mass — which the boundary nodes need, because a ledger line built from a node's own
+  # before/after totals records the NET of everything that crossed in the tick and not the
+  # crossings themselves.
   Grant = Struct.new(:received, :sent, :rejected, :joules, keyword_init: true) do
     def initialize(received: {}, sent: {}, rejected: {}, joules: 0.0)
       super(received: received.freeze, sent: sent.freeze,
@@ -37,12 +42,17 @@ module ReactorSim
     # Parcels that arrived through a given inlet this tick.
     def received_at(port_id) = received.fetch(port_id, [])
 
-    def sent_kg(port_id)     = sent.fetch(port_id, 0.0)
+    # Parcels that left through a given outlet this tick.
+    def sent_at(port_id) = sent.fetch(port_id, [])
+
+    def sent_kg(port_id)     = Parcel.total_kg(sent.fetch(port_id, []))
     def rejected_kg(port_id) = rejected.fetch(port_id, 0.0)
 
-    def total_received = received.values.flatten.sum { |p| p.fetch(:kg) }
-    def total_sent     = sent.values.sum
-    def total_rejected = rejected.values.sum
+    def total_received        = received.values.sum { |ps| Parcel.total_kg(ps) }
+    def total_received_joules = received.values.sum { |ps| Parcel.total_joules(ps) }
+    def total_sent            = sent.values.sum { |ps| Parcel.total_kg(ps) }
+    def total_sent_joules     = sent.values.sum { |ps| Parcel.total_joules(ps) }
+    def total_rejected        = rejected.values.sum
 
     def blocked? = total_rejected > Parcel::EPSILON
   end

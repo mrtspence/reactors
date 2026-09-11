@@ -36,21 +36,45 @@ Enthalpy is relative to 0 K: `joules = kg × (specific_heat × T + formation_ent
 formation term is what makes phase change exact — condensing releases precisely what boiling
 cost. See [`content/CLAUDE.md`](../../../content/CLAUDE.md) for why the YAML must encode it.
 
-## Never replace a closed-form integrator with explicit Euler
+## Never use an integrator that is only stable for small `dt`
 
-`Relaxation` (heat and rotation) and `Reaction` (chemistry) are both closed form and
+`time_scale` is a design dial, so nothing may assume the step is short. `Reaction` stays
+closed form; `Relaxation` solves the whole coupling network **implicitly**, and both are
 unconditionally stable at any `dt`. Explicit Euler returns **negative Kelvin at `dt = 100 s`**;
-relaxation converges cleanly at `dt = 10⁶`. That is what makes `time_scale` a safe design dial
-rather than a hazard.
+these converge cleanly at `dt = 10⁶`.
 
 ```
-transfer = c₁ · (p₁ − equilibrium) · (1 − e^(−dt/τ))     # heat, rotation
-extent   = limiting_reagent · (1 − e^(−rate_per_s · dt))  # reactions
+(C/dt + K) · p′ = (C/dt) · p + b                          # heat, rotation AND gas
+extent          = limiting_reagent · (1 − e^(−rate_per_s · dt))   # reactions
 ```
 
-Heat conserves **energy** exactly. Rotation conserves **momentum** exactly and kinetic energy
-deliberately not — a slipping coupling loses energy, and `Tick#drive` measures the difference
-and ledgers it as `joules_to_friction`.
+**One solver, three quantities** — heat capacity ↔ moment of inertia ↔ `dn/dP`, temperature ↔
+angular velocity ↔ pressure. Heat conserves **energy** exactly; gas conserves **mass**
+exactly; rotation conserves **momentum** exactly and kinetic energy deliberately not — a
+slipping coupling loses energy, and `Tick#drive` measures the difference and ledgers it as
+`joules_to_friction`.
+
+> **The pairwise closed form was not enough and its replacement was worse.** Per-coupling
+> exactness does not compose in a network, and it cannot express flow *through* a body — so
+> mass used `k·ΔP·dt`, which is explicit Euler, with a per-node bound standing in for
+> stability. Every gas coupling in the steam engine ran 400–600× past that limit, and the
+> bound moved a sender to the receiver's *current* potential without allowing for the receiver
+> rising — a 2× overshoot that made two joined vessels **swap contents permanently**. The
+> firebox showed it as a 5.9× tick-to-tick swing in the fire's heat output, and doubling the
+> draught conductance *cut engine power to a fifth*. Backward Euler over the network is first
+> order rather than exact, and that is the right trade: it closes `x/(1+x)` of the gap where
+> the exponential closes `1 − e⁻ˣ`, reaches the same equilibrium, and cannot pass it.
+
+`limits` are constraints inside the solve (a check valve is `[0, ∞]`), never a clamp applied
+afterwards — clamping leaves every other coupling settled against a transfer that did not
+happen. A pinned coupling may be released once, or it holds a flow the network has already
+moved past: pinning the flue at its throat drove the firebox to an **80 kPa vacuum**.
+
+**Cost scales with the largest connected component, not the node count.** The elimination is
+cubic in one component, so `settle` splits the link list into components first. Measured: one
+100-node network is 13.2 ms against 3.0 ms for the same nodes as 50 pairs. Real operations are
+the second shape — the steam engine's largest gas component is three nodes — but
+`performance_spec` guards both.
 
 ## Saturation: pressure and the phase split are coupled
 
@@ -68,8 +92,16 @@ saturation temperature, which condenses it all again — makes a vessel flip bet
 - Phase pairs are indexed **from both sides** — a condenser holding only vapour has no liquid
   parcel to discover the pair from, and used to never condense.
 
-Known limitation: non-condensables are ignored, so air sharing a vessel with boiling water
-does not raise its boiling point.
+**Non-condensables are handled, and the way they are handled looks like a bug until you check
+it.** The pair is solved against its own **partial** pressure — which is what vapour–liquid
+equilibrium depends on — so adding air leaves the steam's partial pressure untouched; the air
+then adds its own share to the vessel total in `Pressurized#pressure_pa`. Measured: 10 kg of
+water at 380 K in 1 m³ holds 62.1 kPa of steam with or without air, and 1 kg of air takes the
+vessel from 62.1 to 166.7 kPa. A condenser losing its vacuum to inleakage is already modelled.
+
+The genuine limitation is narrower: there is no distinction between evaporative equilibrium and
+**bulk boiling**, which requires the vapour pressure to reach the *total* pressure before
+bubbles can form.
 
 ## Ignition
 
@@ -85,8 +117,10 @@ Four things that were each got wrong first, and will be again:
   it cannot reach the threshold without spreading. Bulk temperature belongs on the quench side.
 - **Starvation scales spread down as well as quench up**, or a fire cut off from air dies at
   only `quench − spread`.
-- **The fire keeps a short memory of the draught**, because air passes *through* a node and its
-  standing inventory oscillates to zero every other tick.
+- **The fire keeps a short memory of the draught.** This was a workaround for a standing
+  inventory that oscillated to zero every other tick; that oscillation was an unstable mass
+  solver and is gone, and **disabling the memory now leaves the steam engine bit-identical**.
+  It stays as deliberate fuel-bed inertia, not as a prop.
 
 Spread is closed-form logistic — exact at any `dt`, cannot overshoot, and from exactly zero
 stays at zero, which is what makes an igniter a match rather than a switch.

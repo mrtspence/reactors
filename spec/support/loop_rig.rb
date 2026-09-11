@@ -50,11 +50,15 @@ module LoopRig
         display: ReactorSim::Displays::Needle.new(unit: "kPa", convert: :kpa, precision: 0)
       ),
 
-      # The instrument v0 was structurally incapable of providing: how full the line is.
-      # In the old engine the steam line that killed the player was invisible.
+      # The instrument v0 was structurally incapable of providing: how full something is.
+      #
+      # It used to point at `:steam_line`, which was a Conduit. Conduits stopped holding
+      # material when transport moved to paths, so a level on one now reads nothing at all —
+      # `Level` needs `contents_volume` and `volume_m3`, and a conduit has neither. A holder
+      # is the only thing a level means anything about.
       ReactorSim::Diagnostic.new(
-        id: :steam_line_level, label: "Steam Line Level",
-        source: ReactorSim::Sources::Level.new(:steam_line),
+        id: :condenser_level, label: "Condenser Level",
+        source: ReactorSim::Sources::Level.new(:condenser),
         filters: [ ReactorSim::Filters::Quantize.new(5.0) ],
         display: ReactorSim::Displays::Needle.new(unit: "%", precision: 0, min: 0.0, max: 100.0)
       ),
@@ -114,7 +118,7 @@ module LoopRig
 
       ReactorSim::Nodes::Conduit.new(
         id: :steam_line, label: "Steam Line", accepts: [ :gas ],
-        max_kg_per_s: 6.0, volume_m3: 2.0, heat_capacity: 2.0e4,
+        max_kg_per_s: 6.0, heat_capacity: 2.0e4,
         ambient_conductance: 15.0, control_id: :steam_valve
       ),
 
@@ -130,7 +134,7 @@ module LoopRig
 
       ReactorSim::Nodes::Conduit.new(
         id: :return_line, label: "Return Line", accepts: [ :liquid ],
-        max_kg_per_s: 6.0, volume_m3: 0.4, heat_capacity: 1.5e4,
+        max_kg_per_s: 6.0, heat_capacity: 1.5e4,
         ambient_conductance: 10.0, control_id: :return_valve
       )
     ]
