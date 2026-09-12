@@ -7,10 +7,10 @@ specific heat. Reference:
 
 | Concern | Config (as reader methods) | State it adds | Key methods |
 |---|---|---|---|
-| `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity` |
+| `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume`, `bulk_density_kg_m3` |
 | `Wearing` | `durability_range`, `stress_per_second`, `overload?` | `durability`, `initial_durability`, `broken` | `apply_wear`, `integrity` |
-| `Pressurized` | needs `Holds` + `Thermal` | none — derived | `pressure_pa`, `gas_headroom_kg` |
+| `Pressurized` | needs `Holds` + `Thermal`; optional `material`, `shell_radius_m`, `wall_thickness_m`, `safety_factor`, `max_pressure_pa` | none — derived | `pressure_pa`, `gas_headroom_kg`, `rated_pressure_pa` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
 
@@ -61,6 +61,20 @@ P    = Σ(gas moles) × R × T / free
   `Arbiter#volume_of` — fixing one alone throttles every duct.
 
 Not modelled: pump head, hydrostatic pressure, flow-induced pressure drop.
+
+### What the shell can stand comes from the shell
+
+`rated_pressure_pa(content)` derives the damage threshold by hoop stress — `σ = p·r/t`, so
+`p = σ·t/r·safety_factor` — from the part's `material:`, `shell_radius_m:` and
+`wall_thickness_m:`. Same shape as `Flywheel#burst_speed_m_s`, and for the same reason: a
+vessel's strength is what it is built from and how thick it is, not a number somebody picks.
+
+> **It was `relief_pa × 1.5` on the steam engine, and that is circular.** What a boiler survives
+> cannot depend on where its safety valve was set — and it made the two inseparable, so the gap
+> between blowing off and bursting could never be deliberately changed.
+
+`safety_factor` is the **part's**, not the metal's, exactly as on the flywheel: how far below the
+plate figure a real vessel fails depends on its seams. An explicit `max_pressure_pa:` still wins.
 
 ## Obstructs: the deposit is in the way, not merely taking up room
 

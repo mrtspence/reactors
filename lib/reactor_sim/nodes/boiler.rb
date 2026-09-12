@@ -54,13 +54,22 @@ module ReactorSim
       # to matter were states with nothing moving.
       SLUG_RANGE = 0.15
 
+      # Where the metal starts losing strength, as a fraction of the temperature at which it stops
+      # being structural. Steel and the irons hold up well to a dull heat and then give way
+      # quickly, so this is flat below and steep above. 0.7 of 750 K is 525 K for wrought iron,
+      # which leaves a drum at its own saturation temperature (430–455 K) at full strength — the
+      # point being that a healthy boiler must not be taxed for being hot, only a starved one.
+      CREEP_ONSET_FRACTION = 0.7
+
       attr_reader :steam_port, :carryover_tags, :wetness, :foaming_wetness, :priming_wetness,
-                  :onset_fill, :swell_pa_per_s, :max_swell, :swell_settle_s, :swell_rise_s
+                  :onset_fill, :swell_pa_per_s, :max_swell, :swell_settle_s, :swell_rise_s,
+                  :crown_fill, :fired_by
 
       def initialize(id:, steam_port:, carryover_tags: [ :liquid ],
                      wetness: 0.005, foaming_wetness: 0.30, priming_wetness: 0.97,
                      onset_fill: 0.55, swell_pa_per_s: 0.0, max_swell: 0.35,
-                     swell_settle_s: 8.0, swell_rise_s: 2.0, **options)
+                     swell_settle_s: 8.0, swell_rise_s: 2.0,
+                     crown_fill: 0.0, fired_by: nil, **options)
         super(id: id, **options)
         @steam_port = steam_port.to_sym
         @carryover_tags = carryover_tags.map(&:to_sym).freeze
@@ -68,6 +77,12 @@ module ReactorSim
         @foaming_wetness = foaming_wetness.to_f
         @priming_wetness = priming_wetness.to_f
         @onset_fill = onset_fill.to_f
+        # The fill fraction at which the fire-side plate begins to come out of the water, and the
+        # node whose fire is on the other side of it. Zero (the default) means this drum has no
+        # crown sheet modelled at all, which is right for an evaporator or a flash vessel — the
+        # hazard belongs to a drum with a furnace under it.
+        @crown_fill = crown_fill.to_f
+        @fired_by = fired_by&.to_sym
         # Rate of pressure fall at which the drum holds `max_swell` of its water as
         # bubbles. Zero disables swell and leaves carryover a function of the static level.
         @swell_pa_per_s = swell_pa_per_s.to_f
@@ -111,10 +126,124 @@ module ReactorSim
           pressure_trend_pa_per_s: trend,
           pressure_drop_pa_per_s: fall,
           swell: settled_swell(state, fall, ctx.dt),
-          steam_kg_per_s: grant.sent_kg(@steam_port) / ctx.dt
+          steam_kg_per_s: grant.sent_kg(@steam_port) / ctx.dt,
+          # Recorded rather than derived on demand because it needs the *fire's* temperature,
+          # which is a cross-node read — so a `Sources::Derived` gauge could not compute it and
+          # the fusible plug would have to reach for the firebox itself. One node owns it.
+          crown_exposure: crown_exposure(next_state, ctx.content),
+          crown_temperature_k: crown_temperature_k(next_state, ctx)
         )
 
         events.empty? ? next_state : [ next_state, events ]
+      end
+
+      # ## The crown sheet: the plate over the fire, and the reason low water kills
+      #
+      # **This is the one hazard a lumped body genuinely cannot express**, and it is worth being
+      # precise about why. Everything else here works because a drum's contents are well mixed;
+      # its temperature is a real number that means something. But `temperature_k` on a boiler at
+      # 5% water is *not high* — it is the same saturation temperature as a boiler at 60%, held
+      # by a smaller mass. **A dry boiler in a lumped model is not hot, merely empty.** So no
+      # `max_temperature_k` on this node could ever trip, however far the water fell, and the
+      # feed lever kept its ceiling and had no floor.
+      #
+      # The real failure is *positional* and a lumped model has no positions. The crown sheet is
+      # the plate forming the top of the firebox. While water covers it, it runs a few degrees
+      # above the water and is safe at any fire, because boiling water against steel is an
+      # extraordinarily good heat sink. Uncover it and it is a steel plate with a fire on one side
+      # and steam — a poor conductor — on the other. It reaches red heat in minutes, loses its
+      # strength, and lets go; and because the whole water content then flashes through the hole
+      # at once, this is the failure that killed crews rather than merely wrecking engines.
+      #
+      # So the plate gets a derived temperature of its own, blended between the water it is
+      # supposed to be under and the fire it is over:
+      #
+      #     T_crown = T_water + exposure · (T_fire − T_water)
+      #
+      # That blend is a lumped approximation of its own and deliberately so — a bare plate does
+      # still conduct something into the steam space, so it does not truly reach fire temperature.
+      # What matters is that it is **monotone in exposure and reaches destructive values before
+      # full exposure**, which is what makes low water a gradient a player can be caught on rather
+      # than a cliff.
+      #
+      # > **It reads the TRUE fill, while the gauge glass shows the swelled one, and that gap is
+      # > the trap.** `effective_fill` includes the bubbles the water is holding, because that is
+      # > what a real glass shows; the plate is cooled by water, not by froth. So exactly when the
+      # > engine is being worked hard enough to swell the drum, the glass reads high while the
+      # > plate is uncovering. That is not a contrivance — it is the classic accident, and the
+      # > reason every firing manual tells you to trust the try-cocks over the glass.
+      def crown_exposure(state, content)
+        return 0.0 if @crown_fill <= 0.0 || volume_m3 <= 0.0
+
+        fill = (volume_m3 - room_m3(state, content)) / volume_m3
+        return 0.0 if fill >= @crown_fill
+
+        ((@crown_fill - fill) / @crown_fill).clamp(0.0, 1.0)
+      end
+
+      # What the plate is actually at. Falls back to the drum's own temperature when there is no
+      # fire declared or the firebox cannot be read, so an unfired drum is never in danger.
+      def crown_temperature_k(state, ctx)
+        water = temperature_k(state, ctx.content)
+        exposure = crown_exposure(state, ctx.content)
+        return water if exposure <= 0.0 || @fired_by.nil?
+
+        fire = ctx.node_temperature(@fired_by)
+        return water if fire.nil? || fire <= water
+
+        water + (exposure * (fire - water))
+      end
+
+      # Pressure and bulk temperature still apply — a boiler can still be over-pressured — but
+      # the crown sheet is measured against the **plate's** temperature rather than the drum's.
+      #
+      # Taken as the larger of the two rather than the sum, because they are two descriptions of
+      # the same shell and adding them would charge a boiler twice for one degree of overheat.
+      def stress_per_second(state, ctx)
+        [ super, crown_stress_per_second(state, ctx) ].max
+      end
+
+      # ## What the plate can still hold at the temperature it has reached
+      #
+      # **A crown sheet does not fail because it is hot. It fails because it is hot and there is
+      # pressure behind it**, and that distinction is the whole of this method. A bare plate over
+      # a dead fire warps; a bare plate with steam pushing on it tears out along its seams.
+      #
+      # So the two ratings are multiplied rather than checked separately: `rated_pressure_pa` is
+      # what the shell holds cold (derived from the plate by hoop stress — see
+      # `Concerns::Pressurized`), and that allowance is knocked down as the metal loses strength.
+      # The immediate consequence is the one that matters in play: **a boiler carrying more
+      # pressure fails sooner on the same amount of overheating.** A driver who has wound the
+      # safety valve up has less margin when the water goes, not the same margin.
+      #
+      # Metal keeps essentially all of its strength until creep sets in and then gives it up
+      # quickly, so this is flat below `CREEP_ONSET_FRACTION` of the rating and falls linearly to
+      # nothing at it — rather than declining from ambient, which would tax a perfectly healthy
+      # boiler for being at its own saturation temperature.
+      def crown_allowable_pressure_pa(state, ctx)
+        ceiling = rated_pressure_pa(ctx.content)
+        rated_t = rated_temperature_k(ctx.content)
+        return ceiling unless rated_t.finite? && ceiling.finite?
+
+        onset = rated_t * CREEP_ONSET_FRACTION
+        crown_t = crown_temperature_k(state, ctx)
+        return ceiling if crown_t <= onset
+
+        ceiling * ((rated_t - crown_t) / (rated_t - onset)).clamp(0.0, 1.0)
+      end
+
+      # Measured against the **cold** rating rather than against the allowance, because the
+      # allowance goes to zero and a fraction with zero underneath it is not a gradient. This way
+      # the worst case is bounded at `pressure / rated × stress_rate`, and it still rises smoothly
+      # as the plate softens.
+      def crown_stress_per_second(state, ctx)
+        return 0.0 if stress_rate.zero? || @crown_fill <= 0.0
+
+        ceiling = rated_pressure_pa(ctx.content)
+        return 0.0 unless ceiling.finite? && ceiling.positive?
+
+        excess = pressure_pa(state, ctx.content) - crown_allowable_pressure_pa(state, ctx)
+        excess.positive? ? (excess / ceiling) * stress_rate : 0.0
       end
 
       # ## The pressure fall the water actually responds to, which is not one tick's worth

@@ -82,6 +82,7 @@ cast_iron:
   density_kg_per_m3: 7200
   specific_heat_j_per_kg_k: 460
   tensile_strength_pa: 150.0e6
+  max_temperature_k: 800
 ```
 
 `tensile_strength_pa` is only required on things actually used as structural materials;
@@ -90,6 +91,17 @@ asking for one that is missing raises rather than returning nil into a stress ca
 What a spinning part cares about is the **ratio** of tensile strength to density. Cast iron
 does badly on it — excellent in compression, poor in tension, which is exactly the wrong way
 round for a flywheel.
+
+`max_temperature_k` is where the metal **stops being structural**, not where it melts — steel
+melts near 1700 K and is useless as a pressure boundary by 900. A part gets it by declaring
+`material:`, and `Concerns::Thermal#rated_temperature_k` resolves an explicit
+`max_temperature_k:` on the part first, so a water-cooled wall can still be special.
+
+> **Rate every `:structural` material, and `content_spec` insists.** `Content#max_temperature_k`
+> returns infinity for a resource that declares none — right for coal and steam, and a silent
+> off switch for anything a boiler is built from. Over-temperature fatigue existed in `Vessel`
+> and `Conduit` from the day `Wearing` landed and **had never once fired in any operation**,
+> because every node shipped the infinite default. Nothing failed and nothing warned.
 
 **Safety factors do not belong here.** How far below the ideal figure a real part fails
 depends on casting quality and geometry — properties of the part. They go on the node.

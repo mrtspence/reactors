@@ -66,6 +66,14 @@ ruby -Ilib -e 'require "reactor_sim"'      # boot the sim with no Rails at all
 
 The sim needs no database and no services. `bin/dev` boots the Rails side.
 
+> **A change under `lib/reactor_sim` needs BOTH dev processes restarted.** The sim is outside
+> Zeitwerk and is required once at boot, so Rails' development reloader never picks it up — and
+> `bin/match_runner` loads it once too. Restart the runner and you get new physics with an old
+> panel; restart neither and you get neither. This cost a round trip: four new instruments were
+> written, specced and confirmed present in `op.panel`, and were invisible in the browser for two
+> days because the web process had been up for 56 hours. If a sim change appears to have no effect
+> in the UI, check process age before debugging anything else.
+
 ## Documentation is part of the change, not follow-up work
 
 **A change that makes a doc wrong is not finished until that doc is fixed, in the same

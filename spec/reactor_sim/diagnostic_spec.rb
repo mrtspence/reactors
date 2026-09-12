@@ -55,6 +55,31 @@ RSpec.describe ReactorSim::Diagnostic do
     end
   end
 
+  # `Field` reads numbers and `Flag` reads booleans, and the split is deliberate rather than
+  # fussy — see `docs/reference/diagnostics.md`. A flag has no scale, no noise and no units.
+  describe ReactorSim::Sources::Flag do
+    def sample(state)
+      described_class.new(:box, :melted).sample({}, { box: state }, content)
+    end
+
+    it "reads a true flag as 1.0 and a false one as 0.0" do
+      expect(sample({ melted: true }).value).to eq(1.0)
+      expect(sample({ melted: false }).value).to eq(0.0)
+    end
+
+    it "reports a key that is absent as unavailable rather than as false" do
+      expect(sample({ something_else: true }).available).to be(false)
+    end
+
+    # The reason this class exists at all: `Field` ends in `value.to_f`, and `true.to_f` does
+    # not exist. Raising is the right failure — it says "wrong reader", where a coerced 1.0
+    # would silently make every boolean look like a gauge.
+    it "is needed because Field cannot read a boolean at all" do
+      expect { ReactorSim::Sources::Field.new(:box, :melted).sample({}, { box: { melted: true } }, content) }
+        .to raise_error(NoMethodError)
+    end
+  end
+
   describe ReactorSim::Filters::Lag do
     it "reports what was true n ticks ago" do
       readings = drive(instrument(filters: [ described_class.new(2) ]), [ 1.0, 2.0, 3.0, 4.0, 5.0 ])

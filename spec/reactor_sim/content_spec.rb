@@ -115,6 +115,38 @@ RSpec.describe ReactorSim::Content do
         .to raise_error(ReactorSim::Error, /cannot be used as a structural material/)
     end
 
+    # **This exists because a missing rating is silent and total.** Over-temperature fatigue in
+    # `Vessel` and `Conduit` was complete and wired from the day `Wearing` landed, and had never
+    # once fired in any operation, because every node shipped `Float::INFINITY` and
+    # `stress_per_second` returned on its first branch every time. Nothing failed, nothing
+    # warned, and the mechanic simply did not exist.
+    #
+    # `max_temperature_k` returns infinity for a resource that declares none, which is right for
+    # coal and steam and wrong for anything a boiler is built out of — so the guard belongs here,
+    # on the tag that says "things are made of this".
+    it "rates every structural material for temperature" do
+      structural = content.resources.keys.select { |id| content.tags(id).include?(:structural) }
+
+      expect(structural).not_to be_empty
+      structural.each do |id|
+        expect(content.max_temperature_k(id)).to be_finite,
+          "#{id} is tagged :structural but declares no max_temperature_k, which silently " \
+          "disables over-temperature failure for everything built from it"
+      end
+    end
+
+    # It is the temperature the metal stops being structural at, NOT its melting point — steel
+    # is useless as a pressure boundary hundreds of kelvin before it melts. The ordering below is
+    # the one the crown sheet depends on: the plug has to go before the plate does.
+    it "makes the fusible alloy let go before the boiler plate it protects" do
+      expect(content.max_temperature_k(:fusible_alloy))
+        .to be < content.max_temperature_k(:wrought_iron)
+    end
+
+    it "returns infinity for a substance with no temperature rating" do
+      expect(content.max_temperature_k(:water)).to eq(Float::INFINITY)
+    end
+
     it "indexes the phase pair from both the liquid and the vapour side" do
       expect(content.phase_pair(:water)).to eq([ :water, :steam ])
       expect(content.phase_pair(:steam)).to eq([ :water, :steam ])

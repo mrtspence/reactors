@@ -125,12 +125,13 @@ All generic and reusable. Anything genuinely specific to one machine belongs und
 |---|---|---|
 | `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | A tank, vat, drum or pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, and `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke. |
 | `Conduit` | Thermal, Wearing | A pipe or valve. **Transport** — holds nothing; contributes a restriction, a lever, a wall and the ability to fail. Optional `control_id`, `conductance:`, `head_pa:`, `stack_height_m:`, `one_way:`, `rangeability:` (valve trim). |
-| `Boiler` | (a `Vessel`) | A drum where a liquid and its own vapour coexist. Its vapour outlet is **never quite dry**, gets wetter as the level rises past `onset_fill`, and **swells** when the pressure falls sharply — which is what turns a high glass into a slug of water. |
+| `Boiler` | (a `Vessel`) | A drum where a liquid and its own vapour coexist. Its vapour outlet is **never quite dry**, gets wetter as the level rises past `onset_fill`, and **swells** when the pressure falls sharply — which is what turns a high glass into a slug of water. With `crown_fill:` and `fired_by:` it also has a **crown sheet**: the plate over the fire, which burns when the level falls past it. |
 | `Atmosphere` | Thermal, Holds | The outside world: unlimited source, unlimited sink, fixed pressure reference. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
 | `Load` | Rotating | Where useful work leaves the operation. Has a **torque curve** — `:fan` (τ ∝ ω²), `:viscous` (τ ∝ ω) or `:constant` — absorbing `max_torque` at `rated_omega`. |
 | `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at supply density. Working fluid is configuration. |
-| `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity — `senses_quantity:` defaults to `pressure_pa` but need not be it. |
+| `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity — `senses_quantity:` defaults to `pressure_pa` but need not be it. `ease_control_id:` opens it further by hand (`max`); `control_id:` gags it shut (`×`). Records `lift:`. |
+| `FusiblePlug` | (a `Conduit`) | Senses a **state key** on another node and fails **permanently** open above `melts_above:`. A fuse, not a valve. |
 
 ### Holders and transport are the key distinction
 
@@ -239,6 +240,108 @@ That is also why `ReliefValve` takes `senses_quantity:`. A safety valve pointed 
 vessel pressure here would lift at nothing and look like protection — which is worse than
 fitting none. `spec/reactor_sim/obstruction_spec.rb` asserts both halves: the valve that senses
 the compression pressure lifts, and the one sensing `pressure_pa` stays shut on the same state.
+
+### A transient needs a time constant big enough to have a procedure about
+
+`Cylinder#heat_capacity` is the metal a cold cylinder has to warm through, and it decides whether
+warming through is a **procedure** or a formality. At `6.0e4` J/K against a charge of ~0.25 kg of
+steam a tick carrying ~2.75 MJ/kg, the metal rises ~11.5 K per tick and reaches steam temperature
+in about a dozen ticks — three seconds — so the drain cocks had nothing to do during starting and
+peak occupancy over a whole startup reached 0.188.
+
+Taken from the casting instead (bore, stroke, wall thickness, cast iron) it is ~4.0e5 for a
+0.45 m × 1.1 m cylinder, and the three states separate properly: cocks shut peaks at 0.859 and
+knocks, cocks open stays dry but throws 5% of the power away, cocks open-then-shut gets both.
+
+**Size a thermal mass from the part, not from what makes the transient convenient.** Two general
+points fall out:
+
+- **Scale it per variant.** The atmospheric cylinder is a different casting — 5× rather than the
+  9× its raw volume suggests, because shell thickness goes as `p·r` and 1.4 atm across a 0.65 m
+  radius is a gentler duty than 6 atm across 0.225 m.
+- **A drain changes whether the hazard exists at all.** The atmospheric engine never needs its
+  cocks (peak 0.086) and should not: it exhausts into a condenser, which drains liquid
+  continuously. The high-pressure engine exhausts up a chimney and has nowhere to put it.
+
+### A lumped body cannot express a hazard that is positional
+
+`temperature_k` on a boiler at 5% water is **not high** — it is the same saturation temperature
+a boiler at 60% holds, on a smaller mass. **A dry boiler in a lumped model is not hot, merely
+empty.** So no `max_temperature_k` on the node could ever trip however far the water fell, and
+the low-water hazard was unreachable by configuration rather than by tuning.
+
+The crown sheet is the plate over the fire. While water covers it, it runs a few degrees above
+the water and is safe at any fire, because boiling water against steel is an extraordinarily good
+heat sink. Uncover it and it is a plate with a fire on one side and steam — a poor conductor —
+on the other.
+
+```ruby
+crown_exposure(state, content)      # 0 while covered, → 1 as the level falls past crown_fill
+crown_temperature_k(state, ctx)     # T_water + exposure · (T_fire − T_water)
+stress_per_second(state, ctx)       # max(the Vessel's own, the crown sheet's)
+```
+
+Three things worth copying when the same shape comes up again:
+
+- **The derived value is recorded in state** during `apply`, because it needs a cross-node read
+  (the fire) and therefore has the wrong arity for `Context#node_reading`, which calls
+  `method(state, content)`. One node owns the derivation; everyone else reads the key.
+- **It reads the true fill while the gauge glass shows the swelled one.** The glass includes the
+  bubbles because a real one does; the plate is cooled by water, not froth. So the needle reads
+  comfortable exactly when a hard pull is uncovering the plate — measured, 20.1% on the tick the
+  plug went. That gap is the mechanic.
+- **`max`, not sum.** Pressure stress and crown stress are two descriptions of one shell, and
+  adding them would charge a boiler twice for a single degree of overheat.
+
+### Irreversible is a different part from reversible
+
+`FusiblePlug` looks like a `ReliefValve` — both sense a quantity elsewhere and open above a
+threshold — and was nearly written as one. **A relief valve re-seats and a fusible plug does
+not**, and that difference is the whole part: a safety valve is a control a driver works with, a
+plug is a fuse that operates once and puts the engine out of service. On the reversible base a
+boiler would have quietly healed itself once water came back over the plate, which is precisely
+the consequence-free behaviour the hazard exists to not have. `melted` latches in state.
+
+Measured on the steam engine: with the plug fitted the crown peaks at its 620 K melting point and
+the boiler keeps integrity 1.00 in every run; scaled over, the crown reaches 1152 K and the shell
+ruptures at tick 7088. **The explosion is underneath the safety device**, which is the risk/reward
+the modularisation plan wants.
+
+### Over-temperature ratings come from the material
+
+`Concerns::Thermal#rated_temperature_k` resolves an explicit `max_temperature_k:` on the part
+first — a water-cooled wall survives what its bare metal would not — then the part's `material:`
+looked up in content, then infinity. `stress_rate` stays per-part: how fast a casting fails once
+it is over is a property of the casting, as `safety_factor` is on the flywheel.
+
+> **Infinity is a silent off switch.** `Vessel` and `Conduit` have fatigued on temperature since
+> `Wearing` was written and never once fired, because every node shipped the default.
+
+### A relief valve's two levers do not compose the same way
+
+```ruby
+open_fraction = [ lift(ctx), eased(ctx) ].max * super
+```
+
+`ease_control_id:` is the **easing lever** — the handle on the side of a Ramsbottom valve that
+lifts it by hand. It is a `max`, so it can only ever open the valve further than the spring
+already has: blowing pressure down deliberately is a real operating decision, and holding a
+safety valve shut is not something a handle should be able to do.
+
+`control_id:` (inherited from `Conduit`) is the **gag**, and it multiplies, so it *can* shut the
+valve completely. That is deliberately available — it is exactly the sort of decision that gets
+people killed, and a simulation that makes it impossible is not modelling the hazard.
+
+### A transport node leaves no trace, so it must record what it did
+
+`ReliefValve#apply` writes `lift:` into its own state, and the reason is general: **a conduit
+holds no material, so `Arbiter` leaves nothing in state for an instrument to read.** The one part
+whose whole job is to act unsupervised was the one part a player had no way to watch — a boiler
+blowing off is the loudest thing in the building and the panel could not say so.
+
+Any transport node with a state a player should be able to see has to publish it the same way.
+`apply` reads the previous tick through `ctx` exactly as transport does, so this records what the
+valve did rather than predicting what it will do, and it breaks no invariant.
 
 ### A failure may be graded by more than the state of the part
 

@@ -65,6 +65,24 @@ module ReactorSim
   # torque a real quantity rather than an accounting fiction. `transferred / dt` gives the
   # torque this coupling is carrying, which is what a shaft's wear should be driven by and
   # what a belt should snap from.
+  #
+  # TODO: **MUST ADDRESS — the steam engine's coupling dissipates 60% of its shaft power.**
+  # Measured 2026-09-12 at full controls: the cylinder delivers ~499 kW, the mill receives
+  # **199.7 kW**, and `joules_to_friction` takes **297.5 kW**. The books balance exactly
+  # (199.7 + 297.5 ≈ 497) so nothing is lost silently, and a slipping coupling genuinely does
+  # dissipate — but a real belt drive loses single-digit percent, not sixty. **This is not
+  # acceptable as a permanent figure.**
+  #
+  # The suspect is `stiffness:` (9 000 on `flywheel=load`) held against a fan-law load at a
+  # large steady speed difference: a soft coupling that never stops slipping is a brake, and
+  # `Relaxation` will faithfully charge it forever. Two ends that should converge are instead
+  # sitting at a permanent offset, which is the thing to check first — if the steady-state slip
+  # is large, the stiffness is wrong rather than the loss model.
+  #
+  # **Deliberately not tuned in isolation.** Frictional bearings and their failure modes are
+  # coming, and they will put a second, physically-motivated dissipation term on the same shafts
+  # — so fixing this by moving one number now would only have to be redone against the real
+  # model. Do the pass when the bearings land, and re-measure `joules_to_friction` as part of it.
   class DriveLink
     attr_reader :a, :b, :conductance, :max_torque
 

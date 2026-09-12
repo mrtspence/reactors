@@ -13,7 +13,9 @@ module ReactorSim
 
       def diagnostics(spec)
         base = [
-          boiler_pressure(spec), boiler_water, safety_valve, firebox_temp, fire_state,
+          boiler_pressure(spec), boiler_water, safety_valve, valve_setting,
+          crown_sheet, plug_blown,
+          firebox_temp, fire_state,
           flywheel_speed, flywheel_stress, flywheel_condition,
           engine_power, cylinder_pressure, cylinder_water, cylinder_relief_valve,
           coal_remaining, water_remaining, air_supply
@@ -103,7 +105,63 @@ module ReactorSim
           id: :cylinder_relief_valve, label: "Cylinder Relief",
           source: Sources::Field.new(:cylinder_relief, :lift),
           filters: [ Filters::Bands.new([ 0.01 ]) ],
-          display: Displays::Lamp.new(colour: :red, label: "blowing")
+          # No `label:` on the lamp — `Diagnostic#chrome` merges its own `label` last, so a
+          # display's label is always discarded. `loop_rig` passes one and it has never shown.
+          display: Displays::Lamp.new(colour: :red)
+        )
+      end
+
+      # What the adjusting screw has actually been wound to, in the same units as the pressure
+      # gauge beside it. The lever reads as *margin*, which is the right way to make the decision
+      # but the wrong way to judge how close the needle is — so this closes that gap, and the two
+      # are meant to be read together.
+      #
+      # No lag and no noise: it is a screw with a scale on it, not a measurement.
+      def valve_setting
+        Diagnostic.new(
+          id: :valve_setting_pa, label: "Valve Set To",
+          source: Sources::Field.new(:relief, :setting_pa),
+          filters: [],
+          display: Displays::Digital.new(unit: "kPa", convert: :kpa, precision: 0)
+        )
+      end
+
+      # **Nobody can see a crown sheet**, and that is the entire difficulty of the hazard it
+      # names. It is inside the firebox, under water when all is well, and the only instrument a
+      # real footplate has for it is the water glass — which, at exactly the wrong moment, lies.
+      #
+      # So this is not a thermometer. It is the smell and sound of a boiler being mistreated:
+      # the fire roaring differently, the plate ticking, steam where steam should not be. Banded
+      # well below the 750 K the plate lets go at, and lagged, because the whole point is that the
+      # warning is late, vague, and easy to talk yourself out of.
+      #
+      # It is deliberately **not** given to the fireman as an `observer:`. Their attention is on
+      # the glass and the fire, and a crown sheet coming uncovered is precisely the thing a busy
+      # crew misses.
+      def crown_sheet
+        Diagnostic.new(
+          id: :crown_sheet, label: "Firebox Crown",
+          source: Sources::Field.new(:boiler, :crown_temperature_k),
+          filters: [ Filters::Lag.new(4),
+                     Filters::Bands.new([ 480.0, 580.0, 660.0 ]) ],
+          display: Displays::Prose.new([
+            "quiet", "ticking", "smells hot", "glowing"
+          ])
+        )
+      end
+
+      # The plug, and this one is a lamp because it is the least ambiguous event on the engine.
+      # When it goes, it goes: the fire is out, the shed is full of steam, and the only question
+      # left is how long the repair takes. No lag and no noise — you do not *miss* a fusible plug.
+      # NOTE the id. `:fusible_plug` is the **node**, and ids are one flat namespace across nodes,
+      # levers, gauges and crew because they key one RNG table — `validate_graph!` refuses the
+      # collision outright. Same trap the stoker/`:stoker` pair fell into.
+      def plug_blown
+        Diagnostic.new(
+          id: :plug_blown, label: "Fusible Plug",
+          source: Sources::Flag.new(:fusible_plug, :melted),
+          filters: [],
+          display: Displays::Lamp.new(colour: :red)
         )
       end
 

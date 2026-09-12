@@ -133,9 +133,54 @@ same commit.**
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
 | `Load` | Rotating | Where useful work leaves the operation. |
 | `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at **supply** density. Working fluid is configuration. |
-| `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity. `senses_quantity:` defaults to `pressure_pa` and need not be it. |
+| `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity. `senses_quantity:` defaults to `pressure_pa` and need not be it. `ease_control_id:` is a hand lever that can only open it further (`max`); `control_id:` is a gag and can shut it (`×`). Records `lift:` in `apply` so a gauge can read it. |
+| `FusiblePlug` | (a `Conduit`) | Senses a **state key** on another node and fails permanently open above a threshold. A fuse, not a valve — see below. |
 
 Reach for these first. Write a new node only when the behaviour genuinely does not exist.
+
+## Irreversible is a different part from reversible, however alike the opening rule looks
+
+`FusiblePlug` was very nearly written as a `ReliefValve` — both sense a quantity elsewhere and
+open above a threshold. **A relief valve re-seats and a fusible plug does not**, and that single
+difference is the whole character of the part. A safety valve is a control a driver works with;
+a plug is a fuse that operates once and puts the engine out of service.
+
+Built on the reversible one, a boiler would have quietly healed itself the moment the water came
+back over the crown sheet — exactly the consequence-free behaviour the hazard exists to not have.
+The melt is latched in state instead: `melted` goes true and never goes back.
+
+## Over-temperature ratings come from the MATERIAL
+
+`Concerns::Thermal#rated_temperature_k` resolves in this order: an explicit `max_temperature_k:`
+on the part wins (a water-cooled wall really does survive what its bare metal would not), then
+the part's `material:` looked up in content, then infinity.
+
+> **Infinity is a silent off switch.** `Vessel#stress_per_second` and `Conduit#stress_per_second`
+> have fatigued on temperature since `Wearing` was written, and never once fired in any
+> operation, because every node in the repository shipped the default and the first branch
+> returned zero every time. A capability nothing exercises is indistinguishable from one that
+> does not work. If you add a structural material, rate it — `content_spec` now insists.
+
+How *fast* a part fails once it is over stays per-part as `stress_rate`, exactly as
+`safety_factor` does on the flywheel: that is a property of the casting, not of the metal.
+
+## A lumped body cannot express a hazard that is positional
+
+`Boiler`'s crown sheet is the worked example and the rule generalises. `temperature_k` on a drum
+at 5% water is **not high** — it is the same saturation temperature as a drum at 60%, held by a
+smaller mass. **A dry boiler in a lumped model is not hot, merely empty**, so no rating on the
+node could ever trip however far the water fell.
+
+When the hazard is a *place* rather than the body, derive that place's own temperature and
+override `stress_per_second`. `Boiler#crown_temperature_k` blends the water it is meant to be
+under with the fire it is over, by `crown_exposure`. Two details worth copying:
+
+- It reads the **true** fill while the gauge glass shows the **swelled** one, so the needle reads
+  comfortable exactly when a hard pull is uncovering the plate. That gap is the mechanic, not an
+  oversight.
+- The derived value is **recorded in state** during `apply`, because it needs a cross-node read
+  (the fire) and therefore has the wrong arity for `Context#node_reading`, which calls
+  `method(state, content)`. One node owns the derivation; everyone else reads the key.
 
 ## Reading another node
 

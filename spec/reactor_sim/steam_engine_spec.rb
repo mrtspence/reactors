@@ -33,9 +33,17 @@ RSpec.describe "the steam engine" do
   # `shed_at:` throws the mill off the belt partway through — the one thing that genuinely
   # destroys this engine. See the failure-mode group for why that is the hazard rather than
   # simply opening the regulator.
+  # `damper:` overrides `LIGHT`'s 85 for the whole run. It exists because **85 puts the boiler on
+  # its safety valve**, and a saturated boiler reports every upstream change as zero — see the
+  # ashpan example below.
+  # `each_tick:` is called after every step with the tick number. It exists because some
+  # behaviour is a **transient** — the warm-through condensate clears the moment the engine is
+  # turning properly — and an end-state assertion would pass on a startup that had been knocking
+  # badly the whole way up.
   def light_and_run(op, throttle: 60, stoking: 60, load: 80, ticks: 3600, blower_off: 1600,
-                    shed_at: nil)
+                    shed_at: nil, damper: nil, each_tick: nil)
     LIGHT.each { |k, v| op.set_control(k, v) }
+    op.set_control(:damper_open, damper) if damper
 
     events = []
     (1..ticks).each do |t|
@@ -54,6 +62,7 @@ RSpec.describe "the steam engine" do
       op.set_control(:blower, 0) if t == blower_off
       op.set_control(:load_demand, 0) if shed_at && t == shed_at
       events.concat(op.step!(tick: t))
+      each_tick&.call(t)
     end
     events
   end
@@ -215,9 +224,27 @@ RSpec.describe "the steam engine" do
 
     # **The remedy is not optional chrome.** Without a way out the choke is a slow dead end and
     # no lever a player can reach will help, which is a worse game than not modelling it at all.
+    #
+    # **`damper: 60`, and the reason is the whole point of this comment.** At `LIGHT`'s damper 85
+    # the drum holds 608.0 kPa against a 607.95 kPa relief setting — it is feathering its safety
+    # valve continuously — so a slightly choked fire changes the power not at all, because the
+    # surplus was going over the roof anyway. Measured across the damper, raked against banked:
+    #
+    #     damper 60   397.3 vs 380.4 kW   off the valve   <- here
+    #     damper 70   400.8 vs 401.9 kW   on the valve
+    #     damper 78   402.0 vs 401.8 kW   on the valve
+    #     damper 85   401.7 vs 402.7 kW   on the valve
+    #
+    # `reaction_throttle` falls to 0.954-0.966 in **every** one of those, so the choke happens
+    # regardless; only its consequence is masked. This example used to pass at damper 85 purely
+    # because the fire was oversized enough to be choked and still saturate, and it began failing
+    # by 0.23% — noise, not a reversal — when the stoker was re-rated to match what the fire can
+    # actually burn. **A saturated system reports every upstream change as zero**, which is
+    # indistinguishable from a mechanic that does not work. Assert against a state the quantity
+    # can actually move.
     it "clears when the ashpan is raked, and the engine gets the power back" do
-      raked = engine.tap { |o| o.set_control(:ash_raking, 40); light_and_run(o, ticks: 7200) }
-      banked = engine.tap { |o| light_and_run(o, ticks: 7200) }
+      raked = engine.tap { |o| o.set_control(:ash_raking, 40); light_and_run(o, ticks: 7200, damper: 60) }
+      banked = engine.tap { |o| light_and_run(o, ticks: 7200, damper: 60) }
 
       expect(ash(raked)).to be < 0.5
       expect(ash(banked)).to be > 15.0
@@ -226,6 +253,46 @@ RSpec.describe "the steam engine" do
   end
 
   describe "water in the cylinder" do
+    # **Warming through is a procedure now, and these two examples are the whole of why the
+    # drain cocks exist.** A cold cylinder condenses a great deal of what is admitted to it, so
+    # the driver's job is: cocks open, crack the regulator, let it blow through, shut the cocks
+    # once it is hot. That was impossible to demonstrate until the cylinder was given the thermal
+    # mass its casting actually has — at `heat_capacity: 6.0e4` the metal warmed from ambient to
+    # steam temperature in about a dozen ticks and peak occupancy over a whole startup was 0.188.
+    #
+    # Assert the **peak**, not the end state: the water is swept out as soon as the engine is
+    # turning properly (it ends at 0.004 either way), so an end-state assertion would pass on a
+    # startup that had been knocking badly the whole way up.
+    def peak_occupancy(op, ticks:, cocks:, shut_at: nil)
+      op.set_control(:cylinder_cocks, cocks)
+      peak = 0.0
+      watch = lambda do |t|
+        op.set_control(:cylinder_cocks, 0) if shut_at && t == shut_at
+        peak = [ peak, op.nodes.fetch(:cylinder)
+                        .occupancy(op.state.fetch(:nodes).fetch(:cylinder), op.content) ].max
+      end
+      light_and_run(op, ticks: ticks, each_tick: watch)
+      peak
+    end
+
+    it "fills with its own condensate if the cocks are left shut through warming through" do
+      op = engine
+      peak = peak_occupancy(op, ticks: 2600, cocks: 0)
+
+      # 0.859 measured — past the 0.85 band, so the gauge is calling it "knocking badly" and the
+      # cylinder relief valve is lifting. A real scare, and recoverable: no damage, and it
+      # clears once the engine is away.
+      expect(peak).to be > 0.5
+      expect(op.nodes.fetch(:cylinder).integrity(op.state.fetch(:nodes).fetch(:cylinder))).to eq(1.0)
+    end
+
+    it "stays dry through the same startup if they are opened and then shut" do
+      op = engine
+      peak = peak_occupancy(op, ticks: 2600, cocks: 100, shut_at: 1600)
+
+      expect(peak).to be < 0.1
+    end
+
     # The cylinder condenses its own charge — genuine expansion cooling, and the reason a
     # saturated engine loses so much steam to its walls. While the engine turns, the exhaust
     # stroke sweeps it out; the hazard belongs to standing, not to running.

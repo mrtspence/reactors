@@ -150,6 +150,34 @@ module ReactorSim
       end
     end
 
+    # A boolean state key, as 1.0 or 0.0. Feeds a lamp.
+    #
+    # **`Field` cannot do this and must not be taught to.** It ends in `Reading.of(value)`, which
+    # calls `to_f`, and `true.to_f` does not exist — so a boolean key raises rather than reading
+    # wrong, which is the right failure. Coercing types inside a generic reader would hide the
+    # difference between "this gauge reads a number" and "this gauge reads a state", and those
+    # are different instruments: a flag has no scale, no noise and no units, and the only
+    # sensible display for it is a lamp.
+    #
+    # `Broken` is the same shape hardwired to one key, and it is the precedent — this is what it
+    # would have been if a second boolean had existed when it was written. Now one does: a fusible
+    # plug that has melted.
+    class Flag < Base
+      def initialize(node, key)
+        super()
+        @node = node.to_sym
+        @key = key.to_sym
+        freeze
+      end
+
+      def sample(_nodes, states, _content)
+        state = states[@node] or return Reading.missing
+        return Reading.missing unless state.key?(@key)
+
+        Reading.of(state.fetch(@key) ? 1.0 : 0.0)
+      end
+    end
+
     # Whether something has failed. Feeds a lamp.
     class Broken < Base
       def initialize(node)

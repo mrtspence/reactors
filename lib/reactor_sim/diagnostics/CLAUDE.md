@@ -25,7 +25,7 @@ either. If reading drew noise, how many people happened to be watching would cha
 
 ## Sources — stateless, pure
 
-`Field`, `Derived`, `Level`, `Contents`, `Durability`, `Broken`, `Aggregate`. A snapshot; the
+`Field`, `Flag`, `Derived`, `Level`, `Contents`, `Durability`, `Broken`, `Aggregate`. A snapshot; the
 palette is the truth:
 
 ```sh

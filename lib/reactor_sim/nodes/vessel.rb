@@ -21,14 +21,16 @@ module ReactorSim
 
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
                   :reactions, :heater_control_id, :heater_watts, :igniter_kg_per_s,
-                  :max_pressure_pa, :max_temperature_k, :stress_rate
+                  :max_pressure_pa, :max_temperature_k, :stress_rate, :material,
+                  :shell_radius_m, :wall_thickness_m, :safety_factor
 
       def initialize(id:, label: nil, volume_m3:, ports: [],
                      heat_capacity: 5.0e5, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K,
                      initial_temperature_k: nil, initial_contents: [], reactions: [],
                      heater_control_id: nil, heater_watts: 0.0, igniter_kg_per_s: 0.0,
-                     obstruction_tags: [], void_fraction: 1.0,
+                     obstruction_tags: [], void_fraction: 1.0, material: nil,
+                     shell_radius_m: nil, wall_thickness_m: nil, safety_factor: 1.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
                      stress_rate: 0.0)
         super(id: id, label: label, ports: ports)
@@ -51,6 +53,16 @@ module ReactorSim
         @igniter_kg_per_s = igniter_kg_per_s.to_f
         @max_pressure_pa = max_pressure_pa.to_f
         @max_temperature_k = max_temperature_k.to_f
+        # What the shell is made of, and its geometry. Optional, and they supply the temperature
+        # and pressure ratings only when `max_temperature_k:` / `max_pressure_pa:` were not given
+        # directly — see `Concerns::Thermal#rated_temperature_k` and
+        # `Concerns::Pressurized#rated_pressure_pa`. Radius and thickness are the hoop-stress
+        # terms; `safety_factor` is this part's own, because how far below the plate figure a real
+        # vessel fails depends on its seams rather than on its metal.
+        @material = material&.to_sym
+        @shell_radius_m = shell_radius_m&.to_f
+        @wall_thickness_m = wall_thickness_m&.to_f
+        @safety_factor = safety_factor.to_f
         @stress_rate = stress_rate.to_f
       end
 
@@ -116,11 +128,19 @@ module ReactorSim
 
       # Over-pressure and over-temperature both eat durability, and they compound. This is
       # the generic vessel failure model; a specific operation can override it entirely.
+      # `rated_temperature_k`, not `@max_temperature_k` — the rating may come from the shell's
+      # `material:` rather than from a number written here. See `Concerns::Thermal`.
+      #
+      # **The temperature this compares against is the node's own**, which is a real limitation
+      # and the reason a low-water boiler needs more than this: a lumped body at 5% water is not
+      # hot, merely empty. A part whose hazard is *positional* has to derive its own hot-spot
+      # temperature and override this — `Nodes::Boiler#stress_per_second` does exactly that for
+      # the crown sheet.
       def stress_per_second(state, ctx)
         return 0.0 if @stress_rate.zero?
 
-        over_p = fraction_over(pressure_pa(state, ctx.content), @max_pressure_pa)
-        over_t = fraction_over(temperature_k(state, ctx.content), @max_temperature_k)
+        over_p = fraction_over(pressure_pa(state, ctx.content), rated_pressure_pa(ctx.content))
+        over_t = fraction_over(temperature_k(state, ctx.content), rated_temperature_k(ctx.content))
         (over_p + over_t) * @stress_rate
       end
 

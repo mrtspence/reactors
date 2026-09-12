@@ -88,6 +88,46 @@ module ReactorSim
         moles * Units::GAS_CONSTANT * temperature_k(state, content) / free
       end
 
+      # ## What the shell can stand, derived from the shell
+      #
+      # Hoop stress in a thin cylindrical shell is `σ = p·r / t`, so the pressure that tears it
+      # open is `σ_plate · t / r`. Every term is a property of the part or of the metal, which is
+      # the point: **a vessel's strength is not a number somebody picks, it is what it is built
+      # from and how thick it is.** Exactly the shape `Flywheel#burst_speed_m_s` already has, and
+      # for the same reason — there it is `√(σ/ρ)·safety_factor`, here it is `σ·t/r·safety_factor`.
+      #
+      # > **It used to be `relief_pa × 1.5` on the steam engine, and that is circular.** The
+      # > pressure a boiler can survive cannot depend on where somebody set its safety valve; it
+      # > depends on the plate. Worse, it made the two impossible to separate — raising the valve
+      # > setting dragged the damage threshold up in lockstep, so the gap between "blowing off" and
+      # > "bursting" could never be narrowed or widened deliberately. They are now independent:
+      # > the shell says what it can take, and the valve setting is a decision made against it.
+      #
+      # `safety_factor` is the part's own, not the metal's, for the same reason it is on the
+      # flywheel: how far below the ideal figure a real vessel fails depends on its seams. A
+      # riveted wrought-iron boiler is the worst case — joint efficiency around 70%, and grooving
+      # and corrosion along the seam worse still — so a quarter of the plate figure is realistic
+      # and is not pessimism.
+      #
+      # An explicit `max_pressure_pa:` still wins, so a part can be special or simply not model
+      # this. Infinity when there is no geometry to work from.
+      def rated_pressure_pa(content)
+        declared = max_pressure_pa
+        return declared if declared.finite?
+        return Float::INFINITY if material.nil? || shell_radius_m.nil? || wall_thickness_m.nil?
+        return Float::INFINITY unless shell_radius_m.positive?
+
+        content.tensile_strength_pa(material) * wall_thickness_m / shell_radius_m * safety_factor
+      end
+
+      # Overridden by any node that accepts these directly. Declaring none leaves the node
+      # unbreakable by pressure, which is the right default for a tank nobody pressurises.
+      def max_pressure_pa = Float::INFINITY
+      def material = nil
+      def shell_radius_m = nil
+      def wall_thickness_m = nil
+      def safety_factor = 1.0
+
       private
 
       # Whatever room the condensed phases are not occupying, floored so the ideal gas law

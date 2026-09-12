@@ -367,7 +367,7 @@ Measured with the **damper wide open** (rated 8 kg/s), stoking 80, and an **879 
 
 **Three of its four phrases look unreachable.** The reading above is at the *maximum* draught
 the high-pressure variant can produce, and it is still a factor of 1.5 short of the "thin"
-band; the atmospheric variant runs half the draught (`draught_kg_per_s: 4.0`), so it can only
+band; the atmospheric variant runs a weaker draught (`damper_conductance: 0.1`), so it can only
 be worse. Confirming that no lever combination on either variant clears 0.5 kg is a sweep
 nobody has run — but the mechanism says the ceiling is set by how fast the flue clears the box,
 not by how much air arrives, and no lever moves that.

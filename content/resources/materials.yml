@@ -14,24 +14,52 @@
 # Safety factors are NOT here. How far below the ideal figure a real part fails depends on
 # casting quality, geometry and stress concentrations — properties of the part, not of the
 # metal — so they belong on whatever node is made of this.
+#
+# ## `max_temperature_k` — how hot the metal may get before it stops being structural
+#
+# The temperature at which a part made of this **loses its strength**, not where it melts. Steel
+# melts near 1700 K and is useless as a pressure boundary long before: it begins creeping around
+# 700 K and has lost most of its room-temperature strength by 900. That gap is the mechanic —
+# an overheated plate does not vanish, it sags and lets go under a pressure it held yesterday.
+#
+# It lives here rather than on each part for the same reason `tensile_strength_pa` does: it is a
+# property of the metal, and a hundred future operations must not each invent their own number
+# for "steel". How *fast* a given part fails once it is over — `stress_rate` — stays on the part,
+# exactly as `safety_factor` does on the flywheel.
+#
+# **Nothing had one of these until 2026-09-12, and the over-temperature fatigue in
+# `Vessel#stress_per_second` and `Conduit#stress_per_second` had therefore never once fired.**
+# Both defaulted to `Float::INFINITY`, which is a silent off switch: the mechanic was complete,
+# wired, and inert. If you add a material something is built from, give it a rating.
 
 cast_iron:
   tags: [solid, metal, structural]
   density_kg_per_m3: 7200
   specific_heat_j_per_kg_k: 460
   tensile_strength_pa: 150.0e6
+  # Grey cast iron holds its strength well to a dull red and then goes quickly. It is also
+  # brittle, so a hot casting that is suddenly cooled cracks — which is why firebars and
+  # cylinder covers were cast iron and pressure shells were not.
+  max_temperature_k: 800
 
 wrought_iron:
   tags: [solid, metal, structural]
   density_kg_per_m3: 7700
   specific_heat_j_per_kg_k: 500
   tensile_strength_pa: 250.0e6
+  # What boilers were actually made of in the high-pressure era, and it is the *lower* figure
+  # of the two irons on temperature despite being the stronger in tension: the slag stringers
+  # that make it tough cold are what open up when it is worked hot.
+  max_temperature_k: 750
 
 steel:
   tags: [solid, metal, structural]
   density_kg_per_m3: 7850
   specific_heat_j_per_kg_k: 490
   tensile_strength_pa: 500.0e6
+  # Begins creeping around 700 K; by 900 most of the cold strength is gone. Taken as the point
+  # a plate can no longer be relied on rather than the point it fails outright.
+  max_temperature_k: 900
 
 # Soft, and deliberately so: a bearing is meant to be the part that wears out rather than
 # the shaft running in it.
@@ -40,6 +68,7 @@ bronze:
   density_kg_per_m3: 8800
   specific_heat_j_per_kg_k: 380
   tensile_strength_pa: 250.0e6
+  max_temperature_k: 700
 
 # Softer still, and low-melting — which is the whole reason a hot box destroys itself so
 # quickly once the oil stops arriving.
@@ -48,3 +77,18 @@ babbitt:
   density_kg_per_m3: 7400
   specific_heat_j_per_kg_k: 230
   tensile_strength_pa: 70.0e6
+  # It melts at about this temperature, and that is the point of it.
+  max_temperature_k: 520
+
+# **The fusible plug**, and it is a material rather than a part because that is what it is: a
+# soft-metal bung screwed through the crown sheet, chosen to melt before the plate around it
+# does. When it goes it dumps steam onto the fire and makes a noise nobody misses.
+#
+# Rated well below `wrought_iron` on purpose — a safety device that fails at the same
+# temperature as the thing it protects is not a safety device.
+fusible_alloy:
+  tags: [solid, metal, fusible]
+  density_kg_per_m3: 8000
+  specific_heat_j_per_kg_k: 200
+  tensile_strength_pa: 30.0e6
+  max_temperature_k: 620

@@ -41,7 +41,8 @@ module ReactorSim
 
       attr_reader :heat_capacity, :ambient_conductance, :ambient_k,
                   :control_id, :max_temperature_k, :stress_rate, :conductance,
-                  :stack_height_m, :head_control_id, :blast_from, :blast_pa_per_kg_per_s
+                  :stack_height_m, :head_control_id, :blast_from, :blast_pa_per_kg_per_s,
+                  :material
 
       def initialize(id:, label: nil, accepts: [], max_kg_per_s:, conductance: nil,
                      one_way: false,
@@ -49,7 +50,7 @@ module ReactorSim
                      blast_from: nil, blast_pa_per_kg_per_s: 0.0,
                      heat_capacity: 1.0e4, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, control_id: nil,
-                     rangeability: 1.0,
+                     rangeability: 1.0, material: nil,
                      max_temperature_k: Float::INFINITY, stress_rate: 0.0)
         super(
           id: id, label: label,
@@ -78,6 +79,9 @@ module ReactorSim
         # every conduit that does not ask for this behaves exactly as it always did.
         @rangeability = rangeability.to_f
         @max_temperature_k = max_temperature_k.to_f
+        # What the pipe is made of. Supplies a temperature rating only when one was not given
+        # directly — see `Concerns::Thermal#rated_temperature_k`.
+        @material = material&.to_sym
         @stress_rate = stress_rate.to_f
       end
 
@@ -210,10 +214,13 @@ module ReactorSim
       # The wall reaches the temperature of whatever crosses it (`Tick#carry_through`), so
       # this still sees hot steam even though nothing lingers.
       def stress_per_second(state, ctx)
-        return 0.0 if @stress_rate.zero? || @max_temperature_k.infinite?
+        return 0.0 if @stress_rate.zero?
 
-        over = temperature_k(state, ctx.content) - @max_temperature_k
-        over.positive? ? (over / @max_temperature_k) * @stress_rate : 0.0
+        rated = rated_temperature_k(ctx.content)
+        return 0.0 if rated.infinite?
+
+        over = temperature_k(state, ctx.content) - rated
+        over.positive? ? (over / rated) * @stress_rate : 0.0
       end
 
       def failure_type = :conduit_rupture

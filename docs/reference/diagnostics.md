@@ -38,7 +38,8 @@ Diagnostic.new(
 
 | Source | Reads |
 |---|---|
-| `Field.new(node, key)` | A raw field out of a node's state hash |
+| `Field.new(node, key)` | A raw **numeric** field out of a node's state hash |
+| `Flag.new(node, key)` | A **boolean** state key, as 1.0 / 0.0 — feeds a lamp |
 | `Derived.new(node, quantity)` | Something the node computes |
 | `Level.new(node)` | How full, 0–100 |
 | `Contents.new(node, resource)` | kg of one substance inside a mixture |
@@ -57,6 +58,31 @@ will not build — it raises at construction rather than reading nothing at runt
 
 A source that cannot read reports unavailable, and the diagnostic flags `:offline` rather
 than reporting a fabricated zero.
+
+### `Field` reads numbers; `Flag` reads booleans
+
+`Field` ends in `Reading.of(value)`, which calls `to_f` — and `true.to_f` does not exist, so a
+boolean state key **raises** rather than reading wrong. That is the right failure and `Field`
+must not be taught to coerce: a flag has no scale, no noise and no units, and the only sensible
+display for it is a lamp. `Flag.new(node, key)` is the reader for those; `Broken` is the same
+shape hardwired to one key, and was the precedent.
+
+### A transport node has to publish before it can be gauged
+
+`Field` reads a node's state hash, and **a conduit's state hash contains almost nothing**: it
+holds no material, so the arbiter leaves no parcels behind and there is nothing for a gauge to
+find. That made the parts that act unsupervised — relief valves above all — the parts a player
+could not watch, which is precisely backwards.
+
+`ReliefValve#apply` therefore writes `lift:` into its own state purely so an instrument can read
+it. If you need to gauge something a transport node does, the node has to record it in `apply`
+first; there is no generic flow figure in state to reach for.
+
+Not every gauge deserves a distortion. `safety_valve` on the steam engine has **no lag and no
+noise** because a valve blowing off is the loudest thing in the building — the player is not
+reading a dial at all. That is also what makes it worth fitting next to a pressure gauge that is
+two ticks late and ±8 kPa: the moment the boiler starts wasting steam is the moment that needle
+is least trustworthy.
 
 Anything needing memory is a **filter**, not a source — that is why `Rate` is a filter.
 
@@ -121,6 +147,11 @@ everything inside the sim is SI, and Kelvin becomes °C here or not at all (`con
 
 `Prose.new([phrases])` fed by a `Bands` filter is how durability becomes readable without
 ever becoming a health bar: *"the fitting is showing some cracks."*
+
+> **A display's own `label:` never reaches the client.** `Diagnostic#chrome` is
+> `@display.chrome.merge(id: @id, label: @label)`, so the diagnostic's label always wins and
+> `Lamp.new(label: "RUPTURE")` has never once shown that word. `loop_rig` still passes one. Name
+> the lamp through the `Diagnostic`, not the display.
 
 ---
 

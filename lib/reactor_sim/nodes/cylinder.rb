@@ -61,6 +61,7 @@ module ReactorSim
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
                   :bore_m, :stroke_m, :crank_radius_m, :efficiency, :drives,
                   :cutoff_control_id, :clearance_fraction, :max_pressure_pa, :stress_rate,
+                  :drain_control_id, :drain_authority,
                   :exhausts_to, :supplied_by, :default_working_fluid, :expansion_index,
                   :compression_fraction
 
@@ -68,6 +69,7 @@ module ReactorSim
                      crank_radius_m: nil, efficiency: 0.85, clearance_fraction: 0.08,
                      heat_capacity: 6.0e4, ambient_conductance: 25.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, cutoff_control_id: nil,
+                     drain_control_id: nil, drain_authority: 0.25,
                      inlet_kg_per_s: 8.0, exhaust_kg_per_s: 12.0, drain_kg_per_s: 0.25,
                      relief_kg_per_s: 2.0, working_fluid: :steam,
                      expansion_index: 1.135, compression_fraction: 0.08,
@@ -138,6 +140,12 @@ module ReactorSim
         @ambient_conductance = ambient_conductance.to_f
         @ambient_k = ambient_k.to_f
         @cutoff_control_id = cutoff_control_id&.to_sym
+        # The drain cocks, as the diagram sees them. See `admission_pressure_pa` — the lever is
+        # read here as well as on the conduit because a node cannot ask another node for its
+        # `open_fraction`: `Context#node_reading` calls `method(state, content)` and that one
+        # takes `ctx`.
+        @drain_control_id = drain_control_id&.to_sym
+        @drain_authority = drain_authority.to_f.clamp(0.0, 1.0)
         @max_pressure_pa = max_pressure_pa.to_f
         @stress_rate = stress_rate.to_f
         # Per `nodes/CLAUDE.md` step 6 — a node is configuration and holds no mutable state.
@@ -429,10 +437,56 @@ module ReactorSim
 
         supply_pressure = ctx.node_pressure(@supplied_by) || Units::STANDARD_PRESSURE_PA
         exhaust_pressure = ctx.node_pressure(@exhausts_to) || Units::STANDARD_PRESSURE_PA
-        mep = mean_effective_pressure(supply_pressure, exhaust_pressure, cutoff_fraction(ctx))
+        admission = admission_pressure_pa(supply_pressure, exhaust_pressure, ctx)
+        mep = mean_effective_pressure(admission, exhaust_pressure, cutoff_fraction(ctx))
         torque = mep * piston_area_m2 * @crank_radius_m * @efficiency
 
         state.merge(torque: torque, indicated_power_w: torque * omega)
+      end
+
+      # ## An open drain cock is a hole in the working space, and the diagram has to feel it
+      #
+      # **Without this the cocks had no effect on output at all.** They drained condensate and
+      # cooled the cylinder a little, and that was the whole of it — measured, leaving them wide
+      # open cost 4 to 7% of the power, and at low throttle it *gained* 1%. The steam chest made
+      # it worse rather than better: once the cylinder could refill from a 25 kg/s inlet the chest
+      # stopped depleting (543 → 545 kPa with the cocks fully open), so the indirect route the
+      # old notes described — cocks drain mass, chest falls, P₁ falls — had quietly closed.
+      # `drain_kg_per_s` is inert too: 0.25, 0.5, 1.0, 2.0 and 4.0 give **byte-identical** results,
+      # because the cylinder holds so little gas that the smallest cock can already take all of it.
+      #
+      # So the mass budget is the wrong place to look for this. What an open cock physically does
+      # is **short-circuit the working space to atmosphere while the piston is trying to push
+      # against it.** During admission the space is fed through the valve and vented through the
+      # cock at the same time, which is a pressure divider:
+      #
+      #     P_eff = (A·P_supply + B·P_back) / (A + B)
+      #
+      # Writing `b = B/(A+B)` for the cock's authority wide open, that is
+      # `P_supply − b·(P_supply − P_back)`. Two properties make it the right shape:
+      #
+      #   * **Shut, it is exactly `P_supply`** — `b = 0` changes nothing, so an engine with its
+      #     cocks closed is bit-identical to one that never had any.
+      #   * **The loss is proportional to the pressure difference**, so it is largest exactly when
+      #     the engine is working hardest. That was the complaint from play: dumping your most
+      #     energetic steam should be costliest, and instead it was free above 500 kW.
+      #
+      # This is the same correction the regulator needed — *a restriction, not a ration.* A cock
+      # is an orifice, and what matters about an orifice is the pressure it destroys, not a rate
+      # cap somebody wrote next to it.
+      def admission_pressure_pa(supply_pa, back_pa, ctx)
+        bleed = drain_open_fraction(ctx) * @drain_authority
+        return supply_pa if bleed <= 0.0 || supply_pa <= back_pa
+
+        supply_pa - (bleed * (supply_pa - back_pa))
+      end
+
+      # How far the cocks are open, 0 with none fitted. Reads the lever's **actual** position, so
+      # a cock a minion is still cranking shut is still bleeding.
+      def drain_open_fraction(ctx)
+        return 0.0 unless @drain_control_id
+
+        (ctx.controls.fetch(@drain_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
       end
 
       # ## The indicator diagram, which is what a steam engine actually is

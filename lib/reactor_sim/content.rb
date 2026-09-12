@@ -116,6 +116,24 @@ module ReactorSim
         end.to_f
       end
 
+      # How hot a part made of this may get before it stops being structural — **not** its
+      # melting point. See `content/resources/materials.yml`.
+      #
+      # Returns infinity when the material does not declare one, and that is deliberately the
+      # opposite policy from `tensile_strength_pa` above. A missing tensile strength is always a
+      # mistake, because the only reason to ask is that something is spinning. A missing
+      # temperature rating is the ordinary case for the great majority of resources — coal and
+      # steam are not built out of — and a node only consults this when it has been *given* a
+      # `material:`, which is already a deliberate act.
+      #
+      # Infinity is nonetheless a silent off switch, which is exactly how over-temperature
+      # fatigue sat unused since the day it was written. If you add a structural material, rate
+      # it; `content_spec` asserts that everything tagged `:structural` carries one.
+      def max_temperature_k(id)
+        value = resource(id)[:max_temperature_k]
+        value.nil? ? Float::INFINITY : value.to_f
+      end
+
       # Enthalpy of formation relative to the 0 K reference, per kg. This is what makes
       # phase change conserve energy exactly: boiling 1 kg of water at constant
       # temperature costs precisely the latent heat, no more and no less.

@@ -109,16 +109,26 @@ loop, and normal running is untouched: feed 40 gives 165.4 rpm and 345.1 kW agai
 | 100 | 87.0% | 377.7 K | 118.3 | 337.2 K | 1.0 | 0.0 |
 
 The controlled experiment in §1 warmed the tank and gave hot water **free**, so the boiler could
-be overfilled with no penalty and the fire stayed lit. This charges for it — about 0.28 kg/s of
-steam at full feed against a drum making roughly 1 kg/s — so overfeeding still costs, and it
-should.
+be overfilled with no penalty and the fire stayed lit. This charges for it, so overfeeding still
+costs, and it should.
 
-And overfeeding is unavoidable if you want the glass up: **the pump moves 2.5 kg/s against about
-1 kg/s of evaporation**, so raising the level from 50% to 80% means running two and a half times
-over for something like 6 000 ticks, and that is paid for in both heat and steam.
+And overfeeding is unavoidable if you want the glass up, so the residual blocker is **a ratio,
+not a mechanism** — feed capacity against evaporation rate, and boiler volume against firing
+rate. That is a balance decision. What this change bought is real regardless: the feed lever is
+now a trade instead of a free ride to a thermal cliff, and the cooling it does inflict is roughly
+halved.
 
-So the residual blocker is **a ratio, not a mechanism** — feed capacity against evaporation rate,
-and boiler volume against firing rate. That is a balance decision and it is deliberately left
-open. What this change bought is real regardless: the feed lever is now a trade instead of a
-free ride to a thermal cliff, and the cooling it does inflict is roughly halved.
+> **Numbers revised in the first tuning pass, 2026-09-11.** The figures above were measured at a
+> 2.5 kg/s pump and a 0.28 kg/s injector, and both have moved — the pump to **2.0** and the
+> injector to **0.20**, which is a true 1:10 nozzle ratio. At 0.28 against 2.5 the injector was
+> taking 11% of the water but roughly **28% of everything the drum could raise**, making it the
+> engine's largest single steam consumer. The two are one part: re-derive the steam figure
+> whenever the pump moves.
+>
+> Evaporation was also overstated here. Measured, it is **0.42–0.57 kg/s, not ~1 kg/s**, so the
+> ratio this section calls two-and-a-half-to-one was nearer five to one and is now about four to
+> one. And the reason more fire does not close the gap is that **the drum sits on its safety
+> valve at the nominal operating point** (608.0 kPa against a 607.95 kPa setting), so extra
+> combustion becomes steam over the roof rather than evaporation. The binding constraint is the
+> boiler, not the fire — see `current_progress.md`.
 
