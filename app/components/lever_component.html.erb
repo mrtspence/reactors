@@ -1,0 +1,18 @@
+<div class="flex flex-col gap-1" data-lever-id="<%= id %>">
+  <div class="flex items-baseline justify-between">
+    <label for="lever-<%= id %>" class="text-[11px] uppercase tracking-wide text-slate-300">
+      <%= label %>
+    </label>
+    <span class="text-sm tabular-nums text-slate-100">
+      <span data-lever-readout>—</span><%= unit %>
+    </span>
+  </div>
+
+  <div class="relative">
+    <input type="range" id="lever-<%= id %>" class="lever w-full"
+           min="<%= min %>" max="<%= max %>" step="1" value="<%= min %>"
+           data-lever-input data-action="input->console#lever">
+    <%# Where the lever ACTUALLY is, as opposed to where it has been asked to go. %>
+    <span class="lever-ghost" data-lever-ghost hidden></span>
+  </div>
+</div>

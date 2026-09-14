@@ -1,9 +1,12 @@
-# This file should ensure the existence of records required to run the application in every environment (production,
-# development, test). The code here should be idempotent so that it can be executed at any point in every environment.
-# The data can then be loaded with the bin/rails db:seed command (or created alongside the database with db:setup).
-#
-# Example:
-#
-#   ["Action", "Comedy", "Drama", "Horror"].each do |genre_name|
-#     MovieGenre.find_or_create_by!(name: genre_name)
-#   end
+# frozen_string_literal: true
+
+# Idempotent, and run as often as you like — `bin/rails db:seed`, or automatically by
+# `db:setup`.
+
+# **The dev player owns the whole catalogue**, so the outfitting screen shows everything and the
+# game plays exactly as it did before blueprints existed. That is stage 5a's acceptance
+# criterion rather than a placeholder: the machinery is real, and enforcement (stage 5b) is what
+# starts taking things away. See `docs/design_sketches/blueprints.md` §11.
+DevPlayer.grant_everything!
+
+Rails.logger.debug { "seeded #{DevPlayer.unlocks.count} unlocks for #{DevPlayer::ID}" }

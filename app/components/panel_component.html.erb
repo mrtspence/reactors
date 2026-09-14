@@ -1,0 +1,24 @@
+<div class="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-4">
+  <section aria-label="Instruments"
+           class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 content-start">
+    <%= render InstrumentComponent.with_collection(instruments) %>
+  </section>
+
+  <aside class="flex flex-col gap-4">
+    <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3 flex flex-col gap-3"
+             aria-label="Controls">
+      <h2 class="text-[11px] uppercase tracking-wide text-slate-400">Controls</h2>
+      <%= render LeverComponent.with_collection(controls) %>
+    </section>
+
+    <%= render CrewComponent.new(minions: minions, controls: controls) %>
+
+    <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3" aria-label="Incidents">
+      <h2 class="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Incidents</h2>
+      <ul class="flex flex-col gap-1 text-xs text-rose-300 max-h-40 overflow-y-auto"
+          data-console-target="incidents">
+        <li class="text-slate-500 italic" data-incidents-empty>nothing has gone wrong yet</li>
+      </ul>
+    </section>
+  </aside>
+</div>

@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The tick loop, as its own process. Started by Procfile.dev alongside web and css.
+
+require_relative "../config/environment"
+
+# Loaded once, up front, and never wrapped in the Rails executor or reloader.
+#
+# There is no request cycle here to bracket, and a reload mid-match would swap constants out
+# from under a live Match — which is precisely the hazard config/application.rb cites when it
+# keeps lib/reactor_sim outside Zeitwerk in the first place. A long-running process holding
+# simulation state must not be reloadable.
+Rails.application.eager_load!
+
+$stdout.sync = true
+Rails.logger.broadcast_to(ActiveSupport::Logger.new($stdout)) if Rails.env.development?
+
+MatchRunner.build.run

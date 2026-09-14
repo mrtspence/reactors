@@ -1,0 +1,51 @@
+<% content_for :title, "Reactor — #{@operation_id.to_s.titleize}" %>
+
+<div class="min-h-screen bg-slate-900 text-slate-100"
+     data-controller="console"
+     data-console-match-id-value="<%= @match_id %>"
+     data-console-operation-id-value="<%= @operation_id %>"
+     data-console-commands-url-value="<%= match_commands_path(match_id: @match_id) %>"
+     data-console-reset-url-value="<%= match_reset_path(match_id: @match_id) %>">
+
+  <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
+    <h1 class="text-sm uppercase tracking-widest text-slate-300">
+      <%= @operation_id.to_s.titleize %>
+      <span class="text-slate-500">/ <%= DevMatch.chassis.to_s.tr("_", " ") %></span>
+    </h1>
+
+    <span class="text-xs text-slate-500 tabular-nums">
+      tick <span data-console-target="tick">—</span>
+    </span>
+
+    <%# Connection state is worth showing plainly: a frozen panel and a disconnected one look
+        identical otherwise, and the first is a physics problem while the second is not. %>
+    <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400"
+          data-console-target="status">connecting…</span>
+
+    <div class="grow"></div>
+
+    <% if DevMatch.time_scale != 1.0 %>
+      <span class="text-xs text-amber-300">time ×<%= DevMatch.time_scale %></span>
+    <% end %>
+
+    <%= link_to "Outfitting",
+                components_path(match_id: @match_id, operation_id: @operation_id),
+                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                       "ring-1 ring-slate-700" %>
+
+    <button type="button" data-action="console#reset"
+            class="text-xs px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 ring-1 ring-rose-700">
+      Reset engine
+    </button>
+  </header>
+
+  <main class="p-4">
+    <%= render PanelComponent.new(panel: @panel, minions: @minions) %>
+
+    <p class="mt-4 text-xs text-slate-500 max-w-3xl">
+      Cold start: damper to 10 and igniter to 100, wait for the fire to catch, then igniter to 0,
+      damper 60, stoking 60, feed 40. Once there is pressure, open the throttle — and only then
+      put the load on. Raising steam takes a few minutes at normal speed.
+    </p>
+  </main>
+</div>

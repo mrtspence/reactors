@@ -1,0 +1,17 @@
+<figure class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3 flex flex-col gap-2"
+        data-instrument-id="<%= id %>" data-instrument-kind="needle"
+        data-instrument-min="<%= min %>" data-instrument-max="<%= max %>">
+  <figcaption class="text-[11px] uppercase tracking-wide text-slate-400"><%= label %></figcaption>
+
+  <div class="gauge-dial">
+    <div class="gauge-needle" data-instrument-needle></div>
+    <div class="gauge-hub"></div>
+  </div>
+
+  <div class="flex items-baseline justify-between tabular-nums">
+    <span class="text-xs text-slate-500"><%= number_with_delimiter(min.round) %></span>
+    <span class="text-lg font-semibold text-slate-100" data-instrument-value><%= placeholder %></span>
+    <span class="text-xs text-slate-500"><%= number_with_delimiter(max.round) %></span>
+  </div>
+  <% if unit %><div class="text-center text-[11px] text-slate-400"><%= unit %></div><% end %>
+</figure>

@@ -1,0 +1,111 @@
+# Combustion: the reaction the whole game runs on.
+#
+# `enthalpy_j_per_unit` is per unit of reaction extent, NOT per kilogram of anything. One
+# unit of extent consumes the full `consumes` set — so for coal that is 1 kg of coal plus
+# 11 kg of air, releasing 30 MJ. Negative is exothermic.
+#
+# It must ALSO absorb any difference in formation enthalpy between the two sides. The
+# stoichiometry itself conserves enthalpy exactly — products inherit what the reactants
+# had, split by mass — so this figure is the only place a reaction is allowed to change the
+# system's energy. That is what makes combustion a single, ledgerable line rather than a
+# leak spread across every parcel.
+#
+# Mass must balance: the `consumes` ratios and the `produces` ratios sum to the same number,
+# and Content refuses to load a reaction where they do not. An unbalanced reaction would
+# create matter every time it fired, and it would do so from inside a data file where nobody
+# would think to look when the conservation spec started failing.
+#
+# `min_temperature_k` is the temperature at which the fire GAINS ground rather than losing
+# it — above it the flame front spreads across the grate, below it the fire dies back. It is
+# not a gate on the reaction: an ember keeps burning below it while it fades, which is what
+# lets a dying fire be nursed back instead of being switched off.
+#
+# That is what the `ignition:` block below buys. Ignition used to be modelled on the node's
+# BULK temperature, which a lumped-temperature node cannot represent honestly — a match does
+# not raise a firebox to 700 K, it raises a few grams. Modelled as a bulk threshold the fire
+# was all-or-nothing: above the line the whole grate burned, below it nothing did and nothing
+# ever could again, so the only winning move was to leave the igniter on permanently.
+#
+#   spread_per_s   how fast burning fuel lights its neighbours, while sustaining
+#   quench_per_s   how fast it dies back when too cold, or starved of air
+#
+# Spread is logistic, so it is fastest with half the grate alight and tails off as it runs out
+# of fresh fuel to reach — and from exactly zero it stays at zero. A fire needs a spark.
+#
+# A reaction with no `ignition:` block is unaffected: it keeps the old bulk-temperature gate.
+#
+# Air starvation needs no special handling. The reaction rate is limited by whichever
+# reagent runs out first, so closing the damper chokes the fire through exactly the same
+# code path that an empty fuel bunker does.
+#
+# ## `rate_per_s` changed meaning when ignition landed, and it was not re-tuned
+#
+# It used to cap the reaction at the *available reagents*, and with air almost always the
+# limiting one it meant "how much of the draught blowing past gets burnt". You wanted it high:
+# at 0.8 a firebox starved in the middle of a full grate because air blew through unreacted.
+# Coal sat at **6.0** for that reason.
+#
+# Ignition capped the fuel term at the mass actually ALIGHT, and the same number silently
+# became "how fast lit fuel is consumed" — where 6.0/s means 78% of the fire disappears every
+# tick. Lit mass could then never accumulate: it burned away faster than `spread_per_s` could
+# grow it, so the fire sat pinned at ~0.12 kg alight while `oxidiser_demand` — computed from
+# that same rate — asked for **1 kg of air per tick** to sustain it. Everything downstream
+# read as air starvation, and it was tuned around for a long time (a 25 m³ firebox, an 8 kPa
+# blower) before anyone measured the fire itself.
+#
+# Measured, at the original geometry with a 600 Pa blower — boiler pressure after 4000 ticks:
+#
+#     rate  0.5  fire dies      rate  1.5  605 kPa, 110 rpm
+#     rate  0.7  168 kPa        rate  1.8  607 kPa, 110 rpm
+#     rate  1.0  298 kPa        rate  2.0  600 kPa, 110 rpm
+#                               rate  2.5  fire dies
+#
+# **It is sharply peaked, and both cliffs are failures rather than degradations.** Too slow and
+# the fire cannot heat the box faster than the boiler drains it; too fast and the lit mass
+# outruns spread and goes out. The plateau is 1.5–2.0 and these values sit in the middle of it.
+# If you change `spread_per_s`, `quench_per_s` or the firebox geometry, re-measure this — a
+# number that only works on a plateau is a number that will drift off one.
+
+coal_combustion:
+  consumes: { coal: 1.0, air: 11.0 }
+  produces: { flue_gas: 11.9, ash: 0.1 }
+  enthalpy_j_per_unit: -30000000
+  # How fast LIT fuel is consumed. Read the note at the top of this file before touching it —
+  # the meaning of this number changed when ignition landed and it is now sharply peaked.
+  rate_per_s: 1.5
+  min_temperature_k: 500       # coal wants real heat before a flame front will travel
+  ignition:
+    # Slow to take hold and slow to let go — a coal fire is banked overnight and still there
+    # in the morning, which is the behaviour that makes it forgiving to run.
+    #
+    # `quench_per_s` exceeds `spread_per_s` so that a cold enough box can kill a fire outright.
+    # In practice it rarely will: at ambient the chill term only cancels about half the spread,
+    # so the fire establishes about three times slower in a cold firebox than a hot one rather
+    # than failing to establish at all. Coal dies from a shut damper, not from a cold grate,
+    # and that is the failure worth making a player see coming.
+    spread_per_s: 0.30
+    quench_per_s: 0.45
+
+wood_combustion:
+  consumes: { wood: 1.0, air: 6.0 }
+  produces: { flue_gas: 6.97, ash: 0.03 }
+  enthalpy_j_per_unit: -16000000
+  rate_per_s: 2.2              # catches faster and burns away faster than coal
+  min_temperature_k: 400       # and lights far more easily, which matters at startup
+  ignition:
+    # Catches readily and dies readily. Kindling: the reason you light a coal fire with wood.
+    spread_per_s: 0.80
+    quench_per_s: 0.70
+
+oil_combustion:
+  consumes: { fuel_oil: 1.0, air: 14.0 }
+  produces: { flue_gas: 15.0 }
+  enthalpy_j_per_unit: -42000000
+  rate_per_s: 3.5
+  min_temperature_k: 430
+  ignition:
+    # A sprayed liquid fuel takes the whole burner almost at once and goes out just as fast
+    # when the flame is lost — which is why oil burners have flame detectors and coal grates
+    # do not.
+    spread_per_s: 1.60
+    quench_per_s: 1.20

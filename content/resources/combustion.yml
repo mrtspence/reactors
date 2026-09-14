@@ -1,0 +1,49 @@
+# Fuels, air, and what burning them leaves behind.
+#
+# Formation enthalpies are all zero here: unlike the water/steam pair, none of these
+# substances change phase in the engine, so there is no latent heat to account for. The
+# energy of combustion lives in the reaction, not in the resources.
+#
+# Densities for the solid fuels are bulk (as-heaped) rather than true material density,
+# because what matters is how much of a bunker a tonne of coal fills.
+
+air:
+  tags: [gas, oxidiser]
+  specific_heat_j_per_kg_k: 1005
+  density_kg_per_m3: 1.225
+  molar_mass_g_per_mol: 28.96
+
+# Roughly 30 MJ/kg. The default fuel: dense, hot, and it leaves ash behind.
+coal:
+  tags: [solid, fuel]
+  specific_heat_j_per_kg_k: 1260
+  density_kg_per_m3: 800
+
+# Bulkier, wetter, and much less energy per kilogram — about 16 MJ/kg. A bunker of wood
+# holds far less engine-hours than the same bunker of coal, which is the whole point of
+# offering both.
+wood:
+  tags: [solid, fuel]
+  specific_heat_j_per_kg_k: 1700
+  density_kg_per_m3: 400
+
+# Flows through a pipe instead of needing a stoker, and burns hotter still (~42 MJ/kg).
+# The convenience is the upgrade; it is a liquid, so it routes through different ports.
+fuel_oil:
+  tags: [liquid, fuel]
+  specific_heat_j_per_kg_k: 1900
+  density_kg_per_m3: 890
+
+# Hot combustion products on their way up the chimney. Carries away a large share of the
+# fuel's energy, which is why a boiler is never as efficient as the fuel suggests.
+flue_gas:
+  tags: [gas, exhaust]
+  specific_heat_j_per_kg_k: 1100
+  density_kg_per_m3: 1.1
+  molar_mass_g_per_mol: 29.5
+
+# What is left in the grate. Inert, and it accumulates.
+ash:
+  tags: [solid, waste]
+  specific_heat_j_per_kg_k: 840
+  density_kg_per_m3: 700

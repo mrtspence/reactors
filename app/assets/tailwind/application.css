@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* Instrument geometry.
+ *
+ * Real CSS rather than Tailwind arbitrary values: a rotation formula inside a class attribute
+ * is unreadable, and this is the one place the page has actual geometry.
+ *
+ * The needle is positioned by a single custom property, --fraction (0..1), written by Stimulus.
+ * Two reasons that matters: writing one custom property does not trigger layout the way
+ * animating a width does, and the 250ms transition below IS the tweening — at 4 Hz a CSS
+ * transition exactly bridges one tick, for zero JavaScript. Deliberately NOT an interpolation
+ * buffer, which would trade a whole tick of display lag for smoothness in a game about time
+ * pressure (docs/architecture.md §7). */
+
+@layer components {
+  .gauge-dial {
+    position: relative;
+    aspect-ratio: 2 / 1;
+    overflow: hidden;
+    border-bottom: 1px solid var(--color-slate-700);
+  }
+
+  .gauge-needle {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 2px;
+    height: 78%;
+    background: var(--color-amber-400);
+    transform-origin: bottom center;
+    /* -90deg at empty, +90deg at full scale. */
+    transform: translateX(-50%) rotate(calc(-90deg + (var(--fraction, 0) * 180deg)));
+    transition: transform 250ms linear;
+  }
+
+  /* A needle pinned at either end of its scale is information — the reading is off the dial,
+     not merely high — so it is shown rather than smoothed away. */
+  .gauge-needle[data-pegged] {
+    background: var(--color-rose-400);
+  }
+
+  .gauge-hub {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: var(--color-slate-500);
+    transform: translate(-50%, 50%);
+  }
+
+  /* A lever the player has moved but the simulation has not yet confirmed. */
+  .lever[data-pending] {
+    accent-color: var(--color-amber-400);
+  }
+
+  .lever-ghost {
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: 14px;
+    background: var(--color-slate-400);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+}
