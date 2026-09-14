@@ -61,6 +61,44 @@ Guarded by `spec/reactor_sim/determinism_spec.rb`.
 
 The order nodes and links are declared in cannot affect the result.
 
+> **Measured 2026-09-13, and the two halves of that sentence are not equally true.**
+>
+> **Node order is bit-identical.** Reversing the steam engine's node list and running 1800
+> ticks of a full startup gives a byte-identical state digest.
+>
+> **Link order is not.** The same test on the link list diverges on **tick 1**, and the
+> divergence is `1e-16` relative — one unit in the last place of a double, in the order
+> floats are summed. It reaches **0.3 kPa of boiler pressure and 0.07 rpm by tick 1800**:
+> 608.183 / 608.046 / 607.866 kPa for the list as declared, reversed, and shuffled.
+>
+> **What decides whether an ulp grows or dies is feedback, and the two engines prove it.**
+> Run the same comparison on both chassis: the high-pressure engine diverges and keeps
+> diverging, while the **atmospheric engine diverges transiently around tick 2700 and comes
+> back to a byte-identical digest by 3600, with its total mass bit-identical throughout.**
+> The difference between them is the blastpipe. Trevithick's engine exhausts up its own
+> chimney, so it carries a closed loop — blastpipe → draught → fire → pressure → speed →
+> blastpipe — that multiplies a perturbation; Watt's exhausts into a condenser and has no
+> such loop, so the same perturbation damps away. The last bit is not the problem. The
+> **loop gain** is.
+>
+> **What this does and does not break.** Invariant 2 is untouched: `seed + command log`
+> still reproduces a match bit for bit, because link order is a property of the *code*, and
+> code that changed already changed the physics. What fails is the weaker claim that two
+> different declaration orders of the *same* graph agree bitwise — which matters exactly
+> once, during a refactor that reorders links. Modularisation was that refactor: parts own
+> their links, so the order necessarily changed and the stage could not be accepted on a
+> bit-identical digest. It was accepted on identical node set, identical link **set**,
+> identical panel, identical cold state, and agreement to 1e-15 per tick.
+>
+> `graph_spec` asserts link-order independence and **passes**, because it asserts it on
+> `LoopRig` — four nodes, 60 ticks, no feedback strong enough to amplify an ulp. The
+> assertion is true there and does not generalise. Do not read it as a guarantee about a
+> real operation.
+>
+> **Not yet fixed, and it is a live decision.** Making it bitwise means order-independent
+> accumulation — sorting contributions by a stable key before summing them in `Arbiter` —
+> which is a real change with its own risk. Recorded in `current_progress.md`.
+
 Every node reads the **frozen previous tick** and writes the next. A node physically cannot
 observe a half-finished tick, because nothing is installed until every phase has run.
 
@@ -74,7 +112,7 @@ Two consequences worth knowing:
   (`drives:`, `exhausts_to:`, `supplied_by:`, `senses:`) so they stay visible.
 
 Guarded by `spec/reactor_sim/graph_spec.rb`, which shuffles node and link order and compares
-digests.
+digests — **on `LoopRig`**. Read the note above before treating the link half as a guarantee.
 
 ---
 

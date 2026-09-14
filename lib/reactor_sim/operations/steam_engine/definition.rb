@@ -61,127 +61,129 @@ module ReactorSim
 
       module_function
 
-      def build(id:, seed:, variant: :high_pressure, time_scale: DEFAULT_TIME_SCALE,
-                state: nil, rngs: nil, content: nil)
+      # **The engine is assembled from parts now**, not built from a node list. The chassis
+      # decides the frame — where the exhaust goes, which slots exist — and the loadout decides
+      # what is fitted in them. See `parts.rb` for the components and
+      # `docs/design_sketches/modular_components.md` for why it is shaped this way.
+      #
+      # An empty `loadout:` is the stock engine: `Assembly` fills every slot from its
+      # `default:`, and the result is bit-identical to the machine that existed before parts
+      # did.
+      def build(id:, seed:, chassis: :high_pressure, loadout: {},
+                time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         # Symbolised because a restored snapshot brings it back from JSON as a string.
-        variant = variant.to_sym
-        spec = VARIANTS.fetch(variant) { raise Error, "unknown engine variant #{variant.inspect}" }
+        chassis = chassis.to_sym
+        assembly = assembly_for(chassis, loadout)
+        fragment = assembly.build!
 
         Operation.new(
           id: id, type: TYPE, seed: seed, time_scale: time_scale,
           state: state, rngs: rngs, content: content,
-          options: { variant: variant },
-          nodes: nodes(spec), links: links(spec), thermal_links: thermal_links,
-          drive_links: drive_links, control_points: control_points,
-          diagnostics: diagnostics(spec), minions: crew
+          # **The resolved loadout, not the one that was passed in**, and every slot is named
+          # in it including the empty ones. A partial loadout would be re-defaulted on restore,
+          # so a deliberately-empty slot would quietly grow its part back — the exact silent
+          # divergence `options:` exists to prevent.
+          options: { chassis: chassis, loadout: assembly.loadout },
+          nodes: fragment.nodes, links: fragment.links,
+          thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
+          control_points: fragment.control_points,
+          diagnostics: assembly.diagnostics, minions: crew
         )
       end
 
-      VARIANTS = {
+      # **The one way to ask what a loadout would build, and the only thing outside the sim
+      # should need.** An outfitting screen wants the slots, the alternatives for each, and the
+      # verdict — all of which are on `Assembly` — and it wants them *without* building an
+      # operation, because most of what it renders is for builds the player has not chosen.
+      #
+      # `build` goes through here too, so the machine a player is shown and the machine they get
+      # cannot be assembled two different ways.
+      def assembly_for(chassis, loadout = {})
+        spec = CHASSIS.fetch(chassis.to_sym) { raise Error, "unknown engine chassis #{chassis.inspect}" }
+
+        Assembly.new(
+          slots: slots(spec), loadout: loadout, spec: spec,
+          fixtures: fixtures(spec), instruments: catalogue(spec),
+          routes: ROUTES, advisories: ADVISORIES
+        )
+      end
+
+      # **A chassis is the frame: fixed topology, and which part goes in each slot that differs
+      # between the two machines.** It used to be a flat bag of twenty numbers, seventeen of
+      # which belonged to six parts that were not separate objects yet — see
+      # `docs/design_sketches/modular_components.md` §1, which is the observation the whole of
+      # modularisation came out of. Those numbers now live on the parts that own them, in
+      # `parts.rb`, together with the measurements that chose them.
+      #
+      # What is left is genuinely the machine's shape, plus one presentation number.
+      CHASSIS = {
         # Low boiler pressure, exhaust into a vacuum. The condenser does the work.
         atmospheric: {
-          relief_pa: 1.4 * Units::STANDARD_PRESSURE_PA,
-          # A far narrower band, because a Watt engine has nothing to gain from pressure — it works
-          # by making a vacuum. Winding this up buys almost nothing and risks a 4.93 atm shell.
-          max_relief_pa: 2.2 * Units::STANDARD_PRESSURE_PA,
-          burst_pa: 4.0 * Units::STANDARD_PRESSURE_PA,
           exhausts_to: :condenser,
           condenser: true,
-          # Watt's engine sends its exhaust to the condenser — that vacuum IS the engine — so
-          # there is nothing left to throw up the chimney. It draws on stack height alone, which
-          # is why a beam engine was built with a tall one and lit with a blower.
-          blastpipe: false,
-          # A smaller fire than Trevithick's, which is period-correct — Watt's engines were
-          # low-pressure machines — and also as much as this one's condenser can swallow. Fed
-          # the high-pressure draught it makes more steam than the condenser can lay down, and
-          # the vacuum it exists to pull collapses. See the condenser note in current_progress.
-          #
-          # **This conductance is what makes the fire smaller**, and it is the only thing that
-          # does. A `draught_kg_per_s` used to sit here claiming that job and was inert — see
-          # `damper`. Deliberately not raised with the high-pressure engine's: that one was
-          # measured, this one has its own condenser balance and wants its own measurement.
-          damper_conductance: 0.1,
-          # A wide, thin drum: a beam engine's boiler is a big low-pressure thing, and 6 mm of
-          # wrought iron over a 0.75 m radius is plenty for 1.4 atm. Derived rating ≈ 4.9 atm,
-          # which sits just above the 4.0 this variant already called its burst pressure.
-          shell_radius_m: 0.75, wall_thickness_m: 0.006,
-          bore_m: 1.3, stroke_m: 2.4,
-          # A far bigger casting, but a **thinner-walled** one: shell thickness goes as `p·r`,
-          # and 1.4 atm across a 0.65 m radius is a gentler duty than 6 atm across 0.225 m. So
-          # ~17 mm here against ~25 mm on Trevithick's, which is why this is 5× the high-pressure
-          # figure rather than the 9× the raw volumes suggest. See `cylinder`.
-          cylinder_heat_capacity: 2.0e6,
-          flywheel: { mass_kg: 24_000.0, radius_m: 2.8, friction: 40.0 }.freeze,
-          # A beam engine turns over slowly — Watt's ran at twenty-odd rpm — so its mill is
-          # rated at 2.5 rad/s where Trevithick's is rated at 10.
-          load_inertia: 3_000.0, load_torque: 90_000.0, load_rated_omega: 2.5
+          # **Panel scale only, and the one thing here that is not topology.** It is the boiler
+          # pressure gauge's full-scale reading, not a physical limit — the shell's real rating
+          # is derived from its plate by `Concerns::Pressurized#rated_pressure_pa` and lives on
+          # the boiler part. It stays on the chassis because the panel catalogue is built from
+          # the chassis and does not know which boiler is fitted; moving it needs parts to own
+          # their `Diagnostic`s, which is §4 Option A and deliberately not done yet.
+          burst_pa: 4.0 * Units::STANDARD_PRESSURE_PA,
+          # Everything not named here is the same on both machines and keeps its default in
+          # `slots`. `fetch` on the way out, so adding a slot that varies and forgetting to name
+          # it here raises rather than silently fitting the wrong part.
+          parts: {
+            boiler: :beam_boiler,
+            chimney: :plain_chimney,
+            damper: :narrow_damper,
+            safety_valve: :low_pressure_safety_valve,
+            cylinder: :atmospheric_cylinder,
+            cylinder_relief: :low_pressure_cylinder_relief,
+            flywheel: :beam_flywheel,
+            load: :slow_mill_drive
+          }.freeze
         }.freeze,
         # High boiler pressure, exhaust straight to the sky. No condenser at all.
         high_pressure: {
-          relief_pa: 6.0 * Units::STANDARD_PRESSURE_PA,
-          # The screw wound right down. 9 atm is 63% of the shell's derived 14.39, deliberately —
-          # the shell should never be the binding constraint, because the flywheel and the crown
-          # sheet are the interesting ones and they both bite first. See `relief_valve`.
-          max_relief_pa: 9.0 * Units::STANDARD_PRESSURE_PA,
-          burst_pa: 14.0 * Units::STANDARD_PRESSURE_PA,
           exhausts_to: :atmosphere,
           condenser: false,
-          # Trevithick threw the condenser away, which left the exhaust needing somewhere to go
-          # — and putting it up the chimney turned a liability into the engine's lungs.
-          blastpipe: true,
-          # A 5 m³ drum at 0.6 m radius is about 4.4 m long — a locomotive-sized barrel — and
-          # 14 mm wrought iron is period-correct for 6 atm. Derived rating **14.39 atm**, which is
-          # close to the 14.0 this variant already called its burst pressure, arrived at from the
-          # plate rather than from the gauge scale.
-          shell_radius_m: 0.6, wall_thickness_m: 0.014,
-          # **0.35, up from 0.2, and this is what the blower was secretly paying for.** Reported
-          # from play: the blower was worth about +60 kW on demand, for free, and the engine
-          # sagged whenever it was shut off. It was not a blower problem. The damper conductance
-          # was undersized by roughly a factor of two, and the blower's 600 Pa of head — against a
-          # 10 m stack worth ~69 Pa and a blastpipe worth ~361 Pa — was making up the difference.
-          #
-          # Measured at full controls, blower OFF, sweeping this number alone:
-          #
-          #     k     0.20   0.25   0.30   0.35   0.40   0.50   0.60
-          #     kW   335.1  432.2  476.6  493.3  491.3  497.4  499.0
-          #     fire   986   1000   1002   1001    999    993    988   K
-          #                                  ^ here: the knee, and the hottest fire
-          #
-          # And what the blower is still worth, by conductance: **+152.7 kW at 0.2, +16.4 at 0.3,
-          # +2.9 at 0.4, and −2.4 at 0.5** — past the knee it over-draughts and cools the fire
-          # (993 → 931 K). So opening the damper does not merely replace the blower, it **removes
-          # the exploit**: there is no longer a free 45% sitting behind a lever, because the
-          # engine is already getting the air. That is what a blower is for — raising the first
-          # steam on a cold stack — and it is inert once the fire is drawing for itself.
-          #
-          # 0.35 rather than 0.4+ because above the knee the engine burns more fuel for no more
-          # work and then starts feathering its safety valve: 0.4 burns 3.4% more coal for 0.4%
-          # *less* power. 607.8 kPa here against a 607.95 setting, which is as close to the valve
-          # as it is useful to sit.
-          #
-          # **The old note claiming "×1.5 and above simply pins the boiler on its safety valve and
-          # the engine stops gaining anything" was wrong** — ×1.5 is 0.3, which measures at
-          # 599.5 kPa, off the valve, and +142 kW. It was measured before the steam chest, the
-          # regulator trim and the stoker rating all moved. A stale measurement is worse than
-          # none; it had been cited as a reason not to touch this.
-          #
-          # Deliberately **not** applied to the atmospheric variant, whose draught is sized
-          # against what its condenser can lay down (see the note there). That one needs its own
-          # measurement.
-          damper_conductance: 0.35,
-          bore_m: 0.45, stroke_m: 1.1,
-          # The metal a cold cylinder has to warm through. See `cylinder` for the arithmetic and
-          # for why this being too small made the drain cocks decoration during startup.
-          cylinder_heat_capacity: 4.0e5,
-          flywheel: { mass_kg: 3_200.0, radius_m: 1.5, friction: 8.0 }.freeze,
-          # **Rated for the engine, and the engine got its pressure back.** 5500 was chosen when
-          # the cylinder's diagram ran on its own held charge — a release-condition pressure at
-          # roughly 30% of the boiler's — so the mill was sized against a prime mover throwing
-          # away two thirds of its admission pressure. With the diagram reading the supply, full
-          # gear at an open regulator burst the flywheel on every run.
-          load_inertia: 400.0, load_torque: 14_000.0, load_rated_omega: 10.0
+          # Panel scale only — see the note on the atmospheric chassis above.
+          burst_pa: 14.0 * Units::STANDARD_PRESSURE_PA,
+          parts: {
+            boiler: :locomotive_boiler,
+            # Trevithick threw the condenser away, which left the exhaust needing somewhere to
+            # go — and putting it up the chimney turned a liability into the engine's lungs.
+            # **That is one part rather than two**: a blastpipe and the chimney above it were
+            # proportioned together and are meaningless apart. See `parts.rb`.
+            chimney: :blastpipe_chimney,
+            damper: :wide_damper,
+            safety_valve: :ramsbottom_safety_valve,
+            cylinder: :high_pressure_cylinder,
+            cylinder_relief: :high_pressure_cylinder_relief,
+            flywheel: :light_flywheel,
+            load: :mill_drive
+          }.freeze
         }.freeze
       }.freeze
+
+      # --- what the chassis used to carry, and where it went ---------------------
+      #
+      # The block below was `VARIANTS`, a flat hash of twenty keys. Seventeen of them belonged
+      # to six parts; they are now on those parts in `parts.rb`, with the sweeps that chose them.
+      # Kept here for one more release as a map, because several of these numbers are cited by
+      # name in `current_progress.md` and in the notes on the node builders further down:
+      #
+      #     relief_pa, max_relief_pa                 -> :ramsbottom_safety_valve / :low_pressure_safety_valve
+      #     cylinder_relief_pa, ..._max_pa           -> :high_pressure_cylinder_relief / :low_pressure_...
+      #     shell_radius_m, wall_thickness_m         -> :locomotive_boiler / :beam_boiler
+      #     bore_m, stroke_m, cylinder_heat_capacity -> :high_pressure_cylinder / :atmospheric_cylinder
+      #     flywheel{}, wheel_safety_factor          -> :light_flywheel / :beam_flywheel
+      #     load_inertia, load_torque, load_rated_omega -> :mill_drive / :slow_mill_drive
+      #     damper_conductance                       -> :wide_damper / :narrow_damper
+      #     blastpipe                                -> :blastpipe_chimney / :plain_chimney
+      #
+      # `exhausts_to` and `condenser` stayed: they are the machine's shape rather than a
+      # fitting's rating. `burst_pa` stayed for the reason given above, and is the one entry
+      # here that is still in the wrong place.
 
       # --- how the gas conductances were chosen ---------------------------------
       #
@@ -213,18 +215,12 @@ module ReactorSim
       # **Re-measure this if the stack height, the blastpipe rating or the firebox volume
       # changes**, because all three move the head this conductance is solved against.
       #
-      # --- nodes ---------------------------------------------------------------
-
-      def nodes(spec)
-        base = [
-          Nodes::Atmosphere.new,
-          fuel_bunker, stoker, damper(spec), firebox, ash_pan, boiler_tubes, flue(spec),
-          water_supply, feed_pump, injector, injector_steam,
-          boiler(spec), relief_valve(spec), fusible_plug, throttle, steam_chest,
-          cylinder(spec), drain_cocks, cylinder_relief(spec), flywheel(spec), load(spec)
-        ]
-        spec.fetch(:condenser) ? base + [ condenser, condensate_return ] : base
-      end
+      # --- the components ------------------------------------------------------
+      #
+      # Each of these builds one node. What they are wired to, which levers they bring and
+      # which gauges arrive with them lives in `parts.rb`, next to the `Parts.register` that
+      # fits them — a part's pieces used to be scattered across four lists in two files, which
+      # is why nothing was ever optional.
 
       def fuel_bunker
         Nodes::Vessel.new(
@@ -276,7 +272,7 @@ module ReactorSim
         )
       end
 
-      def damper(spec)
+      def damper(conductance:)
         Nodes::Conduit.new(
           # **`damper_conductance` is the only air control there is**, and `max_kg_per_s` below is
           # a structural port bound rather than a dial: it does not apply to a conduit that
@@ -300,16 +296,61 @@ module ReactorSim
           # around a factor of two nobody could see.
           id: :damper, label: "Damper", accepts: [ :gas ],
           max_kg_per_s: 12.0, heat_capacity: 2.0e3,
-          conductance: spec.fetch(:damper_conductance),
-          # Forced draught. A cold chimney does not draw — buoyancy needs a hot stack, and a
-          # hot stack needs a fire — so a naturally-drawn firebox physically cannot light
-          # itself. Real practice is a blower, and this is it: hold it on to get the fire
-          # established, then shut it and let the stack take over.
-          # A modest blower, which is all a coal fire should ever need. It exists because the
-          # blastpipe cannot help until the engine is already turning and a cold stack has no
-          # buoyancy — so something has to raise the first steam.
-          head_pa: 600.0, head_control_id: :blower,
+          conductance: conductance,
+          # **The blower used to live here, as `head_pa:` and `head_control_id:` on this
+          # node.** It is its own part now — see `blower_fan` — because an attribute on
+          # somebody else's node cannot be fitted, removed or upgraded, which is the whole
+          # thing modularisation is for. The physics is unchanged: `Arbiter.path_head` sums
+          # head over every conduit on a path, so a fan in series with the damper contributes
+          # exactly what an attribute on the damper did.
           control_id: :damper_open
+        )
+      end
+
+      # **The blower, promoted from an attribute to a part.**
+      #
+      # Forced draught. A cold chimney does not draw — buoyancy needs a hot stack, and a hot
+      # stack needs a fire — so a naturally-drawn firebox physically cannot light itself. Real
+      # practice is a blower, and this is it: hold it on to get the fire established, then shut
+      # it and let the stack take over. A modest one, which is all a coal fire should ever
+      # need; it exists because the blastpipe cannot help until the engine is already turning.
+      #
+      # **`conductance: Float::INFINITY`, and it has to be a number rather than nothing.**
+      #
+      # The first attempt left it off, on the reasoning that a fan is a pressure source and not
+      # a restriction. That **killed the engine outright** — fire at 296 K, boiler at 3 kPa,
+      # dead on both chassis — because a path settles by pressure *only if every conduit on it
+      # declares a conductance* (`Arbiter.gas_coupling`, which returns nil the moment one does
+      # not). One nil turned the whole air path rate-driven, and a rate-driven path has no head
+      # at all, so the blower and the chimney both stopped existing. Silent, and total.
+      #
+      # Infinity is the faithful spelling of what the attribute did. Series conductances combine
+      # reciprocally — `1/total = Σ 1/kᵢ` — so `1/∞ = 0` contributes exactly nothing and the
+      # damper's rating comes through untouched, which is what keeps the seven-point sweep that
+      # chose `damper_conductance` valid. A finite value would be more honest about a real fan
+      # casing and would re-rate the path: 1000 already moves it 0.03%.
+      #
+      # Note this is the one place in the engine where `Float::INFINITY` is a *statement* rather
+      # than a silent off switch: it says "not the restriction", and the restriction is next
+      # door and measured.
+      #
+      # `:blower_fan` rather than `:blower`, because `:blower` is already the lever. Ids are one
+      # flat namespace across nodes, levers, gauges and crew — they key one rng table — and this
+      # is the third part to hit that: `:stoker` against `stoking`, and `:fusible_plug` against
+      # the `plug_blown` gauge.
+      #
+      # TODO: **WIP part.** The blower is still free, and it should not be. The intended cost is
+      # crew time first and a consumable second, and note the constraint that rules out the easy
+      # answer: **assume a black start**, since a player may be the only one generating power in
+      # a match, so nothing may depend on having an electrical supply. A fuel-oil reserve bolts
+      # onto this part when minions land; `heat_capacity` below is a placeholder for a casing
+      # nobody has weighed.
+      def blower_fan
+        Nodes::Conduit.new(
+          id: :blower_fan, label: "Blower", accepts: [ :gas ],
+          max_kg_per_s: 12.0, conductance: Float::INFINITY,
+          heat_capacity: 2.0e3, ambient_conductance: 0.0,
+          head_pa: 600.0, head_control_id: :blower
         )
       end
 
@@ -411,7 +452,7 @@ module ReactorSim
         )
       end
 
-      def flue(spec)
+      def flue(blastpipe:)
         Nodes::Conduit.new(
           # **Wet, not dry.** This was `[:gas]`, and because `Arbiter` requires every port on a
           # path to accept a resource, that one tag meant condensate had no route out of the
@@ -435,7 +476,7 @@ module ReactorSim
           # it is weakest when the stack is cold, which is exactly when a cold engine needs
           # draught most, so a naturally-drawn firebox lights and then suffocates. Exhausting up
           # the chimney ties draught to how hard the engine is working instead.
-          blast_from: (:cylinder if spec.fetch(:blastpipe)),
+          blast_from: (:cylinder if blastpipe),
           blast_pa_per_kg_per_s: 600.0,
           ambient_conductance: 200.0
         )
@@ -525,7 +566,7 @@ module ReactorSim
 
       # The dangerous part. Relief pressure is where it starts hurting itself; burst
       # pressure is where it stops being a boiler.
-      def boiler(spec)
+      def boiler(shell_radius_m:, wall_thickness_m:)
         Nodes::Boiler.new(
           id: :boiler, label: "Boiler", volume_m3: 5.0,
           heat_capacity: 6.0e5, ambient_conductance: 90.0,
@@ -549,8 +590,8 @@ module ReactorSim
           # starts falling.
           # Per variant, because the plate really is different: a 1.4 atm beam engine has no
           # business carrying 14 mm of iron, and a 6 atm one cannot do without it.
-          shell_radius_m: spec.fetch(:shell_radius_m),
-          wall_thickness_m: spec.fetch(:wall_thickness_m),
+          shell_radius_m: shell_radius_m,
+          wall_thickness_m: wall_thickness_m,
           safety_factor: 0.25, stress_rate: 90.0,
           # **The crown sheet, which is what makes a low glass dangerous at last.** The water
           # lever has had a ceiling (priming) and no floor since it was built: feed 0 ran happily
@@ -666,12 +707,12 @@ module ReactorSim
       # drum sits on its valve at 608.0 kPa, and at 90 or below it is **under** its setting
       # (638 → 790 kPa) and limited by the fire instead. The masking is now something a player can
       # choose to remove.
-      def relief_valve(spec)
+      def relief_valve(relief_pa:, max_relief_pa:)
         Nodes::ReliefValve.new(
           id: :relief, label: "Safety Valve", senses: :boiler,
-          relief_pressure_pa: spec.fetch(:relief_pa), ease_control_id: :ease_safety,
+          relief_pressure_pa: relief_pa, ease_control_id: :ease_safety,
           setting_control_id: :valve_setting,
-          max_relief_pressure_pa: spec.fetch(:max_relief_pa),
+          max_relief_pressure_pa: max_relief_pa,
           accepts: [ :gas ], max_kg_per_s: 3.0, conductance: 0.05,
           heat_capacity: 1.0e3, ambient_conductance: 50.0
         )
@@ -839,20 +880,47 @@ module ReactorSim
       #
       # Set above the highest compression the engine reaches in normal work, so it costs nothing
       # until something is wrong. Permissive, because what it has to pass is water.
-      def cylinder_relief(spec)
+      # **Its own adjusting screw, on the same margin-reads-100-is-safe convention as the boiler's.**
+      # Stated absolutely rather than as `relief_pa * 1.5`, because a cylinder valve's setting is a
+      # property of the cylinder and not of where the boiler's valve happens to be set — the old
+      # spelling coupled them for no reason, and coupled the cylinder to a number that is now only
+      # the *safe end* of the boiler's range.
+      #
+      # **Its SETTING rarely matters; its PRESENCE matters on every cold start.** Those are two
+      # different claims and only the first was written down here. Measured 2026-09-14, once the
+      # valve became a part that could be left off: a normal startup with no relief valve fitted
+      # ends in `cylinder_failure`. Warming through fills a cold cylinder with its own
+      # condensate — peak occupancy 0.859, "knocking badly" — and this is what lifts, vents the
+      # charge and turns a wrecked cylinder into a scare that teaches the procedure.
+      #
+      # What winding it down buys and costs is narrower than the boiler's and worth being honest
+      # about. In ordinary *running* this valve never lifts — compression pressure stays far below
+      # it — so the setting does nothing there. It matters while the cylinder is **wet**: lifting vents
+      # the charge, which is a real power loss exactly when a driver is already in trouble, so a
+      # higher setting keeps the engine pulling through a damp patch. The price is that the last
+      # device standing between a slug and a wrecked cylinder has been told to wait longer.
+      #
+      # The range to 20 atm looks generous against a 9 atm base, and is deliberate: the barrel's own
+      # derived hoop rating is far above both, so a player who fits a better cylinder should find
+      # room here rather than a limit left over from this one. Going past what the barrel can take
+      # now fatigues it — see `Cylinder#stress_per_second`, which had never once fired because
+      # nothing gave the cylinder a rating.
+      def cylinder_relief(relief_pa:, max_relief_pa:)
         Nodes::ReliefValve.new(
           id: :cylinder_relief, label: "Cylinder Relief Valve",
           senses: :cylinder, senses_quantity: :compression_pressure_pa,
-          relief_pressure_pa: spec.fetch(:relief_pa) * 1.5,
+          relief_pressure_pa: relief_pa,
+          setting_control_id: :cylinder_valve_setting,
+          max_relief_pressure_pa: max_relief_pa,
           max_kg_per_s: 2.0, conductance: 0.02,
           heat_capacity: 5.0e2, ambient_conductance: 20.0
         )
       end
 
-      def cylinder(spec)
+      def cylinder(spec, bore_m:, stroke_m:, heat_capacity:)
         Nodes::Cylinder.new(
           id: :cylinder, label: "Cylinder",
-          bore_m: spec.fetch(:bore_m), stroke_m: spec.fetch(:stroke_m),
+          bore_m: bore_m, stroke_m: stroke_m,
           # **`supplied_by:` is the steam chest, not the boiler**, and that one word is what
           # makes the regulator a real control. It is the node the indicator diagram takes its
           # admission pressure from and the node whose density sizes the intake, so pointing it
@@ -890,6 +958,19 @@ module ReactorSim
           # bit-identical to having no cocks at all, verified against authority 0.0 at 365.6552 kW
           # and 169.5271 rpm to every decimal place.
           drain_control_id: :cylinder_cocks, drain_authority: 0.30,
+          # **The barrel's own strength, so over-pressure has a graded cost.** `stress_per_second`
+          # has fatigued on `compression_pressure_pa` since it was written and had **never once
+          # fired**, because nothing gave the cylinder a rating — the fifth silent-off-switch in
+          # this engine. Until now a cylinder could only fail one way, all at once, through
+          # `overload?`; a driver running it hard and wet paid nothing until the moment it broke.
+          #
+          # Radius comes from the bore, so only the thickness and the metal are stated. 25 mm of
+          # cast iron over a 0.225 m radius gives a hoop rating well above the relief setting,
+          # which is right — a cylinder barrel is a thick casting and its danger is the
+          # *compression spike*, not steady working pressure. `safety_factor: 0.3` is the casting:
+          # cast iron is brittle, and a cylinder end is full of stress raisers where the cover
+          # bolts through.
+          material: :cast_iron, wall_thickness_m: 0.025, safety_factor: 0.3, stress_rate: 45.0,
           # **The cold-cylinder mechanic lives in this number, and it was an order of magnitude
           # light.** The drain cocks are meant to matter during starting: a cold cylinder
           # condenses a great deal of what is admitted to it, which is why the procedure is
@@ -916,7 +997,7 @@ module ReactorSim
           # genuine scare that teaches the procedure rather than a death sentence for forgetting
           # it. Opening the cocks holds it at 0.002 and costs about 5% of the power, which is the
           # trade that makes shutting them again a decision.
-          heat_capacity: spec.fetch(:cylinder_heat_capacity),
+          heat_capacity: heat_capacity,
           # The intake is rated for the port, not for the stroke — `admission_kg` sizes the
           # charge and this only stops the valve passing more than the pipe can. It has to admit
           # water at the rate the steam line can deliver it, or a slug simply cannot reach the
@@ -925,7 +1006,7 @@ module ReactorSim
         )
       end
 
-      def flywheel(spec)
+      def flywheel(mass_kg:, radius_m:, friction:, safety_factor:)
         # A beam engine's wheel is a different object from a high-pressure engine's: vastly
         # heavier, larger, and turning far more slowly. It has to be, because a 1.3 m piston
         # working against a vacuum develops something like 160 kN·m.
@@ -935,11 +1016,44 @@ module ReactorSim
           # wrong way round for a flywheel. The strength and density come from content; the
           # safety factor is this part's own, because how far below the ideal figure a real
           # casting fails is a property of the casting.
-          material: :cast_iron, safety_factor: 0.35,
-          friction: spec.fetch(:flywheel).fetch(:friction),
+          #
+          # ## **0.45 on the high-pressure engine, and it is what makes the boiler dangerous**
+          #
+          # At 0.35 the wheel was the first thing to fail in the one regime that matters: wound
+          # the safety valve down to 9 atm, it burst at **tick 1511 — in the acceleration
+          # transient, with the crown sheet still at 449 K.** The low-water hazard was therefore
+          # unreachable in play, because the engine came apart long before the plate got hot.
+          #
+          # Swept against the crown, starved boiler, reporting which part fails first and the
+          # wheel's peak stress:
+          #
+          #     wheel                margin 100   margin 70   margin 40   margin 0 (9 atm)
+          #     iron sf 0.35         crown 0.27   crown 0.38  crown 0.50  **WHEEL** t1511
+          #     iron sf 0.45  ×1.65  crown 0.16   crown 0.23  crown 0.30  crown 0.41
+          #     iron sf 0.55  ×2.47  crown 0.11   crown 0.15  crown 0.20  crown 0.27
+          #     steel sf 0.35 ×3.06  crown 0.09   crown 0.12  crown 0.16  crown 0.22
+          #
+          # **0.45 is chosen because it is the minimum that works, and the minimum is the point.**
+          # It makes the crown reachable at every pressure while leaving the wheel at 0.41 wound
+          # right down — a real gradient from 0.16 to 0.41 on the Wheel Stress gauge, so the wheel
+          # is still something a driver watches. At 0.55 and above it stops being a hazard at all
+          # (0.11–0.27), and steel stops it mattering entirely, which is why steel is left as the
+          # upgrade rather than the default.
+          #
+          # With the plug scaled over the plate ruptures at **711 / 702 / 692 / 675 K** across the
+          # same margins — note it fails *cooler* at higher pressure, which is the crown's pressure
+          # coupling working, and why it goes below wrought iron's bare 750 K rating.
+          #
+          # **Watt's wheel keeps 0.35, and not only because it was not measured.** Foundry practice
+          # in 1776 was not what it was in 1802, so the older engine having the poorer casting is
+          # period-apt. It is also irrelevant in normal running — that wheel sits at 0.007 of its
+          # burst stress — so the figure only decides how far it has to overspeed when the load
+          # comes off, and that wants its own measurement rather than this one.
+          material: :cast_iron, safety_factor: safety_factor,
+          friction: friction,
           fatigue_rate: 25.0,
-          mass_kg: spec.fetch(:flywheel).fetch(:mass_kg),
-          radius_m: spec.fetch(:flywheel).fetch(:radius_m)
+          mass_kg: mass_kg,
+          radius_m: radius_m
         )
       end
 
@@ -953,10 +1067,10 @@ module ReactorSim
       # demand was the *safe* setting. Under a fan law the mill holds the engine at its duty
       # point and it is taking the load AWAY that lets everything the boiler is pouring in go
       # into acceleration, with only the wheel's tensile limit in the way.
-      def load(spec)
+      def load(moment_of_inertia:, max_torque:, rated_omega:)
         Nodes::Load.new(
-          id: :load, label: "Mill Drive", moment_of_inertia: spec.fetch(:load_inertia),
-          max_torque: spec.fetch(:load_torque), rated_omega: spec.fetch(:load_rated_omega),
+          id: :load, label: "Mill Drive", moment_of_inertia: moment_of_inertia,
+          max_torque: max_torque, rated_omega: rated_omega,
           curve: :fan, control_id: :load_demand, friction: 3.0
         )
       end
@@ -985,67 +1099,13 @@ module ReactorSim
       end
 
       # --- wiring --------------------------------------------------------------
-
-      def links(spec)
-        base = [
-          Link.new(from: [ :bunker, :out ],          to: [ :stoker, :inlet ]),
-          Link.new(from: [ :stoker, :outlet ],       to: [ :firebox, :fuel_in ]),
-          Link.new(from: [ :atmosphere, :intake ],   to: [ :damper, :inlet ]),
-          Link.new(from: [ :damper, :outlet ],       to: [ :firebox, :air_in ]),
-          # Through the tubes on the way to the chimney, which is where the water gets most of
-          # its heat. The blastpipe still joins at the chimney, downstream of the tubes, which
-          # is where a locomotive puts it.
-          Link.new(from: [ :firebox, :ash_out ],     to: [ :ash_pan, :inlet ]),
-          Link.new(from: [ :ash_pan, :outlet ],      to: [ :atmosphere, :exhaust ]),
-          Link.new(from: [ :firebox, :flue_out ],    to: [ :boiler_tubes, :inlet ]),
-          Link.new(from: [ :boiler_tubes, :outlet ], to: [ :flue, :inlet ]),
-          Link.new(from: [ :flue, :outlet ],         to: [ :atmosphere, :exhaust ]),
-          # Water and steam meet in the injector; hot water goes on to the drum. Boiler →
-          # injector → boiler is a closed loop, which needs no special handling — paths are
-          # resolved holder to holder and nothing here depends on a topological order.
-          Link.new(from: [ :supply, :out ],           to: [ :feed_pump, :inlet ]),
-          Link.new(from: [ :feed_pump, :outlet ],     to: [ :injector, :water_in ]),
-          Link.new(from: [ :boiler, :injector_out ],  to: [ :injector_steam, :inlet ]),
-          Link.new(from: [ :injector_steam, :outlet ], to: [ :injector, :steam_in ]),
-          Link.new(from: [ :injector, :out ],         to: [ :boiler, :feed_in ]),
-          Link.new(from: [ :boiler, :steam_out ],    to: [ :throttle, :inlet ]),
-          Link.new(from: [ :boiler, :relief_out ],   to: [ :relief, :inlet ]),
-          Link.new(from: [ :relief, :outlet ],       to: [ :atmosphere, :exhaust ]),
-          # **Into the firebox, not to the sky**, and that is the whole point of the part. A plug
-          # that vented outside would be a leak; venting onto the grate is what kills the fire and
-          # forces the driver to stop, which is the safety function.
-          Link.new(from: [ :boiler, :plug_out ],     to: [ :fusible_plug, :inlet ]),
-          Link.new(from: [ :fusible_plug, :outlet ], to: [ :firebox, :plug_in ]),
-          # Boiler → regulator → chest is **pressure-driven**, because the throttle declares a
-          # conductance and a passive vessel sits at each end. Chest → cylinder is
-          # **rate-driven**, because the cylinder declares a positive-displacement draw. Two
-          # laws either side of one node, which is exactly what the chest is for: the gradient
-          # decides what can get in, the geometry decides what is taken out, and the pressure
-          # between them is where the two negotiate.
-          Link.new(from: [ :throttle, :outlet ],     to: [ :steam_chest, :in ]),
-          Link.new(from: [ :steam_chest, :out ],     to: [ :cylinder, :inlet ]),
-          # Straight to the ground, which is where cylinder cocks blow. What leaves this way is
-          # gone — it reaches `Atmosphere` and lands on the ledger as `mass_vented`, not back in
-          # the water supply.
-          Link.new(from: [ :cylinder, :drain ],      to: [ :drain_cocks, :inlet ]),
-          Link.new(from: [ :drain_cocks, :outlet ],  to: [ :atmosphere, :exhaust ]),
-          Link.new(from: [ :cylinder, :relief ],     to: [ :cylinder_relief, :inlet ]),
-          Link.new(from: [ :cylinder_relief, :outlet ], to: [ :atmosphere, :exhaust ])
-        ]
-
-        # The one line that decides which engine this is.
-        if spec.fetch(:condenser)
-          base + [
-            Link.new(from: [ :cylinder, :exhaust ], to: [ :condenser, :in ]),
-            Link.new(from: [ :condenser, :drain ],  to: [ :hotwell, :inlet ]),
-            Link.new(from: [ :hotwell, :outlet ],   to: [ :supply, :in ])
-          ]
-        else
-          # Up the chimney, not out to the sky. This is the one link that makes the engine
-          # self-draughting — see the blastpipe note on `flue`.
-          base + [ Link.new(from: [ :cylinder, :exhaust ], to: [ :flue, :inlet ]) ]
-        end
-      end
+      #
+      # **The link list has moved onto the parts.** Every link now ships with the fitting it
+      # belongs to, in `parts.rb`, which is what makes a part removable at all: an unfitted
+      # part contributes no fragment, so its links leave with it and nothing has to remember to
+      # delete them. The one link that is NOT a fitting's — where the cylinder exhausts to — is
+      # the chassis's own, in `SteamEngine.fixtures`, because that is the difference between
+      # Watt's engine and Trevithick's rather than a part somebody bolted on.
 
       # Two paths from the fire to the water, which is how a boiler actually works.
       #
@@ -1064,19 +1124,17 @@ module ReactorSim
       # The middle row is the trade the single link used to force: a realistic fire bought by
       # starving the boiler. With two paths the engine gets both — a fire at 895 K instead of
       # 676, the same heat into the water, and more power out.
-      def thermal_links
-        [ ThermalLink.new(a: :firebox, b: :boiler, conductance: 3_500.0),
-          # Strong, so the tube metal sits near the water rather than near the fire. What
-          # limits the transfer is the enthalpy the gas is carrying, not this number.
-          ThermalLink.new(a: :boiler_tubes, b: :boiler, conductance: 20_000.0) ]
-      end
-
-      def drive_links
-        [ DriveLink.new(a: :flywheel, b: :load, stiffness: 9_000.0) ]
-      end
+      #
+      # **Both links now ship with the part that owns them** — the radiant one with
+      # the boiler part, the convective one with `:stock_boiler_tubes` — but the measurement
+      # stays here, where the two can be read against each other. A boiler fitted without its
+      # tubes is the first row of that table, and stage 2 will make it buildable.
 
       # --- controls ------------------------------------------------------------
-
+      #
+      # **Levers arrive with the part they belong to**, in `parts.rb`. Panel order is slot
+      # declaration order, which is ordered by the cab rather than by the graph.
+      #
       # Every lever here keeps the default `stiffness: Float::INFINITY`, so `actual` snaps to
       # `target` and the crew's rate multiplier is discarded before it is ever used.
       #
@@ -1086,34 +1144,19 @@ module ReactorSim
       # time_scale 1.0 (60/80/60 survives, 80/90/70 bursts the flywheel) was measured with
       # instant actuation, and a proper implementation re-measures it rather than assuming
       # a few ticks of lever travel are lost in the noise.
-      def control_points
-        [
-          ControlPoint.new(id: :igniter, label: "Igniter", node: :firebox),
-          ControlPoint.new(id: :stoking, label: "Stoking Effort", node: :stoker),
-          ControlPoint.new(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan),
-          ControlPoint.new(id: :damper_open, label: "Damper", node: :damper, default: 50.0),
-          ControlPoint.new(id: :blower, label: "Blower", node: :damper),
-          ControlPoint.new(id: :feed, label: "Feed Pump", node: :feed_pump),
-          ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle),
-          ControlPoint.new(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0),
-          # **Defaults shut, and that is not the safe setting.** A standing engine should have
-          # its cocks open; this defaults closed because that is the state the engine's whole
-          # balance was measured in, and a lever whose default silently changes every other
-          # number is worse than one a player has to learn. Opening them is part of the
-          # starting procedure, not a correction to it.
-          ControlPoint.new(id: :cylinder_cocks, label: "Cylinder Cocks", node: :drain_cocks),
-          # Lifts the safety valve by hand. Defaults shut, and it only ever opens the valve
-          # further than the spring already has — see `relief_valve`.
-          ControlPoint.new(id: :ease_safety, label: "Ease the Safety Valve", node: :relief),
-          # **The adjusting screw, read as margin rather than as pressure.** Defaults to 100, the
-          # full safety margin, so an untouched engine is the safe engine and spending margin is a
-          # decision. Winding it down raises the valve setting toward `max_relief_pa` — more power,
-          # and a crown sheet, a shell and above all a flywheel with less to give.
-          ControlPoint.new(id: :valve_setting, label: "Safety Valve Margin", node: :relief,
-                           default: 100.0),
-          ControlPoint.new(id: :load_demand, label: "Mill Load", node: :load, default: 60.0)
-        ]
-      end
+      #
+      # Two of them are worth reading where they are declared, because their defaults are
+      # deliberate and surprising:
+      #
+      #   :cylinder_cocks    **defaults shut, and that is not the safe setting.** A standing
+      #                      engine should have its cocks open; this defaults closed because
+      #                      that is the state the whole balance was measured in, and a lever
+      #                      whose default silently changes every other number is worse than
+      #                      one a player has to learn.
+      #   :valve_setting     **the adjusting screw, read as margin rather than as pressure**,
+      #                      defaulting to 100 — the full safety margin — so an untouched
+      #                      engine is the safe engine and spending margin is a decision.
+      #                      `:cylinder_valve_setting` follows the same convention.
 
       # --- crew ----------------------------------------------------------------
 

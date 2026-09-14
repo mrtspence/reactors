@@ -10,9 +10,14 @@ require "reactor_sim"
 RSpec.describe "the steam engine" do
   # Starting from cold and lighting the fire takes real time, so most examples share one
   # warmed-up engine rather than paying for the startup in every one.
-  def engine(variant: :high_pressure, seed: 42)
+  # `chassis:` — the frame, which decides where the exhaust goes and therefore which slots
+  # exist. It was `variant:` until the engine became assembled from parts; the concept did not
+  # change, only what it is now one axis of. An empty loadout is the stock engine.
+  def engine(chassis: :high_pressure, seed: 42, loadout: {})
     ReactorSim::Match
-      .create(id: "e", seed: seed, operations: [ { id: "eng", type: :steam_engine, variant: variant } ])
+      .create(id: "e", seed: seed,
+              operations: [ { id: "eng", type: :steam_engine, chassis: chassis,
+                              loadout: loadout } ])
       .operation(:eng)
   end
 
@@ -68,6 +73,10 @@ RSpec.describe "the steam engine" do
   end
 
   def rpm(op) = op.nodes.fetch(:flywheel).rpm(op.state.fetch(:nodes).fetch(:flywheel))
+
+  def boiler_pa(op)
+    op.nodes.fetch(:boiler).pressure_pa(op.state.fetch(:nodes).fetch(:boiler), op.content)
+  end
 
   # What the crank was measurably given, not what the indicator diagram claimed. The two
   # diverge whenever the regulator is the restriction — see the note on `engine_power` in
@@ -225,31 +234,63 @@ RSpec.describe "the steam engine" do
     # **The remedy is not optional chrome.** Without a way out the choke is a slow dead end and
     # no lever a player can reach will help, which is a worse game than not modelling it at all.
     #
-    # **`damper: 60`, and the reason is the whole point of this comment.** At `LIGHT`'s damper 85
-    # the drum holds 608.0 kPa against a 607.95 kPa relief setting — it is feathering its safety
-    # valve continuously — so a slightly choked fire changes the power not at all, because the
-    # surplus was going over the roof anyway. Measured across the damper, raked against banked:
+    # ## This example needs the boiler to be OFF its safety valve, and now says so
     #
-    #     damper 60   397.3 vs 380.4 kW   off the valve   <- here
-    #     damper 70   400.8 vs 401.9 kW   on the valve
-    #     damper 78   402.0 vs 401.8 kW   on the valve
-    #     damper 85   401.7 vs 402.7 kW   on the valve
+    # A drum sitting on its relief valve reports every upstream change as zero, because the
+    # surplus was going over the roof anyway — so a slightly choked fire changes the power not at
+    # all, and **that is indistinguishable from a mechanic which does not work.** Measured with
+    # the fire pinned, raked against banked comes out at +0.45 / +0.43 / +0.14 / +0.81 / −0.22 /
+    # −0.03 / −0.59 / +0.57 percent across eight settings: random sign, pure noise.
     #
-    # `reaction_throttle` falls to 0.954-0.966 in **every** one of those, so the choke happens
-    # regardless; only its consequence is masked. This example used to pass at damper 85 purely
-    # because the fire was oversized enough to be choked and still saturate, and it began failing
-    # by 0.23% — noise, not a reversal — when the stoker was re-rated to match what the fire can
-    # actually burn. **A saturated system reports every upstream change as zero**, which is
-    # indistinguishable from a mechanic that does not work. Assert against a state the quantity
-    # can actually move.
+    # **It has broken twice for this reason, and pinning a damper number is what keeps breaking
+    # it.** First at `damper: 85`, which stopped working once the stoker was re-rated to match
+    # what the fire can burn; then at `damper: 60`, which stopped working once
+    # `damper_conductance` went 0.2 → 0.35 and made 60 deliver what 85 used to. A setting chosen
+    # to dodge saturation goes stale every time the air path moves.
+    #
+    # So the precondition is now **asserted rather than assumed**. If this drifts again it fails
+    # saying *the boiler was saturated* instead of *raking did not help*, and only one of those
+    # is true. The `1.01` floor on the power is the same idea: it demands a real recovery rather
+    # than any difference at all, so noise cannot pass it.
+    #
+    # > **Winding the relief setting up does NOT fix this**, which was worth measuring before
+    # > reaching for it. Headroom stays within 0.4 kPa of zero at margins 100, 70, 40 and 0 — the
+    # > fire is oversized, so the drum simply rises to meet wherever the valve is put. Only a
+    # > genuinely smaller fire gets off the valve.
+    #
+    # Measured **through this file's own rig**, which matters — a scratch script put the usable
+    # setting at damper 35, and in here that is still only 4.4 kPa off the valve, because the
+    # script set `cutoff: 40` while this helper leaves cut-off at its ControlPoint default of 100.
+    # Full gear is a different engine. Sweeping `light_and_run` itself, banked:
+    #
+    #     damper 40    400.0 kW   headroom   +0.0 kPa   +0.37%   (on the valve, noise)
+    #     damper 35    394.8 kW   headroom   +4.4 kPa   +1.27%   (barely off)
+    #     damper 30    187.1 kW   headroom +203.3 kPa   +3.35%   <- here
+    #     damper 25     15.5 kW   headroom +444.7 kPa            (barely turning)
+    #
+    # Ash reaches 12.17 kg rather than the 20-odd a hard fire banks up, because accumulation
+    # scales with firing rate — hence the lower threshold here than in the example above, which
+    # runs at `LIGHT`'s damper.
     it "clears when the ashpan is raked, and the engine gets the power back" do
-      raked = engine.tap { |o| o.set_control(:ash_raking, 40); light_and_run(o, ticks: 7200, damper: 60) }
-      banked = engine.tap { |o| light_and_run(o, ticks: 7200, damper: 60) }
+      raked = engine.tap { |o| o.set_control(:ash_raking, 40); light_and_run(o, ticks: 7200, damper: 30) }
+      banked = engine.tap { |o| light_and_run(o, ticks: 7200, damper: 30) }
+
+      expect(headroom_pa(banked)).to be > 10_000.0,
+                                     "the boiler is on its safety valve, so this example cannot " \
+                                     "measure anything — pick a damper that leaves it headroom"
 
       expect(ash(raked)).to be < 0.5
-      expect(ash(banked)).to be > 15.0
-      expect(shaft_power(raked)).to be > shaft_power(banked)
+      expect(ash(banked)).to be > 10.0
+      expect(shaft_power(raked)).to be > shaft_power(banked) * 1.01
     end
+  end
+
+  # How far the drum is below the setting its safety valve is currently at. Negative means it is
+  # feathering the valve, which masks anything upstream of it.
+  def headroom_pa(op)
+    nodes = op.state.fetch(:nodes)
+    setting = nodes.fetch(:relief).fetch(:setting_pa)
+    setting - op.nodes.fetch(:boiler).pressure_pa(nodes.fetch(:boiler), op.content)
   end
 
   describe "water in the cylinder" do
@@ -298,7 +339,7 @@ RSpec.describe "the steam engine" do
     # stroke sweeps it out; the hazard belongs to standing, not to running.
     it "stays far away from hydraulic lock in normal running" do
       %i[high_pressure atmospheric].each do |variant|
-        op = engine(variant: variant)
+        op = engine(chassis: variant)
         light_and_run(op, ticks: 4800)
 
         expect(op.nodes.fetch(:cylinder)
@@ -531,6 +572,76 @@ RSpec.describe "the steam engine" do
     end
   end
 
+  # **What the safety devices are actually for, proved by taking them off.**
+  #
+  # Every one of these is now an optional part, and the design rests on a claim that was
+  # untestable while they were welded in: that going without is a *decision* rather than a
+  # strictly-worse choice, because the hazard underneath is real and the device costs something.
+  # These are slow examples and they earn it — they are the only place that claim is checked.
+  #
+  # Three other optional parts — the ashpan, the cylinder cocks and the fusible plug — show **no
+  # effect at all** over a run like this, and that is correct rather than disappointing. Their
+  # hazards are slow (ash takes thousands of ticks to bank up) or conditional (the plug only
+  # matters once the water is down past the crown sheet). They are covered where those
+  # conditions are actually reached: `the grate silts up`, `water in the cylinder`, and
+  # `crown_sheet_spec`.
+  describe "running without the safety devices" do
+    # **The safety valve costs power, and that is the whole point of being allowed to remove
+    # it.** Measured at 2400 ticks: the drum sits pinned at 608.0 kPa on 174.5 rpm with the
+    # valve fitted, and reaches 687.0 kPa on 196.6 rpm without it. More pressure, more speed,
+    # and the shell's own derived rating is now the only thing in the way.
+    #
+    # Asserted as a *relationship* rather than a pinned figure, for the reason the ashpan
+    # example records: a number tuned against today's air path goes stale the moment anything
+    # upstream moves.
+    it "makes more power with no safety valve fitted, and nothing left to stop it" do
+      fitted = engine.tap { |o| light_and_run(o, ticks: 2400) }
+      stripped = engine(loadout: { safety_valve: nil }).tap { |o| light_and_run(o, ticks: 2400) }
+
+      expect(boiler_pa(stripped)).to be > boiler_pa(fitted) * 1.05
+      expect(rpm(stripped)).to be > rpm(fitted) * 1.05
+      # The gauges and levers go with the part, which is what makes the choice legible: there
+      # is no Safety Valve reading to watch because there is no safety valve.
+      expect(stripped.diagnostics).not_to have_key(:safety_valve)
+      expect(stripped.control_points).not_to have_key(:valve_setting)
+    end
+
+    # **The cylinder relief valve is load-bearing during an ordinary start, which the comment on
+    # it did not say.** `cylinder_relief`'s note is about its *setting* — true, that never
+    # matters in steady running — but its *presence* does: warming through fills a cold cylinder
+    # with its own condensate (peak occupancy 0.859, "knocking badly"), the valve lifts, and the
+    # engine survives a genuine scare. Take it off and the same startup destroys the cylinder.
+    it "wrecks the cylinder on a normal startup with no relief valve fitted" do
+      op = engine(loadout: { cylinder_relief: nil })
+      events = light_and_run(op, ticks: 2400)
+
+      expect(events.map { |e| e[:type] }).to include(:cylinder_failure)
+      expect(op.broken?).to be(true)
+    end
+
+    # Not a safety device, and the sharpest result of the lot: a cold stack has no buoyancy, so
+    # an engine with no forced draught cannot raise its own first steam. 8.8 kPa and a fire at
+    # 429.6 K against 608.0 and 974.4 — it never gets going at all.
+    it "cannot raise steam at all with no blower fitted" do
+      stripped = engine(loadout: { blower: nil }).tap { |o| light_and_run(o, ticks: 2400) }
+
+      expect(rpm(stripped)).to be_within(1e-6).of(0.0)
+      expect(boiler_pa(stripped)).to be < 50_000.0
+    end
+
+    # The other one that stops the engine working, and the biggest upgrade on the machine. With
+    # no tube bundle the only fire→water path is radiant, which is a plain shell boiler: 101.7
+    # kPa and a stopped engine where the stock one makes 608.0 and turns at 174.5.
+    it "will not turn the engine with no boiler tubes fitted" do
+      stripped = engine(loadout: { boiler_tubes: nil }).tap { |o| light_and_run(o, ticks: 2400) }
+
+      expect(rpm(stripped)).to be_within(1e-6).of(0.0)
+      expect(stripped.nodes).not_to have_key(:boiler_tubes)
+      # The convective heat path leaves with the bundle; only the radiant one is left.
+      expect(stripped.thermal_links.length).to eq(1)
+    end
+  end
+
   describe "conservation" do
     it "balances mass and energy through combustion, boiling and shaft work" do
       op = engine
@@ -554,26 +665,26 @@ RSpec.describe "the steam engine" do
                   boiler relief throttle cylinder flywheel load]
 
       %i[high_pressure atmospheric].each do |variant|
-        expect(engine(variant: variant).nodes.keys).to include(*shared)
+        expect(engine(chassis: variant).nodes.keys).to include(*shared)
       end
     end
 
     # One line in the operation definition decides which engine this is.
     it "differs only in what the cylinder exhausts into" do
-      expect(engine(variant: :high_pressure).nodes.fetch(:cylinder).exhausts_to).to eq(:atmosphere)
-      expect(engine(variant: :atmospheric).nodes.fetch(:cylinder).exhausts_to).to eq(:condenser)
+      expect(engine(chassis: :high_pressure).nodes.fetch(:cylinder).exhausts_to).to eq(:atmosphere)
+      expect(engine(chassis: :atmospheric).nodes.fetch(:cylinder).exhausts_to).to eq(:condenser)
     end
 
     it "gives the atmospheric engine a condenser and the high-pressure engine none" do
-      expect(engine(variant: :atmospheric).nodes).to have_key(:condenser)
-      expect(engine(variant: :high_pressure).nodes).not_to have_key(:condenser)
+      expect(engine(chassis: :atmospheric).nodes).to have_key(:condenser)
+      expect(engine(chassis: :high_pressure).nodes).not_to have_key(:condenser)
     end
 
     # The real payoff. Watt's engine makes power from a vacuum with a boiler barely above
     # atmospheric; Trevithick's throws the condenser away and pushes with boiler pressure.
     # Same Cylinder class, same torque formula, different graph.
     it "runs an atmospheric engine on a boiler pressure the high-pressure engine could not use" do
-      watt = engine(variant: :atmospheric)
+      watt = engine(chassis: :atmospheric)
       light_and_run(watt, throttle: 70, stoking: 60, load: 60, ticks: 3600)
 
       boiler_pa = watt.nodes.fetch(:boiler).pressure_pa(
@@ -585,7 +696,7 @@ RSpec.describe "the steam engine" do
     end
 
     it "gives the atmospheric engine a condenser vacuum below atmospheric" do
-      watt = engine(variant: :atmospheric)
+      watt = engine(chassis: :atmospheric)
       light_and_run(watt, throttle: 70, stoking: 60, load: 60, ticks: 3600)
 
       vacuum = watt.nodes.fetch(:condenser).pressure_pa(
@@ -598,17 +709,17 @@ RSpec.describe "the steam engine" do
     # The closed water loop — condenser to hotwell to feed — is exactly the topology a
     # topological resolution order could not have handled.
     it "closes the water loop on the atmospheric engine" do
-      watt = engine(variant: :atmospheric)
+      watt = engine(chassis: :atmospheric)
 
       expect(watt.links.map(&:id)).to include(:"hotwell.outlet->supply.in")
     end
   end
 
   describe "snapshots" do
-    # The variant is builder configuration, not state. Without persisting it, an
+    # The chassis is builder configuration, not state. Without persisting it, an
     # atmospheric engine would restore as a high-pressure one — a total, silent divergence.
     it "restores an atmospheric engine as an atmospheric engine" do
-      watt = engine(variant: :atmospheric)
+      watt = engine(chassis: :atmospheric)
       light_and_run(watt, ticks: 500)
 
       restored = ReactorSim::Operation.from_h(
@@ -617,6 +728,41 @@ RSpec.describe "the steam engine" do
 
       expect(restored.nodes).to have_key(:condenser)
       expect(ReactorSim.canonical(restored.to_h)).to eq(ReactorSim.canonical(watt.to_h))
+    end
+
+    # **`eq` cannot catch this and `canonical` cannot either.** The loadout is symbols living
+    # as VALUES in `options:`, and JSON preserves neither: `deep_symbolize` converts keys only,
+    # so a part id comes back as `"locomotive_boiler"` and misses every `Parts.fetch`. That is not a
+    # nil — it is a different machine, rebuilt in silence. And `canonical` runs through
+    # `JSON.generate`, where `:locomotive_boiler` and the string are the same thing, so the
+    # digest assertion above passes with the bug present.
+    #
+    # Fourth instance of this trap after parcel resource ids, instrument flags and a minion's
+    # station. Only an identity assertion finds it.
+    it "restores the loadout as symbols, not as strings" do
+      restored = ReactorSim::Operation.from_h(
+        ReactorSim.deep_symbolize(JSON.parse(JSON.generate(engine.to_h)))
+      )
+
+      loadout = restored.options.fetch(:loadout)
+      expect(loadout).not_to be_empty
+      expect(loadout.fetch(:boiler)).to be(:locomotive_boiler)
+      expect(restored.options.fetch(:chassis)).to be(:high_pressure)
+    end
+
+    # A slot left deliberately empty must STAY empty. A loadout that recorded only what was
+    # fitted would fall back to `slot.default` on restore and quietly grow the part back —
+    # which is why `Assembly#loadout` names every slot, empty ones included.
+    it "keeps a deliberately empty slot empty across a snapshot" do
+      # Nothing is optional yet, so this asserts the mechanism rather than a playable build:
+      # an explicit nil must survive the round trip as an explicit nil.
+      resolved = ReactorSim::Assembly.new(
+        slots: [ ReactorSim::Slot.new(id: :s, accepts: :k, default: :whatever) ],
+        loadout: { s: nil }
+      ).loadout
+
+      expect(resolved).to eq({ s: nil })
+      expect(ReactorSim.deep_symbolize(JSON.parse(JSON.generate(resolved)))).to eq({ s: nil })
     end
   end
 

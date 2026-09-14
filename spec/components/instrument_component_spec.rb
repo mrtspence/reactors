@@ -75,10 +75,11 @@ RSpec.describe InstrumentComponent, type: :component do
   # The panel is data-driven, so the whole console must survive whatever the operation declares.
   # The high-pressure engine has twelve instruments and the atmospheric one thirteen.
   describe "the real steam engine panel" do
-    it "renders every instrument the operation declares, whichever variant it is" do
-      %i[high_pressure atmospheric].each do |variant|
+    it "renders every instrument the operation declares, whichever chassis it is" do
+      %i[high_pressure atmospheric].each do |chassis|
         panel = ReactorSim::Match
-                .create(id: "p", seed: 1, operations: [ { id: :eng, type: :steam_engine, variant: variant } ])
+                .create(id: "p", seed: 1,
+                        operations: [ { id: :eng, type: :steam_engine, chassis: chassis } ])
                 .panel(operation_id: :eng)
 
         html = render_inline(PanelComponent.new(panel: panel))

@@ -103,6 +103,19 @@ governs rate-driven paths and nothing else — applying both makes every throat 
 choked, and a choked coupling carries a fixed flow, which leaves the pressure at either end
 with no feedback at all.
 
+> **EVERY conduit on a path must declare one, or the path is not pressure-driven at all.**
+> `gas_coupling` returns nil the moment one does not, and a rate-driven path has **no head** —
+> so a single missing number deletes the draught, the chimney and the blower together, with no
+> error of any kind.
+>
+> Cost: inserting the steam engine's blower as its own conduit without a conductance, on the
+> reasoning that a fan is a pressure source rather than a restriction. Physically true, fatal
+> here — 296 K firebox, 3 kPa boiler, dead on both chassis. **A pressure source in series wants
+> `conductance: Float::INFINITY`**, which contributes exactly `1/∞ = 0` to the reciprocal sum
+> and leaves the real restriction's measured rating untouched. Verified: the atmospheric
+> engine came back mass-bit-identical, every reading unchanged, and `total_joules` up by
+> exactly 586,300 J — the new casing's own `2000 J/K × 293.15 K`, and nothing else.
+
 **Gas may flow backwards.** `Flow#source_node` / `#sink_node`, never `path.from_node`.
 `Conduit#one_way?` is the opt-out for parts that really are check valves.
 

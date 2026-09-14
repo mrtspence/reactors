@@ -127,7 +127,7 @@ class MatchRunner
   # throttle" has to mean what it says.
   def handle_local(match, command)
     case command["type"]
-    when "reset_match" then reset(match)
+    when "reset_match" then reset(match, command)
     when "resync"      then @sink&.publish(match, nil, full: true)
     else @logger.warn("runner: unknown command type #{command['type'].inspect}")
     end
@@ -138,10 +138,24 @@ class MatchRunner
   # restarting the process. A proper implementation puts this on `match.lifecycle` with
   # created/started/ended semantics and archives the finished match's seed + command log
   # rather than throwing it away, since that pair IS the replay.
-  def reset(match)
-    @logger.info("runner: resetting #{match.id}")
-    @matches[match.id] = DevMatch.build
+  # **The loadout comes from the command, not from the database.** The web process writes the
+  # `loadouts` row and *then* produces this, so reading the table here would be reading it at
+  # whatever moment the record happened to arrive — and a reset that raced a save would rebuild
+  # the previous machine with nothing to show for it. The payload says which machine it means.
+  # A command with no loadout in it (the plain "put it back how it was" reset, or one produced
+  # before anybody visited the outfitting screen) falls through to whatever is stored.
+  def reset(match, command = {})
+    chassis = command["chassis"]&.to_sym
+    loadout = command["loadout"]&.to_h { |slot, part| [ slot.to_sym, part&.to_sym ] }
+
+    @logger.info("runner: resetting #{match.id}#{" as #{chassis}" if chassis}")
+    @matches[match.id] = DevMatch.build(chassis: chassis, loadout: loadout)
     @sink&.reset(match.id)
+  rescue ReactorSim::Error => e
+    # A loadout that cannot assemble must not take the runner down with it. The controller
+    # refuses invalid builds, so reaching here means something got past it — log loudly and
+    # leave the running match alone rather than killing every match on this runner.
+    @logger.error("runner: reset refused for #{match.id}: #{e.message}")
   end
 
   # `lateness` is measured against the ABSOLUTE schedule, so it reports drift accumulated

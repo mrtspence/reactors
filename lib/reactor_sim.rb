@@ -112,9 +112,18 @@ require_relative "reactor_sim/diagnostics/player_view"
 
 require_relative "reactor_sim/command"
 require_relative "reactor_sim/operations"
+
+# Parts and slots: how an operation is assembled from swappable components. Pure
+# configuration, resolved once at build — nothing below this line is reachable from the tick.
+require_relative "reactor_sim/part"
+require_relative "reactor_sim/parts"
+require_relative "reactor_sim/slot"
+require_relative "reactor_sim/assembly"
+
 require_relative "reactor_sim/tick"
 require_relative "reactor_sim/operation"
 require_relative "reactor_sim/match"
 
 require_relative "reactor_sim/operations/steam_engine/definition"
+require_relative "reactor_sim/operations/steam_engine/parts"
 require_relative "reactor_sim/operations/steam_engine/panel"

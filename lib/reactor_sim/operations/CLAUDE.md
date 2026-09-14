@@ -11,8 +11,52 @@ Only **state** is serialised; the graph is rebuilt identically every time from t
 builder. That is what lets a snapshot be a bag of floats rather than an object graph.
 
 **Anything that changes the graph's shape must be in `options:`** so it is snapshotted and
-handed back on restore. The steam engine's `variant:` does this. Miss it and an atmospheric
-engine restores as a high-pressure one — a total, silent divergence.
+handed back on restore. The steam engine's `chassis:` and `loadout:` both do this. Miss it and
+an atmospheric engine restores as a high-pressure one — a total, silent divergence.
+
+Three ways that goes wrong, all of them silent:
+
+- **Symbols as VALUES do not survive JSON.** `deep_symbolize` converts keys only, so a loadout
+  arrives back as `{ boiler: "locomotive_boiler" }` and misses every `Parts.fetch`. That is not a
+  nil, it is a different machine. Symbolise on the way in, and assert with `be`, never `eq` —
+  `canonical` runs through `JSON.generate`, where the two are the same string.
+- **A partial loadout re-defaults on restore.** `Assembly#loadout` names *every* slot, empty
+  ones included, because a slot left deliberately empty and a slot nobody mentioned must not
+  look the same to the builder.
+- **The registered builder whitelists its keywords.** An option it does not name is an
+  `ArgumentError` at restore. Loud, which is right — but `options:` and that signature have to
+  move together.
+
+## Assembled from parts
+
+An operation is built from a **chassis** (the frame: fixed topology, which slots exist) and a
+**loadout** (what is fitted in them). See
+[`docs/design_sketches/modular_components.md`](../../../docs/design_sketches/modular_components.md).
+
+```ruby
+Parts.register(:id, kind:, provides: [], instruments: []) { |spec| Fragment.new(...) }
+Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass: [...])
+Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisories:)
+```
+
+- **A part contributes a `Fragment`** — nodes, links, thermal/drive links, control points —
+  because a part is almost never one node. Its gauges are named by id and come from the
+  operation's panel catalogue.
+- **`provides:` is the id contract.** The id belongs to the **role**, not the part: every
+  boiler names its drum `:boiler`, so the wiring, the gauges and the rng stream all survive a
+  swap.
+- **`when_empty:` is the only topology a slot declares.** `:omit` needs no machinery at all —
+  an unfitted part contributes no fragment, so its links leave with it. Only `:bypass` has to
+  know where the two ends are.
+- **Slot declaration order is the panel's lever order.** Order it by the cab, not the graph.
+  Instrument order comes from the panel catalogue instead, so reordering slots cannot move the
+  dials.
+- **Errors refuse a build; warnings do not.** An engine with no fusible plug is legal and is
+  meant to be — the hazard under the safety is what makes going without one a decision.
+
+> **Assembly runs once, at build, and must leave no trace in the tick.** No `Context` method
+> may take a slot id; no node may ask what is fitted elsewhere. If it needs to know, the answer
+> belongs in its own config, decided at build.
 
 ```ruby
 Operation.new(
@@ -25,7 +69,8 @@ Operation.new(
 )
 ```
 
-Register with `Operations.register(TYPE) { |id:, seed:, ...| ... }`, then require it from
+Register with `Operations.register(TYPE, chassis: CHASSIS.keys) { |id:, seed:, ...| ... }`, then
+require it from
 `lib/reactor_sim.rb` **last**. Extra keys in a `Match.create` operation spec are passed through
 to the builder.
 
@@ -49,11 +94,42 @@ to the builder.
 5. **What can the player see?** The interesting design work. Give the two things that will
    kill the player the best instruments — and even those late.
 
-## Variants: one definition, several machines
+## Chassis: one definition, several machines
 
 The steam engine is deliberately two machines — Watt's atmospheric and Trevithick's
-high-pressure — differing only in what the cylinder exhausts into and a few sizes. `nodes(spec)`
-and `links(spec)` branch on the `VARIANTS` hash.
+high-pressure — differing only in what the cylinder exhausts into and a few sizes. `slots(spec)`
+and `fixtures(spec)` branch on the `CHASSIS` hash. (It was `VARIANTS`, and the keyword was
+`variant:`; the concept did not change when the engine became assembled from parts, only what
+it is now one axis of.)
+
+**A chassis owns what a slot cannot express.** Fitting the condenser does not add a branch, it
+*reroutes* the cylinder's exhaust — and "absent means rerouted" is a frame decision, not a
+fitting. That link lives in `fixtures(spec)`.
+
+**Pass `chassis: CHASSIS.keys` to `Operations.register`.** That is the *enumeration* — a second,
+unrelated `chassis:` from the one the builder block takes, which is the frame that was chosen.
+`Operations.chassis_for(type)` reads it back, and it exists because the delivery tier has to be
+able to list what a machine can be built on: every chassis is separately unlockable
+([`design_sketches/blueprints.md`](../../../docs/design_sketches/blueprints.md)). Derive it from
+the hash, never write the list out — a copy drifts the first time somebody adds a frame, and it
+drifts silently, because the new frame is simply unreachable. Nothing on the tick path reads it.
+
+**A chassis owns topology and a default loadout, not numbers.** It used to be a flat bag of
+twenty keys, seventeen of which belonged to six parts. Those live on the parts now, with the
+sweeps that chose them; what is left is `exhausts_to`, `condenser`, a `parts:` map of the kinds
+that differ between the two machines, and `burst_pa` — which is a gauge's full-scale reading and
+is the one entry still in the wrong place.
+
+> **An attribute becomes a node when it is a separate object in the machine, and a variant when
+> it is a different version of the same object.** The blower was the first — a fan bolted to the
+> ashpan, now `:blower_fan`. The blastpipe was the second and went the other way: it is part of
+> the chimney, because the two were proportioned together and because the blast head has to
+> reach both paths through the stack, which only the flue sits on. Getting this wrong costs a
+> node that cannot be wired without stealing a link from the chassis.
+
+**Where two parts of a kind differ only in numbers, write the wiring once.** `parts.rb` keeps a
+`*_fragment` helper per kind holding the shape; the registrations hold only the figures. Sixteen
+copies of one link list is sixteen chances to drift on something that is not supposed to vary.
 
 This is the test the architecture was built to pass: if two machines that look nothing alike
 are the same definition with parts swapped, the abstractions are right. Prefer a variant to a

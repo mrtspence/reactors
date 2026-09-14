@@ -115,7 +115,8 @@ Three things to know:
   the machine's skill gradient, so re-measure it.
 - **A fixed roster stays out of `options:`**, because it is rebuilt from code like the node
   list. The moment a crew can be hired, injured or dismissed it must move into `options:`, or
-  a restored snapshot rebuilds a different crew — the same trap `variant:` is there to avoid.
+  a restored snapshot rebuilds a different crew — the same trap `chassis:` and `loadout:` are
+  there to avoid. A crew is a loadout by another name, and will become one.
 
 ---
 
@@ -129,52 +130,121 @@ module ReactorSim
 
       module_function
 
-      def build(id:, seed:, time_scale: 1.0, state: nil, rngs: nil, content: nil, variant: :basic)
+      def build(id:, seed:, time_scale: 1.0, state: nil, rngs: nil, content: nil,
+                chassis: :basic, loadout: {})
+        spec = CHASSIS.fetch(chassis.to_sym)
+        assembly = Assembly.new(slots: slots(spec), loadout:, spec:,
+                                fixtures: fixtures(spec), instruments: catalogue(spec),
+                                routes: ROUTES, advisories: ADVISORIES)
+        fragment = assembly.build!
+
         Operation.new(id:, type: TYPE, seed:, time_scale:, state:, rngs:, content:,
-                      options: { variant: variant },
-                      nodes: nodes(variant), links: links(variant),
-                      thermal_links:, drive_links:,
-                      control_points:, diagnostics: diagnostics(variant))
+                      # The RESOLVED loadout, not the one passed in — see below.
+                      options: { chassis: chassis.to_sym, loadout: assembly.loadout },
+                      nodes: fragment.nodes, links: fragment.links,
+                      thermal_links: fragment.thermal_links,
+                      drive_links: fragment.drive_links,
+                      control_points: fragment.control_points,
+                      diagnostics: assembly.diagnostics)
       end
     end
 
-    register(MyOperation::TYPE) do |id:, seed:, time_scale: 1.0, state: nil, rngs: nil, variant: :basic|
-      MyOperation.build(id:, seed:, variant:, time_scale:, state:, rngs:)
+    # Two different `chassis:` here, deliberately. The one on `register` is the ENUMERATION —
+    # which frames this type offers — and the one in the block is the frame that was chosen.
+    # Pass `CHASSIS.keys`, never a literal list: the enumeration exists so the delivery tier can
+    # ask what a machine can be built on (every chassis is separately unlockable), and a
+    # hand-written copy drifts the first time somebody adds a frame.
+    register(MyOperation::TYPE,
+             chassis: MyOperation::CHASSIS.keys) do |id:, seed:, time_scale: 1.0, state: nil,
+                                                     rngs: nil, content: nil,
+                                                     chassis: :basic, loadout: {}|
+      MyOperation.build(id:, seed:, chassis:, loadout:, time_scale:, state:, rngs:, content:)
     end
   end
 end
 ```
 
-Then require it from `lib/reactor_sim.rb`, last (operations depend on everything).
+`Operations.chassis_for(:my_operation)` reads it back. It is introspection and nothing on the
+tick path touches it; a builder still takes `chassis:` as an ordinary option and still raises on
+a frame it does not know. A type with only one frame may leave it out and the answer is an empty
+list, which is a real answer rather than a missing one.
+
+Then require it from `lib/reactor_sim.rb`, last (operations depend on everything) — the
+definition, then the parts, then the panel.
 
 ```ruby
 ReactorSim::Match.create(
   id: "m1", seed: 42,
-  operations: [ { id: "op", type: :my_operation, variant: :basic } ]
+  operations: [ { id: "op", type: :my_operation, chassis: :basic } ]
 )
 ```
 
 Extra keys in the spec hash are passed through to the builder. **Anything that changes the
 graph's shape must also be in `options:`**, or a restored snapshot rebuilds the wrong machine.
 
+Three ways that goes wrong, each of them silent, and all three have bitten:
+
+- **Symbols as values do not survive JSON.** `deep_symbolize` converts keys only, so a loadout
+  comes back as `{ boiler: "stock_boiler" }` and misses every `Parts.fetch`. Assert it with
+  `be`, never `eq` — `canonical` runs through `JSON.generate`, where the two are the same
+  string, so a digest round-trip spec passes with the bug present.
+- **Store the resolved loadout, not the given one.** `Assembly#loadout` names every slot,
+  including the empty ones, because a slot left deliberately empty and one nobody mentioned
+  must not look the same on restore — otherwise the missing part quietly grows back.
+- **The `register` block whitelists its keywords.** An option it does not name raises at
+  restore. Loud, which is right, but `options:` and that signature have to move together.
+
 ---
 
-## Variants: one operation, several machines
+## Chassis and loadout: one operation, several machines
 
 The steam engine is deliberately two machines from one definition — Watt's atmospheric engine
 and Trevithick's high-pressure engine — differing only in what the cylinder exhausts into and
-a few sizes.
+a few sizes. Since 2026-09-13 that is one of **two** axes.
+
+**A chassis is the frame**: the fixed topology, and which slots exist on it.
 
 ```ruby
-VARIANTS = {
+CHASSIS = {
   atmospheric:   { exhausts_to: :condenser,  condenser: true,  relief_pa: 1.4 * ATM, ... },
   high_pressure: { exhausts_to: :atmosphere, condenser: false, relief_pa: 6.0 * ATM, ... }
 }.freeze
 ```
 
-`nodes(spec)` and `links(spec)` then branch on `spec.fetch(:condenser)`. This is the test the
-architecture was built to pass: if two machines that look nothing alike are the same
-definition with parts swapped, the abstractions are right.
+`slots(spec)` and `fixtures(spec)` branch on `spec.fetch(:condenser)`. The exhaust link lives
+in `fixtures` rather than in a slot deliberately: fitting a condenser does not add a branch, it
+**reroutes** the exhaust, and "absent means rerouted" is a frame decision rather than a fitting.
+
+**A loadout is what is bolted to it.** Each part registers a builder returning a `Fragment` —
+its nodes, its links, its levers — plus the ids it promises and the gauges that arrive with it.
+
+```ruby
+Parts.register(:ramsbottom_safety_valve, kind: :safety_valve, provides: %i[relief],
+               instruments: %i[safety_valve valve_setting_pa]) do |spec|
+  Fragment.new(nodes: [ ... ], links: [ ... ], control_points: [ ... ])
+end
+
+Slot.new(id: :safety_valve, accepts: :safety_valve, required: false, when_empty: :omit,
+         default: :ramsbottom_safety_valve)
+```
+
+Four rules that are easy to get wrong:
+
+- **`provides:` names the ids the part must build, and the id belongs to the role.** Every
+  boiler names its drum `:boiler`, so the wiring, the gauges and the rng stream survive a swap.
+- **`when_empty: :omit` needs no machinery** — an unfitted part contributes no fragment, so its
+  links leave with it. Only `:bypass` has to declare where the two ends are.
+- **A part in a `:bypass` run should be a conduit**, not a holder. A conduit is resolved
+  through and costs no tick; a holder costs one tick per hop, so fitting one silently re-times
+  the machine and moves every balance number.
+- **Slot order is the panel's lever order**, so order it by the cab. Instruments come from the
+  panel catalogue in *its* order instead, so reordering slots cannot move the dials.
+
+This is the test the architecture was built to pass: if two machines that look nothing alike
+are the same definition with parts swapped, the abstractions are right.
+
+Full design, including the options weighed and rejected:
+[`../design_sketches/modular_components.md`](../design_sketches/modular_components.md).
 
 ---
 
@@ -216,6 +286,27 @@ survive indefinitely, settings that make far more output and then destroy the ma
 band between them. If every setting survives, there is no game; if none do, something is
 missing (usually a safety device).
 
+**Read the lever in the units the physics uses, not in lever percent.** The steam engine's
+stoking looked like a mysterious inversion — more coal, less power, everywhere — and as kg/s it
+was a ratio anyone could check: the fire establishes at ~0.12 kg/s of coal and can usefully burn
+~0.15, and the stoker was rated 0.6. The entire useful band sat below lever 25.
+
+**Before tuning a constant, check it is on the path that decides the thing.** The cheapest
+possible test is to set it to three different values and see whether anything moves. Four
+constants in this engine turned out to be inert — the damper's and the cocks' rate caps sit
+beside a `conductance` and never bound anything — and one of them had a comment above it
+confidently explaining what it did. **Delete a dead constant rather than documenting it as
+dead**; a number that looks tunable and is not will be cited as fact by the next reader.
+
+**Check the system is not saturated before concluding a mechanic does nothing.** A boiler sitting
+on its safety valve reports every upstream change as zero, which is indistinguishable from a
+lever that is not wired up. The ash choke measured as a 0.23% *inversion* at one damper setting
+and a genuine 4.4% recovery at another, with the mechanic unchanged.
+
+**And check which part the safety device is actually protecting.** The steam engine's safety
+valve was not protecting its boiler; it was capping power before the *flywheel* failed. Raising
+it burst the wheel every time, with the drum never reaching the new setting.
+
 ---
 
 ## Specs an operation should have
@@ -227,6 +318,7 @@ Copy the shape of `spec/reactor_sim/steam_engine_spec.rb`:
 3. **It fails the way it should** — with the right event type and detail.
 4. **Moderate settings survive** a long run with no events.
 5. **Conservation holds** — mass and energy balance to `< 1e-9` relative.
-6. **Snapshot round-trip** preserves the variant and the digest.
+6. **Snapshot round-trip** preserves the chassis, the loadout and the digest — and asserts the
+   loadout's part ids with `be`, not `eq`.
 
 The conservation spec is the one that catches real physics bugs. Write it early.

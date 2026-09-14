@@ -30,12 +30,18 @@ graph/        nodes, ports, links, paths, and the arbiter that settles every cla
 concerns/     composable state+behaviour fragments a node opts into
 nodes/        generic machinery, reusable across operations
 diagnostics/  the instrument chain — the only thing that leaves the simulation
-operations/   specific machines, built from everything above
+operations/   specific machines, assembled from everything above
 ```
 
 Top-level files: `tick.rb` (the eight phases, in order), `operation.rb` (config, commands,
 projection, serialisation), `match.rb` (many operations in lockstep), `content.rb`,
 `control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `rng.rb`.
+
+Plus the assembly layer — `part.rb` (`Part` and `Fragment`), `parts.rb` (the registry),
+`slot.rb`, `assembly.rb`. **All four are build-time only.** They resolve a chassis and a
+loadout into the flat lists `Operation` has always taken, and nothing in them is reachable from
+`Tick`, `Arbiter` or any node. Keep it that way: a `Context` method taking a slot id would put
+assembly structure on the hot path for a lookup that could have been decided at build.
 
 ## The tick
 
@@ -56,9 +62,11 @@ you rearrange:
 ## Serialisation traps
 
 - **Symbols as *values* do not survive JSON.** `deep_symbolize` converts keys only. Resource
-  ids inside parcels, flags inside instrument state, and a minion's `station` all broke this
-  way. `Operation#restore` normalises all three — if you add state holding symbols as values,
-  normalise it there too.
+  ids inside parcels, flags inside instrument state, a minion's `station`, and now **a
+  loadout's part ids** all broke this way. `Operation#restore` normalises the first three and
+  `Assembly#resolve_loadout` the fourth — if you add state holding symbols as values,
+  normalise it there too. The loadout is the worst of the four: a part id that misses is not a
+  nil, it is a **different machine**, rebuilt in silence.
   **The digest cannot catch this**: `canonical` runs through `JSON.generate`, where `:stoking`
   and `"stoking"` are the same string, so a round-trip spec passes with the bug present. Only
   an identity assertion (`be(:stoking)`, never `eq`) finds it.

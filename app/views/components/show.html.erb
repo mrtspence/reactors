@@ -1,0 +1,174 @@
+<% content_for :title, "Reactor — Outfitting" %>
+
+<div class="min-h-screen w-full bg-slate-900 text-slate-100">
+
+  <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
+    <h1 class="text-sm uppercase tracking-widest text-slate-300">
+      Outfitting
+      <span class="text-slate-500">/ <%= @chassis.to_s.tr("_", " ") %></span>
+    </h1>
+
+    <div class="grow"></div>
+
+    <%= link_to "Back to the console",
+                console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID),
+                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                       "ring-1 ring-slate-700" %>
+  </header>
+
+  <main class="p-4 max-w-5xl">
+
+    <%# **Everything that depends on the selection lives inside one frame**, verdict included.
+        Changing a dropdown submits the form back to this same URL as a GET, Turbo swaps the
+        frame, and the page neither scrolls nor reloads. The verdict is the reason this is a
+        round trip at all: only the simulation can say whether a build assembles, so a
+        client-side preview could update the stats and would have to leave the warnings stale,
+        which is worse than not previewing them. %>
+    <%# The controller sits on the FRAME rather than the form, because Turbo replaces the
+        frame's contents on each draft — a controller on the form would be torn down and
+        rebuilt every time, where one here survives and simply re-scans. %>
+    <%= turbo_frame_tag "outfitting", data: { controller: "outfit" } do %>
+
+    <%# The verdict is the first thing on the page because it decides whether the button at the
+        bottom does anything. Errors refuse the build; warnings never do — that split is the
+        game's risk/reward axis rather than two severities, and the page has to make it obvious
+        which one a player is looking at. %>
+    <% if @assembly.verdict.errors.any? %>
+      <section class="mb-4 rounded border border-rose-800 bg-rose-950/40 p-3">
+        <h2 class="text-xs uppercase tracking-widest text-rose-300 mb-2">
+          This will not run
+        </h2>
+        <ul class="text-sm text-rose-100 space-y-1 list-disc list-inside">
+          <% @assembly.verdict.errors.each do |error| %>
+            <li><%= error %></li>
+          <% end %>
+        </ul>
+      </section>
+    <% end %>
+
+    <% if @assembly.verdict.warnings.any? %>
+      <section class="mb-4 rounded border border-amber-900 bg-amber-950/30 p-3">
+        <h2 class="text-xs uppercase tracking-widest text-amber-300 mb-2">
+          It will run. Whether you should is your business.
+        </h2>
+        <ul class="text-sm text-amber-100/90 space-y-1 list-disc list-inside">
+          <% @assembly.verdict.warnings.each do |warning| %>
+            <li><%= warning %></li>
+          <% end %>
+        </ul>
+      </section>
+    <% end %>
+
+    <%# Posts to the PREVIEW by default; the Fit button at the bottom overrides the target with
+        `formaction`, which is exactly what that attribute is for and saves keeping the
+        selections in one form and the commit button in another.
+        Both are POSTs so the CSRF token rides in the body — a GET preview would put it in the
+        query string on every dropdown change. %>
+    <%#
+       **`authenticity_token:` is explicit, and without it the Fit button 422s.**
+
+       Rails mints *per-form* CSRF tokens by default: the token is scoped to the form's declared
+       action and method. This form declares the preview path, and the Fit button below points
+       somewhere else with `formaction` — so the token it carries is minted for the wrong path
+       and verification refuses it.
+
+       Passing `form_authenticity_token` with no form options supplies the **global** session
+       token instead, which Rails accepts for any action. A request spec cannot catch this:
+       CSRF verification is off in the test environment, so it passes there and 422s in a
+       browser. It was found by driving the real server.
+    %>
+    <%= form_with url: preview_components_path(match_id: DevMatch::ID,
+                                               operation_id: DevMatch::OPERATION_ID),
+                  method: :post, authenticity_token: form_authenticity_token,
+                  data: { outfit_target: "form" } do %>
+
+      <% @assembly.slots.group_by(&:group).each do |group, slots| %>
+        <% meta = slot_group(group) %>
+        <section class="mb-6">
+          <h2 class="text-xs uppercase tracking-widest <%= meta[:accent] %> border-b <%= meta[:rule] %> pb-1 mb-1">
+            <%= meta[:label] %>
+          </h2>
+          <p class="text-xs text-slate-500 mb-3"><%= meta[:blurb] %></p>
+
+          <div class="space-y-2">
+            <% slots.each do |slot| %>
+              <% fitted = @assembly.part(slot.id) %>
+              <%# An empty optional slot is SHOWN as empty rather than hidden. Seeing the hole
+                  where a fusible plug would go is the point of the screen. %>
+              <div class="rounded border <%= fitted ? "border-slate-800 bg-slate-800/40" : "border-slate-700 border-dashed bg-slate-900" %> p-3">
+                <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <label class="text-sm font-medium text-slate-200"
+                         for="loadout_<%= slot.id %>"><%= slot.label %></label>
+
+                  <% if slot.required? %>
+                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">required</span>
+                  <% else %>
+                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">optional</span>
+                  <% end %>
+
+                  <% if fitted&.wip %>
+                    <%# A part that is deliberately half-built says so, rather than being
+                        presented as finished. The blower is free and will not stay free. %>
+                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-200">work in progress</span>
+                  <% end %>
+
+                  <div class="grow"></div>
+
+                  <%# `onchange` submits the draft. It is an inline handler rather than a
+                      Stimulus controller because it is one line and has no state; if this grows
+                      a second behaviour it should become one. %>
+                  <select name="loadout[<%= slot.id %>]" id="loadout_<%= slot.id %>"
+                          data-action="change->outfit#preview"
+                          class="text-sm bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100">
+                    <% unless slot.required? %>
+                      <option value="" <%= "selected" if fitted.nil? %>>— nothing fitted —</option>
+                    <% end %>
+                    <% ReactorSim::Parts.of_kind(slot.accepts).each do |candidate| %>
+                      <option value="<%= candidate.id %>" <%= "selected" if fitted&.id == candidate.id %>>
+                        <%= candidate.label %>
+                      </option>
+                    <% end %>
+                  </select>
+                </div>
+
+                <% if fitted %>
+                  <p class="mt-2 text-xs text-slate-400"><%= fitted.description %></p>
+
+                  <% if fitted.stats.any? %>
+                    <dl class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                      <% fitted.stats.each do |name, value| %>
+                        <div class="flex gap-1">
+                          <dt><%= name.to_s.tr("_", " ") %></dt>
+                          <dd class="text-slate-300 tabular-nums"><%= part_stat(value) %></dd>
+                        </div>
+                      <% end %>
+                    </dl>
+                  <% end %>
+                <% else %>
+                  <p class="mt-2 text-xs text-slate-500 italic">Nothing fitted here.</p>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </section>
+      <% end %>
+
+      <div class="sticky bottom-0 -mx-4 px-4 py-3 bg-slate-900/95 border-t border-slate-800 flex items-center gap-3">
+        <%# `formaction` is what turns this one button into the commit, and
+            `data-turbo-frame="_top"` breaks it out of the frame so the redirect to the console
+            navigates the whole page rather than trying to render a console inside a frame. %>
+        <button type="submit" data-turbo-frame="_top"
+                formaction="<%= components_path(match_id: DevMatch::ID,
+                                                operation_id: DevMatch::OPERATION_ID) %>"
+                class="text-sm px-4 py-1.5 rounded bg-emerald-800 hover:bg-emerald-700
+                       ring-1 ring-emerald-600 cursor-pointer">
+          Fit and test drive
+        </button>
+        <p class="text-xs text-slate-500">
+          Fitting rebuilds the engine from cold. Whatever she was doing, she stops doing it.
+        </p>
+      </div>
+    <% end %>
+    <% end %>
+  </main>
+</div>

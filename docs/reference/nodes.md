@@ -129,7 +129,7 @@ All generic and reusable. Anything genuinely specific to one machine belongs und
 | `Atmosphere` | Thermal, Holds | The outside world: unlimited source, unlimited sink, fixed pressure reference. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
 | `Load` | Rotating | Where useful work leaves the operation. Has a **torque curve** — `:fan` (τ ∝ ω²), `:viscous` (τ ∝ ω) or `:constant` — absorbing `max_torque` at `rated_omega`. |
-| `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at supply density. Working fluid is configuration. |
+| `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at supply density. Working fluid is configuration. `drain_control_id:` + `drain_authority:` let an open cock bleed the working space; `material:` + `wall_thickness_m:` give it a hoop rating off its own bore. |
 | `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity — `senses_quantity:` defaults to `pressure_pa` but need not be it. `ease_control_id:` opens it further by hand (`max`); `control_id:` gags it shut (`×`). Records `lift:`. |
 | `FusiblePlug` | (a `Conduit`) | Senses a **state key** on another node and fails **permanently** open above `melts_above:`. A fuse, not a valve. |
 
@@ -155,6 +155,47 @@ with no feedback at all.
 **Pressure-driven paths are bidirectional** unless the conduit says `one_way: true`. Backflow
 is real — a chimney backdraughts, a valve blows back — and a network built only from diodes
 has no equilibrium to reach.
+
+**Head composes along a path, so a pressure source belongs on its own conduit.**
+`Arbiter.path_head` *sums* `head_pa` and `stack_height_m` over every conduit on a path, so
+putting a fan in series with a valve contributes exactly what a `head_pa:` attribute on the
+valve did. That is what makes a pump, a fan or a chimney a **swappable part** rather than an
+attribute: you cannot bolt a different fan onto a number.
+
+> **EVERY conduit on a path must declare a conductance, or the path is not pressure-driven at
+> all.** `Arbiter.gas_coupling` returns nil the moment one of them does not, and a rate-driven
+> path has **no head** — so one missing number deletes the draught, the chimney and the blower
+> together.
+>
+> Measured 2026-09-13, promoting the steam engine's blower from `head_pa:` on the damper to its
+> own `:blower_fan` conduit. Left without a conductance on the reasoning that "a fan is a
+> pressure source, not a restriction" — true physically, fatal here. The fire never lit: 296 K
+> firebox, 3 kPa boiler, dead on both chassis, **no error of any kind.**
+>
+> The fix is `conductance: Float::INFINITY`, which is the faithful spelling of what the
+> attribute did. Series conductances combine **reciprocally** (`1/total = Σ 1/kᵢ`), so `1/∞`
+> contributes exactly zero and the damper's measured rating comes through untouched. A finite
+> value re-rates the path — 1000 already moves it 0.03% — which would quietly invalidate the
+> sweep that chose `damper_conductance`. This is the one place in the engine where
+> `Float::INFINITY` is a *statement* ("not the restriction") rather than a silent off switch,
+> and it is only safe because the real restriction is next door and measured.
+>
+> **The blastpipe is NOT the same shape, and promoting it would have been a mistake.** It stayed
+> an attribute on `flue` and became a chimney *variant* instead (`:blastpipe_chimney` against
+> `:plain_chimney`), for two reasons that generalise: physically a blastpipe and the chimney
+> above it are one assembly, proportioned together; and mechanically the blast head has to reach
+> **both** paths through the chimney — the firebox draught and the cylinder's own exhaust — which
+> only the flue does, because only the flue sits on both. A blastpipe node between the tubes and
+> the flue would draught the fire and not the exhaust.
+>
+> The rule: **an attribute becomes a node when it is a separate object in the machine, and a
+> variant when it is a different version of the same object.** `stack_height_m` is a chimney
+> property for the same reason, so a taller stack is a variant too.
+
+**Watch the wall when you insert a conduit.** A conduit carries a `heat_capacity` that
+`Tick#carry_through` mixes the stream into, so adding one in series adds thermal mass to that
+path. It is free on a path whose stream and wall sit at the same temperature (a blower breathing
+ambient air) and is not free anywhere else — measure rather than assume.
 
 ### A conduit with a thermal link is a heat exchanger
 
@@ -241,6 +282,24 @@ vessel pressure here would lift at nothing and look like protection — which is
 fitting none. `spec/reactor_sim/obstruction_spec.rb` asserts both halves: the valve that senses
 the compression pressure lifts, and the one sensing `pressure_pa` stays shut on the same state.
 
+### A drain has to reach the diagram, not just the mass budget
+
+`Cylinder#admission_pressure_pa` blends the supply pressure toward the back pressure by
+`drain_open_fraction × drain_authority`, because an open cock short-circuits the working space to
+atmosphere **while the piston is pushing against it**. Shut, `bleed` is 0 and the result is exactly
+the supply pressure, so an engine with its cocks closed is bit-identical to one that has none.
+
+> **Draining mass was not enough, and the steam chest is what broke it.** The cocks' only route to
+> the output used to be indirect — drain mass, deplete the chest, lower P₁ — and once the cylinder
+> could refill from a 25 kg/s inlet the chest stopped depleting (543 → 545 kPa with the cocks wide
+> open). Leaving them open cost 4–7% of the power and *gained* 1% at low throttle. `drain_kg_per_s`
+> is inert too: 0.25, 0.5, 1.0, 2.0 and 4.0 give byte-identical results, because the cylinder holds
+> so little gas that the smallest cock already takes all of it.
+
+The loss is proportional to the pressure difference, so it is largest exactly when the engine is
+working hardest — which is the point. Same correction the regulator needed: **a restriction, not a
+ration.**
+
 ### A transient needs a time constant big enough to have a procedure about
 
 `Cylinder#heat_capacity` is the metal a cold cylinder has to warm through, and it decides whether
@@ -292,6 +351,14 @@ Three things worth copying when the same shape comes up again:
   plug went. That gap is the mechanic.
 - **`max`, not sum.** Pressure stress and crown stress are two descriptions of one shell, and
   adding them would charge a boiler twice for a single degree of overheat.
+- **A plate does not fail because it is hot, it fails because it is hot and there is pressure
+  behind it.** So the two ratings *multiply* rather than being checked separately:
+  `crown_allowable_pressure_pa` is the cold hoop-stress allowance knocked down as the metal loses
+  strength, flat below `CREEP_ONSET_FRACTION` of the temperature rating and falling to nothing at
+  it. The consequence that matters in play is that **a boiler carrying more pressure fails sooner
+  on the same overheating** — a driver who wound the safety valve up has less margin when the water
+  goes, not the same margin. The knockdown is flat at low temperature on purpose: declining from
+  ambient would tax a perfectly healthy drum for sitting at its own saturation temperature.
 
 ### Irreversible is a different part from reversible
 
@@ -331,6 +398,19 @@ safety valve shut is not something a handle should be able to do.
 `control_id:` (inherited from `Conduit`) is the **gag**, and it multiplies, so it *can* shut the
 valve completely. That is deliberately available — it is exactly the sort of decision that gets
 people killed, and a simulation that makes it impossible is not modelling the hazard.
+
+`setting_control_id:` is the **adjusting screw**, and it is a third distinct thing: the other two
+open a valve that is already set, this one decides where it is set. It reads as **margin, not
+pressure** — 100 is the full safety margin and the declared `relief_pressure_pa`, 0 is the screw
+wound down to `max_relief_pressure_pa` — so an untouched engine is the safe engine and spending
+margin is a decision. `full_open_pa` scales with it, keeping the valve's character.
+
+> **A safety valve can end up protecting something other than the vessel, and that is worth
+> checking before tuning it.** The steam engine's 6 atm setting was not protecting its boiler; it
+> was capping power before the **flywheel** failed. Raising it at all burst the wheel, with the
+> drum never reaching the new setting — so the valve could not be moved without a stronger
+> driveline, and the gauge that matters while winding the screw down is Wheel Stress, not
+> pressure.
 
 ### A transport node leaves no trace, so it must record what it did
 

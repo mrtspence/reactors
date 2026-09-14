@@ -11,16 +11,28 @@ module ReactorSim
       # speed — get the best instruments, and even those are late.
       module_function
 
-      def diagnostics(spec)
-        base = [
+      # **Every gauge this engine knows how to show, indexed by id — not the ones it is
+      # showing.** Parts name the instruments that arrive with them (see `parts.rb`) and
+      # `Assembly` selects from this hash, so a fitting that is not fitted takes its gauge with
+      # it and a part naming a gauge that does not exist fails at build.
+      #
+      # **Order here is the panel's order**, and it is deliberately not slot order: a player
+      # learns a panel by where things are, so rearranging the slot list for some unrelated
+      # reason must not move the dials. Selection preserves this sequence.
+      #
+      # Building a gauge costs nothing — a `Diagnostic` is frozen configuration — so the
+      # catalogue holds `condenser_vacuum` on both chassis even though only one can ever fit a
+      # condenser. Filtering happens at selection, where it can be checked.
+      def catalogue(spec)
+        [
           boiler_pressure(spec), boiler_water, safety_valve, valve_setting,
           crown_sheet, plug_blown,
           firebox_temp, fire_state,
           flywheel_speed, flywheel_stress, flywheel_condition,
           engine_power, cylinder_pressure, cylinder_water, cylinder_relief_valve,
-          coal_remaining, water_remaining, air_supply
-        ]
-        spec.fetch(:condenser) ? base + [ condenser_vacuum ] : base
+          coal_remaining, water_remaining, air_supply,
+          condenser_vacuum
+        ].to_h { |d| [ d.id, d ] }.freeze
       end
 
       # The gauge that matters most, so it is the one most worth upgrading. Two ticks late
@@ -347,9 +359,20 @@ module ReactorSim
       end
     end
 
-    register(SteamEngine::TYPE) do |id:, seed:, time_scale: 1.0, state: nil, rngs: nil, variant: :high_pressure|
-      SteamEngine.build(id: id, seed: seed, variant: variant, time_scale: time_scale,
-                        state: state, rngs: rngs)
+    # **The keyword list here is a whitelist, and that is load-bearing on restore.** An option
+    # the builder does not name is an `ArgumentError` rather than a silent default — loud,
+    # which is right, but it means `options:` and this signature have to move together. A
+    # `loadout:` that failed to arrive would rebuild the stock engine from a snapshot of a
+    # stripped one, silently and completely.
+    # `chassis:` here is the *enumeration* — derived from `CHASSIS` so it cannot drift from the
+    # frames that actually exist — and is unrelated to the `chassis:` keyword the block takes,
+    # which is one chosen frame. See `Operations.register`.
+    register(SteamEngine::TYPE,
+             chassis: SteamEngine::CHASSIS.keys) do |id:, seed:, time_scale: 1.0, state: nil,
+                                                     rngs: nil, content: nil,
+                                                     chassis: :high_pressure, loadout: {}|
+      SteamEngine.build(id: id, seed: seed, chassis: chassis, loadout: loadout,
+                        time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end
 end

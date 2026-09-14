@@ -62,6 +62,7 @@ module ReactorSim
                   :bore_m, :stroke_m, :crank_radius_m, :efficiency, :drives,
                   :cutoff_control_id, :clearance_fraction, :max_pressure_pa, :stress_rate,
                   :drain_control_id, :drain_authority,
+                  :material, :wall_thickness_m, :safety_factor,
                   :exhausts_to, :supplied_by, :default_working_fluid, :expansion_index,
                   :compression_fraction
 
@@ -74,6 +75,7 @@ module ReactorSim
                      relief_kg_per_s: 2.0, working_fluid: :steam,
                      expansion_index: 1.135, compression_fraction: 0.08,
                      entrainment_omega: 10.0, standing_kg_per_s: 0.15, standing_omega: 1.0,
+                     material: nil, wall_thickness_m: nil, safety_factor: 1.0,
                      max_pressure_pa: Float::INFINITY, stress_rate: 0.0)
         @bore_m = bore_m.to_f
         @stroke_m = stroke_m.to_f
@@ -147,6 +149,12 @@ module ReactorSim
         @drain_control_id = drain_control_id&.to_sym
         @drain_authority = drain_authority.to_f.clamp(0.0, 1.0)
         @max_pressure_pa = max_pressure_pa.to_f
+        # What the barrel is made of and how thick it is. `shell_radius_m` is not configurable
+        # here because a cylinder already knows it — it is the bore — which is the nice thing
+        # about deriving a rating from geometry on a part whose geometry is the point.
+        @material = material&.to_sym
+        @wall_thickness_m = wall_thickness_m&.to_f
+        @safety_factor = safety_factor.to_f
         @stress_rate = stress_rate.to_f
         # Per `nodes/CLAUDE.md` step 6 — a node is configuration and holds no mutable state.
         # `Vessel` and `Conduit` cannot do this because `Boiler` and `ReliefValve` assign their
@@ -655,11 +663,18 @@ module ReactorSim
       # reaches that peak while its average pressure looks ordinary. Fatiguing on the average
       # would report a healthy machine right up to the stroke that destroys it.
       def stress_per_second(state, ctx)
-        return 0.0 if @stress_rate.zero? || @max_pressure_pa.infinite?
+        return 0.0 if @stress_rate.zero?
 
-        over = compression_pressure_pa(state, ctx.content) - @max_pressure_pa
-        over.positive? ? (over / @max_pressure_pa) * @stress_rate : 0.0
+        rated = rated_pressure_pa(ctx.content)
+        return 0.0 if rated.infinite?
+
+        over = compression_pressure_pa(state, ctx.content) - rated
+        over.positive? ? (over / rated) * @stress_rate : 0.0
       end
+
+      # The barrel's own radius, for the hoop-stress rating in `Concerns::Pressurized`. A cylinder
+      # is the one pressure part that never has to be told this.
+      def shell_radius_m = @bore_m / 2.0
 
       # ## The work the crank has to find to reach top dead centre
       #

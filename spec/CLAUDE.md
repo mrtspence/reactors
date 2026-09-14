@@ -37,7 +37,10 @@ instead of writing a second one.
 | `steam_engine_spec` → "priming and hydraulic lock" | The failure chain end to end: flood the glass while running hard, slam the regulator, and the drum swells past its offtake into the cylinder. **Assert the peak, not the end state** — a broken cylinder declares `Intent.none` and drains, so it read 0.21 on a run that had been at 4.06 and was already destroyed |
 | `entrainment_spec` | `Arbiter.entrained` — the **pressure-driven** half of settlement, which had no coverage of any kind until the cylinder relief valve was found to pass water in exactly zero states. That the gas figure the solve settled survives any weight the clamp allows, that liquid is additive but bounded by the bore, and that a path with no declared opinion still passes what is in it. **Its rig declares a `conductance:` and that is the entire point** — `transport_affinity_spec`'s does not, which is why all 13 of its examples test the other branch |
 | `obstruction_spec` | `Concerns::Obstructs` — occupancy against a **characteristic** volume, the derived top-dead-centre pressure, hydraulic lock graded by the driveline's stored energy, and that a relief valve sensing the wrong quantity stays shut on a state that would destroy the part. Also the concern's second caller, a bed choked by its own ash — **if it only ever had one it would not have earned a file** |
+| `assembly_spec` | Slots, parts, loadouts and the validator. **Two halves on purpose**: a deliberately tiny two-vessel registry, so which rule fired is never in doubt, then the same machinery pointed at the real engine — a mechanism that works on a toy and not on the thing it was built for has proved nothing. Guards the id contract (`provides:`), the flat-namespace collision naming *both* slots, reachability through the real `Path` router, and **the error/warning split**, which is the game's risk/reward axis rather than two severities. Also the loadout's three snapshot traps: string part ids, a partial loadout re-defaulting, and `:none`. **`OPTIONAL` is written out rather than derived from the slots**, so a slot quietly becoming optional — or quietly ceasing to be — fails a spec instead of passing one; the converse example empties every *required* slot and insists each is refused |
 | `content_spec` | Eager validation, mass balance, latent-heat encoding. Also that **every `:structural` material carries a `max_temperature_k`** — a missing one is silent and total, and is why over-temperature fatigue existed from the day `Wearing` landed and had never once fired |
+| `steam_engine_spec` → "the grate silts up" | The ash choke and its remedy. **Asserts its own precondition** — `headroom_pa > 10 kPa`, i.e. the drum is off its safety valve — because a pinned boiler reports every upstream change as zero and that reads exactly like a broken mechanic. It broke twice on a pinned `damper:` value before this, once when the stoker was re-rated and once when the damper conductance moved. The `× 1.01` floor on the recovery is there so noise cannot pass |
+| `steam_engine_spec` → "running without the safety devices" | The claim modularisation rests on: that going without a safety device is a **decision**, not a strictly-worse choice. Four slow examples, and they earn it — no safety valve is **+13% pressure and +13% speed** (687.0 kPa / 196.6 rpm against 608.0 / 174.5), no cylinder relief **wrecks the cylinder on an ordinary startup**, no blower never raises steam at all, no boiler tubes will not turn the engine. **Three other optional parts show no effect here and that is correct** — the ashpan, the cocks and the plug have slow or conditional hazards and are covered where those conditions are reached. Assert the *relationship*, not a pinned figure, for the reason the ashpan example records |
 | `steam_engine_spec` → "water in the cylinder" | Warming through as a **procedure**: that leaving the cocks shut fills the cylinder with its own condensate (peak occupancy 0.859, "knocking badly", relief valve lifting, no damage) and that opening them and shutting them again stays dry at full power. **Assert the peak, not the end state** — the water is swept out the moment the engine is turning properly, so an end-state assertion passes on a startup that had been knocking badly the whole way up. `light_and_run` takes `each_tick:` for exactly this |
 | `crown_sheet_spec` | The low-water hazard: that the plate is at water temperature while covered and costs nothing, that starving the feed uncovers it and blows the fusible plug, that **the plug goes before the plate does** (620 K against 750), that it stays melted once melted, and that the gauge glass reads high while the plate is already bare. **Requires `reactor_sim` directly** — `spec_helper` alone does not load the sim |
 | `diagnostic_spec` | The instrument chain, `record` vs `read`, `distortion?` |
@@ -55,8 +58,11 @@ instead of writing a second one.
 |---|---|
 | `runner/match_runner_spec` | The tick barrier and command routing — sim vs runner-addressed, and that a bad record cannot kill the loop |
 | `requests/commands_spec` | Ingress validation and status codes; that the operation id is stamped server-side, not trusted |
+| `requests/components_spec` | The outfitting screen, and **the order behind the button — validate, store, reset**. Guards the two things that order prevents: a build the validator refused reaching the database, and a refused build reaching the runner. Also that the loadout rides **inside** the reset command rather than being referenced by it, that an unchecked slot arrives as an explicit nil rather than re-defaulting, and that the panel follows the loadout (18 instruments → 16 with the safety valve off) |
 | `runner/view_broadcaster_spec` | The wire envelope, `prev_tick` chaining, and the resync contract |
 | `components/instrument_component_spec` | That every gauge carries the `data-` attributes Stimulus writes into |
+| `models/blueprint_spec` | That the unlock catalogue is **derived from the simulation's registries and never written down** — one part blueprint per registered part, one per operation type, one per content archetype — because a hand-maintained list drifts *silently*, leaving a new part simply unreachable. Also that a chassis id is scoped to its operation (`steam_engine/high_pressure`), so two machines that each name a frame `standard` cannot share an unlock, and that a real part id is not findable under the wrong kind |
+| `models/unlock_spec` | That a row **cannot be created naming a blueprint that does not exist**, and — the half that matters more — that a row a *rename* stranded can still be found afterwards. Stage 3 renamed `:stock_boiler` to `:locomotive_boiler`, and nothing revalidates rows already in the table; a stale one is not a crash but a player quietly missing what they earned. `insert_all` is used deliberately, because that is what a rename does |
 
 Component specs assert against the **Nokogiri fragment `render_inline` returns**, not Capybara's
 `page` — Capybara is not a dependency and this prototype does not need one.
@@ -99,6 +105,22 @@ for), pressure-driven phase change, conduction, ambient loss, and back-pressure.
 diagnostics list is one of each instrument kind.
 
 It is a **test fixture, not a game operation**. Prefer extending it over building a new rig.
+
+## Tune a spec's constants through the SPEC's rig, not a scratch script
+
+A scratch script and a spec diverge silently through **defaults nobody wrote down**, and the
+divergence does not announce itself — it just produces a number that does not transfer.
+
+Measuring the ashpan example's damper setting in a scratch script gave 35, and in the spec that
+was still 4.4 kPa from the safety valve and could measure nothing. The cause was one line that was
+never *written* in either place: the script set `cutoff: 40`, while `light_and_run` leaves cut-off
+at its `ControlPoint` default of **100 — full gear**, which is a materially different engine
+(517 kW against 364 kW at the same margin). Re-measured through `light_and_run` itself, the
+answer was damper 30.
+
+So when a value will end up inside an assertion, drive the sweep through the spec's own helper
+and its own `engine` constructor. `Match.create` vs `SteamEngine.build`, the seed, and every
+lever the helper does *not* set are all places the two rigs can quietly part company.
 
 ## Writing new specs
 
