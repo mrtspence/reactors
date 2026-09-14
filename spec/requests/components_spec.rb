@@ -178,6 +178,61 @@ RSpec.describe "Outfitting", type: :request do
     end
   end
 
+  # **The loadout parameter is attacker-shaped, and `permit!` was letting every shape through.**
+  #
+  # Brakeman flagged the mass assignment; the worse half was that `permit!` also admits
+  # non-scalars. An Array reaches `Assembly#normalise_part_id`, where `Array#to_sym` raises —
+  # and on the *preview* action, which has no rescue, that is a 500 rather than the "no such
+  # part" the validator exists to report. `permit` with the slot ids fixes both.
+  #
+  # None of these had a spec, which is why the shape survived. They assert **no 500**, not a
+  # particular verdict: what matters is that malformed input reaches the validator as data.
+  describe "a malformed loadout parameter" do
+    def preview_path
+      preview_components_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+    end
+
+    it "treats a nested array as no part rather than raising" do
+      post preview_path, params: { loadout: full_loadout.merge("boiler" => %w[a b]) }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("This will not run")
+    end
+
+    it "treats a nested hash as no part rather than raising" do
+      post preview_path, params: { loadout: full_loadout.merge("boiler" => { "evil" => "1" }) }
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    # `?loadout=x` makes the parameter a String, which does not respond to `permit`.
+    it "treats a scalar loadout as nothing submitted rather than raising" do
+      post preview_path, params: { loadout: "not-a-hash" }
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    # A JSON body can carry a number, and `Integer#to_sym` does not exist.
+    it "reports a non-string part id by name instead of raising on it" do
+      post preview_path, params: { loadout: full_loadout.merge("boiler" => 1) }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("no such part")
+    end
+
+    # A key that is not a slot is dropped by `permit` before `Assembly` ever sees it, so the
+    # "no slot :x on this chassis" branch is unreachable from the web. That is the right layering
+    # — the validator still guards the library — but it should not be mistaken for dead code.
+    it "drops a key that is not a slot instead of storing it" do
+      post path, params: { loadout: full_loadout.merge("mainframe" => "locomotive_boiler") }
+
+      expect(response).to redirect_to(
+        console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+      )
+      expect(Loadout.find_by(match_id: DevMatch::ID).parts).not_to have_key("mainframe")
+    end
+  end
+
   # The panel is a pure function of the loadout, which is what keeps rebuilding a throwaway
   # match in the web process sound now that a player chooses the configuration.
   describe "the panel follows the loadout" do

@@ -21,6 +21,7 @@ class ComponentsController < ApplicationController
 
     @chassis = DevMatch.chassis
     @assembly = DevMatch.outfitting(loadout: draft_loadout)
+    outfit_from_workshop
   end
 
   # Fit parts, then take it out.
@@ -64,12 +65,34 @@ class ComponentsController < ApplicationController
   # Values are left as Strings here on purpose — `Assembly` symbolises them, and doing it in two
   # places would mean two places to forget.
   def submitted_loadout
-    fitted = params.fetch(:loadout, {}).permit!.to_h
+    slots = DevMatch.outfitting.slots
+    fitted = permitted_loadout(slots)
 
-    DevMatch.outfitting.slots.to_h do |slot|
-      chosen = fitted[slot.id.to_s]
-      [ slot.id, chosen.presence ]
+    slots.to_h do |slot|
+      # `to_s` before `presence` so a non-String scalar becomes a part id the validator can
+      # refuse by name rather than an object `Assembly#normalise_part_id` will call `to_sym` on.
+      # A JSON body can carry `{"boiler": 1}`, and `Integer#to_sym` does not exist.
+      [ slot.id, fitted[slot.id.to_s].to_s.presence ]
     end
+  end
+
+  # **`permit` with the slot ids, never `permit!`** — flagged by Brakeman as mass assignment, and
+  # it was hiding a second, worse problem.
+  #
+  # Naming the keys is the obvious half: this method reads nothing but slot ids, so there was
+  # never a reason to admit anything else. The half that actually bites is that `permit` also
+  # admits only **scalars**. Under `permit!`, `loadout[boiler][]=x` arrives as an Array, reaches
+  # `Assembly#normalise_part_id`, and `Array#to_sym` raises — a 500 on the *preview* action,
+  # which has no rescue, instead of the "no such part" the validator would have reported.
+  #
+  # `loadout` is attacker-shaped and may not be a parameter hash at all: `?loadout=x` makes it a
+  # String, which does not respond to `permit`. Anything that is not a hash is treated as nothing
+  # submitted, which the validator then reports as a stripped machine rather than a crash.
+  def permitted_loadout(slots)
+    submitted = params[:loadout]
+    return {} unless submitted.is_a?(ActionController::Parameters)
+
+    submitted.permit(*slots.map { |slot| slot.id.to_s })
   end
 
   # `nil` means "nothing submitted, show what is fitted". An empty hash would mean something

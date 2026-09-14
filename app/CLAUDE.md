@@ -116,6 +116,23 @@ validator already refused.
 > broken. It was found by driving the real server with curl — which is the general lesson: a
 > request spec proves routing and behaviour, not that a browser can submit the form.
 
+> **`permit` with the keys you mean, never `permit!` — and the security warning is the lesser
+> half.** Brakeman flagged `params.fetch(:loadout, {}).permit!` as mass assignment, which it is.
+> What it was also doing was admitting **non-scalars**: `loadout[boiler][]=x` arrived as an Array,
+> reached `Assembly#normalise_part_id`, and `Array#to_sym` raised. On `fit` that is caught by the
+> rescue; on the **preview** action, which has none, it is a 500 — reachable by anyone who can
+> open the page. `{"boiler": 1}` in a JSON body did the same through `Integer#to_sym`.
+>
+> `permit(*slot_ids)` fixes both at once, because `permit` only admits scalar values. Two habits
+> that follow: **coerce a permitted value with `to_s` before treating it as an id**, since a JSON
+> body can carry a number where a form always carries a String; and **check the parameter is an
+> `ActionController::Parameters` before calling `permit` on it**, because `?loadout=x` makes it a
+> String and `String#permit` does not exist. Malformed input should reach the validator as data
+> and come back as "no such part", never as an exception.
+
+**Run `bin/brakeman` before calling controller work done.** `bin/ci` does, but the feedback loop
+is four seconds on its own, and this one was found by a scan on GitHub rather than locally.
+
 ## Blueprints: what a player owns
 
 Progression lives entirely on this side of the boundary, and that is the design rather than an
