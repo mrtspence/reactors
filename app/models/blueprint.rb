@@ -22,14 +22,30 @@ class Blueprint
   # then parts to hang on the frame, then people to work it.
   KINDS = %i[operation chassis part minion].freeze
 
-  attr_reader :kind, :blueprint_id, :label, :detail
+  attr_reader :kind, :blueprint_id, :label, :detail, :materials, :requires_achievement
 
-  def initialize(kind:, blueprint_id:, label:, detail: nil)
+  def initialize(kind:, blueprint_id:, label:, detail: nil, materials: {},
+                 requires_achievement: nil)
     @kind = kind.to_sym
     @blueprint_id = blueprint_id.to_s
     @label = label
     @detail = detail
+    # Resource id => kilograms. Empty means genuinely free; a blueprint with no entry in
+    # `config/blueprints.yml` does not get here at all, because that is an error rather than a
+    # free part.
+    @materials = materials.freeze
+    @requires_achievement = requires_achievement
     freeze
+  end
+
+  def free? = @materials.empty?
+
+  # Nothing can pay a bill of materials yet — there is no resource ledger, because a match reward
+  # cannot be designed against a single steam engine. So this is the achievement gate only, and
+  # the resource gate joins it here when there is something to spend.
+  def obtainable_by?(owner_id)
+    @requires_achievement.nil? ||
+      Achievement.earned?(@requires_achievement, owner_id: owner_id)
   end
 
   # The pair is the identity; neither half is unique on its own.
@@ -60,7 +76,10 @@ class Blueprint
 
     # Specs build throwaway part registries; without this the catalogue memoised from the real
     # one leaks into them. Same reason `ReactorSim::Parts.reset!` exists.
-    def reload! = @catalogue = nil
+    def reload!
+      @catalogue = nil
+      @costs = nil
+    end
 
     private
 
@@ -72,17 +91,52 @@ class Blueprint
       @catalogue ||= (operations + chassis + parts + minions).index_by(&:key).freeze
     end
 
+    # `config/blueprints.yml`, indexed the way the catalogue is. Delivery tier, deliberately —
+    # the simulation has no concept of value and must not acquire one (§7).
+    def costs
+      @costs ||= YAML.safe_load_file(Rails.root.join("config/blueprints.yml"))
+                     .flat_map { |kind, entries|
+                       entries.map { |id, spec| [ [ kind.to_sym, id ], spec || {} ] }
+                     }.to_h.freeze
+    end
+
+    # **A blueprint with no entry is an error, not a free one**, and a material or achievement it
+    # names that nothing knows is an error too. Same rule as everywhere else in this system, for
+    # the same reason: a lookup that silently misses is a feature silently switched off, and a
+    # price that defaults to zero is the same bug wearing different clothes.
+    def gates_for(kind, blueprint_id)
+      spec = costs.fetch([ kind, blueprint_id ]) do
+        raise Ungated, "no entry in config/blueprints.yml for #{kind} #{blueprint_id.inspect}"
+      end
+
+      materials = (spec["materials"] || {}).to_h { |id, kg| [ id.to_sym, Float(kg) ] }
+      materials.each_key { |id| ReactorSim::Content.default.resource(id) }
+
+      requires = spec["requires"]&.to_sym
+      if requires && !Achievement.known?(requires)
+        raise Ungated, "#{kind} #{blueprint_id.inspect} requires unknown achievement " \
+                       "#{requires.inspect}"
+      end
+
+      { materials: materials, requires_achievement: requires }
+    end
+
+    def build(kind, blueprint_id, label:, detail: nil)
+      new(kind: kind, blueprint_id: blueprint_id, label: label, detail: detail,
+          **gates_for(kind, blueprint_id.to_s))
+    end
+
     def operations
-      ReactorSim::Operations.known.map do |type|
-        new(kind: :operation, blueprint_id: type, label: humanize(type))
+      ReactorSim::Operations.catalogued.map do |type|
+        build(:operation, type, label: humanize(type))
       end
     end
 
     def chassis
-      ReactorSim::Operations.known.flat_map do |type|
+      ReactorSim::Operations.catalogued.flat_map do |type|
         ReactorSim::Operations.chassis_for(type).map do |frame|
-          new(kind: :chassis, blueprint_id: chassis_id(type, frame),
-              label: humanize(frame), detail: humanize(type))
+          build(:chassis, chassis_id(type, frame),
+                label: humanize(frame), detail: humanize(type))
         end
       end
     end
@@ -93,16 +147,24 @@ class Blueprint
     def parts
       ReactorSim::Parts.known.map do |id|
         part = ReactorSim::Parts.fetch(id)
-        new(kind: :part, blueprint_id: id, label: part.label, detail: part.description)
+        build(:part, id, label: part.label, detail: part.description)
       end
     end
 
-    # A minion blueprint is an **archetype**, not a person. You unlock the template; the minion
-    # in a match is minted from it and their health, fatigue and station live and die there —
-    # the same rule every other instance follows.
+    # **This models the wrong noun and is known to.** It enumerates content archetypes —
+    # `fireman`, `yardhand` — which are **jobs a minion performs**, not minions. What a player
+    # actually unlocks is an individual: Jim, who is human and starts with certain stats and tags,
+    # or Elowynne, who is an elf. Each is their own template, upgradable by further blueprints
+    # (certification courses that grant stat bumps or new tags), and each carries equipment in
+    # three slots — tool set, gear, utility — whose blueprints are unlocked *per minion*.
+    #
+    # Left in place rather than ripped out because the *mechanism* is right and the entities are
+    # not: minions are unlockable, these are simply not the minions. Nothing enforces minion
+    # ownership, so the wrong model cannot yet mislead a player. See
+    # `docs/design_sketches/minion-sketch.md`, and do not build on this.
     def minions
       ReactorSim::Content.default.minions.map do |id, spec|
-        new(kind: :minion, blueprint_id: id, label: spec.fetch(:label, humanize(id)))
+        build(:minion, id, label: spec.fetch(:label, humanize(id)))
       end
     end
 
@@ -113,4 +175,9 @@ class Blueprint
   # silently switched off — the same rule that makes `Parts.fetch` raise and `content_spec`
   # refuse a material with no temperature rating.
   class Unknown < StandardError; end
+
+  # A blueprint the cost catalogue does not price, or one whose bill names a material or
+  # achievement nothing knows. Fails the whole catalogue rather than that one entry: a partly
+  # built catalogue is how a part goes quietly missing from the workshop.
+  class Ungated < StandardError; end
 end

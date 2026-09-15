@@ -9,7 +9,7 @@ specific heat. Reference:
 |---|---|---|---|
 | `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume`, `bulk_density_kg_m3` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?` | `durability`, `initial_durability`, `broken` | `apply_wear`, `integrity` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to` |
 | `Pressurized` | needs `Holds` + `Thermal`; optional `material`, `shell_radius_m`, `wall_thickness_m`, `safety_factor`, `max_pressure_pa` | none — derived | `pressure_pa`, `gas_headroom_kg`, `rated_pressure_pa` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
@@ -115,6 +115,76 @@ Override `failure_type` and `failure_detail(state, ctx)` to describe it.
 
 The rolled starting durability is hidden from the player — that is where the uncertainty
 lives, rather than in the system being arbitrary.
+
+### `failure` is a mode, not a boolean
+
+State carries `failure: nil | <mode symbol>`, and `Node#broken?` derives from it — so a node
+that never included `Wearing` answers false without carrying a key it has no use for, which
+`Arbiter.settle_drive` relies on when it checks both ends of a link to a `Load`.
+
+**"Broken" cannot distinguish a seam weeping steam from a drum letting go**, and that is the
+only interesting axis a failure has. Two methods carry it:
+
+- `failure_modes` — the modes this part can enter, **in ascending severity**, as a plain hash
+  whose values are the consequences each carries. The order is the hash's own insertion order,
+  so the escalation ordering needs no second declaration to disagree with the first. *Nothing
+  consumes the values yet* — they are staged in
+  [`failure_model.md`](../../../docs/design_sketches/failure_model.md) §8.
+- `failure_mode(state, ctx, cause)` — what it became, from the conditions at that instant.
+  **Not derivable from `cause`**, and `Nodes::Boiler` is why: over-pressure and a dry crown
+  sheet both end as a hole in the shell, and what separates a split from an explosion is how
+  much pressure was behind the metal. `Nodes::Cylinder` is the case where the cause *does*
+  separate them cleanly, which is why both hooks exist.
+
+`break_part` is the one place a failure changes — sound → failed **and** failed → worse — so
+naming the mode stays a single decision. It emits an event only on a transition.
+
+### A broken part keeps being evaluated, and can get worse
+
+`apply_wear` used to return early on a failed node. That was a footgun, not an optimisation:
+**an early, mild failure must never immunise a part against a catastrophic one.** A cracked
+pipe that goes on being fed should be able to tear open; a reactor that has lost a seal must
+still be able to melt down. Left as it was, the first failure a part suffered was the last
+thing that could ever happen to it — a *safe harbour* on exactly the machines where that is
+most wrong.
+
+- **Fatigue cannot escalate; overload can.** Durability is spent once a part has failed, so
+  `stress_per_second` has nothing left to consume. That is the right story anyway: a split drum
+  that keeps being fired reaches bursting conditions; one that has been shut down does not.
+- **`escalate_to` only moves forward.** Otherwise a drum that had exploded would be
+  re-described as merely split the moment its own hole took the pressure away — the conditions
+  that destroyed it are gone precisely *because* it was destroyed.
+- A mode the table does not name sorts last, rather than being discarded quietly.
+
+### What a mode actually does
+
+Two consumers so far, and they sit on opposite sides of the generic/specific line:
+
+- **`Nodes::Breach`** reads the mode to size the hole a failed holder spills through.
+- **`failure_damages`** — `{ mode => { node_id => share } }` — is what the part takes with it,
+  spent by `Tick#spread_damage` as a share of each bystander's *starting* durability.
+
+**`failure_damages` is deliberately not an entry in `failure_modes`**, and the reason is the
+rule that everything under `nodes/` is generic: `Nodes::Boiler` cannot name a `:cylinder`,
+because a boiler in another machine has none near it. Which modes exist belongs to the class;
+who is standing next to it belongs to the machine, so it is configured per instance
+(`Vessel.new(damages: …)`).
+
+It is spent **on the transition only** — otherwise a failed part grinds its neighbours down at
+the tick rate — and **after** all wear is settled rather than inside the map, so two parts
+failing together and damaging each other give the same answer whatever order they are visited
+in. Phase 6 obeys order-independence like everything else.
+
+Everything else a failure does is still generic (a part that has let go stops turning, leaves
+the drivetrain, drives nothing), so **a part with no breach and no casualties fails without
+visible consequence unless it spins.**
+
+> **The mode is a Symbol held as a VALUE, so JSON hands it back as a String** — the fifth
+> instance of that trap here. `Operation#restore` normalises it. The failure is *partial*, which
+> is what makes it nasty: `broken?` is truthy either way, so the part stays broken in a mode
+> nothing matches. **The digest cannot catch it** — `canonical` goes through `JSON.generate`,
+> where `:explosion` and `"explosion"` are the same string. Only an identity assertion finds it;
+> `spec/reactor_sim/failure_spec.rb` has one.
 
 ## Rotating
 

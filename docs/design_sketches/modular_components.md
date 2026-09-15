@@ -805,11 +805,15 @@ have worked around:
 | flywheel | `:light_flywheel` | `:beam_flywheel` |
 | mill | `:mill_drive` | `:slow_mill_drive` |
 
-`CHASSIS` keeps `exhausts_to`, `condenser`, a `parts:` map of the eight that vary, and
-`burst_pa`. **`burst_pa` is the one entry still in the wrong place** — it is the pressure gauge's
-full-scale reading rather than a physical limit, and it stays because the panel catalogue is
-built from the chassis and does not know which boiler is fitted. Moving it needs parts to own
-their `Diagnostic`s, which is §4's Option A.
+`CHASSIS` keeps `exhausts_to`, `condenser`, a `parts:` map of the kinds that vary, and — at the
+time of writing — `burst_pa`.
+
+> **`burst_pa` left on 2026-09-14**, and `CHASSIS` is now topology and nothing else. It was the
+> pressure gauge's full-scale reading rather than a physical limit, and it stayed because the
+> panel catalogue was built from the chassis and did not know which boiler was fitted. The fix was
+> **not** §4's Option A as written — handing the fitted boiler to the catalogue is the same
+> category error one object closer, because a gauge's range is not a property of the drum either.
+> The dial became a part of its own. See [`blueprints.md`](blueprints.md) §19.
 
 ### Acceptance: bit-identical, and this time literally
 

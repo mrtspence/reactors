@@ -61,6 +61,56 @@ module ReactorSim
       # point being that a healthy boiler must not be taxed for being hot, only a starved one.
       CREEP_ONSET_FRACTION = 0.7
 
+      # ## Flash evaporation, and why a boiler does not merely leak
+      #
+      # **Over-pressure is not how a boiler is destroyed, and a pressure ratio is the wrong
+      # criterion for how badly.** Measured on this engine: firing hard with the safety valve
+      # removed, the drum peaks at 0.53 of its cold rating and never loses a point of
+      # durability. The shell is rated at nearly 2.4x its working pressure, which is a correct
+      # boiler. An earlier `EXPLOSION_RATIO = 1.5` was therefore unreachable — decoration.
+      #
+      # What actually destroys one is the water. A drum holds water at saturation *under
+      # pressure*; open it and the water is instantly superheated with respect to its new
+      # boiling point, and the excess sensible heat flashes part of it to steam:
+      #
+      #     x = c_p · (T_sat(P_vessel) − T_sat(P_ambient)) / h_fg
+      #
+      # At this engine's 609 kPa that is **11% of the water, as steam, at once** — 362 kg from a
+      # full drum, which is **604 m³ at atmospheric pressure trying to leave a 5 m³ shell.**
+      #
+      # **Note what flashing does NOT do: it cannot raise the pressure.** Making steam costs
+      # latent heat, which cools the water, so the pressure follows the water down. (A vessel
+      # run water-solid, with no steam space at all, is the exception, and this engine has no
+      # such part.) The destructive quantity is the *volume* — that expansion is what peels the
+      # plate back from the rent and unzips the shell, which is what the accident reports
+      # describe: one staybolt lets go and the rest follow simultaneously.
+      #
+      # So the mode is decided by **how much flash steam is available**, as a multiple of the
+      # drum's own volume. That reproduces the history the pressure rule got backwards:
+      # **a low-water crown-sheet failure at working pressure is the classic catastrophic
+      # explosion**, not a gentle split — heavy locomotives were torn off their frames by
+      # exactly that, and the boilers thrown hundreds of feet. A drum only splits quietly when
+      # there is little superheat to release: low pressure, or nearly no water left.
+      #
+      # ## Where 12 comes from, and why not 20
+      #
+      # Measured at the real event rather than from a table. Running this engine into the
+      # low-water hazard with the plug removed, the drum ruptures on tick 6111 holding 626 kg at
+      # 609 kPa — **67 kg of flash steam, 22.8 drum-volumes.** A synthetic sweep of the same
+      # water mass at a lower pressure says 18.6, which straddles a threshold of 20; tuning to
+      # that table would have put the canonical explosion on the wrong side of the line for a
+      # state the engine never actually occupies.
+      #
+      # 20 was the first guess and it happens to give the right answer here — by 14%. **That
+      # margin is too thin for a case the history is unambiguous about**, and this engine's
+      # balance constants move. 12 keeps the crown-sheet rupture explosive by a factor of 1.9
+      # while still leaving the quiet regimes quiet: a drum at 265 kPa with the same water is
+      # 11.4, a nearly-dry one 4.0, a cold one 0.
+      #
+      # Ten-odd volumes of steam is also where the criterion means something physically — no
+      # rent can pass ten vessel-volumes in the time the flash takes, so the shell has to go.
+      FLASH_EXPANSION_FOR_RUPTURE = 12.0
+
       attr_reader :steam_port, :carryover_tags, :wetness, :foaming_wetness, :priming_wetness,
                   :onset_fill, :swell_pa_per_s, :max_swell, :swell_settle_s, :swell_rise_s,
                   :crown_fill, :fired_by
@@ -201,6 +251,52 @@ module ReactorSim
       # the same shell and adding them would charge a boiler twice for one degree of overheat.
       def stress_per_second(state, ctx)
         [ super, crown_stress_per_second(state, ctx) ].max
+      end
+
+      # Ascending severity — `Concerns::Wearing` escalates forward through this order and never
+      # back, so a drum that has let go cannot be re-described as merely split once its own hole
+      # has taken the pressure away.
+      def failure_modes = { seam_split: {}, explosion: {} }
+
+      # **The same drum can be destroyed two ways and the mode is not the cause.** Over-pressure
+      # and a dry crown sheet both end as a hole in the shell; what separates a split from an
+      # explosion is how much superheated water is behind the metal when it goes, which is a
+      # reading at that instant rather than a property of what broke it.
+      def failure_mode(state, ctx, _cause)
+        flash_expansion(state, ctx) >= FLASH_EXPANSION_FOR_RUPTURE ? :explosion : :seam_split
+      end
+
+      # How much of the water would boil away the instant the shell is opened to the outside.
+      #
+      # Straight from the saturation curve the engine already uses for everything else — the
+      # superheat is the gap between the boiling point at this pressure and at ambient, and the
+      # sensible heat in that gap buys latent heat at `h_fg`. Per parcel, because a drum may
+      # hold more than one condensable and each has its own curve.
+      def flash_steam_kg(state, ctx)
+        content = ctx.content
+        pressure = pressure_pa(state, content)
+        return 0.0 if pressure <= Units::STANDARD_PRESSURE_PA
+
+        parcels(state).sum { |parcel| parcel_flash_kg(parcel, pressure, content) }
+      end
+
+      # The flash steam's volume at ambient, as a multiple of the drum's own — which is the
+      # figure that decides whether a rent relieves or unzips. Dimensionless on purpose: it
+      # means the same thing to a locomotive barrel and a tea urn.
+      def flash_expansion(state, ctx)
+        return 0.0 if volume_m3 <= 0.0
+
+        content = ctx.content
+        pressure = pressure_pa(state, content)
+        return 0.0 if pressure <= Units::STANDARD_PRESSURE_PA
+
+        volume = parcels(state).sum do |parcel|
+          kg = parcel_flash_kg(parcel, pressure, content)
+          next 0.0 if kg <= Parcel::EPSILON
+
+          kg * vapour_volume_per_kg(parcel, content)
+        end
+        volume / volume_m3
       end
 
       # ## What the plate can still hold at the temperature it has reached
@@ -399,6 +495,35 @@ module ReactorSim
 
         slug = ((fill - 1.0) / SLUG_RANGE).clamp(0.0, 1.0)
         foam + ((@priming_wetness - foam) * slug)
+      end
+
+      private
+
+      # Per parcel, because a drum may hold more than one condensable and each has its own
+      # saturation curve. Anything with no vapour phase declared simply does not flash.
+      def parcel_flash_kg(parcel, pressure, content)
+        resource = parcel.fetch(:resource)
+        spec = content.resource(resource)
+        phase = spec[:phase]
+        return 0.0 unless phase && phase[:vapour]
+
+        superheat = Resources::Saturation.saturation_temperature_k(spec, pressure) -
+                    Resources::Saturation.saturation_temperature_k(spec, Units::STANDARD_PRESSURE_PA)
+        return 0.0 unless superheat.positive?
+
+        fraction = (content.specific_heat(resource) * superheat) /
+                   phase.fetch(:latent_heat_j_per_kg).to_f
+        parcel.fetch(:kg) * fraction.clamp(0.0, 1.0)
+      end
+
+      # Ideal gas at the vapour's own boiling point, which is the state the flash lands in.
+      def vapour_volume_per_kg(parcel, content)
+        spec = content.resource(parcel.fetch(:resource))
+        vapour = spec.fetch(:phase).fetch(:vapour).to_sym
+        molar = content.resource(vapour).fetch(:molar_mass_g_per_mol).to_f / 1000.0
+        boiling = Resources::Saturation.saturation_temperature_k(spec, Units::STANDARD_PRESSURE_PA)
+
+        Units::GAS_CONSTANT * boiling / (molar * Units::STANDARD_PRESSURE_PA)
       end
     end
   end

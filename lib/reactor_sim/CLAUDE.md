@@ -43,6 +43,12 @@ loadout into the flat lists `Operation` has always taken, and nothing in them is
 `Tick`, `Arbiter` or any node. Keep it that way: a `Context` method taking a slot id would put
 assembly structure on the hot path for a lookup that could have been decided at build.
 
+A `Fragment` carries nodes, links, thermal and drive links, control points — and `diagnostics`,
+for the parts that **are** instruments. Everything else names its gauges by id and the
+operation's panel holds the definitions; a dial's full-scale reading has nowhere else to live,
+because it is a property of the dial rather than of what it is screwed to. Gauge ids are in the
+same flat namespace as everything else and collide the same way.
+
 ## The tick
 
 `Operation#step!` delegates to `Tick`, which reads the frozen previous state and returns the
@@ -62,11 +68,13 @@ you rearrange:
 ## Serialisation traps
 
 - **Symbols as *values* do not survive JSON.** `deep_symbolize` converts keys only. Resource
-  ids inside parcels, flags inside instrument state, a minion's `station`, and now **a
-  loadout's part ids** all broke this way. `Operation#restore` normalises the first three and
-  `Assembly#resolve_loadout` the fourth — if you add state holding symbols as values,
-  normalise it there too. The loadout is the worst of the four: a part id that misses is not a
-  nil, it is a **different machine**, rebuilt in silence.
+  ids inside parcels, flags inside instrument state, a minion's `station`, a loadout's part
+  ids, and now **a node's `failure` mode** all broke this way. `Operation#restore` normalises
+  all but the loadout, which `Assembly#resolve_loadout` handles — if you add state holding
+  symbols as values, normalise it there too. Two of the five are worse than a nil: a part id
+  that misses is a **different machine**, rebuilt in silence, and a failure mode that misses
+  leaves the part broken in a mode nothing matches, so every consequence keyed to it goes
+  quiet while `broken?` still reads true.
   **The digest cannot catch this**: `canonical` runs through `JSON.generate`, where `:stoking`
   and `"stoking"` are the same string, so a round-trip spec passes with the bug present. Only
   an identity assertion (`be(:stoking)`, never `eq`) finds it.

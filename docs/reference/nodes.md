@@ -49,7 +49,8 @@ been removed from senders, added to receivers, and every node rebalanced to one 
 `apply` is for what makes this node *this* node — a heater, a brake, a torque source. See
 [`tick.md`](tick.md#what-a-node-does-not-have-to-do).
 
-Optional hooks: `reactions` (array of reaction ids this node hosts) and `broken?(state)`.
+Optional hooks: `reactions` (array of reaction ids this node hosts) and `broken?(state)`, which
+derives from the `failure` mode rather than from a boolean — see `Wearing` below.
 
 ---
 
@@ -62,7 +63,7 @@ includes nothing carries nothing — an indicator lamp should not have a specifi
 |---|---|---|---|
 | `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?` | `durability`, `initial_durability`, `broken` | `apply_wear`, `integrity` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to` |
 | `Pressurized` | (needs `Holds` + `Thermal`) | none — derived | `pressure_pa`, `gas_headroom_kg` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
@@ -80,7 +81,9 @@ Config is supplied as **reader methods**, not ivars — `def volume_m3` / `attr_
   things that do not deteriorate but simply let go past a limit.
 
 `integrity` (0..1) is passed to `overload?` so a worn part fails sooner than a fresh one,
-keeping accumulated history meaningful. Events carry `cause: :fatigue` or `cause: :overload`.
+keeping accumulated history meaningful. Both routes converge on `break_part(state, ctx, cause)`,
+which is the one place a part goes from sound to failed; events carry `cause: :fatigue` or
+`cause: :overload` **and** the `mode:` the part became.
 
 `Cylinder`'s hydraulic lock is the clearest overload in the codebase and shows what the hook is
 for: water does not compress, so once the clearance space is full of it the piston has nowhere
@@ -92,6 +95,41 @@ applied *before* the hazard becomes possible, which is what makes it a procedure
 reaction.
 
 Override `failure_type` and `failure_detail(state, ctx)` to describe the failure.
+
+### What a failed part becomes
+
+State carries `failure: nil | <mode symbol>` rather than a boolean, because "broken" cannot
+distinguish a seam weeping steam from a drum letting go, and that is the only interesting axis
+a failure has. `broken?` derives from it, so a node with no `Wearing` answers false without
+carrying the key.
+
+A node declares `failure_modes` — the modes it can enter, **in ascending severity** — and
+`failure_mode(state, ctx, cause)` picks one from the conditions at the instant it failed. The
+mode is not derivable from the cause: a boiler destroyed by over-pressure and one destroyed by
+a dry crown sheet both end as a hole in the shell, and what separates a seam split from an
+explosion is how much pressure was behind the metal. `Nodes::Cylinder` is the converse case,
+where the cause *does* separate them, which is why both hooks exist.
+
+**A failed part keeps being evaluated and can get worse.** `apply_wear` no longer returns early
+on a broken node, because an early mild failure must never immunise a part against a
+catastrophic one. Only an overload can escalate — durability is already spent — and
+`escalate_to` only ever moves forward through the declared order, so a drum that has exploded
+cannot be re-described as merely split once its own hole has taken the pressure away.
+
+`Wearing::GENERIC_FAILURE` (`:failed`) is the fallback for a node that declares nothing, and
+`spec/reactor_sim/failure_spec.rb` treats a part left on it as a defect — it is the same shape
+of silent off switch as an infinite temperature rating.
+
+**A mode's one consumer today is `Nodes::Breach`** — the hole a failed holder spills through,
+built with the machine and shut until it is needed, opening by `opens_by[mode]` of full bore.
+That is what makes a ruptured drum behave differently from a sound one; the `derates:` and
+`damages:` entries in a mode table are declared and not yet read. Everything else a failure does
+is still generic — a part that has let go stops turning, leaves the drivetrain and drives
+nothing — so **a part with no breach wired to it still fails without visible consequence unless
+it spins.** Staged in [`design_sketches/failure_model.md`](../design_sketches/failure_model.md).
+
+> **The mode is a Symbol held as a value**, so it does not survive JSON and `Operation#restore`
+> normalises it. The digest cannot catch a miss; only an identity assertion can.
 
 ---
 

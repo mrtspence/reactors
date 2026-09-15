@@ -726,6 +726,17 @@ module ReactorSim
         stored > compression_work_joules(state, ctx.content)
       end
 
+      # Ascending severity. The two are genuinely different machines afterwards: a scored bore
+      # still runs and runs badly, a blown head does not run at all and is a hole in the engine.
+      def failure_modes = { scored_bore: {}, blown_head: {} }
+
+      # **The cause separates these cleanly, which is not usually true** — see `Nodes::Boiler`,
+      # where it is not. Here it is, because the two routes into failure are physically
+      # different events rather than two severities of one: fatigue is a barrel worn out by
+      # being run hot and wet over hours, and the only overload this part has is hydraulic
+      # lock, which bends and breaks things in a single stroke.
+      def failure_mode(_state, _ctx, cause) = cause == :overload ? :blown_head : :scored_bore
+
       def failure_type = :cylinder_failure
 
       def failure_detail(state, ctx)

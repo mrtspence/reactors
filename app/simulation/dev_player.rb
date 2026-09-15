@@ -20,17 +20,31 @@ module DevPlayer
 
   def unlocks = Unlock.owned_by(ID)
 
-  # A Set of `[kind, blueprint_id]` pairs, which is the shape a filter wants. One query rather
-  # than one per part: the outfitting screen asks this about every candidate in every slot, and
-  # that is twenty-odd questions on a page render.
-  def owned_keys = unlocks.pluck(:kind, :blueprint_id).map { |k, id| [ k.to_sym, id ] }.to_set
+  def owned_ids(kind) = Unlock.owned_ids(ID, kind)
 
   def unlocked?(kind, blueprint_id)
     unlocks.exists?(kind: kind.to_s, blueprint_id: blueprint_id.to_s)
   end
 
-  # Every blueprint in the catalogue, granted. Idempotent, so it is safe to call from a seed, a
-  # rake task, or a spec's setup as often as you like.
+  # **Acquire a blueprint the way a player would: through its gates.** Returns the `Unlock`, or
+  # nil — changing nothing — when a prerequisite is unmet.
+  #
+  # Distinct from `grant` on purpose. Earning is the real path and is checked; granting is a
+  # development override and says so by being a different word. Conflating them would mean the
+  # gate had no live call site and would rot — which is what happens to every check that only
+  # ever runs in a spec.
+  def earn(kind, blueprint_id)
+    blueprint = Blueprint.fetch(kind, blueprint_id)
+    return unless blueprint.obtainable_by?(ID)
+
+    grant(blueprint.kind, blueprint.blueprint_id)
+  end
+
+  # Every blueprint in the catalogue, **gates ignored**. Idempotent, so it is safe to call from a
+  # seed, a rake task, or a spec's setup as often as you like.
+  #
+  # Bypassing the gates is the point: this is the stage 5a baseline where the dev player owns
+  # everything so the game plays as it did, and nothing awards an achievement yet.
   def grant_everything!
     Blueprint.known.each do |blueprint|
       Unlock.grant(owner_id: ID, kind: blueprint.kind, blueprint_id: blueprint.blueprint_id)

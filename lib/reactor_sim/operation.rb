@@ -143,11 +143,11 @@ module ReactorSim
                 pressure_pa: (node.pressure_pa(state, @content) if node.respond_to?(:pressure_pa)),
                 kg: (node.contents_kg(state) if node.respond_to?(:contents_kg)),
                 durability: state[:durability],
-                broken: state[:broken] }.compact ]
+                failure: state[:failure] }.compact ]
       end
     end
 
-    def broken? = @state.fetch(:nodes).values.any? { |s| s[:broken] }
+    def broken? = @state.fetch(:nodes).values.any? { |s| s[:failure] }
 
     def ledger = @state.fetch(:ledger)
 
@@ -267,9 +267,16 @@ module ReactorSim
     # against its absence.
     def restore(state)
       nodes = state.fetch(:nodes).to_h do |id, node_state|
-        next [ id, node_state ] unless node_state.key?(:parcels)
+        restored = node_state
+        restored = restored.merge(parcels: Parcel.normalise(restored.fetch(:parcels))) if restored.key?(:parcels)
 
-        [ id, node_state.merge(parcels: Parcel.normalise(node_state.fetch(:parcels))).freeze ]
+        # A failure MODE is a symbol living as a value, so JSON hands it back as a string.
+        # **Fifth instance of this trap**, and the nastiest yet: `broken?` is truthy either
+        # way, so the part stays broken — in a mode nothing matches, with every `case` on it
+        # falling to its else branch. A boiler that exploded comes back merely failed.
+        restored = restored.merge(failure: restored[:failure]&.to_sym) if restored.key?(:failure)
+
+        [ id, restored.freeze ]
       end
 
       # Instrument flags are symbols living in an array — values, not keys — so they come

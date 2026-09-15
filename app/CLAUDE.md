@@ -7,7 +7,7 @@ before assuming anything here exists.
 app/simulation/   DevMatch, StreamNames — the ONLY code both web and runner touch
 app/runner/       MatchRunner (4 Hz loop), CommandConsumer, ViewBroadcaster — bin/match_runner
 app/kafka/        CommandProducer — web side, produces to match.commands
-app/controllers/  ConsolesController (chrome), CommandsController (202), MatchesController
+app/controllers/  Consoles(show), Commands(create), Loadouts(edit/update), LoadoutDrafts(create), MatchResets(create)
 app/channels/     OperationChannel — read-only, telemetry out
 app/components/   PanelComponent -> InstrumentComponent -> Instruments::{Needle,Digital,Prose,Lamp}
 app/javascript/   controllers/console_controller.js, channels/consumer.js
@@ -28,6 +28,39 @@ putting a class the controller depends on inside `app/runner/` would lie about t
 
 The design for all of it is [`docs/architecture.md`](../docs/architecture.md) §6–§10. It was
 written before the simulation rewrite and is unaffected by it.
+
+## Controllers are routing, not logic
+
+**Every action is one of the seven: `index`, `show`, `new`, `create`, `edit`, `update`,
+`destroy`.** There are no others. An action named for a verb in the domain — `fit`, `preview`,
+`reset`, `publish` — is a signal, and it means one of two things:
+
+1. **A resource is missing.** Name the noun the verb acts on and the verb becomes standard.
+   "Fit these parts" is `update` on a **loadout**. "Grant a blueprint" is `create` on an
+   **unlock**, and revoking it is `destroy`. If a verb resists this, the noun is usually a
+   *decision* or a *draft* rather than a record — those are resources too.
+2. **The work belongs somewhere else.** Lift it into the model of the underlying resource, or
+   into a service object beside it.
+
+**A controller may express routing, authorisation, parameter permitting, and which template or
+redirect follows. Nothing else.** No domain rules, no multi-step orchestration, no assembling a
+view's data out of three collaborators. If an action needs more than a few lines, the lines are
+in the wrong file.
+
+> Written down after `ComponentsController#fit` grew an ownership check, a workshop query and a
+> per-slot candidate list on top of the validate/store/reset sequence it already had. Each
+> addition was individually reasonable and the total was not, which is how this always happens —
+> **the rule is here so the first one gets refused, not the fifth.**
+>
+> Applying it retired three non-standard actions: `components#show`/`#fit` became
+> `loadouts#edit`/`#update` plus `loadout_drafts#create`, and `matches#reset` became
+> `match_resets#create`. `MatchesController.reset_command` — domain work living on a controller —
+> moved to `DevMatch`. The work went to `Outfitting`.
+
+The counter-pressure to watch for: a thin controller that delegates to a fat `params`-aware
+service is the same problem moved. A service object takes **resolved arguments**, never
+`params`, and never touches `session`, `request` or `flash` — that is what keeps it testable
+without a request and reusable from a rake task.
 
 ## The boundary
 
@@ -86,9 +119,34 @@ why both processes read it through `DevMatch.chassis` and never from `ENV` direc
 
 ## The outfitting screen
 
-`ComponentsController` renders configuration only, exactly as the console does — `Assembly`
-answers every question on the page without building an operation, because most of what it shows
-is about builds nobody has chosen.
+```
+GET   …/operations/:id/loadout/edit    the screen
+PATCH …/operations/:id/loadout         fit it, and rebuild the engine from cold
+POST  …/operations/:id/loadout_draft   evaluate a build without storing it
+```
+
+**The chassis is a choice on this screen, and it decides what slots exist** — the atmospheric
+frame has a condenser and the high-pressure one does not. Two rules follow, and both were bugs
+first:
+
+- **Permit against the SUBMITTED chassis, not the stored one.** They differ for exactly one
+  request — the one where a player changes frame — and permitting against the old chassis drops
+  the slots only the new one has.
+- **Carry through only the keys the submission contains.** Stage 4's rule that an unfitted slot
+  is an explicit empty exists so removing the fusible plug and saving does not put it back. On a
+  frame change it is wrong: the form was drawn for the *old* frame, so naming a slot it never
+  offered sends an explicit empty for a question nobody asked — and switching to the atmospheric
+  frame refused itself with *"Condenser is required and nothing is fitted."* A same-frame save
+  names every slot anyway, because the form renders every slot, so nothing re-defaults.
+
+**`Outfitting` does the work; the controllers route.** It takes an owner id and a parts hash —
+never `params` — and answers everything the screen asks: what is fitted, what may be offered,
+what is locked, what will not run, and `fit!`. That is what lets a rake task drive the same path
+and a spec exercise it without a request.
+
+It renders configuration only, exactly as the console does — `Assembly` answers every question
+about the machine without building an operation, because most of what the screen shows is about
+builds nobody has chosen.
 
 **The order through the Fit button is the design: validate → store → reset.** A build that cannot
 assemble never reaches the database, so a runner booting cold cannot inherit a machine the
@@ -98,7 +156,20 @@ validator already refused.
   Rails booted and could read the `loadouts` table; it must not. The web process writes the row
   and *then* produces the command, so a runner reading the table would read it at whatever moment
   the record happened to arrive — a reset racing a save rebuilds the previous machine with
-  nothing to show for it. `MatchesController.reset_command` builds the payload.
+  nothing to show for it. `DevMatch.reset_command` builds the payload.
+- **Two verdicts, reported apart.** "You have not unlocked this" and "this will not run" are
+  different failures with different fixes; merging them into one list makes the first
+  unactionable, because a player goes looking for a wiring problem that is not there. Ownership
+  is checked **first**, for the same reason.
+- **The dropdown filter is a courtesy; `Outfitting#locked` is the gate.** The form is a plain
+  POST and anyone can submit any part id — a client-side-only filter is not a filter.
+- **A locked part that is already fitted still appears in its dropdown**, flagged. Hiding it
+  would report an error about something the player can neither see nor change.
+- **The form's own action is Fit, and previewing is what the JavaScript overrides.** Previewing
+  is inherently scripted — it fires on `change` — so degrading to "no live preview" is right
+  where degrading to "cannot fit anything" would not be. `outfit_controller.js` borrows the form,
+  points it at the draft resource, clears Rails' `_method` override so it posts rather than
+  patches, and puts all three back.
 - **An unchecked slot submits as an explicit empty, never as a missing key.** A partial loadout
   falls back to `slot.default` in `Assembly`, which would silently refit the part a player just
   removed.
@@ -153,6 +224,28 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
 - **The simulation must never learn about ownership.** `Assembly` answers *"will this build
   run?"*; the delivery tier answers *"are you allowed this part?"*. Two validators, and keeping
   them apart is what lets the first stay simple and the second stay testable without a player.
+- **The gates live in `config/blueprints.yml`, not in `content/`.** A bill of materials and an
+  achievement prerequisite per blueprint. `content/` is the simulation's own YAML and the sim
+  must not learn what anything costs — but a bill may *name* a resource the sim knows, and that
+  reference is checked when the catalogue builds. Prices are the one part of this system that
+  genuinely is data: scalars, no logic, rebalanced constantly, and a rebalance should not be a
+  change to `lib/reactor_sim` requiring both dev processes restarted.
+- **A blueprint with no entry is an error; `materials: {}` is how something is free.** The
+  difference between "decided to be free" and "nobody filled it in" has to survive in the file,
+  for the same reason `content_spec` refuses a structural material with no temperature rating.
+- **`DevPlayer.earn` goes through the gates; `grant` is an override.** Different words on
+  purpose — if the only path bypassed the check, the check would have no live call site and
+  would rot. `Achievement.earned?` is a stub returning true, so the gate never closes today; the
+  specs prove it is wired by stubbing it `false`.
+- **Operations come from `Operations.catalogued`, never `Operations.known`.** A spec rig registers
+  globally and `known` includes it, so deriving from `known` made `spec/support/loop_rig.rb` an
+  unlockable machine nobody had priced — which took the whole catalogue down, and **only in a
+  full-suite run**, because nothing else loads that file.
+- **`Blueprint.minions` enumerates the wrong noun and is marked as such.** It lists content
+  archetypes — `fireman`, `yardhand` — which are *jobs*, not minions. A player unlocks an
+  individual (Jim, Elowynne), each their own upgradable template carrying equipment in three
+  slots. Nothing enforces minion ownership, so it cannot mislead anyone yet. Do not build on it;
+  see [`design_sketches/minion-sketch.md`](../docs/design_sketches/minion-sketch.md).
 
 > **`rake blueprints:audit` after renaming anything.** Validation refuses to *create* a row
 > naming a blueprint that does not exist, but nothing revalidates rows already in the table —

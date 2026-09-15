@@ -13,7 +13,9 @@ require "reactor_sim"
 # So the hazard is positional and the plate gets a derived temperature of its own. These examples
 # guard the three things that were each got wrong on the way in.
 RSpec.describe "the crown sheet" do
-  def engine = ReactorSim::Operations::SteamEngine.build(id: :engine, seed: 7)
+  def engine(loadout: {})
+    ReactorSim::Operations::SteamEngine.build(id: :engine, seed: 7, loadout: loadout)
+  end
 
   COLD_START = { igniter: 100, blower: 100, damper_open: 100, stoking: 70, feed: 45,
             throttle_open: 0, load_demand: 0, ash_raking: 20, ease_safety: 0,
@@ -77,6 +79,39 @@ RSpec.describe "the crown sheet" do
       expect(op.nodes.fetch(:boiler).integrity(boiler_state(op))).to eq(1.0)
       # Steam onto the grate puts the fire out, so the engine stops. That is the cost.
       expect(op.state.fetch(:nodes).fetch(:cylinder).fetch(:shaft_power_w)).to be < 1_000.0
+    end
+
+    # **The other half of the plug's story, and what makes it a save rather than a nuisance.**
+    # Leave it out and the same run destroys the drum.
+    #
+    # Two things worth knowing here, both measured rather than assumed:
+    #
+    # **This is the only route by which this engine can destroy its boiler.** Firing hard for
+    # 6000 ticks with the safety valve removed, the drum peaks at 0.53× its cold rating and
+    # never loses a point of durability — the shell is rated at nearly 2.4× its working
+    # pressure, which is a correct boiler. Over-pressure is not the hazard; low water is, which
+    # is what the period sources say too.
+    #
+    # **And it is an EXPLOSION, which is the whole reason the failure model measures flash
+    # steam rather than a pressure ratio.** Measured at the rupture: tick 6111, 626 kg of water
+    # still in the drum at 609 kPa — 67 kg of that flashes the instant the shell opens, which is
+    # 22.8 times the drum's own volume in steam. No rent passes twenty vessel-volumes in the
+    # time a flash takes, so the plate peels back and the shell unzips.
+    #
+    # This is exactly what the accident reports describe: a low-water crown-sheet failure at
+    # ordinary working pressure was *the* catastrophic locomotive boiler explosion, violent
+    # enough to tear the boiler off its frames. An earlier version of the model called this a
+    # gentle seam split, on a pressure-ratio rule that could never fire at all — the drum never
+    # exceeds 0.53× its cold rating however hard it is fired.
+    it "explodes, and spills itself, when the plug has been left out" do
+      op = engine(loadout: { fusible_plug: nil })
+      events = starve(op, feed: 0)
+
+      expect(events.map { |e| e[:type] }).to include(:vessel_rupture)
+      expect(boiler_state(op).fetch(:failure)).to be(:explosion)
+      # **The whole point of the failure model: a failed drum is not a sealed drum.** Before
+      # `Nodes::Breach` a burst boiler kept its contents and went on making steam.
+      expect(op.ledger.fetch(:mass_spilled)).to be > 0.0
     end
 
     # **A fuse, not a valve.** Built on `ReliefValve` this would re-seat the moment the water came

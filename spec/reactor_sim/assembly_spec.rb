@@ -252,7 +252,8 @@ RSpec.describe ReactorSim::Assembly do
       s = SteamEngine::CHASSIS.fetch(chassis)
       described_class.new(
         slots: SteamEngine.slots(s), loadout: loadout, spec: s,
-        fixtures: SteamEngine.fixtures(s), instruments: SteamEngine.catalogue(s),
+        fixtures: SteamEngine.fixtures(s), instruments: SteamEngine.catalogue,
+        order: SteamEngine::PANEL_ORDER,
         routes: SteamEngine::ROUTES, advisories: SteamEngine::ADVISORIES
       )
     end
@@ -283,6 +284,32 @@ RSpec.describe ReactorSim::Assembly do
       it "raises on a type nobody registered" do
         expect { ReactorSim::Operations.chassis_for(:water_wheel) }
           .to raise_error(ReactorSim::Error, /unknown operation type/)
+      end
+    end
+
+    # **A spec rig is not a machine, and something outside this library is counting machines.**
+    #
+    # `spec/support/loop_rig.rb` registers globally — it has to, or `Match.create` cannot resolve
+    # it — and the delivery tier derives its blueprint catalogue from this registry. The rig
+    # therefore arrived as an operation nobody had priced and took the entire catalogue down with
+    # it, and **only in a full-suite run**, because nothing else loads that file. A targeted run
+    # of the specs that failed passed every time.
+    describe "harnesses" do
+      it "keeps a harness out of the catalogued machines but leaves it buildable" do
+        expect(ReactorSim::Operations.known).to include(:steam_engine)
+        expect(ReactorSim::Operations.catalogued).to include(:steam_engine)
+        expect(ReactorSim::Operations).not_to be_harness(:steam_engine)
+      end
+
+      # Guarded from this side rather than only from the Rails side, because the rule belongs to
+      # whoever registers: if you register a rig, say so.
+      it "marks every registered rig as one" do
+        rigs = ReactorSim::Operations.known - ReactorSim::Operations.catalogued
+
+        expect(ReactorSim::Operations.known - rigs).to eq([ :steam_engine ]),
+                                                       "an operation registered by a spec is " \
+                                                       "being counted as a machine — pass " \
+                                                       "`harness: true` when registering it"
       end
     end
 
@@ -348,12 +375,24 @@ RSpec.describe ReactorSim::Assembly do
     end
 
     # The gauge list must not move when the slot list is reordered for some unrelated reason:
-    # a player learns a panel by where things are. Selection runs over the catalogue, not over
-    # the parts.
-    it "orders instruments by the panel's catalogue, not by slot order" do
-      catalogue_order = SteamEngine.catalogue(spec).keys
+    # a player learns a panel by where things are. `PANEL_ORDER` decides, not the slots and not
+    # the parts — including for a gauge an instrument part *supplied* rather than named.
+    it "orders instruments by the panel's order, not by slot order" do
+      expect(real.diagnostics.map(&:id))
+        .to eq(SteamEngine::PANEL_ORDER - [ :condenser_vacuum ])
+    end
 
-      expect(real.diagnostics.map(&:id)).to eq(catalogue_order - [ :condenser_vacuum ])
+    # **The pressure gauge arrives from a part and still lands first.** It is the most important
+    # dial on the panel, and an instrument becoming a fitting must not push it to the end of the
+    # list — which is what appending supplied gauges would have done.
+    it "places a supplied gauge where the panel says, not where the slot is" do
+      expect(real.diagnostics.first.id).to eq(:boiler_pressure)
+      expect(real.slots.index { |s| s.id == :boiler_gauge }).to be > 0
+    end
+
+    # Every gauge the panel can show has to have a place, or it silently lands at the end.
+    it "places every catalogued gauge" do
+      expect(SteamEngine.catalogue.keys - SteamEngine::PANEL_ORDER).to be_empty
     end
 
     it "brings the condenser's gauge only on the chassis that can fit one" do
@@ -382,20 +421,25 @@ RSpec.describe ReactorSim::Assembly do
       expect(real.fragment.nodes.map(&:id)).to include(:boiler, :cylinder, :flywheel, :relief)
     end
 
-    # **Seven parts can be left out, and none of them may break the build.** This is the whole
+    # **Eight parts can be left out, and none of them may break the build.** This is the whole
     # of stage 2 asserted in one place: what is optional, that removing any one of them still
     # assembles and still passes every route check, and that each one says something before the
     # player finds out the hard way.
+    #
+    # `boiler_gauge` is the eighth and the odd one out: every other entry is machinery, and it is
+    # an **instrument**. Leaving it off costs no power and breaks nothing — it takes away the only
+    # honest warning the engine gives, which is the same bargain the safety devices offer applied
+    # to what the driver can see rather than to what can break.
     #
     # The list is deliberately written out rather than derived from the slots, because a slot
     # silently becoming optional — or silently ceasing to be — is exactly the kind of change
     # that should fail a spec rather than pass one.
     describe "what can be left out" do
       OPTIONAL = { ash_pan: :omit, blower: :bypass, boiler_tubes: :bypass,
-                   drain_cocks: :omit, safety_valve: :omit, fusible_plug: :omit,
-                   cylinder_relief: :omit }.freeze
+                   boiler_gauge: :omit, drain_cocks: :omit, safety_valve: :omit,
+                   fusible_plug: :omit, cylinder_relief: :omit }.freeze
 
-      it "is exactly these seven, with these behaviours" do
+      it "is exactly these eight, with these behaviours" do
         declared = SteamEngine.slots(spec).reject(&:required?)
                               .to_h { |s| [ s.id, s.when_empty ] }
 
@@ -420,8 +464,19 @@ RSpec.describe ReactorSim::Assembly do
 
           # The point of fragments: a part's nodes, links, levers and gauges leave together,
           # with no edit anywhere else. Before this, removing one meant finding all four lists.
+          #
+          # **Measured across every list rather than on nodes alone.** An instrument part brings
+          # no nodes at all — a pressure gauge is a `Diagnostic` and nothing else — so a node
+          # count encodes an assumption that every part is machinery, which stopped being true
+          # the moment a dial became a fitting.
           it "takes its own pieces with it and nothing else" do
-            expect(stripped.fragment.nodes.length).to be < real.fragment.nodes.length
+            def pieces(assembly)
+              f = assembly.fragment
+              f.nodes.length + f.links.length + f.control_points.length +
+                f.thermal_links.length + f.drive_links.length + assembly.diagnostics.length
+            end
+
+            expect(pieces(stripped)).to be < pieces(real)
             expect(stripped.verdict.errors).to be_empty
           end
         end

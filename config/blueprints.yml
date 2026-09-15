@@ -1,0 +1,205 @@
+# What it costs to unlock a blueprint, and what you must have done first.
+#
+# **This is delivery-tier data and it must stay out of `content/`.** That YAML is the
+# simulation's own, read by `content.rb` at boot, and the simulation has no concept of value and
+# must not acquire one — it would be the first field in there existing solely for Rails. See
+# `docs/design_sketches/blueprints.md` §7.
+#
+# It is also the one part of the blueprint system that genuinely *is* data rather than code.
+# Part behaviour is a builder block and stays in `parts.rb` beside the sweeps that chose its
+# numbers (`modular_components.md` §3); a bill of materials is scalars with no logic that will be
+# rebalanced constantly, and a rebalance should not be a change to `lib/reactor_sim` requiring
+# both dev processes restarted.
+#
+# ## Rules
+#
+#   * **Every blueprint needs an entry.** A missing one is an error at catalogue build, not a
+#     free part — `content_spec` already refuses a structural material with no temperature
+#     rating for the same reason: a default of zero is a silent off switch.
+#   * **`materials: {}` means genuinely free**, and has to be written out. That is the difference
+#     between "decided to be free" and "nobody filled it in".
+#   * **Material names are resource ids the simulation knows** (`content/resources/`), checked at
+#     catalogue build. There is no `copper` — the six metals are cast_iron, wrought_iron, steel,
+#     bronze, babbitt and fusible_alloy. Quantities are kilograms.
+#   * **`requires` names an achievement** (`Achievement::KNOWN`), also checked. Optional.
+#
+# ## The numbers are provisional and are meant to look it
+#
+# Nothing can pay these yet: there is no resource ledger, because a match reward cannot be
+# designed against a single steam engine — the mechanic is one operation's failure starving
+# another's input (`blueprints.md` §4). These are plausible masses for the thing described, not
+# balanced prices, and they exist so the *shape* is right before anything depends on it.
+
+operation:
+  # The starting machine. Free by definition — a player who cannot assemble anything has no
+  # opening screen. Which things are free is what defines the bottom tier every later choice is
+  # measured against, and that tier is still to be designed.
+  steam_engine:
+    materials: {}
+
+chassis:
+  # The frame itself: bedplate, framing, the housing everything else bolts to. Watt's is the
+  # heavier of the two because a beam engine is a building with an engine in it.
+  steam_engine/atmospheric:
+    materials:
+      cast_iron: 9000
+      wrought_iron: 2500
+  steam_engine/high_pressure:
+    materials:
+      cast_iron: 4200
+      wrought_iron: 1800
+
+# You unlock the template, never the person. Health, fatigue and station are minted fresh inside
+# each match and die with it, exactly as a part's condition does.
+#
+# Free because a crew is not built out of metal. What a minion should actually cost — wages,
+# reputation, an achievement — is a question for whenever minions do real work.
+minion:
+  fireman:
+    materials: {}
+  yardhand:
+    materials: {}
+
+part:
+  # --- fire -------------------------------------------------------------------------------
+  stock_firebox:
+    materials:
+      wrought_iron: 1400
+      cast_iron: 600        # firebars, which are cast because they live in the fire
+  stock_ash_pan:
+    materials:
+      wrought_iron: 180
+  wide_damper:
+    materials:
+      cast_iron: 140
+  narrow_damper:
+    materials:
+      cast_iron: 110
+  stock_stoker:
+    materials:
+      steel: 90
+  stock_bunker:
+    materials:
+      wrought_iron: 700
+  stock_blower:
+    materials:
+      cast_iron: 220
+      bronze: 40
+
+  # --- the boiler and what protects it ------------------------------------------------------
+  locomotive_boiler:
+    materials:
+      wrought_iron: 3200
+      cast_iron: 300
+  beam_boiler:
+    materials:
+      wrought_iron: 4600    # wider, thinner, and a great deal more of it
+      cast_iron: 400
+  stock_boiler_tubes:
+    # The single biggest upgrade on the engine, and a great many small tubes.
+    materials:
+      wrought_iron: 850
+  stock_fusible_plug:
+    # Almost nothing, and it is the difference between a bad day and a destroyed boiler.
+    materials:
+      fusible_alloy: 3
+      bronze: 6
+  ramsbottom_safety_valve:
+    materials:
+      bronze: 34
+      steel: 12
+    requires: first_full_head_of_steam
+  low_pressure_safety_valve:
+    materials:
+      bronze: 28
+      steel: 8
+
+  # **Instruments are parts too, and they cost almost nothing to make.** That is the whole
+  # difficulty of pricing them: a Bourdon gauge is a curled brass tube and a pointer, so the bill
+  # of materials cannot be what makes a better one expensive. Whatever eventually gates an
+  # instrument upgrade — an achievement, a craftsman, a certification — it will not be tonnage.
+  bourdon_pressure_gauge:
+    materials:
+      bronze: 4
+      steel: 2
+  low_pressure_gauge:
+    materials:
+      bronze: 4
+      steel: 2
+  compensated_pressure_gauge:
+    materials:
+      bronze: 6
+      steel: 3
+    requires: ran_an_hour_without_blowing_off
+
+  # --- water ------------------------------------------------------------------------------
+  stock_water_supply:
+    materials:
+      wrought_iron: 950
+  stock_injector:
+    materials:
+      bronze: 70
+      steel: 25
+
+  # --- steam ------------------------------------------------------------------------------
+  stock_regulator:
+    materials:
+      bronze: 55
+      steel: 20
+  stock_steam_chest:
+    materials:
+      cast_iron: 310
+  blastpipe_chimney:
+    # Stack and blast nozzle were proportioned together and are one assembly, which is why this
+    # is a chimney variant rather than two blueprints.
+    materials:
+      wrought_iron: 1100
+      cast_iron: 150
+    requires: raised_steam_from_cold_alone
+  plain_chimney:
+    materials:
+      wrought_iron: 900
+  stock_condenser:
+    materials:
+      cast_iron: 1600
+      bronze: 120
+
+  # --- the engine ---------------------------------------------------------------------------
+  high_pressure_cylinder:
+    materials:
+      cast_iron: 620
+      bronze: 45          # valve faces, which have to slide against iron and lose
+    requires: first_full_head_of_steam
+  atmospheric_cylinder:
+    materials:
+      cast_iron: 2400
+      bronze: 60
+  high_pressure_cylinder_relief:
+    materials:
+      bronze: 22
+      steel: 7
+  low_pressure_cylinder_relief:
+    materials:
+      bronze: 18
+      steel: 6
+  stock_drain_cocks:
+    materials:
+      bronze: 14
+  light_flywheel:
+    materials:
+      cast_iron: 2600
+      babbitt: 12         # the bearings it turns in, which are meant to be what wears out
+  beam_flywheel:
+    materials:
+      cast_iron: 11000
+      babbitt: 30
+  mill_drive:
+    materials:
+      cast_iron: 800
+      steel: 260
+      babbitt: 18
+  slow_mill_drive:
+    materials:
+      cast_iron: 1100
+      steel: 180
+      babbitt: 22

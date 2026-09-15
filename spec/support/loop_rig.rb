@@ -167,6 +167,12 @@ module LoopRig
   end
 end
 
-ReactorSim::Operations.register(LoopRig::TYPE) do |id:, seed:, time_scale: 1.0, state: nil, rngs: nil|
+# **`harness: true`, and without it this rig becomes an unlockable machine.** It has to register
+# globally for `Match.create` to find it, and the delivery tier's blueprint catalogue is derived
+# from that same registry — so the rig turned up as an operation nobody had priced and took the
+# whole catalogue down with it. Only in a full-suite run, too, because nothing else loads this
+# file.
+ReactorSim::Operations.register(LoopRig::TYPE, harness: true) do |id:, seed:, time_scale: 1.0,
+                                                                  state: nil, rngs: nil|
   LoopRig.build(id: id, seed: seed, time_scale: time_scale, state: state, rngs: rngs)
 end

@@ -106,6 +106,40 @@ RSpec.describe Unlock do
       expect(Unlock.stale).to be_empty
     end
 
+    # **Earning goes through the gates; granting is an override.** They are different words on
+    # purpose — conflating them would leave `obtainable_by?` with no live call site, and a check
+    # that only ever runs in a spec rots.
+    describe "earning versus granting" do
+      it "earns a blueprint whose prerequisite is met" do
+        expect(described_class.earn(:part, :ramsbottom_safety_valve)).to be_persisted
+        expect(described_class).to be_unlocked(:part, :ramsbottom_safety_valve)
+      end
+
+      it "refuses to earn one whose prerequisite is not, and stores nothing" do
+        allow(Achievement).to receive(:earned?).and_return(false)
+
+        expect(described_class.earn(:part, :ramsbottom_safety_valve)).to be_nil
+        expect(described_class).not_to be_unlocked(:part, :ramsbottom_safety_valve)
+      end
+
+      # An ungated part is unaffected by an unmet achievement — the gate is per blueprint, not a
+      # global switch.
+      it "still earns an ungated part while achievements are unmet" do
+        allow(Achievement).to receive(:earned?).and_return(false)
+
+        expect(described_class.earn(:part, :plain_chimney)).to be_persisted
+      end
+
+      # The dev baseline, and it bypasses deliberately: stage 5a's acceptance is that the dev
+      # player owns everything, and nothing awards an achievement yet.
+      it "grants everything regardless of gates" do
+        allow(Achievement).to receive(:earned?).and_return(false)
+        described_class.grant_everything!
+
+        expect(described_class).to be_unlocked(:part, :ramsbottom_safety_valve)
+      end
+    end
+
     it "answers ownership by the pair, not by the id alone" do
       described_class.grant(:part, :locomotive_boiler)
 
@@ -115,13 +149,15 @@ RSpec.describe Unlock do
     end
 
     # The shape the outfitting screen wants: one query, then twenty-odd membership tests.
-    it "hands back owned keys as kind/id pairs" do
+    it "hands back the owned ids of one kind, and only that kind" do
       described_class.grant(:part, :locomotive_boiler)
+      described_class.grant(:part, :beam_boiler)
       described_class.grant(:chassis, Blueprint.chassis_id(:steam_engine, :high_pressure))
 
-      expect(described_class.owned_keys)
-        .to contain_exactly([ :part, "locomotive_boiler" ],
-                            [ :chassis, "steam_engine/high_pressure" ])
+      expect(described_class.owned_ids(:part))
+        .to contain_exactly("locomotive_boiler", "beam_boiler")
+      expect(described_class.owned_ids(:chassis))
+        .to contain_exactly("steam_engine/high_pressure")
     end
   end
 end

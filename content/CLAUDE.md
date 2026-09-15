@@ -88,6 +88,13 @@ What a spinning part cares about is the **ratio** of tensile strength to density
 **Safety factors do not belong here.** How far below the ideal figure a real part fails depends
 on casting quality and geometry — properties of the part. They go on the node.
 
+**Renaming a resource here breaks `config/blueprints.yml`.** The delivery tier prices a blueprint
+as a bill of materials — *this boiler is 3.2 t of wrought iron* — and those names are resource
+ids from this directory, checked when the blueprint catalogue builds. Prices themselves must
+never appear in here: the simulation has no concept of value and must not acquire one. Run
+`rake blueprints:audit` after a rename; it builds the catalogue and so catches a bill left
+pointing at nothing.
+
 ## A minion archetype
 
 ```yaml

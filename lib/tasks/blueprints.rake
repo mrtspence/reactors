@@ -7,7 +7,9 @@ namespace :blueprints do
       entries = Blueprint.of_kind(kind)
       puts "#{kind} (#{entries.length})"
       entries.sort_by(&:blueprint_id).each do |b|
-        puts format("  %-34s %s", b.blueprint_id, b.label)
+        bill = b.free? ? "free" : b.materials.map { |m, kg| "#{m} #{kg.round}" }.join(", ")
+        gate = b.requires_achievement ? "  after #{b.requires_achievement}" : ""
+        puts format("  %-34s %-30s %s%s", b.blueprint_id, b.label, bill, gate)
       end
       puts
     end
@@ -41,5 +43,47 @@ namespace :blueprints do
   task grant_all: :environment do
     DevPlayer.grant_everything!
     puts "#{DevPlayer.unlocks.count} blueprint(s) owned by #{DevPlayer::ID}."
+  end
+
+  # The dev affordance behind stage 5b. There is no players table and no workshop screen yet, so
+  # this is how a part gets taken away and given back:
+  #
+  #   bin/rails "blueprints:revoke[part,ramsbottom_safety_valve]"
+  #   bin/rails "blueprints:grant[part,ramsbottom_safety_valve]"
+  #
+  # Revoking a part that is currently fitted is allowed on purpose — the outfitting screen has to
+  # be able to show you a machine holding something you no longer own, or the refusal it reports
+  # would be impossible to act on.
+  # Goes through the gates, so it is the path a player would take rather than a back door. With
+  # nothing awarding achievements yet the gate always opens — but it is a live call site, and a
+  # check that only ever runs in a spec rots.
+  desc "Earn one blueprint for the dev player, gates enforced — blueprints:grant[kind,id]"
+  task :grant, %i[kind id] => :environment do |_t, args|
+    blueprint = Blueprint.fetch(args.fetch(:kind), args.fetch(:id))
+
+    unless DevPlayer.earn(blueprint.kind, blueprint.blueprint_id)
+      abort "#{blueprint.label} needs #{blueprint.requires_achievement} first."
+    end
+
+    bill = blueprint.free? ? "free" : blueprint.materials.map { |m, kg| "#{m} #{kg.round}" }
+                                               .join(", ")
+    puts "earned #{blueprint.kind} #{blueprint.blueprint_id} (#{blueprint.label}) — #{bill}"
+  end
+
+  desc "Revoke one blueprint from the dev player — blueprints:revoke[kind,id]"
+  task :revoke, %i[kind id] => :environment do |_t, args|
+    blueprint = Blueprint.fetch(args.fetch(:kind), args.fetch(:id))
+    removed = DevPlayer.revoke(blueprint.kind, blueprint.blueprint_id)
+    puts removed.any? ? "revoked #{blueprint.kind} #{blueprint.blueprint_id}" : "was not owned"
+  end
+
+  desc "What the dev player owns, and what they do not"
+  task owned: :environment do
+    owned = DevPlayer.unlocks.pluck(:kind, :blueprint_id).to_set
+
+    Blueprint.known.sort_by { |b| [ b.kind.to_s, b.blueprint_id ] }.each do |b|
+      mark = owned.include?([ b.kind.to_s, b.blueprint_id ]) ? "  " : "??"
+      puts format("%s %-9s %-34s %s", mark, b.kind, b.blueprint_id, b.label)
+    end
   end
 end
