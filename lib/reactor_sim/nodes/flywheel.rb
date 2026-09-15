@@ -81,6 +81,11 @@ module ReactorSim
         over.positive? ? over * @fatigue_rate : 0.0
       end
 
+      # One mode, and it is genuinely one: a disc past its hoop-stress limit does not have a
+      # mild version. What varies is how much energy it had when it went, and that is in the
+      # event's detail rather than in the mode.
+      def failure_modes = { burst: {} }
+
       def failure_type = :flywheel_burst
 
       def failure_detail(state, _ctx)

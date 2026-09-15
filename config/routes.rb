@@ -11,24 +11,30 @@ Rails.application.routes.draw do
   # avoids re-pathing every route, every Stimulus fetch and every cable stream name the day
   # there is a second one. Controllers 404 anything that is not the dev match.
   get "matches/:match_id/operations/:operation_id", to: "consoles#show", as: :console
-  # The outfitting screen. Nested under the operation rather than the match, because a loadout
-  # belongs to one machine and a match will eventually hold several.
-  # Three ways in, two of which render the same screen.
+
+  # **Standard actions only** (`app/CLAUDE.md`, "Controllers are routing, not logic"), which
+  # means the verbs a player thinks in — fit, preview, reset — each had to find the noun that
+  # makes them standard:
   #
-  #   GET  …/components          what is fitted
-  #   POST …/components/preview  what you are *considering* — the draft, into a Turbo frame
-  #   POST …/components          commit it and rebuild the engine
+  #   GET   …/loadout/edit   the outfitting screen
+  #   PATCH …/loadout        fit it, and rebuild the engine from cold
+  #   POST  …/loadout_draft  evaluate a build without storing it, into a Turbo frame
+  #   POST  …/matches/:id/reset   ask for a rebuild
   #
-  # **The preview is a POST rather than a GET on purpose.** A GET form would carry the CSRF
-  # token in the query string on every dropdown change — into history, logs and anywhere the
-  # URL is pasted — which is a poor trade for a bookmarkable draft nobody wants.
-  get "matches/:match_id/operations/:operation_id/components",
-      to: "components#show", as: :components
-  post "matches/:match_id/operations/:operation_id/components/preview",
-       to: "components#show", as: :preview_components
-  post "matches/:match_id/operations/:operation_id/components", to: "components#fit"
+  # A **draft** is a resource in its own right: changing a dropdown asks what a build *would* be,
+  # and the answer is a rendering rather than a saved record, so `create` is the honest verb. A
+  # **reset** likewise — what it creates is a request that the runner start again.
+  #
+  # The loadout is nested under the operation rather than the match, because a loadout belongs to
+  # one machine and a match will eventually hold several. Singular (`resource`) because a machine
+  # has exactly one.
+  scope "matches/:match_id/operations/:operation_id" do
+    resource :loadout, only: %i[edit update]
+    resource :loadout_draft, only: %i[create]
+  end
+
   post "matches/:match_id/commands", to: "commands#create", as: :match_commands
-  post "matches/:match_id/reset", to: "matches#reset", as: :match_reset
+  resource :match_reset, only: %i[create], path: "matches/:match_id/reset"
 
   root to: redirect("/matches/#{DevMatch::ID}/operations/#{DevMatch::OPERATION_ID}")
 end

@@ -636,7 +636,7 @@ module ReactorSim
       # stayed on the drivetrain and kept accelerating — measured at 2365 rpm and 3.97 MW, on
       # a wheel whose own burst limit is 322 rpm.
       live = drive_links.reject do |link|
-        states.fetch(link.a)[:broken] || states.fetch(link.b)[:broken]
+        states.fetch(link.a)[:failure] || states.fetch(link.b)[:failure]
       end
       return {} if live.empty?
 

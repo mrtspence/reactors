@@ -188,7 +188,7 @@ module ReactorSim
 
       def sample(_nodes, states, _content)
         state = states[@node] or return Reading.missing
-        Reading.of(state[:broken] ? 1.0 : 0.0)
+        Reading.of(state[:failure] ? 1.0 : 0.0)
       end
     end
 

@@ -32,8 +32,12 @@ module ReactorSim
                      obstruction_tags: [], void_fraction: 1.0, material: nil,
                      shell_radius_m: nil, wall_thickness_m: nil, safety_factor: 1.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
-                     stress_rate: 0.0)
+                     stress_rate: 0.0, damages: {})
         super(id: id, label: label, ports: ports)
+        # Who this takes with it when it goes, per failure mode. Configured rather than
+        # declared, because which parts are near enough to be wrecked is a fact about the
+        # machine and this class may not know a `:cylinder` exists. See `Concerns::Wearing`.
+        @failure_damages = damages.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
         @volume_m3 = volume_m3.to_f
         # What clogs this vessel, and how much of it there is room for before it does. Empty
         # tags mean nothing obstructs anything, which is the case for almost every vessel — a
@@ -143,6 +147,12 @@ module ReactorSim
         over_t = fraction_over(temperature_k(state, ctx.content), rated_temperature_k(ctx.content))
         (over_p + over_t) * @stress_rate
       end
+
+      # The generic holder splits and stops there. A vessel that can fail two ways — a seam
+      # that weeps against a shell that lets go — says so itself; `Nodes::Boiler` does.
+      def failure_modes = { rupture: {} }
+
+      def failure_damages = @failure_damages
 
       def failure_type = :vessel_rupture
 

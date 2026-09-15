@@ -317,7 +317,7 @@ module ReactorSim
         # Nothing drives a wheel that has come apart. The driver keeps its computed torque —
         # a cylinder still has pressure across its piston — but there is no longer anything
         # on the other end of the crank for it to do work on.
-        next acc if acc.fetch(driver.drives)[:broken]
+        next acc if acc.fetch(driver.drives)[:failure]
 
         before = shaft.kinetic_joules(acc.fetch(driver.drives))
         spun = shaft.apply_torque(acc.fetch(driver.drives), torque, ctx.dt)
@@ -394,12 +394,13 @@ module ReactorSim
       work   = states.values.sum { |s| s.fetch(:joules_extracted, 0.0) }
       burnt  = states.values.sum { |s| s.fetch(:joules_from_reactions, 0.0) }
       vented = states.values.sum { |s| s.fetch(:mass_vented, 0.0) }
+      spilled = states.values.sum { |s| s.fetch(:mass_spilled, 0.0) }
       dumped = states.values.sum { |s| s.fetch(:joules_discarded, 0.0) }
-      return ledger if [ joules, mass, work, vented, dumped, burnt ].all?(&:zero?)
+      return ledger if [ joules, mass, work, vented, spilled, dumped, burnt ].all?(&:zero?)
 
       Ledger.add(ledger, joules_added: joules, mass_added: mass, joules_to_work: work,
-                         mass_vented: vented, joules_advected_out: dumped,
-                         joules_from_reactions: burnt)
+                         mass_vented: vented, mass_spilled: spilled,
+                         joules_advected_out: dumped, joules_from_reactions: burnt)
     end
 
     # `delivered` comes from advection because only advection knows what survived the walls;
@@ -560,13 +561,15 @@ module ReactorSim
         worn, node_events = node.apply_wear(state, ctx)
         events.concat(node_events)
         # **A part that has let go stops being a machine.** A burst flywheel is not a
-        # flywheel spinning with a `broken` flag on it — it is scrap, and it does not keep
-        # turning. `Wearing` set the flag and nothing anywhere acted on it, so a wheel that
-        # burst at 400.8 rpm against a 321.6 limit was doing **2364.7 rpm and 3.97 MW** six
-        # hundred ticks later.
-        worn = worn.merge(angular_momentum: 0.0) if worn[:broken] && worn.key?(:angular_momentum)
+        # flywheel spinning with a failure recorded against it — it is scrap, and it does not
+        # keep turning. `Wearing` set the flag and nothing anywhere acted on it, so a wheel
+        # that burst at 400.8 rpm against a 321.6 limit was doing **2364.7 rpm and 3.97 MW**
+        # six hundred ticks later.
+        worn = worn.merge(angular_momentum: 0.0) if worn[:failure] && worn.key?(:angular_momentum)
         [ id, worn.freeze ]
       end
+
+      next_states = spread_damage(next_states, events)
 
       # The energy that wheel was carrying went into wrecking the shop. Ledgered rather than
       # dropped, for the same reason belt slip is: an explicit line nobody can miss beats a
@@ -575,6 +578,44 @@ module ReactorSim
       ledger = Ledger.add(ledger, joules_to_friction: wrecked) if wrecked.abs > Parcel::EPSILON
 
       [ next_states, ledger, events ]
+    end
+
+    # What a part breaking does to the parts around it.
+    #
+    # **Structural energy is fiat here, deliberately.** A bursting drum throws its shell at the
+    # shop, and that matters in exactly two places — it breaks adjacent machinery and it injures
+    # nearby crew. Modelling the release properly would be a whole physics for one narrative
+    # beat, and it would need a notion of *place* before it could even name a neighbour. So a
+    # mode names what it damages and by how much, and this spends that as durability.
+    #
+    # **Nothing is created, so conservation is untouched by construction** rather than by a
+    # clamp: damage is a durability write, never a joule. See
+    # docs/design_sketches/failure_model.md §6.
+    #
+    # Applied after every node's wear is settled, never inside the map, so two parts failing on
+    # the same tick and damaging each other give the same answer whatever order they are
+    # visited in. Phase 6 has to obey order-independence like everything else.
+    def spread_damage(states, events)
+      harm = Hash.new(0.0)
+      events.each do |event|
+        node = nodes[event[:node]]
+        next unless node.respond_to?(:failure_damages)
+
+        (node.failure_damages[event[:mode]] || {}).each { |id, share| harm[id] += share }
+      end
+      return states if harm.empty?
+
+      states.merge(harm.filter_map { |id, share| damaged(states, id, share) }.to_h)
+    end
+
+    # A share of what the part started with rather than a flat figure, so the same table entry
+    # means the same thing to a light fitting and a heavy one.
+    def damaged(states, id, share)
+      state = states[id]
+      return nil if state.nil? || !state.key?(:durability)
+
+      spent = state.fetch(:initial_durability, 0.0) * share
+      [ id, state.merge(durability: [ state.fetch(:durability) - spent, 0.0 ].max).freeze ]
     end
 
     # Phase 7. Each instrument samples its source and advances its filter chain. The only

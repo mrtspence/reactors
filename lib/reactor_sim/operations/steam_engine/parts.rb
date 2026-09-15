@@ -51,8 +51,20 @@ module ReactorSim
 
       def boiler_fragment(shell_radius_m:, wall_thickness_m:)
         Fragment.new(
+          # **The drum ships its own hole.** A boiler you can fit is a boiler that can burst, so
+          # the breach belongs to this fragment rather than to the chassis — fit a different
+          # drum and you get that drum's way of failing, fit none and there is nothing to
+          # rupture. It is shut and costs nothing until the shell fails; see `Nodes::Breach`.
           nodes: [ SteamEngine.boiler(shell_radius_m: shell_radius_m,
-                                      wall_thickness_m: wall_thickness_m) ],
+                                      wall_thickness_m: wall_thickness_m),
+                   SteamEngine.boiler_breach ],
+          links: [
+            Link.new(from: [ :boiler, :breach_out ],   to: [ :boiler_breach, :inlet ]),
+            # `:spill`, not `:exhaust`. Both end in the sky; only one of them was meant to, and
+            # booking them together would make every efficiency figure built on the ledger a
+            # lie. See `Nodes::Atmosphere`.
+            Link.new(from: [ :boiler_breach, :outlet ], to: [ :atmosphere, :spill ])
+          ],
           # The firebox glowing straight at the water legs around it. The other half of the
           # fire→water path is the tube bundle, which arrives with `:stock_boiler_tubes` — the
           # split matters more than either number. See `SteamEngine.boiler_tubes`.
@@ -339,7 +351,11 @@ module ReactorSim
       Parts.register(:locomotive_boiler, kind: :boiler, label: "Locomotive Boiler",
                      description: "A long riveted barrel, thick enough for real pressure.",
                      provides: %i[boiler],
-                     instruments: %i[boiler_pressure boiler_water crown_sheet],
+                     # **No `boiler_pressure` here.** The dial is its own fitting now
+                     # (`:boiler_gauge`), and a boiler that still claimed it collided with the
+                     # gauge that supplies it — which is the id-collision check earning its keep.
+                     # The water glass and the crown sheet stay: those genuinely read the drum.
+                     instruments: %i[boiler_water crown_sheet],
                      stats: { volume_m3: 5.0, shell_radius_m: 0.6, wall_thickness_m: 0.014,
                               material: :wrought_iron, rated_pressure: "14.39 atm" }) do |_spec|
         SteamEngine.boiler_fragment(shell_radius_m: 0.6, wall_thickness_m: 0.014)
@@ -355,7 +371,8 @@ module ReactorSim
       Parts.register(:beam_boiler, kind: :boiler, label: "Beam Engine Boiler",
                      description: "Wide, thin, and low-pressure — a big kettle.",
                      provides: %i[boiler],
-                     instruments: %i[boiler_pressure boiler_water crown_sheet],
+                     # The gauge is a fitting of its own — see `:locomotive_boiler` above.
+                     instruments: %i[boiler_water crown_sheet],
                      stats: { volume_m3: 5.0, shell_radius_m: 0.75, wall_thickness_m: 0.006,
                               material: :wrought_iron, rated_pressure: "4.93 atm" }) do |_spec|
         SteamEngine.boiler_fragment(shell_radius_m: 0.75, wall_thickness_m: 0.006)
@@ -375,6 +392,58 @@ module ReactorSim
                               easing_lever: true }) do |_spec|
         SteamEngine.safety_valve_fragment(relief_pa: 6.0 * Units::STANDARD_PRESSURE_PA,
                                           max_relief_pa: 9.0 * Units::STANDARD_PRESSURE_PA)
+      end
+
+      # **The first parts that are instruments rather than machinery**, and the reason they exist
+      # is that `burst_pa` had nowhere honest to live. A gauge's full-scale reading is a property
+      # of the gauge — a 0–14 atm dial and a 0–4 atm dial are different objects, chosen to suit
+      # the drum — so it followed the chassis around until the dial itself became a fitting.
+      #
+      # They contribute a `Diagnostic` instead of nodes. The definition stays in `panel.rb` with
+      # the rest of the panel's reasoning; these hold only the figures, which is the same division
+      # every other kind here already uses.
+      #
+      # **Not required.** An engine with no pressure gauge assembles, runs, and is a genuinely
+      # frightening way to work — which is the risk/reward axis the safety devices already sit on,
+      # applied to information instead of to metal.
+      Parts.register(:bourdon_pressure_gauge, kind: :boiler_gauge, label: "Bourdon Gauge",
+                     description: "Reads to 14 atm. Two ticks late and ±8 kPa, which is most " \
+                                  "of the argument for not running close to the valve.",
+                     instruments: [],
+                     stats: { full_scale: "14 atm", lag_ticks: 2, noise_kpa: 8 }) do |_spec|
+        Fragment.new(diagnostics: [
+          SteamEngine.boiler_pressure(full_scale_pa: 14.0 * Units::STANDARD_PRESSURE_PA)
+        ])
+      end
+
+      # **Scaled for a Watt engine**, which never sees 3 atm — the same dial would spend its life
+      # in the first tenth of its travel, and a needle that never moves tells you nothing.
+      Parts.register(:low_pressure_gauge, kind: :boiler_gauge, label: "Low-Pressure Gauge",
+                     description: "Reads to 4 atm, so the working range fills the dial.",
+                     instruments: [],
+                     stats: { full_scale: "4 atm", lag_ticks: 2, noise_kpa: 8 }) do |_spec|
+        Fragment.new(diagnostics: [
+          SteamEngine.boiler_pressure(full_scale_pa: 4.0 * Units::STANDARD_PRESSURE_PA)
+        ])
+      end
+
+      # **The upgrade, and the shape every instrument upgrade has to take.** One tick of lag
+      # instead of two and ±3 kPa instead of ±8 — better, and still late and still wrong.
+      #
+      # It does not remove either filter, and no instrument blueprint ever may: the panel's
+      # imperfection is the game rather than an obstacle in front of it, and a gauge that can be
+      # bought into telling the truth has sold the only thing it was protecting. See
+      # `SteamEngine.boiler_pressure` for the rule and the three gauges exempt from it entirely.
+      Parts.register(:compensated_pressure_gauge, kind: :boiler_gauge,
+                     label: "Compensated Gauge",
+                     description: "A tick quicker and a good deal steadier. Still late, still " \
+                                  "wrong, just less so.",
+                     instruments: [],
+                     stats: { full_scale: "14 atm", lag_ticks: 1, noise_kpa: 3 }) do |_spec|
+        Fragment.new(diagnostics: [
+          SteamEngine.boiler_pressure(full_scale_pa: 14.0 * Units::STANDARD_PRESSURE_PA,
+                                      lag: 1, noise_pa: 3_000.0)
+        ])
       end
 
       # **A far narrower band, because a Watt engine has nothing to gain from pressure** — it
@@ -654,6 +723,14 @@ module ReactorSim
                    required: true, default: :stock_injector),
           Slot.new(id: :boiler, accepts: :boiler, label: "Boiler", group: :water,
                    required: true, default: fitted.fetch(:boiler)),
+          # **A gauge is a fitting, not a property of the drum.** Optional, and that is the point:
+          # an engine with no pressure gauge assembles and runs perfectly well, and driving one is
+          # the same bargain as running without a safety valve — applied to what you can *see*
+          # rather than to what can break. `:omit`, because a dial that is not there shows nothing
+          # and there is no machinery to bypass.
+          Slot.new(id: :boiler_gauge, accepts: :boiler_gauge, label: "Pressure Gauge",
+                   group: :water, required: false, default: fitted.fetch(:boiler_gauge),
+                   when_empty: :omit),
           Slot.new(id: :regulator, accepts: :regulator, label: "Regulator", group: :steam,
                    required: true, default: :stock_regulator),
           Slot.new(id: :steam_chest, accepts: :steam_chest, label: "Steam Chest", group: :steam,
@@ -750,6 +827,13 @@ module ReactorSim
         { slot: :ash_pan,
           says: "No ashpan. The fire's own waste will bank up under the grate and choke it, " \
                 "and no lever you can reach will help." },
+        # **The one advisory about a hazard the player cannot see rather than cannot stop.**
+        # Every other part on this list protects the machine; this one protects the driver's
+        # judgement, and going without it is the same bargain applied to information — you keep
+        # the engine you had and lose the only honest warning it gave you.
+        { slot: :boiler_gauge,
+          says: "No pressure gauge. The safety valve is now the first thing that will tell " \
+                "you how hard you are pushing her, and by then it is telling everyone." },
         { slot: :drain_cocks,
           says: "No cylinder cocks. A cold cylinder fills with its own condensate and a " \
                 "standing one has no way to sweep it out — warming this engine through is " \

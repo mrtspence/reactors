@@ -39,7 +39,13 @@ module ReactorSim
           id: id, label: label,
           ports: ports || [
             Port.new(id: :intake, direction: :outlet, accepts: [ :gas ]),
-            Port.new(id: :exhaust, direction: :inlet)
+            # Two inlets, because a safety valve lifting and a boiler bursting must not be the
+            # same number. Both end up in the sky; only one of them was meant to. See
+            # docs/design_sketches/failure_model.md — nothing links to `:spill` until parts can
+            # breach, and it books to the `mass_spilled` ledger line that has been reserved,
+            # unwritten, since `Ledger` was written.
+            Port.new(id: :exhaust, direction: :inlet),
+            Port.new(id: :spill, direction: :inlet)
           ]
         )
         @ambient_k = ambient_k.to_f
@@ -97,7 +103,12 @@ module ReactorSim
           parcels: baseline(ctx.content),
           joules: heat_capacity * @ambient_k,
           mass_injected: grant.total_sent,
-          mass_vented: grant.total_received,
+          # Per PORT rather than per node, for the same reason `transport_affinity` is: a
+          # node's ends have to be allowed to disagree about what they mean. Energy is not
+          # split — a joule leaving through a hole is the same loss as one leaving through
+          # the chimney, and only the *mass* carries the story of how it left.
+          mass_vented: grant.received_kg(:exhaust),
+          mass_spilled: grant.received_kg(:spill),
           joules_injected: grant.total_sent_joules,
           joules_discarded: grant.total_received_joules
         )

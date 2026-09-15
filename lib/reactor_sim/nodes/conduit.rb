@@ -111,17 +111,26 @@ module ReactorSim
 
       # How much this conduit will pass this tick, in kg.
       #
-      # TODO: a broken conduit currently passes nothing, so a failure propagates as a solid
-      # wall — the line backs up all the way to the source. That is wrong: a burst pipe is a
-      # LEAK, not a plug. Upstream should still see a moving flow (largely undiminished for a
-      # small rupture) while everything downstream starves, and the difference should go to the
-      # atmosphere as a genuine loss on the ledger. A proper implementation needs a rupture
-      # size, a path that diverts to `Atmosphere` as the universal sink, and `mass_spilled`
-      # finally having a writer. Deferred: it needs the leak fraction to mean something, which
-      # is a failure-model decision rather than a transport one.
-      def throughput_kg(state, ctx)
-        return 0.0 if broken?(state)
-
+      # **A rupture is not a plug, so failure does not appear here at all.**
+      #
+      # This used to `return 0.0 if broken?(state)`, which made a burst pipe a *better* seal
+      # than the working one — the line backed up all the way to the source and everything
+      # downstream starved completely. Backwards on its own terms, and the shortcut
+      # `design_sketches/blueprints.md` §3 rules out by name.
+      #
+      # The fix is not a leak fraction subtracted here either, which is what the failure-model
+      # sketch first proposed. **A hole in a pipe does not reduce its bore**: the pipe still
+      # passes what it always passed, and what starves the far end is that the upstream holder
+      # is now being drained by two paths instead of one. So the hole is a `Nodes::Breach`
+      # beside it — a parallel path the arbiter apportions against — and this method goes back
+      # to being about nothing but rating and lever.
+      #
+      # Consequence worth knowing: **a ruptured conduit with no breach wired next to it does
+      # nothing.** That is deliberate. It is strictly better than plugging, and it puts the
+      # spill where it can be sized and pointed somewhere, rather than hiding it in a subtraction.
+      # `_state` because this conduit needs none — but the arbiter calls it as
+      # `throughput_kg(states.fetch(id), ctx)` and subclasses do use it, so the arity stays.
+      def throughput_kg(_state, ctx)
         port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx)
       end
 
@@ -165,9 +174,16 @@ module ReactorSim
       # `nil` means this conduit does not model pressure-driven flow, and any path through it
       # stays rate-driven on `throughput_kg`. That is the migration seam: a conduit opts in to
       # the relaxation by declaring one. See docs/design_sketches/transport_model.md.
-      def gas_conductance(state, ctx)
+      # **This one was worse than a plug.** It used to `return 0.0 if broken?(state)`, and a
+      # zero conductance does not merely shut the path — `Arbiter.gas_coupling` rejects any
+      # conductance at or below zero, so the path stops being **pressure-driven at all** and
+      # falls back to a rate rule with no head. `graph/CLAUDE.md` records what that costs when
+      # it happens by accident: *"a single missing number deletes the draught, the chimney and
+      # the blower together, with no error of any kind."* One ruptured flue section did exactly
+      # that, on purpose. A failure that changes the *regime* of a path rather than its rate is
+      # not a hobbled machine, it is a different one.
+      def gas_conductance(_state, ctx)
         return nil if @conductance.nil?
-        return 0.0 if broken?(state)
 
         @conductance * open_fraction(ctx)
       end
@@ -222,6 +238,10 @@ module ReactorSim
         over = temperature_k(state, ctx.content) - rated
         over.positive? ? (over / rated) * @stress_rate : 0.0
       end
+
+      # A pipe splits. Whether that is a weep or a severed line is a matter of *size*, which
+      # belongs to the breach the rupture opens rather than to a second name here.
+      def failure_modes = { rupture: {} }
 
       def failure_type = :conduit_rupture
 

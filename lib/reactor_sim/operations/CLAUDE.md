@@ -74,6 +74,13 @@ require it from
 `lib/reactor_sim.rb` **last**. Extra keys in a `Match.create` operation spec are passed through
 to the builder.
 
+> **A spec rig registering an operation must pass `harness: true`.** It has to register globally
+> or `Match.create` cannot resolve it — but something outside this library *derives a list of
+> machines from this registry*, so an unmarked rig becomes a machine. `spec/support/loop_rig.rb`
+> did, and it took the delivery tier's whole blueprint catalogue down with it — **only in a
+> full-suite run**, because nothing else loads that file, so every targeted re-run of the failing
+> specs passed. `Operations.known` is everything; `Operations.catalogued` is the machines.
+
 ## Design decisions, in order
 
 1. **What are the nodes?** A join earns a node only when it is *interesting* — it carries a
@@ -116,9 +123,26 @@ drifts silently, because the new frame is simply unreachable. Nothing on the tic
 
 **A chassis owns topology and a default loadout, not numbers.** It used to be a flat bag of
 twenty keys, seventeen of which belonged to six parts. Those live on the parts now, with the
-sweeps that chose them; what is left is `exhausts_to`, `condenser`, a `parts:` map of the kinds
-that differ between the two machines, and `burst_pa` — which is a gauge's full-scale reading and
-is the one entry still in the wrong place.
+sweeps that chose them; what is left is `exhausts_to`, `condenser` and a `parts:` map of the kinds
+that differ between the two machines. **Topology and nothing else** — `burst_pa` was the last
+holdout and it left on 2026-09-14, when the pressure gauge became a fitting of its own.
+
+**An instrument can be a part, and `Fragment#diagnostics` is how.** Most parts *name* their
+gauges by id and the panel holds the definitions, because the reasoning about why each gauge lies
+is worth keeping in one readable file. A part that **is** an instrument has nowhere else to put
+its full-scale reading or its lag — those are properties of the dial, not of the drum it is
+screwed to — so it builds its own `Diagnostic`. The definition still lives in `panel.rb`; the
+part passes it figures, exactly as a boiler part passes its shell thickness.
+
+> **`PANEL_ORDER` decides where a gauge sits, and neither source may.** A player learns a panel by
+> where things are, so fitting a better pressure gauge must not move the water glass.
+> `Assembly` sorts by it and refuses a gauge it does not name, so the list cannot drift by
+> omission.
+>
+> And the rule that governs instrument upgrades: **an upgrade may reduce a filter, never remove a
+> class of one.** Less lag, less noise, a finer band — never zero lag, and never a number where
+> the design chose prose. `safety_valve`, `crown_sheet` and `flywheel_condition` are exempt
+> outright. The instruments are the game, not an obstacle in front of it.
 
 > **An attribute becomes a node when it is a separate object in the machine, and a variant when
 > it is a different version of the same object.** The blower was the first — a fan bolted to the

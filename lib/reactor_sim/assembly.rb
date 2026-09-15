@@ -27,14 +27,16 @@ module ReactorSim
     attr_reader :slots, :loadout
 
     def initialize(slots:, loadout: {}, spec: {}, fixtures: Fragment.empty,
-                   instruments: {}, routes: [], advisories: [], registry: Parts)
+                   instruments: {}, order: nil, routes: [], advisories: [], registry: Parts)
       @slots = slots.freeze
       @spec = spec
       @fixtures = fixtures
-      # Insertion-ordered, and that order is the panel's order. Selecting from it rather than
-      # concatenating per part is what keeps the gauge layout stable however the slots are
-      # arranged.
+      # The gauges the panel defines, for parts that name one. Selecting from this rather than
+      # concatenating per part is what keeps the layout stable however the slots are arranged.
       @instruments = instruments
+      # The panel's order, covering gauges from both sources. Defaults to the catalogue's own
+      # order, which is what an operation with no instrument parts wants.
+      @order = (order || instruments.keys).freeze
       @routes = routes.freeze
       @advisories = advisories.freeze
       @registry = registry
@@ -55,10 +57,21 @@ module ReactorSim
 
     # In catalogue order, never in slot order, so the panel does not rearrange itself when a
     # slot list is reordered for some unrelated reason.
+    # Gauges arrive two ways, and both end up in one list ordered by the panel.
+    #
+    #   * **Named** — an ordinary part lists gauge ids and the panel holds the definitions.
+    #   * **Supplied** — an instrument part *is* the gauge and builds its own `Diagnostic`.
+    #
+    # **`order` is the panel's order and neither source may decide it.** A player learns a panel
+    # by where things are, so rearranging the slot list — or fitting a better pressure gauge —
+    # must not move the dials. Anything the order does not name is a build error rather than a
+    # silent append, because a gauge quietly landing at the end of the panel is exactly the kind
+    # of drift nobody notices until they are looking for it in an emergency.
     def diagnostics
       wanted = fitted_parts.flat_map(&:instruments)
+      named = @instruments.values.select { |d| wanted.include?(d.id) }
 
-      @instruments.values.select { |d| wanted.include?(d.id) }
+      (named + fragment.diagnostics).sort_by { |d| @order.index(d.id) || @order.length }
     end
 
     def verdict
@@ -180,7 +193,11 @@ module ReactorSim
         next if fitted.nil?
 
         pieces = built(slot)
-        ids = pieces.nodes.map(&:id) + pieces.control_points.map(&:id) + fitted.instruments
+        # Gauges count here whether they were named or supplied: ids are one flat namespace
+        # across nodes, levers, gauges and crew because they key one RNG table, and a part that
+        # *builds* a `Diagnostic` can collide just as easily as one that names it.
+        ids = pieces.nodes.map(&:id) + pieces.control_points.map(&:id) +
+              fitted.instruments + pieces.diagnostics.map(&:id)
 
         ids.each do |id|
           if seen.key?(id)
@@ -198,6 +215,7 @@ module ReactorSim
       end
 
       errors.concat(unknown_instruments)
+      errors.concat(unplaced_instruments)
       errors
     end
 
@@ -206,6 +224,19 @@ module ReactorSim
         .flat_map { |p| p.instruments.map { |i| [ p, i ] } }
         .reject { |_, id| @instruments.key?(id) }
         .map { |p, id| "#{p.label} names an instrument #{id.inspect} the panel does not define" }
+    end
+
+    # **A gauge the panel's order does not name would land at the end of the panel**, quietly, and
+    # a player would go looking for it where it used to be. Loud at build instead — the same rule
+    # that makes a part naming a nonexistent gauge fail here rather than read nil forever.
+    def unplaced_instruments
+      @slots.filter_map { |slot|
+        supplied = built(slot).diagnostics.map(&:id).reject { |id| @order.include?(id) }
+        next if supplied.empty?
+
+        "#{slot.label} brings #{supplied.map(&:inspect).join(', ')}, which the panel's order " \
+          "does not place"
+      }
     end
 
     # Reachability: the only check that catches "assembles fine, cannot possibly work".

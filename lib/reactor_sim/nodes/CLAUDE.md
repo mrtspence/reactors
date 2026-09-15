@@ -25,6 +25,7 @@ Intent.new(draws: { inlet_port_id => kg }, pushes: { outlet_port_id => kg })
 Intent.none
 
 grant.received_at(:inlet)   # parcels that ARRIVED, after the walls took their share
+grant.received_kg(:inlet)
 grant.sent_at(:outlet)      # parcels that left, carrying their enthalpy
 grant.sent_kg(:outlet)
 grant.rejected_kg(:outlet)  # what could not be pushed — back-pressure
@@ -36,7 +37,7 @@ crosses. Ledger a crossing from these, never from a before/after delta — a del
 both directions, and at a boundary they cancel.
 
 Optional hooks: `reactions` (ids this node hosts), `broken?(state)`, `stress_per_second`,
-`overload?`.
+`overload?`, `failure_modes`, `failure_mode`.
 
 ## What the engine already did for you
 
@@ -112,6 +113,25 @@ volume and 100% of its clearance. Detail in
   mechanic — which is why the ashpan and its lever landed with the choke.
 - Needs `Holds`, so **a conduit cannot foul**: it holds nothing by design.
 
+## A rupture is not a plug, and a hole does not narrow the pipe
+
+`Conduit#throughput_kg` used to return 0 for a broken conduit, which made a burst pipe a
+**better seal than the working one** — the line backed up to the source and everything
+downstream starved. `gas_conductance` did the same and was worse: at zero, `Arbiter.gas_coupling`
+drops the path out of the pressure-driven regime altogether, so one ruptured flue section
+deleted the draught, the chimney and the blower together — deliberately doing the thing
+[`../graph/CLAUDE.md`](../graph/CLAUDE.md) warns costs a day when it happens by accident.
+
+Both guards are gone, and **the replacement is not a leak fraction subtracted here either**.
+That was the first design and it is wrong twice: a hole does not reduce a pipe's bore, and a
+conduit holds nothing, so anything it declines to pass just stays upstream as back-pressure —
+a throttle, not a leak. What starves the far end is the **upstream holder being drained by a
+second path**, which is a `Breach` beside it, apportioned against the real one by the arbiter.
+
+> The honest consequence: **a ruptured conduit with no breach wired next to it does nothing.**
+> Deliberate. It is strictly better than plugging, and it puts the spill somewhere it can be
+> sized and pointed rather than hidden in a subtraction.
+
 ## A conduit is still a real part
 
 It keeps `Thermal` and `Wearing`. `Tick#carry_through` mixes the passing stream with the wall
@@ -126,15 +146,16 @@ same commit.**
 
 | Node | Concerns | What it is |
 |---|---|---|
-| `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | Tank, vat, drum, pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, and `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke. |
+| `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | Tank, vat, drum, pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke, and `damages:` for what it takes with it when it lets go. |
 | `Conduit` | Thermal, Wearing | Pipe or valve. **Transport** — holds nothing. Rate limit, lever, wall, failure. Optional `control_id`, `rangeability:` (valve trim). |
-| `Boiler` | (a `Vessel`) | A drum holding a liquid and its own vapour. Its vapour outlet is never quite dry; **swell** lifts the level when it is pulled hard, and priming is what happens when a high glass and a hard pull coincide. |
-| `Atmosphere` | Thermal, Holds | The outside world: unlimited source and sink, fixed pressure reference. |
+| `Boiler` | (a `Vessel`) | A drum holding a liquid and its own vapour. Its vapour outlet is never quite dry; **swell** lifts the level when it is pulled hard, and priming is what happens when a high glass and a hard pull coincide. How badly it fails is decided by **flash evaporation**, not by pressure — see below. |
+| `Atmosphere` | Thermal, Holds | The outside world: unlimited source and sink, fixed pressure reference. **Two inlets** — `:exhaust` books `mass_vented`, `:spill` books `mass_spilled`, because a safety valve lifting and a boiler bursting must not be the same number. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
 | `Load` | Rotating | Where useful work leaves the operation. |
 | `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at **supply** density. Working fluid is configuration. `drain_authority:` bleeds the diagram when the cocks are open; `material:` + `wall_thickness_m:` rate the barrel off its own bore. |
 | `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity. `senses_quantity:` defaults to `pressure_pa` and need not be it. **Three levers, three meanings:** `ease_control_id:` opens it further by hand (`max`), `control_id:` is a gag and can shut it (`×`), `setting_control_id:` is the adjusting screw and moves the setting itself (margin 100 → safe, 0 → `max_relief_pressure_pa`). Records `lift:` and `setting_pa:` in `apply` so gauges can read them. |
 | `FusiblePlug` | (a `Conduit`) | Senses a **state key** on another node and fails permanently open above a threshold. A fuse, not a valve — see below. |
+| `Breach` | (a `Conduit`) | A hole that is not there until it is. Senses another node's `failure` **mode** and opens by `opens_by[mode]` of full bore; a mode it does not name opens nothing, so one part can carry several breaches of escalating size. Always one-way. Where it spills is its outlet's link, not a setting. |
 
 Reach for these first. Write a new node only when the behaviour genuinely does not exist.
 
@@ -148,6 +169,32 @@ a plug is a fuse that operates once and puts the engine out of service.
 Built on the reversible one, a boiler would have quietly healed itself the moment the water came
 back over the crown sheet — exactly the consequence-free behaviour the hazard exists to not have.
 The melt is latched in state instead: `melted` goes true and never goes back.
+
+## What destroys a pressure vessel is its water, not its pressure
+
+`Boiler#failure_mode` decides `:seam_split` against `:explosion` on **flash evaporation**, and
+the route to that rule is worth keeping because the obvious rule was wrong twice over.
+
+It was a pressure ratio — explosion above 1.5× the cold rating. **It could never fire.** Measured
+firing hard with the safety valve removed, the drum peaks at **0.53×** its rating and never loses
+a point of durability; the shell is rated at nearly 2.4× its working pressure, which is a correct
+boiler. And the rule also made a low-water crown-sheet failure a *gentle* split, which is
+backwards: that is precisely the catastrophic locomotive explosion the accident reports describe.
+
+Open a drum holding water at saturation and the water is instantly superheated against its new
+boiling point; `x = c_p·ΔT_sat / h_fg` of it flashes. At 609 kPa that is **11% at once** — 604 m³
+of steam from a full drum, into a 5 m³ shell.
+
+> **Flashing does not raise the pressure**, and a model built on that would be modelling
+> something that does not happen: making steam costs latent heat, so the water cools and the
+> pressure follows it down. (A vessel run *water-solid*, with no steam space, is the genuine
+> exception.) **It is the volume that peels the plate back from the rent.**
+
+So the criterion is `flash_expansion` — flash steam at ambient as a multiple of the drum's own
+volume, which is dimensionless and means the same thing to a locomotive barrel and a tea urn.
+**Measure the event, not a proxy:** a synthetic sweep of the same water mass read 18.6 and
+straddled the first threshold, because it evaluated a pressure the running engine never sits at;
+the real rupture reads 22.8.
 
 ## Over-temperature ratings come from the MATERIAL
 
@@ -200,7 +247,9 @@ declared anywhere is how a graph becomes unreadable.
 4. If it injects or extracts mass/energy, set the matching state key so `record_injections`
    ledgers it — see
    [`settlement.md`](../../../docs/reference/settlement.md#how-a-node-reports-a-crossing).
-5. If it can fail, implement `stress_per_second` and/or `overload?`.
+5. If it can fail, implement `stress_per_second` and/or `overload?`, **and declare
+   `failure_modes`** — a node left on `Wearing::GENERIC_FAILURE` has no failure story, and
+   `spec/reactor_sim/failure_spec.rb` fails the build for it.
 6. `freeze` at the end of `initialize`.
 7. Add the require to `lib/reactor_sim.rb`, in dependency order.
 8. Keep it generic. If it is machine-specific, put it under that operation's folder instead.

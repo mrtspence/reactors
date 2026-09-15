@@ -434,7 +434,7 @@ machine the validator already refused.
 booted and could read the table; it must not. The web process writes the row and *then* produces
 the command, so a runner reading the table would read it at whatever moment the record happened
 to arrive — and a reset racing a save would rebuild the previous machine with nothing to show for
-it. `MatchesController.reset_command` builds the payload; `MatchRunner#reset` takes it and
+it. `DevMatch.reset_command` builds the payload; `MatchRunner#reset` takes it and
 rescues `ReactorSim::Error` so a bad loadout cannot take every match on the runner down with it.
 
 **`DevMatch.panel`'s long-standing TODO is closed.** It said rebuilding a throwaway match in the
@@ -482,6 +482,129 @@ the alternative was a hand-written map from operation type to `SomeOperation::CH
 Rails. Nothing on the tick path reads it; the simulation still knows nothing about players,
 ownership or cost.
 
+#### Stage 5b: enforcement, and the controller rule that came out of it
+
+Done 2026-09-14. A part the player has not unlocked is **refused when posted directly**, not
+merely absent from the dropdown — the form is a plain POST, so a client-side filter is not a
+filter. `Assembly` is untouched and still knows nothing about players: its verdict stays `ok?`
+for a locked build, which is the assertion that keeps ownership out of the simulation.
+
+**The first version was rejected for living in a controller, and the rule is the lasting part.**
+`app/CLAUDE.md` now says: every action is one of the seven; an action named for a domain verb
+means either a resource is missing or the work belongs elsewhere; a controller may express
+routing, authorisation, parameter permitting and which template follows, and nothing else.
+Applying it retired three non-standard actions —
+
+| Was | Is |
+|---|---|
+| `components#show` | `loadouts#edit` |
+| `components#show` (POST preview) | `loadout_drafts#create` — **a draft is a resource** |
+| `components#fit` | `loadouts#update` |
+| `matches#reset` | `match_resets#create` |
+| `MatchesController.reset_command` | `DevMatch.reset_command` |
+
+— and moved the work to **`Outfitting`**, a service object taking an owner id and a parts hash,
+never `params`.
+
+**A GitHub security scan found a 500 the specs could not.** Brakeman refused
+`params.fetch(:loadout, {}).permit!` as mass assignment; the worse half is that `permit!` admits
+**non-scalars**, so `loadout[boiler][]=x` arrived as an Array, reached
+`Assembly#normalise_part_id`, and `Array#to_sym` raised — on the draft action, which has no
+rescue, reachable by anyone who could open the page. `permit(*slot_ids)` fixes both. Five specs
+cover those shapes now; none existed before, which is why it survived.
+
+Dev affordance: `blueprints:grant[kind,id]`, `blueprints:revoke[kind,id]`, `blueprints:owned`. A
+workshop screen was deliberately not built — it is progression UI and wants a tech tree.
+
+#### Stage 5c: the gates, stubbed in their real shape
+
+Done 2026-09-14. `config/blueprints.yml` prices all 34 blueprints as a **bill of materials** —
+*this boiler is 3.2 t of wrought iron* — and may name an achievement prerequisite. Both are
+delivery tier: `content/` is the simulation's own YAML and the sim must not learn what anything
+costs, though a bill may *name* a resource the sim knows, and that reference is resolved through
+`Content#resource` when the catalogue builds.
+
+**Nothing can pay one yet**, and that is deliberate: there is no resource ledger, because a match
+reward cannot be designed against a single steam engine. The quantities are plausible masses, not
+balanced prices. What stage 5c bought is that the shape is now impossible to get wrong quietly.
+
+- **A missing entry raises; `materials: {}` is how a blueprint is free.** "Decided to be free"
+  and "nobody filled it in" are indistinguishable six months later unless the file says which.
+  Free today: the steam engine itself and both minion archetypes.
+- **The sketch's own worked example priced a boiler in `copper`, which `content/` does not
+  have.** Small, and exactly the argument for the check — `copper: 420` does not announce itself
+  as wrong. `rake blueprints:audit` builds the catalogue, so the existing command catches it.
+- **`DevPlayer.earn` goes through the gates; `grant` bypasses them.** Different words on purpose:
+  `Achievement.earned?` is a stub returning true, so a gate wired only into a spec would be
+  indistinguishable from a method that returns true. The specs stub it **false** and watch an
+  ungated part still earn while a gated one does not. Three blueprints carry a prerequisite.
+
+#### Stage 5d: the frame becomes a choice, and a trap worth more than the feature
+
+Done 2026-09-14, partly. **The chassis is now chosen on the outfitting screen** rather than read
+from a stored row or an environment variable, filtered to frames the player owns, with an unowned
+one refused on its own line. Switching frames exposed a real bug: stage 4's rule that *an unfitted
+slot is an explicit empty* is wrong across a frame change, because the form was drawn for the old
+frame and a slot only the new one has was never on it — switching to the atmospheric frame refused
+itself with *"Condenser is required and nothing is fitted."* Fixed by carrying through only the
+keys the submission actually contains.
+
+**Operations have nothing to enforce yet** — one machine, no lobby, no point of choice.
+
+**The minion row is NOT done, and what exists models the wrong noun.** `Blueprint.minions`
+enumerates content archetypes — `fireman`, `yardhand` — which are *jobs a minion performs*. A
+player unlocks an **individual**: Jim, who is human with his own stats and tags, or Elowynne, who
+is an elf. Each is their own upgradable template, and each carries equipment in three slots — tool
+set, gear, utility — whose blueprints are unlocked *per minion*. Tags carry values the simulation
+reads (`mining_effectiveness: 0.25`, `darkvision: 0.1`, `open_flame: true`). Left in place and
+marked, because the mechanism is right and the entities are not; nothing enforces minion ownership,
+so it cannot mislead a player yet. See
+[`design_sketches/minion-sketch.md`](design_sketches/minion-sketch.md) and `blueprints.md` §17.
+
+> **A derived catalogue derives from whatever is in the registry.**
+> `spec/support/loop_rig.rb` registers an operation globally — it must, or `Match.create` cannot
+> resolve it — so it arrived in the blueprint catalogue as a machine nobody had priced and took
+> the whole catalogue down: seventeen examples failing at once. It reproduced **only in a
+> full-suite run**, because nothing else loads that file, so re-running the failures passed every
+> time. `Operations.register(type, harness: true)` now marks a rig; `Operations.known` is
+> everything and `Operations.catalogued` is the machines. The default is `harness: false`, so
+> forgetting to mark a real machine does nothing and forgetting to mark a rig fails loudly.
+
+#### Stage 5e: the dial becomes a fitting, and `CHASSIS` is finally just topology
+
+Done 2026-09-14. **`CHASSIS` holds `exhausts_to`, `condenser` and `parts:` and nothing else** —
+what §6 of the modularisation sketch asked for, true for the first time.
+
+`burst_pa` was the last holdout, and the expected fix was wrong. The sketch assumed it meant
+handing the fitted boiler to the panel catalogue; that is the same category error one object
+closer, because **a gauge's range is not a property of the drum** — a 0–14 atm dial and a 0–4 atm
+dial are different brass instruments chosen to suit the boiler. So the dial became a part:
+a `:boiler_gauge` slot, three gauges, and the scale on the gauge. Same rule that moved the blower
+and kept the blastpipe, applied to an instrument for the first time.
+
+- **`Fragment#diagnostics`** lets a part that *is* an instrument build its own `Diagnostic`. The
+  definitions stay in `panel.rb` with the reasoning; the part passes figures.
+- **`PANEL_ORDER` is now explicit** and covers gauges from both sources. Selection used to run
+  over the catalogue, whose insertion order *was* the panel order; a supplied gauge has no place
+  in that hash, and appending would have put the most important dial on the engine at the end of
+  the panel. `Assembly` refuses a gauge the order does not name.
+- **The gauge is optional**, and it is the eighth optional part and the odd one out — every other
+  is machinery, this is information. An engine with no pressure gauge assembles and runs.
+- **`:compensated_pressure_gauge` is the upgrade and its shape is the rule**: one tick of lag
+  instead of two, ±3 kPa instead of ±8, and **neither filter removed**. An instrument upgrade may
+  reduce a filter, never remove a class of one; `safety_valve`, `crown_sheet` and
+  `flywheel_condition` are exempt outright. The instruments are the game, not an obstacle in
+  front of it.
+
+Two checks earned their keep on the way: the id-collision check caught both boilers still
+claiming `boiler_pressure` alongside the gauge that now supplies it, and a spec asserting *"takes
+its own pieces with it"* by counting `fragment.nodes` had to widen — an instrument part brings no
+nodes at all.
+
+**Instruments cost almost nothing to make**, which is the open question this leaves. A Bourdon
+gauge is a curled brass tube and a pointer, so a bill of materials cannot be what makes a better
+one expensive. Whatever gates an instrument upgrade will not be tonnage.
+
 Two consequences of modularisation that should shape decisions made before the rest of it
 lands:
 
@@ -517,8 +640,10 @@ In rough priority order. The first two are the ones that most damage the game as
    writer. Both needed a rupture size, which is a failure-model design decision rather than a
    physics one — the same reason the conduit TODO has been deferred.
 
-   **The design decision is made (2026-09-14), the code is not written.** See
-   [`design_sketches/blueprints.md`](design_sketches/blueprints.md) §3. The rule: **broken is
+   **Stages A and B are built (2026-09-14); C and D are not.** The sketch is
+   [`design_sketches/failure_model.md`](design_sketches/failure_model.md), which stages the
+   build A–D and makes stage C measurement-first; the rule it is built on was decided in
+   [`design_sketches/blueprints.md`](design_sketches/blueprints.md) §3. That rule: **broken is
    not absent** — a failed part stays wired where it was and performs differently, and how
    differently is a property of that part's own failure mode. A leaking pipe lets the machine
    limp on; a boiler letting go ends the run. Two shortcuts are ruled out explicitly: a broken
@@ -526,6 +651,50 @@ In rough priority order. The first two are the ones that most damage the game as
    running tick, which the snapshot contract assumes cannot happen), and a broken holder must
    not plug — today's behaviour by omission, and backwards, because it makes a rupture a
    *better* seal than the working part.
+
+   **What A and B changed.** `broken: true` is now `failure: nil | <mode symbol>`, `broken?`
+   derives from it, and every part declares a `failure_modes` table in ascending severity — 44
+   wearing nodes across both chassis, none left on the generic fallback, with a spec that walks
+   them and fails the build for any that is. A failed part **keeps being evaluated and can get
+   worse**: the early return in `apply_wear` is gone, because a mild failure must never immunise
+   a part against a catastrophic one, and `escalate_to` only ever moves forward. `Atmosphere`
+   gained a second inlet so `mass_spilled` has a writer path distinct from `mass_vented`.
+
+   **What C changed.** `Nodes::Breach` — a hole built with the machine and shut, which opens by
+   the failed part's mode. The boiler part ships its own, wired to `Atmosphere`'s new `:spill`
+   inlet, so **`mass_spilled` finally has a writer** and this playtest item's original complaint
+   is answered. `Conduit` stopped plugging: both `broken?` guards deleted outright, because a
+   hole does not narrow a pipe and what starves the far end is the upstream holder being drained
+   by a second path. Conservation is exact across a burst on both balances.
+
+   **The sizing was measured, and the first guess was wrong by four orders of magnitude** —
+   sized against the safety valve it was a cliff, every hole fatal. The valve only opens above
+   its setting; a breach is open always, so the reference is the *regulator wide open*. At
+   conductance 1e-4 a 175 rpm engine falls to 151 over 600 ticks and can be limped to the shed;
+   at full bore it is at 2 rpm with the drum empty. That is 5e-5 of the shell — about a 3 cm
+   hole in a drum this size, which is what a weeping seam is. **Run-ending is still declared
+   nowhere**: the engine stops because there is no pressure, because there is a hole.
+
+   **What D changed so far.** A failing part now spends `failure_damages` on its neighbours —
+   fiat, a durability write rather than a joule, so conservation is untouched by construction.
+   And **flash evaporation decides how badly a boiler fails**, which is what made `:explosion`
+   reachable at all.
+
+   That last one reversed an earlier conclusion. A pressure-ratio rule could never fire (the
+   drum peaks at 0.53× its rating) and, worse, it called a low-water crown-sheet failure a
+   *gentle* split — backwards, because that is precisely the catastrophic locomotive explosion
+   the accident reports describe. Open a drum holding water at saturation and 11% of it flashes
+   instantly: at the real rupture, 626 kg at 609 kPa gives 67 kg of steam, **22.8 times the
+   drum's own volume**, which is what peels the plate back. Note flashing does *not* raise the
+   pressure — making steam costs latent heat, so the water cools; it is the volume that does the
+   damage. Criterion and scale in `Nodes::Boiler`, reasoning in the sketch §14.
+
+   The player-facing consequence is the good one: **how much water is in the glass now decides
+   how badly the boiler fails, not merely whether it fails.**
+
+   **Still open (stage D):** breaches on the cylinder, chest and main steam pipe — until a part
+   has one, its rupture does nothing, which is deliberate but incomplete. Modes carry `derates:`
+   tables that nothing yet reads.
 
    One consequence worth knowing before `Atmosphere` is built as the universal sink: in-match
    repair is coming as a minion job, and **what a part spills can deny the crew access to it**.
@@ -621,6 +790,29 @@ before the simulation rewrite but is unaffected by it.
 
 Every one of these was a real bug. They are documented where they matter, but collected here
 because they are the kind a fresh reader repeats.
+
+- **Never pipe a suite run through `tail`.** A background full-suite run was written as
+  `bundle exec rspec | tail -20`, which truncated the failure output *and* masked the exit code —
+  `tail` exits 0 whatever rspec did. The task reported success while printing a list of failed
+  examples, and the tally line the summary needed had been cut off. Capture the whole thing; read
+  the tail afterwards.
+- **Check the example COUNT, not just the failure count.** Same lesson, different mechanism, and
+  it caught the very next run. A background suite under `timeout 1200` was killed at the twenty
+  minute mark; rspec printed `324 examples, 0 failures, 1 pending` and a normal `Finished in
+  19 minutes 52 seconds`, which reads exactly like a clean run. **The suite has 450 examples**
+  (`bundle exec rspec --dry-run` counts them in seconds) — 126 never ran, and the only thing that
+  said so was the exit code, 124. A green summary line is not a green suite. Give a full run a
+  generous timeout, and reconcile the count against the dry run before believing it.
+- **The suite takes about thirty-five minutes, not the "~2.5 min" the root `CLAUDE.md` claimed
+  for a long time.** Measured at 34:08 for 460 examples on 2026-09-14. (A partial run that got
+  through 324 of them took 19:52, which is where an intermediate "~20 min" estimate came from —
+  another reason not to trust a truncated run for anything.) It is dominated by the steam
+  engine's multi-thousand-tick runs. Budget for it when backgrounding one.
+- **A failure that only appears in a full-suite run will not reproduce when you re-run it.**
+  `spec/support/loop_rig.rb` is loaded by nothing but a full run, and it registers an operation
+  globally, which poisoned a catalogue derived from that registry. Seventeen examples failed
+  together; every targeted re-run of them passed. When a full run fails and a focused run does
+  not, suspect load order and global registration before suspecting flakiness.
 
 - **Link declaration order changes the answer, and `graph_spec` says it does not.** Measured
   2026-09-13 while modularising. Reverse the steam engine's link list, change nothing else, and

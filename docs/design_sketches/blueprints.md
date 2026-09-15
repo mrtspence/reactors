@@ -28,7 +28,9 @@ Four consequences, and all four are load-bearing:
   simply worth less — and it settles at the end of the match rather than following anyone home.
 - **Unlocking is gated by resources and, later, by achievements.** A boiler blueprint wants a
   few tons of copper, bronze, iron or steel depending on which boiler it is. Both gates are
-  stubbed for now.
+  stubbed for now. (**Note as built:** `content/` has cast iron, wrought iron, steel, bronze,
+  babbitt and fusible alloy, and no copper — a bill naming one that does not exist is refused, so
+  copper wants adding as a material before it can be charged for. See §16.)
 
 Later, and deliberately not now: **pre-match wear**. Certain parts arrive with a random amount
 of wear on them, and the player is handed a maintenance report to read — or to skip, if they
@@ -169,6 +171,13 @@ it is further out than the leak model itself.
 **None of this is stage 5.** It is its own sketch, it touches nodes, `Wearing` and the arbiter,
 and it wants the same measurement-first treatment the transport model got.
 
+> **That sketch now exists: [`failure_model.md`](failure_model.md) (2026-09-14).** It keeps every
+> rule above and adds three the design here did not reach: `broken:` widens to a `failure:` mode
+> symbol, failures **escalate** along an ordered mode table (so a mild failure can never immunise
+> a part against a catastrophic one), and a spill leaves through a **breach** — a dormant
+> `Conduit` that opens on the sensed failure, which is the only way to change topology without
+> changing the graph under a running tick.
+
 ---
 
 ## 4. What is missing, and what to stub
@@ -248,7 +257,7 @@ Three points in the chain could check it. They are not alternatives; the questio
 them is *authoritative* and which are courtesies.
 
 1. **The outfitting screen's dropdowns** — offer only what is unlocked.
-2. **`ComponentsController#fit`** — refuse a submitted loadout naming a locked part.
+2. **The controller that accepts the form** — refuse a submitted loadout naming a locked part.
 3. **`Assembly`** — refuse the build.
 
 ### Option A: the screen only
@@ -392,10 +401,10 @@ a good sign.
 | # | Stage | Acceptance |
 |---|---|---|
 | 5a | The blueprint registry and `unlocks`, typed by `(kind, blueprint_id)`, with a boot-time sweep that refuses an unlock naming something no registry has. `DevPlayer` owns everything. **Built 2026-09-14 — see §14, and note the sweep moved.** | Boot fails loudly on a typo'd blueprint id. Existing behaviour unchanged — everything is unlocked, so the screen looks the same. |
-| 5b | Enforcement. The outfitting screen offers only unlocked parts; `ComponentsController#fit` refuses a locked one and says so in the verdict panel. A dev affordance grants and revokes. | Revoke a part, and it disappears from the dropdown *and* is refused when posted directly. `Assembly` is unchanged and still knows nothing about players. |
-| 5c | Gates, stubbed in their real shape: a bill of materials naming substances the sim knows, and an achievement prerequisite that always reports earned. | A blueprint naming a material `content/` does not have fails the same boot sweep. |
-| 5d | Chassis, operation and minion-template blueprints on the same mechanism. | Unlocking is one code path for all four kinds; minion templates are filtered but not yet plumbed into `options:` — that is stage 6. |
-| 5e | *(later)* Instruments become parts under §9's rule; `burst_pa` leaves the chassis with them. | `CHASSIS` holds `exhausts_to`, `condenser` and `parts:` — topology and nothing else. |
+| 5b | Enforcement. The outfitting screen offers only unlocked parts; fitting refuses a locked one and says so in its own panel. A dev affordance grants and revokes. **Built 2026-09-14 — see §15.** | Revoke a part, and it disappears from the dropdown *and* is refused when posted directly. `Assembly` is unchanged and still knows nothing about players. |
+| 5c | Gates, stubbed in their real shape: a bill of materials naming substances the sim knows, and an achievement prerequisite that always reports earned. **Built 2026-09-14 — see §16.** | A blueprint naming a material `content/` does not have fails the same boot sweep. |
+| 5d | Chassis, operation and minion-template blueprints on the same mechanism. **Chassis built 2026-09-14; operations have nothing to enforce yet; the minion row is NOT done and is modelling the wrong noun — see §17.** | Unlocking is one code path for all four kinds; minion templates are filtered but not yet plumbed into `options:` — that is stage 6. |
+| 5e | Instruments become parts under §9's rule; `burst_pa` leaves the chassis with them. **Built 2026-09-14 — see §19.** | `CHASSIS` holds `exhausts_to`, `condenser` and `parts:` — topology and nothing else. |
 
 5a is deliberately a no-op from the player's side. The whole of it is a table, a registry sweep
 and a stub owner, and at the end of it the game plays exactly as it does today — which is the
@@ -507,3 +516,320 @@ and read by nothing. This codebase has already paid for one dead constant kept "
 (`LEGACY_KEYS_MOVED_TO_PARTS`), and the answer then was the same: **a misleading appendix costs
 more than it saves.** The starting set is stage 5b's, where something reads it — and it wants
 the bottom tier to exist first, which it does not.
+
+---
+
+## 15. Where stage 5b departed from this sketch
+
+Built 2026-09-14. The enforcement itself landed as §6 recommended — the screen filters, the
+controller enforces, `Assembly` never learns what a player is. What changed was everything
+around it.
+
+### It was refused for being in a controller, and the rule that came out of it is the lasting part
+
+The first version put the ownership check, the workshop query and the per-slot candidate list
+straight into `ComponentsController#fit`, on top of the validate/store/reset sequence already
+there. That was rejected, and the rule written down in `app/CLAUDE.md` is worth restating because
+it now binds everything after this:
+
+> **Every action is one of the seven.** An action named for a domain verb — `fit`, `preview`,
+> `reset` — means either that a resource is missing or that the work belongs elsewhere. A
+> controller may express routing, authorisation, parameter permitting, and which template or
+> redirect follows. Nothing else.
+
+Applying it retired three non-standard actions and moved one piece of domain logic:
+
+| Was | Is | Why |
+|---|---|---|
+| `components#show` | `loadouts#edit` | The screen is a form for editing a loadout |
+| `components#show` (POST preview) | `loadout_drafts#create` | **A draft is a resource.** Asking what a build *would* be produces a rendering, not a record, and `create` is the honest verb for "evaluate this one" |
+| `components#fit` | `loadouts#update` | "Fit these parts" is an update to the loadout |
+| `matches#reset` | `match_resets#create` | What it creates is a request that the runner start again |
+| `MatchesController.reset_command` | `DevMatch.reset_command` | Domain work that had no business on a controller |
+
+The work went to **`Outfitting`**, a service object taking an owner id and a parts hash — never
+`params`, never `session` — which is what lets a rake task and a spec drive the same path.
+
+### The preview's original justification was wrong
+
+The old routes file said the preview had to be a POST because *"a GET form would carry the CSRF
+token in the query string on every dropdown change"*. **It would not.** Rails emits an
+authenticity token only for non-GET forms, so a GET preview carries no token at all.
+
+The real reason to keep it a POST is duller and still sufficient: a twenty-slot loadout in a query
+string on every change is noise in history and logs. Recorded because a wrong reason defended in a
+comment is worse than no comment — it is exactly the sort of thing that gets cited later as
+settled.
+
+### The form's default action flipped, and that is a real improvement
+
+Before, the form posted to the *preview* and the Fit button overrode it with `formaction`. Now the
+form is a `PATCH` to the loadout — Fit is the default — and the Stimulus controller borrows it for
+previews, clearing Rails' `_method` override so the draft posts rather than patches.
+
+The direction matters: **with JavaScript broken, the old form could preview but not fit; the new
+one fits but does not preview.** Previewing is inherently scripted — it fires on `change` — so
+that is the right way round. The global-token workaround from stage 4 survives unchanged and for
+the same reason, since the form still submits to two different actions.
+
+### A security scan found what the specs could not
+
+Brakeman, run after a GitHub scan flagged it, refused `params.fetch(:loadout, {}).permit!`. The
+mass assignment was the lesser half. **`permit!` also admits non-scalars**, so `loadout[boiler][]=x`
+arrived as an Array, reached `Assembly#normalise_part_id`, and `Array#to_sym` raised — a **500 on
+the draft action**, which has no rescue, reachable by anyone who could open the page. A JSON body
+carrying `{"boiler": 1}` did the same through `Integer#to_sym`.
+
+`permit(*slot_ids)` fixes both, because `permit` admits only scalars. Two habits go with it:
+coerce a permitted value with `to_s` before treating it as an id, and check the parameter really
+is an `ActionController::Parameters` before calling `permit` on it — `?loadout=x` makes it a
+String. Five specs now cover those shapes; **none existed before, which is why it survived.**
+
+### The dev affordance is rake, not a screen
+
+`blueprints:grant[kind,id]`, `blueprints:revoke[kind,id]` and `blueprints:owned`. A workshop
+screen is the obvious next thing and was deliberately not built: it is a progression UI, it wants
+the tech tree to exist, and stage 5b's job was the enforcement underneath it.
+
+### One rule the acceptance test did not anticipate
+
+"Revoke a part and it disappears from the dropdown" is only true of a part that is **not fitted**.
+The stored machine may already be wearing something the player no longer owns — that is exactly
+what revocation produces — and a screen that hid it would report an error about a part the player
+can neither see nor change. So a locked part that is already fitted stays in its dropdown, flagged
+`(locked)`, and the two rules are not in tension: what is fitted is a fact about the machine, what
+is offered is a fact about the workshop.
+
+---
+
+## 16. Where stage 5c departed from this sketch
+
+Built 2026-09-14. `config/blueprints.yml` (34 entries), `Achievement` (a stub), and the checks
+that make both refusable. Three things worth recording.
+
+### The sketch's own worked example named a material that does not exist
+
+§7 proposed stubbing a bill of materials as `{ wrought_iron: 3000.0 }` and the artifact showed a
+boiler costing **copper**. There is no copper in `content/resources/materials.yml` — the six
+metals are cast iron, wrought iron, steel, bronze, babbitt and fusible alloy.
+
+That is a small thing and it is exactly the argument for the check. A bill is written by hand,
+the names in it look obviously right, and nothing about `copper: 420` announces itself as wrong
+until a foundry mechanic tries to charge for it years later. `Blueprint.gates_for` resolves every
+material through `Content#resource`, which raises, so the catalogue refuses to build — and
+`rake blueprints:audit` builds the catalogue, so the existing guard covers this one too without a
+new command.
+
+### "A part with no price is an error" needed a way to say *free*
+
+§7's rule was right and incomplete. Taken literally it makes the starting operation impossible:
+something has to be free, or a new player has no opening screen. But a default of zero is a
+silent off switch, which is the failure this codebase has paid for repeatedly.
+
+> **A missing entry raises; `materials: {}` is how a blueprint is free.** The difference between
+> "decided to be free" and "nobody filled it in" has to survive in the file, because six months
+> later they are indistinguishable from the outside.
+
+Free today: the steam engine itself, and both minion archetypes — a crew is not built out of
+metal, and what a minion should actually cost is a question for whenever minions do real work.
+
+### The achievement gate needed a live call site, so acquisition split in two
+
+A check that only ever runs in a spec rots. `Achievement.earned?` returns true unconditionally —
+nothing awards an achievement, and gating on one would lock every blueprint that names a
+prerequisite, permanently and with no way to earn it — so a gate wired only into a test would be
+indistinguishable from a method that returns true.
+
+So acquiring a blueprint became two verbs:
+
+- **`DevPlayer.earn`** goes through the gates and returns nil, changing nothing, when a
+  prerequisite is unmet. `rake blueprints:grant[kind,id]` uses it.
+- **`DevPlayer.grant`** / `grant_everything!` bypass them, and say so by being a different word.
+  That is the stage 5a baseline where the dev player owns the catalogue.
+
+The specs prove the gate is real by stubbing `earned?` **false** and watching an ungated part
+still earn while a gated one does not. Three blueprints carry a prerequisite today — the
+Ramsbottom valve, the high-pressure cylinder and the blastpipe chimney — so the mechanism has
+something to exercise.
+
+### What is still stubbed, and is meant to look it
+
+**Nothing can pay a bill.** There is no resource ledger, because a match reward cannot be
+designed against a single steam engine — the mechanic is one operation's failure starving
+another's input (§4). The quantities are plausible masses for the thing described, not balanced
+prices; the whole tree currently comes to 35.6 t of cast iron, 18.2 t of wrought iron and well
+under a tonne of everything else. The **shape** is what stage 5c was for, and the shape is now
+impossible to get wrong quietly.
+
+---
+
+## 17. Stage 5d: the frame becomes a choice — and a correction to §1 and §8
+
+Built 2026-09-14. Two of the three remaining kinds landed; the third turned out to be modelling
+the wrong noun.
+
+### Chassis
+
+The chassis had never been *choosable* — it came from a stored row or an environment variable.
+It is now a select at the top of the outfitting screen, offering the frames the player owns, and
+an unowned one is refused on its own line rather than folded in with the parts (it is the larger
+purchase, and every part on the page is fitted to it).
+
+**Switching frames exposed a real bug in the loadout resolver.** The rule from stage 4 —
+*"an unfitted slot is an explicit empty, never a missing key"* — exists so that taking the fusible
+plug off and saving does not silently put it back. Applied to a frame change it is wrong: the
+form that submitted was drawn for the **old** frame, so a slot only the new frame has was never
+on it. Naming it anyway sends an explicit empty for a question the player was never asked, and
+switching to the atmospheric frame refused itself with *"Condenser is required and nothing is
+fitted."*
+
+> **Carry through only the keys the submission actually contains.** A same-frame save names every
+> slot, because the form renders every slot, and nothing re-defaults. A frame change names the
+> slots that existed before, and the genuinely new ones arrive with their defaults.
+
+Cross-frame fitting stays legal, and is meant to: a locomotive boiler on a beam engine is a
+decision, not an error.
+
+### Operations
+
+There is one operation, no lobby, and no point at which a player chooses between machines, so
+there is nothing to enforce yet. What the stage *did* produce here is a trap worth more than the
+feature would have been — §18.
+
+### Minions: this is the wrong noun, and §1 and §8 are wrong with it
+
+Both this sketch and the code treat a **minion blueprint** as a content archetype — `fireman`,
+`yardhand`. Those are **jobs**, not minions.
+
+> A minion is an **individual**. You unlock Jim, who is human and starts with particular stats and
+> tags, or Elowynne, who is an elf with her own. Each is a template in its own right, upgradable
+> by further blueprints — certification courses granting stat bumps or new tags. "Fireman" is
+> merely what one of them is doing in your operation this match.
+
+Three consequences this sketch had not allowed for:
+
+- **Equipment is a separate abstraction** with its own blueprints, unlocked **per minion** — Jim
+  and Elowynne each own their own. Three slots, one item each: **tool set** (what they carry),
+  **gear** (what they wear — heat protection, rebreathers, a powered exoskeleton), and
+  **utility** (the niche slot: a lucky amulet, a rebreather on someone you would rather not put
+  in a full hazmat suit).
+- **Tags carry values and are read by the simulation.** `{ mining_effectiveness: 0.25,
+  darkvision: 0.1, open_flame: true }` — a mining node multiplies its output by the minion's
+  effectiveness *and* by whatever light they have, so a crude pick and a candle is a punishing
+  ×0.25 ×0.1. Tags come from the minion (a dwarf has their own darkvision) and from equipment,
+  combined. `open_flame` in a gassy mine is a hazard rather than a bonus.
+- **A pre-match screen** to assign minions, swap their equipment, and post them to starting roles
+  before commencing.
+
+**What was built is left in place and marked.** The mechanism is right — minions *are* unlockable
+— and the entities are not. Nothing enforces minion ownership, so the wrong model cannot mislead
+a player today; `Blueprint.minions` says plainly that it enumerates jobs and that nothing should
+be built on it. Stage 5d's minion row is **not** done, and re-pointing it at individuals is part
+of the minion work rather than a tidy-up.
+
+The sketch also flags what comes after: **minion position and transit**, probably the next thing
+after this modularisation pass. Injuries depend on where somebody is standing relative to a
+failing machine, and in a mine, moving people is the logistical problem — model it away and lifts,
+man-engines, repairs and shift rotation all become trivial. The proposal is local environment
+volumes reusing the conductance and node machinery already here, with tagged transport for
+*minions* deciding who can go where and how fast.
+
+---
+
+## 18. The trap stage 5d actually produced
+
+**A derived catalogue derives from whatever is in the registry, including things that are not
+machines.**
+
+`spec/support/loop_rig.rb` registers an operation type globally — it has to, or `Match.create`
+cannot resolve it. The blueprint catalogue is derived from that same registry, so the rig arrived
+as an operation nobody had priced, `gates_for` raised `Ungated`, and **the entire catalogue
+refused to build**: all seventeen blueprint examples failed at once.
+
+Three things about how it presented are worth keeping:
+
+- **It only failed in a full-suite run.** Nothing else loads the rig, so every targeted run of the
+  specs that were failing passed. Re-running the failures is exactly the wrong instinct here.
+- **It was nearly invisible.** The background command piped rspec through `tail -20`, which
+  truncated the evidence *and* masked the exit code — `tail` exits 0. The run reported success
+  while listing failures. **Do not pipe a suite through `tail`.**
+- **The obvious fixes are both wrong.** Pricing the rig ships test data in application config;
+  skipping unpriced operations reinstates exactly the silent default the whole design refuses.
+
+The fix keeps the derivation and corrects the set it derives from:
+
+> `Operations.register(type, harness: true)` marks a registration that exists only to exercise
+> the engine. `Operations.known` is everything, and is what `Match.create` resolves against;
+> `Operations.catalogued` is the machines, and is what anything counting machines for a player
+> must use. **The default is `harness: false`** — forgetting to mark a real machine does nothing,
+> and forgetting to mark a rig fails loudly and points straight at it.
+
+The guard lives in `assembly_spec`, on the simulation side, because the rule belongs to whoever
+registers: if you register a rig, say so.
+
+---
+
+## 19. Stage 5e: the dial becomes a fitting, and `burst_pa` finally leaves
+
+Built 2026-09-14. **`CHASSIS` now holds `exhausts_to`, `condenser` and `parts:` — topology and
+nothing else**, which is what §6 of the modularisation sketch asked for and the first time it has
+been true.
+
+### The fix was not the one this sketch expected
+
+§8 assumed moving `burst_pa` meant *"parts own their `Diagnostic`s, which is §4's Option A"* — and
+the obvious reading of that is to hand the fitted boiler to the panel catalogue so it can read the
+boiler's scale. That is still wrong, and for the same reason the original arrangement was wrong:
+
+> **A gauge's range is not a property of the drum.** A 0–14 atm dial and a 0–4 atm dial are
+> different brass instruments, chosen to suit the boiler they are screwed to. Asking the boiler
+> what its gauge reads to is the same category error as asking the chassis, one object closer.
+
+So the dial became a **part**: a `:boiler_gauge` slot, three registered gauges, and the scale on
+the gauge. Same rule that moved the blower and kept the blastpipe — *an attribute becomes a node
+when it is a separate object, and a variant when it is a different version of the same object* —
+applied to an instrument for the first time.
+
+### `Fragment#diagnostics`, and the ordering problem it creates
+
+An instrument part builds its own `Diagnostic` rather than naming one. The definitions stay in
+`panel.rb` with the two hundred lines explaining why each gauge lies; the part passes figures,
+exactly as a boiler part passes its shell thickness. §4's objection — *"`panel.rb` is dismembered
+and the property that you can read the whole instrument philosophy in one sitting is lost"* — does
+not apply, because nothing moved out of it.
+
+What did have to move is **who decides the order**. Selection used to run over the catalogue,
+whose insertion order *was* the panel order. Supplied gauges have no place in that hash, and
+appending them would have put the most important dial on the engine at the end of the panel.
+
+> **`PANEL_ORDER` is now explicit and covers both sources**, and `Assembly` refuses a gauge it
+> does not name rather than silently appending one. A player learns a panel by where things are;
+> a gauge quietly landing at the end is the kind of drift nobody notices until they are looking
+> for it in an emergency.
+
+### Two checks earned their keep immediately
+
+- **The id-collision check caught the boiler.** Both boilers still listed `boiler_pressure` in
+  their `instruments:`, so the drum and the dial both claimed the same gauge. It failed at build
+  naming both slots, which is exactly what it was written for.
+- **A spec encoded an assumption that stopped being true.** *"Takes its own pieces with it"*
+  measured `fragment.nodes.length`, and an instrument part brings **no nodes at all**. Widened to
+  count every list plus the diagnostics.
+
+### The gauge is optional, and that is the point
+
+An engine with no pressure gauge assembles, runs, and is a genuinely frightening way to work. It
+is the eighth optional part and the odd one out — every other one is machinery, and this is
+information. *"The safety valve is now the first thing that will tell you how hard you are pushing
+her, and by then it is telling everyone."*
+
+`:compensated_pressure_gauge` is the upgrade and the shape every instrument upgrade must take: one
+tick of lag instead of two, ±3 kPa instead of ±8. **It removes neither filter, and none ever may.**
+
+### What this does not answer
+
+**Instruments cost almost nothing to make.** A Bourdon gauge is a curled brass tube and a pointer,
+so a bill of materials cannot be what makes a better one expensive — the three gauges are priced
+at 6 kg of bronze and under. Whatever eventually gates an instrument upgrade, it will not be
+tonnage: an achievement, a craftsman, a certification. The compensated gauge carries an
+achievement prerequisite today precisely because that is the gate with any weight behind it.

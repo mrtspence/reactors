@@ -423,7 +423,7 @@ RSpec.describe "the steam engine" do
 
       expect(events.map { |e| e[:type] }).to include(:cylinder_failure)
       expect(peak).to be > 1.0
-      expect(op.state.fetch(:nodes).fetch(:cylinder).fetch(:broken)).to be true
+      expect(op.state.fetch(:nodes).fetch(:cylinder).fetch(:failure)).not_to be_nil
     end
 
     # **The remedy acts on the cylinder, not on the boiler**, and that is the point of it: the
@@ -503,7 +503,7 @@ RSpec.describe "the steam engine" do
       600.times { |i| op.step!(tick: 4200 + i) }
       state = op.state.fetch(:nodes)
 
-      expect(state.fetch(:flywheel).fetch(:broken)).to be(true)
+      expect(state.fetch(:flywheel).fetch(:failure)).to be(:burst)
       expect(rpm(op)).to be_within(1e-9).of(0.0)
       expect(state.fetch(:cylinder).fetch(:indicated_power_w)).to be_within(1e-9).of(0.0)
     end
@@ -568,7 +568,7 @@ RSpec.describe "the steam engine" do
       # ornament: the fire is pouring in enough to burst the shell and the pressure does not
       # climb regardless.
       expect(pressure).to be_within(0.05 * setting).of(setting)
-      expect(op.state.fetch(:nodes).fetch(:boiler).fetch(:broken)).to be(false)
+      expect(op.state.fetch(:nodes).fetch(:boiler).fetch(:failure)).to be_nil
     end
   end
 

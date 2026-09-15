@@ -174,16 +174,31 @@ RSpec.describe "transport" do
       expect(after).to be > 320.0
     end
 
-    it "passes nothing once it has broken" do
+    # **A rupture is not a plug, and this example used to assert that it was.**
+    #
+    # `Conduit#throughput_kg` returned 0 for a broken conduit, which made a burst pipe a
+    # *better* seal than the working one: the line backed up to the source and everything
+    # downstream starved completely. `gas_conductance` did the same and was worse — at zero,
+    # `Arbiter.gas_coupling` drops the path out of the pressure-driven regime altogether, so a
+    # ruptured flue section deleted the draught rather than merely restricting it.
+    #
+    # Both guards are gone. A hole does not reduce a pipe's bore; what starves the far end is
+    # the upstream holder being drained by a second path, which is a `Nodes::Breach` beside it.
+    # See docs/design_sketches/failure_model.md §7.
+    it "keeps passing what it always passed once it has broken" do
+      sound = flow_rig
+      5.times { |i| sound.step!(tick: i + 1) }
+      undamaged = sound.telemetry.fetch(:middle)[:kg].to_f
+
       op = flow_rig
       nodes = op.state.fetch(:nodes)
       op.instance_variable_set(
-        :@state, op.state.merge(nodes: nodes.merge(feed: nodes.fetch(:feed).merge(broken: true)))
+        :@state, op.state.merge(nodes: nodes.merge(feed: nodes.fetch(:feed).merge(failure: :rupture)))
       )
-      before = op.telemetry.fetch(:middle)[:kg].to_f
       5.times { |i| op.step!(tick: i + 1) }
 
-      expect(op.telemetry.fetch(:middle)[:kg].to_f).to be_within(1e-9).of(before)
+      expect(op.telemetry.fetch(:middle)[:kg].to_f).to be_within(1e-9).of(undamaged)
+      expect(undamaged).to be > 0.0
     end
   end
 

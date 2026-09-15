@@ -11,21 +11,38 @@ module ReactorSim
       # speed — get the best instruments, and even those are late.
       module_function
 
+      # **Where every gauge sits on the panel, whichever way it arrives.**
+      #
+      # A player learns a panel by where things are, so this order is the one thing neither the
+      # slot list nor a fitted instrument may disturb: fitting a better pressure gauge must not
+      # move the water glass. `Assembly` sorts by this and refuses a gauge it does not name, so
+      # the list cannot drift by omission.
+      PANEL_ORDER = %i[
+        boiler_pressure boiler_water safety_valve valve_setting_pa
+        crown_sheet plug_blown
+        firebox_temp fire_state
+        engine_speed flywheel_stress flywheel_condition
+        engine_power cylinder_pressure cylinder_water cylinder_relief_valve
+        coal_remaining water_remaining air_supply
+        condenser_vacuum
+      ].freeze
+
       # **Every gauge this engine knows how to show, indexed by id — not the ones it is
       # showing.** Parts name the instruments that arrive with them (see `parts.rb`) and
       # `Assembly` selects from this hash, so a fitting that is not fitted takes its gauge with
       # it and a part naming a gauge that does not exist fails at build.
       #
-      # **Order here is the panel's order**, and it is deliberately not slot order: a player
-      # learns a panel by where things are, so rearranging the slot list for some unrelated
-      # reason must not move the dials. Selection preserves this sequence.
+      # **`boiler_pressure` is deliberately absent.** It is not a property of the boiler, it is a
+      # separate instrument screwed to it — which is why its full-scale reading was the last thing
+      # stranded on the chassis. It arrives with a `:boiler_gauge` part instead, built by
+      # `boiler_pressure` below, and `PANEL_ORDER` still decides where it sits.
       #
       # Building a gauge costs nothing — a `Diagnostic` is frozen configuration — so the
       # catalogue holds `condenser_vacuum` on both chassis even though only one can ever fit a
       # condenser. Filtering happens at selection, where it can be checked.
-      def catalogue(spec)
+      def catalogue
         [
-          boiler_pressure(spec), boiler_water, safety_valve, valve_setting,
+          boiler_water, safety_valve, valve_setting,
           crown_sheet, plug_blown,
           firebox_temp, fire_state,
           flywheel_speed, flywheel_stress, flywheel_condition,
@@ -35,17 +52,32 @@ module ReactorSim
         ].to_h { |d| [ d.id, d ] }.freeze
       end
 
-      # The gauge that matters most, so it is the one most worth upgrading. Two ticks late
-      # and ±8 kPa, which is enough to make the last stretch before the relief valve a
-      # genuine judgement call.
-      def boiler_pressure(spec)
+      # **The gauge that matters most, and now a fitting in its own right.**
+      #
+      # The definition stays here with the rest of the panel's reasoning; the *figures* come from
+      # whichever gauge is fitted (`parts.rb`), exactly as a boiler's shell thickness comes from
+      # whichever boiler is fitted. `full_scale_pa` is a property of the instrument — a 0–14 atm
+      # gauge and a 0–4 atm gauge are different objects you would choose to suit the drum — and
+      # treating it as a property of the *machine* is what left `burst_pa` on the chassis.
+      #
+      # Stock is two ticks late and ±8 kPa, which is enough to make the last stretch before the
+      # relief valve a genuine judgement call.
+      #
+      # > **An instrument upgrade may reduce a filter. It may never remove a class of one.**
+      # > Less lag, less noise, a finer band — never zero lag, and never a number where the design
+      # > chose prose. The instruments are not an obstacle between the player and the game; they
+      # > *are* the game, and a panel that can be bought into telling the truth has sold the only
+      # > thing it was protecting. `safety_valve`, `crown_sheet` and `flywheel_condition` are
+      # > exempt outright: the first is true by design because nobody is reading a dial, and the
+      # > other two are vague *because that is the hazard*.
+      def boiler_pressure(full_scale_pa:, lag: 2, noise_pa: 8_000.0)
         Diagnostic.new(
           id: :boiler_pressure, label: "Boiler Pressure",
           source: Sources::Derived.new(:boiler, :pressure_pa),
-          filters: [ Filters::Lag.new(2), Filters::Noise.new(8_000.0),
-                     Filters::Range.new(0.0, spec.fetch(:burst_pa)) ],
+          filters: [ Filters::Lag.new(lag), Filters::Noise.new(noise_pa),
+                     Filters::Range.new(0.0, full_scale_pa) ],
           display: Displays::Needle.new(unit: "kPa", convert: :kpa, precision: 0,
-                                        min: 0.0, max: spec.fetch(:burst_pa))
+                                        min: 0.0, max: full_scale_pa)
         )
       end
 

@@ -14,15 +14,28 @@ module ReactorSim
   # fragment, part or slot is reachable from `Tick`, `Arbiter` or any node — see
   # `operations/CLAUDE.md`.
   class Fragment
-    attr_reader :nodes, :links, :thermal_links, :drive_links, :control_points
+    attr_reader :nodes, :links, :thermal_links, :drive_links, :control_points, :diagnostics
 
+    # `diagnostics:` is for parts that **are** instruments, and only those.
+    #
+    # Every other part names its gauges by id (`Part#instruments`) and the operation's panel holds
+    # the definitions, because the two hundred lines explaining *why each gauge lies the way it
+    # does* are worth keeping in one readable file. A gauge that is itself the fitting has nowhere
+    # else to live: its full-scale reading and its lag are properties of that instrument, not of
+    # the machine it is screwed to, and that is exactly what kept `burst_pa` stranded on the
+    # chassis for a week. See `docs/design_sketches/modular_components.md` §4, which left room for
+    # this and declined to build it.
+    #
+    # The definitions still live in the panel — an instrument part's builder calls a panel helper
+    # and passes it figures — so the commentary stays put and only the numbers move.
     def initialize(nodes: [], links: [], thermal_links: [], drive_links: [],
-                   control_points: [])
+                   control_points: [], diagnostics: [])
       @nodes = nodes.freeze
       @links = links.freeze
       @thermal_links = thermal_links.freeze
       @drive_links = drive_links.freeze
       @control_points = control_points.freeze
+      @diagnostics = diagnostics.freeze
       freeze
     end
 
@@ -37,7 +50,8 @@ module ReactorSim
         links: @links + other.links,
         thermal_links: @thermal_links + other.thermal_links,
         drive_links: @drive_links + other.drive_links,
-        control_points: @control_points + other.control_points
+        control_points: @control_points + other.control_points,
+        diagnostics: @diagnostics + other.diagnostics
       )
     end
   end

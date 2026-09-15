@@ -101,6 +101,7 @@ require_relative "reactor_sim/nodes/atmosphere"
 require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 require_relative "reactor_sim/nodes/fusible_plug"
+require_relative "reactor_sim/nodes/breach"
 
 require_relative "reactor_sim/control_point"
 require_relative "reactor_sim/minion"

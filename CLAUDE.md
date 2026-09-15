@@ -57,7 +57,8 @@ no longer exists. Read them for why a decision was made, never as a description 
 ## Commands
 
 ```sh
-bundle exec rspec                          # full suite (~2.5 min, dominated by steam engine runs)
+bundle exec rspec                          # full suite (~35 min, dominated by steam engine runs)
+bundle exec rspec --dry-run                # count the examples a full run should reach
 bundle exec rspec spec/reactor_sim/conservation_spec.rb   # one file
 bin/rubocop                                # style + the bug-catching cops
 bin/ci                                     # setup, rubocop, bundler-audit, brakeman

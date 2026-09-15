@@ -344,8 +344,8 @@ crossing the boundary is declared.
 | `joules_to_friction` | out | Bearing drag, belt slip |
 | `joules_to_work` | out | Useful shaft work delivered |
 | `joules_advected_out` | out | Energy carried out with departing mass |
-| `mass_vented` | out | Deliberate discharge |
-| `mass_spilled` | out | Overflow, leak, failure. **Reserved — nothing writes it yet.** |
+| `mass_vented` | out | Deliberate discharge — what reaches `Atmosphere`'s `:exhaust` inlet |
+| `mass_spilled` | out | Leak or failure — what reaches `Atmosphere`'s `:spill` inlet, which is where a `Nodes::Breach` discharges |
 
 The hash also carries `ambient_k` — the environment's temperature, config rather than a flow.
 It is what `settle_ambient` relaxes toward.
@@ -355,9 +355,20 @@ Ledger.mass_balance(op.total_mass, op.ledger)     # constant
 Ledger.energy_balance(op.total_joules, op.ledger) # constant
 ```
 
-`mass_spilled` is unused on purpose rather than by omission: the arbiter scales a flow down
-when a sink has no room, so the material simply stays with the sender. Nothing overflows by
-construction. The line exists for a future node that models a genuine leak.
+**Nothing overflows in this engine by construction**: the arbiter scales a flow down when a
+sink has no room, so unaccepted material simply stays with the sender. So `mass_spilled` is
+only ever *damage*, and the distinction from `mass_vented` is the whole reason it is a separate
+line — a safety valve lifting and a boiler bursting both end in the sky, and reporting them as
+one number would make every efficiency figure built on the ledger a lie.
+
+`Atmosphere` therefore has **two inlets** and books them apart, per port rather than per node,
+for the same reason `transport_affinity` is per port: a node's ends have to be allowed to
+disagree about what they mean. Energy is *not* split — a joule leaving through a hole is the
+same loss as one leaving up the chimney, and only the mass carries the story of how it left.
+
+`Nodes::Breach` is what links to `:spill` — a hole built with the machine and shut until the
+part it senses fails. The steam engine's drum carries one. See
+[`design_sketches/failure_model.md`](../design_sketches/failure_model.md) §7–§9.
 
 ### `joules_from_reactions` is separate on purpose
 

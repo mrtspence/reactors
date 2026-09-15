@@ -103,7 +103,7 @@ module ReactorSim
 
         Assembly.new(
           slots: slots(spec), loadout: loadout, spec: spec,
-          fixtures: fixtures(spec), instruments: catalogue(spec),
+          fixtures: fixtures(spec), instruments: catalogue, order: PANEL_ORDER,
           routes: ROUTES, advisories: ADVISORIES
         )
       end
@@ -121,18 +121,17 @@ module ReactorSim
         atmospheric: {
           exhausts_to: :condenser,
           condenser: true,
-          # **Panel scale only, and the one thing here that is not topology.** It is the boiler
-          # pressure gauge's full-scale reading, not a physical limit — the shell's real rating
-          # is derived from its plate by `Concerns::Pressurized#rated_pressure_pa` and lives on
-          # the boiler part. It stays on the chassis because the panel catalogue is built from
-          # the chassis and does not know which boiler is fitted; moving it needs parts to own
-          # their `Diagnostic`s, which is §4 Option A and deliberately not done yet.
-          burst_pa: 4.0 * Units::STANDARD_PRESSURE_PA,
           # Everything not named here is the same on both machines and keeps its default in
           # `slots`. `fetch` on the way out, so adding a slot that varies and forgetting to name
           # it here raises rather than silently fitting the wrong part.
           parts: {
             boiler: :beam_boiler,
+            # **This is where `burst_pa` went.** It was the boiler pressure gauge's full-scale
+            # reading — never a physical limit; the shell's real rating is derived from its plate
+            # by `Concerns::Pressurized#rated_pressure_pa` — and it sat on the chassis because
+            # the panel catalogue was built from the chassis and did not know which boiler was
+            # fitted. The dial is a fitting now, so the number lives on the dial.
+            boiler_gauge: :low_pressure_gauge,
             chimney: :plain_chimney,
             damper: :narrow_damper,
             safety_valve: :low_pressure_safety_valve,
@@ -146,10 +145,9 @@ module ReactorSim
         high_pressure: {
           exhausts_to: :atmosphere,
           condenser: false,
-          # Panel scale only — see the note on the atmospheric chassis above.
-          burst_pa: 14.0 * Units::STANDARD_PRESSURE_PA,
           parts: {
             boiler: :locomotive_boiler,
+            boiler_gauge: :bourdon_pressure_gauge,
             # Trevithick threw the condenser away, which left the exhaust needing somewhere to
             # go — and putting it up the chimney turned a liability into the engine's lungs.
             # **That is one part rather than two**: a blastpipe and the chimney above it were
@@ -182,8 +180,19 @@ module ReactorSim
       #     blastpipe                                -> :blastpipe_chimney / :plain_chimney
       #
       # `exhausts_to` and `condenser` stayed: they are the machine's shape rather than a
-      # fitting's rating. `burst_pa` stayed for the reason given above, and is the one entry
-      # here that is still in the wrong place.
+      # fitting's rating.
+      #
+      # **`burst_pa` is gone too, as of 2026-09-14**, and it took a change of mind to move it. It
+      # was the pressure gauge's full-scale reading and it stayed here because the panel catalogue
+      # was built from the chassis. The fix was not to pass the fitted boiler into the catalogue —
+      # a gauge's range is not a property of the drum either. It was to notice that **the dial is
+      # a separate object screwed to the boiler**, and make it a part: `:boiler_gauge`, optional,
+      # with the scale on the gauge where it belongs. Same rule as the blower and the blastpipe —
+      # *an attribute becomes a node when it is a separate object, and a variant when it is a
+      # different version of the same object* — applied to an instrument for the first time.
+      #
+      # So `CHASSIS` now holds `exhausts_to`, `condenser` and `parts:`. Topology and nothing else,
+      # which is what §6 of the modularisation sketch asked for.
 
       # --- how the gas conductances were chosen ---------------------------------
       #
@@ -593,6 +602,13 @@ module ReactorSim
           shell_radius_m: shell_radius_m,
           wall_thickness_m: wall_thickness_m,
           safety_factor: 0.25, stress_rate: 90.0,
+          # **What the shell takes with it.** A drum letting go throws its plate across the
+          # shop; a seam splitting soaks the place in steam and hurts nothing structural. Fiat
+          # rather than a release-energy model — see `Concerns::Wearing#failure_damages` and
+          # docs/design_sketches/failure_model.md §6 — and configured here rather than in
+          # `Nodes::Boiler` because *which* parts are near enough to be wrecked is a fact about
+          # this machine, not about boilers.
+          damages: { explosion: { cylinder: 0.6, flywheel: 0.5 } },
           # **The crown sheet, which is what makes a low glass dangerous at last.** The water
           # lever has had a ceiling (priming) and no floor since it was built: feed 0 ran happily
           # at 357 kW while the drum emptied. Half a mechanic, and the missing half is the
@@ -650,6 +666,12 @@ module ReactorSim
             Port.new(id: :steam_out, direction: :outlet, accepts: [ :gas, :liquid ],
                      max_kg_per_s: 25.0),
             Port.new(id: :relief_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 3.0),
+            # Where the shell lets go. Wet, because what comes out of a burst drum is steam and
+            # the water flashing behind it, and rated far above anything the working machine
+            # uses so that the **breach** is the restriction rather than this port — see
+            # `SteamEngine.boiler_breach`. Nothing flows through it while the drum is sound.
+            Port.new(id: :breach_out, direction: :outlet, accepts: [ :gas, :liquid ],
+                     max_kg_per_s: 100.0),
             # Through the crown sheet and down onto the fire. Wet, because what comes out of a
             # blown plug is whatever is at the top of the water.
             Port.new(id: :plug_out, direction: :outlet, accepts: [ :gas, :liquid ],
@@ -707,6 +729,47 @@ module ReactorSim
       # drum sits on its valve at 608.0 kPa, and at 90 or below it is **under** its setting
       # (638 → 790 kPa) and limited by the fire instead. The masking is now something a player can
       # choose to remove.
+      # **The hole the drum opens when it fails**, and the thing that makes a burst boiler
+      # different from a boiler with a flag set on it.
+      #
+      # The mode fractions scale the conductance and the rate together, because
+      # `Conduit#open_fraction` feeds both — one number is genuinely the size of the hole.
+      #
+      # ## Measured, and the first guess was wrong by four orders of magnitude
+      #
+      # Sized against the safety valve at first, on the reasoning that it is the only other hole
+      # in this drum with a physical meaning. That produced a **cliff**: every fraction from 0.03
+      # down to 0.0005 took a 175 rpm engine to a standstill, so there was no small failure at
+      # all. The mistake was the reference — the valve only opens above its setting, while a
+      # breach is open always, and the number to compare against is the **regulator wide open**
+      # (`conductance: 1.5e-3`), which is the hole this engine's whole output goes through.
+      #
+      # Swept on a worked engine (175 rpm, 608 kPa, 2034 kg in the drum), rpm at +600 ticks:
+      #
+      #     conductance   2e-5    1e-4    4e-4    2e-3     2.0
+      #     rpm           175     151      80      18       2
+      #     spilled kg     26     111     230     294    2150
+      #
+      # So `seam_split` is **1e-4**, which is the limp-home case: the engine loses speed slowly
+      # and a driver who damps the fire and runs for the shed has a decision worth making.
+      # That is 5e-5 of the shell, and the area works out honest — about 8 cm² on a drum of this
+      # size, a hole three centimetres across, which is what a weeping seam is. `explosion` opens
+      # the whole bore and empties the drum inside a hundred ticks.
+      #
+      # **Run-ending is not declared anywhere.** The engine stops because there is no pressure,
+      # because there is a hole. See docs/design_sketches/failure_model.md §6.
+      def boiler_breach
+        Nodes::Breach.new(
+          id: :boiler_breach, label: "Boiler Breach", senses: :boiler,
+          opens_by: { seam_split: 5.0e-5, explosion: 1.0 },
+          accepts: [ :gas, :liquid ], max_kg_per_s: 60.0, conductance: 2.0,
+          # Effectively no wall. A hole is not a fitting: it has no thermal mass of its own to
+          # rob the escaping stream of heat on the way out, and giving it one would make a burst
+          # drum quietly cheaper than it should be.
+          heat_capacity: 1.0, ambient_conductance: 0.0
+        )
+      end
+
       def relief_valve(relief_pa:, max_relief_pa:)
         Nodes::ReliefValve.new(
           id: :relief, label: "Safety Valve", senses: :boiler,

@@ -110,7 +110,9 @@ module ReactorSim
     # which reactions can happen inside it.
     def reactions = []
 
-    def broken?(state) = state.fetch(:broken, false)
+    # Derived from the failure MODE, so a node that never included `Wearing` — a `Load`, an
+    # `Atmosphere` — answers false without carrying a key it has no use for.
+    def broken?(state) = !state.fetch(:failure, nil).nil?
 
     # Defaults for nodes that are not Thermal, so the Operation can treat every node
     # uniformly without asking what it includes. Depositing energy into a node that cannot

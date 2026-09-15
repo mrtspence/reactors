@@ -29,6 +29,14 @@ class Unlock < ApplicationRecord
     owned_by(owner_id).where(kind: kind.to_s, blueprint_id: blueprint_id.to_s).destroy_all
   end
 
+  # Every blueprint id one owner holds of one kind, as a Set of Strings. **One query, then
+  # membership tests** — the outfitting screen asks "do they own this?" about every candidate in
+  # every slot, which is twenty-odd slots times however many parts fit each, so a query per
+  # question would be several hundred round trips on one page render.
+  def self.owned_ids(owner_id, kind)
+    owned_by(owner_id).where(kind: kind.to_s).pluck(:blueprint_id).to_set
+  end
+
   # **Rows that name a blueprint the catalogue no longer has.**
   #
   # This is the drift that actually happens, and it has happened already: stage 3 of the

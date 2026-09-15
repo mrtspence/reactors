@@ -45,6 +45,7 @@ module ReactorSim
     # Parcels that left through a given outlet this tick.
     def sent_at(port_id) = sent.fetch(port_id, [])
 
+    def received_kg(port_id) = Parcel.total_kg(received.fetch(port_id, []))
     def sent_kg(port_id)     = Parcel.total_kg(sent.fetch(port_id, []))
     def rejected_kg(port_id) = rejected.fetch(port_id, 0.0)
 

@@ -211,7 +211,35 @@ to diff flags itself.
 2. Chain filters in the order the physical instrument would apply them — usually lag, then
    noise, then scale.
 3. Pick a display and put any unit conversion there.
-4. Add it to the operation's diagnostics list.
-5. If you add a **new filter class**, decide `distortion?` deliberately and spec it. Unused
+4. Add it to the operation's panel catalogue **and to its panel order** — the order is what
+   decides where it sits, and `Assembly` refuses a gauge the order does not name rather than
+   quietly appending it to the end.
+5. Decide which part it arrives with. Most gauges are *named* by a part (`instruments: %i[…]`)
+   and defined in the panel; a gauge that is itself a fitting is built by that part instead —
+   see below.
+6. If you add a **new filter class**, decide `distortion?` deliberately and spec it. Unused
    palette pieces get specced too — an upgrade slot nobody has exercised is one that will not
    work when it is first reached for.
+
+## When the gauge is itself a part
+
+Most instruments belong to a machine part: the water glass arrives with the boiler, the wheel
+stress gauge with the flywheel. Those name gauge ids and the panel holds the definitions, which
+is what keeps the reasoning about how each one lies in one readable file.
+
+**A gauge that is a separate object gets to be a part.** The boiler pressure gauge is a brass
+instrument screwed to the drum, and its full-scale reading is a property of *it* — a 0–14 atm
+dial and a 0–4 atm dial are different fittings, chosen to suit the boiler. Treating that as a
+property of the machine is what stranded `burst_pa` on the steam engine's chassis for a week.
+Such a part builds a `Fragment` carrying `diagnostics:`; the definition still lives in the panel
+and the part passes it figures.
+
+> **An instrument upgrade may reduce a filter. It may never remove a class of one.** Less lag,
+> less noise, a finer band — never zero lag, and never a number where the design chose prose.
+> Three gauges on the steam engine are exempt outright: `safety_valve`, which is *true* by design
+> because the player is not reading a dial at all, and `crown_sheet` and `flywheel_condition`,
+> whose vagueness **is** the hazard they name.
+>
+> The reason is the whole premise of this file: the instruments are not an obstacle between the
+> player and the game, they *are* the game. A panel that can be bought into telling the truth has
+> sold the only thing it was protecting.

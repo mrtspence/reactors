@@ -11,6 +11,11 @@ module DevMatch
   ID = "dev"
   OPERATION_ID = :engine
 
+  # The registered operation TYPE, which is not the operation's id: `:engine` is what this
+  # particular machine is called in this match, `:steam_engine` is what kind of machine it is.
+  # The delivery tier needs the type to ask the registry what frames it offers.
+  TYPE = :steam_engine
+
   # Fixed rather than random, so a restart reproduces the same machine — which is the whole
   # point of a deterministic simulation and makes "it did that again" a usable bug report.
   SEED = 20_260_828
@@ -41,6 +46,26 @@ module DevMatch
 
   def stored_parts = stored&.to_sim || {}
 
+  # **The loadout rides INSIDE the reset command, not merely referenced by it.**
+  #
+  # The runner could read the `loadouts` table itself — it has Rails booted. It must not: the web
+  # process writes that row and *then* produces this command, so a runner reading the table would
+  # be reading it at whatever moment the record happened to reach it, and a reset that raced a
+  # save would rebuild the previous machine with no sign anything went wrong. Carried in the
+  # payload, the command says exactly which machine it means, and it stays ordered against the
+  # lever commands around it because it rides the same key on the same topic.
+  #
+  # The table is still what a cold runner boots from. It is just not what a reset consults.
+  def reset_command
+    { "type" => "reset_match" }.tap do |command|
+      row = stored
+      next unless row
+
+      command["chassis"] = row.chassis
+      command["loadout"] = row.parts
+    end
+  end
+
   # TODO: expedient — 1.0 is the only setting whose skill gradient has actually been measured
   # (60/80/60 survives, 80/90/70 bursts the flywheel). Raising it makes a cold start bearable
   # for a first-time tester but shifts that gradient, so it is a dial for impatience during
@@ -53,7 +78,7 @@ module DevMatch
   def build(chassis: nil, loadout: nil)
     ReactorSim::Match.create(
       id: ID, seed: SEED, time_scale: time_scale,
-      operations: [ { id: OPERATION_ID, type: :steam_engine,
+      operations: [ { id: OPERATION_ID, type: TYPE,
                       chassis: chassis || self.chassis,
                       loadout: loadout || stored_parts } ]
     )
