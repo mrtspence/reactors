@@ -3,28 +3,24 @@
 module ReactorSim
   # What a part contributes to an operation when it is fitted.
   #
-  # A part is almost never one node, which is why this exists at all. The condenser is a
-  # condenser *and* a hotwell return *and* two links; the feedwater set is a pump, an injector,
-  # a steam pipe, five links and a lever. Before this, a part's pieces were scattered across
-  # four separate lists in two files, so removing one meant editing all four and hoping you
-  # found them — which is exactly why nothing was ever optional.
+  # **A part is almost never one node**, which is why this exists: the condenser is a condenser
+  # *and* a hotwell return *and* two links; the feedwater set is a pump, an injector, a steam
+  # pipe, five links and a lever. Keeping a part's pieces together is what makes it removable —
+  # scattered across separate lists, removing one means editing all of them and hoping you found
+  # them.
   #
-  # Everything in here is CONFIGURATION. Fragments are merged once, at build, and the
-  # `Operation` that results is the same flat bag of nodes and links it has always been. No
-  # fragment, part or slot is reachable from `Tick`, `Arbiter` or any node — see
-  # `operations/CLAUDE.md`.
+  # Everything here is CONFIGURATION. Fragments merge once, at build, into the flat bag of nodes
+  # and links `Operation` takes. No fragment, part or slot is reachable from `Tick`, `Arbiter` or
+  # any node — see `operations/CLAUDE.md`.
   class Fragment
     attr_reader :nodes, :links, :thermal_links, :drive_links, :control_points, :diagnostics
 
-    # `diagnostics:` is for parts that **are** instruments, and only those.
-    #
-    # Every other part names its gauges by id (`Part#instruments`) and the operation's panel holds
-    # the definitions, because the two hundred lines explaining *why each gauge lies the way it
-    # does* are worth keeping in one readable file. A gauge that is itself the fitting has nowhere
-    # else to live: its full-scale reading and its lag are properties of that instrument, not of
-    # the machine it is screwed to, and that is exactly what kept `burst_pa` stranded on the
-    # chassis for a week. See `docs/design_sketches/modular_components.md` §4, which left room for
-    # this and declined to build it.
+    # `diagnostics:` is for parts that **are** instruments, and only those. Every other part names
+    # its gauges by id (`Part#instruments`) and the operation's panel holds the definitions,
+    # because the reasoning about why each gauge lies the way it does is worth keeping in one
+    # readable file. A gauge that is itself the fitting has nowhere else to put its full-scale
+    # reading and its lag, which are properties of that instrument rather than of the machine it
+    # is screwed to.
     #
     # The definitions still live in the panel — an instrument part's builder calls a panel helper
     # and passes it figures — so the commentary stays put and only the numbers move.
@@ -64,10 +60,10 @@ module ReactorSim
   # is what lets a part be swapped without rewriting the wiring around it, and it is what
   # keeps the rng stream — which is keyed by name — attached to the same role across a swap.
   #
-  # `instruments:` names gauge ids rather than carrying `Diagnostic` objects. The definitions
-  # stay in the operation's panel, where the 250 lines explaining *why each gauge lies the way
-  # it does* can be read in one sitting; the part only says which ones arrive with it. A part
-  # naming a gauge that does not exist fails at build rather than reading nil forever.
+  # `instruments:` names gauge ids rather than carrying `Diagnostic` objects. The definitions stay
+  # in the operation's panel, where the reasoning about why each gauge lies can be read in one
+  # sitting; the part only says which ones arrive with it. A part naming a gauge that does not
+  # exist fails at build rather than reading nil forever.
   class Part
     attr_reader :id, :kind, :label, :description, :stats, :provides, :instruments, :wip
 

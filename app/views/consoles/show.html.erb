@@ -33,6 +33,13 @@
                 class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
                        "ring-1 ring-slate-700" %>
 
+    <%# Separate from outfitting, because they are separate decisions: what the machine IS, and
+        who is working it. Both rebuild the engine from cold. %>
+    <%= link_to "Crew",
+                edit_crew_path(match_id: @match_id, operation_id: @operation_id),
+                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                       "ring-1 ring-slate-700" %>
+
     <button type="button" data-action="console#reset"
             class="text-xs px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 ring-1 ring-rose-700">
       Reset engine

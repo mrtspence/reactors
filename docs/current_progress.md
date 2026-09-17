@@ -1,22 +1,28 @@
 # Current progress
 
-Last updated: 2026-09-05. Sim suite: **179 examples, 0 failures.** Rubocop: clean, 111 files.
+Last updated: 2026-09-16. Suite: **631 examples, 0 failures, 1 pending** (48 min). Rubocop:
+clean, 184 files.
 
 ---
 
 ## Where the project is
 
-The **simulation is real and working**. The Rails delivery tier is scaffolded but essentially
-untouched — nothing in `app/` has been written yet.
+The **simulation is real and working**, and it is now playable in a browser by a crew of people
+who can be equipped, trained and hurt.
 
 ```
 DONE      simulation engine (lib/reactor_sim)     — physics, graph, diagnostics
 DONE      one playable operation                  — the steam engine, two variants
 DONE      infrastructure                          — Postgres, Redpanda, topics, gems
-NOT DONE  everything that makes it a game         — runner, Kafka wiring, web tier, minions
+DONE      the delivery tier                       — runner, Kafka wiring, web tier, panel
+DONE      minions                                 — individuals, kit, training, injury, the IL
+DONE      the durable record                      — match.events, incidents, progression, awards
+NOT DONE  match lifecycle, snapshots + recovery, auth, fatigue, movement
 ```
 
-There is no way to *play* it yet. You can drive an operation from Ruby and watch it work.
+You can play it. What is missing is everything around a match rather than inside one: a match
+still has no real beginning or end (`DevMatch` stands in), a crash loses the run, and there are
+no user accounts.
 
 ---
 
@@ -77,10 +83,13 @@ Verified end to end: same-key records land on one partition and are consumed in 
 
 ### Specs
 
-`ls spec/reactor_sim/` is the truth; at the time of writing: `purity`, `determinism`,
-`conservation`, `thermal`, `graph`, `content`, `diagnostic`, `minion`, `player_view`,
-`performance`, `steam_engine`. Plus `spec/environment_spec.rb` for infrastructure facts with
-silent failure modes, and `spec/models/` for the blueprint catalogue and unlock rows.
+`ls spec/reactor_sim/` is the truth; at the time of writing: `assembly`, `conservation`,
+`content`, `crew`, `crown_sheet`, `determinism`, `diagnostic`, `entrainment`, `event`, `failure`,
+`graph`, `ignition`, `injury`, `kit`, `minion`, `obstruction`, `performance`, `player_view`,
+`purity`, `steam_engine`, `thermal`, `transport`, `transport_affinity`. Plus
+`spec/environment_spec.rb` for infrastructure facts with silent failure modes, and the delivery
+tier's own directories (`ls spec/`): `channels`, `components`, `models`, `requests`, `runner`,
+`services`.
 
 Note that `environment_spec` asserts Postgres, the sim boundary and the cable adapter — **not
 Kafka.** The "same-key records land on one partition" check above was done by hand; nothing in
@@ -143,16 +152,13 @@ was refused with 422 and never reached the topic.
 
 ### Simulation features designed but not built
 
-- **Minions — partly built.** `Minion` exists, archetypes load from `content/minions/`, state
-  is `{health, fatigue, station}`, `assign_minion` is a command, and phase 0 consults the crew
-  through `ControlPoint#actuate(rate_multiplier:)`. The steam engine has a fireman and a
-  yardhand.
-  **They are inert on purpose:** every steam engine lever keeps `stiffness: Float::INFINITY`,
-  which discards the multiplier, so the measured skill gradient is untouched. Still missing —
-  what makes fatigue accrue and health decline (nothing does, so a minion never tires);
-  intelligence and the `Diagnostic#observer` gauge-reading path; skills and tags; a rule for
-  an unmanned lever (currently full rate) and for two minions at one station (last writer
-  wins). Every one is marked `TODO` at the code.
+- **Minions — built, with two seams left open.** Individuals with stats and tags, a four-layer
+  sheet, equipment in three slots, training, a roster in `options:`, injury through a Danger
+  Check, and effort stations that make the crew load-bearing on output. What is still missing:
+  **fatigue** (`state[:fatigue]` multiplies into capability and nothing advances it — item 6
+  below), **`intelligence` and the `Diagnostic#observer` gauge-reading path** (the stat is
+  defined and read by nothing), and **two minions at one station** (last writer wins). Each is
+  marked `TODO` at the code.
 - **`ControlLink`** — one node sensing another as a declared, breakable graph edge. Needed for
   a governor that can fail on.
 - **Failure modes** from `design_sketches/boiler.md`: governor fail-on, hot box / bearing
@@ -221,6 +227,25 @@ was refused with 422 and never reached the topic.
 
 ## What to do next
 
+**The minion release is built — all seven stages, 2026-09-16.** Design and findings in
+[`design_sketches/minions.md`](design_sketches/minions.md). Individuals rather than jobs, equipment
+in three slots, training, injury through a Danger Check, and a crew that is load-bearing on the
+machine's output. What landed:
+
+- **The noun is corrected.** What you unlock is Jim, not "fireman". `content/` splits into
+  `archetypes/` and `minions/`, a four-layer sheet resolves archetype → individual → training →
+  equipment (**merge adds, use multiplies**), and the catalogue carries blueprints across six kinds.
+- **The crew rides in `options:`**, which `definition.rb` had been warning about since the crew was
+  written — a restored snapshot now rebuilds the *same* crew.
+- **Injury needs no dice.** `resilience` is rolled once at `initial_state`, an already-permitted
+  entropy point, so every Danger Check is a deterministic comparison: replay, order-independence
+  and snapshot safety with no amendment to the invariants. Hazards resolve through **stations**,
+  which gives coarse place with no geometry and upgrades cleanly when volumes arrive.
+- **Effort stations replaced `stiffness`** — the lever is intent, the crew supplies the rate. A
+  locomotive cannot be run by day-labourers; a competent human reproduces the tuned machine.
+
+**Movement and the spatial model are the release after**, deliberately.
+
 Steps 1–4 of the original vertical slice are **done** — the prototype is playable in a browser.
 What remains, in dependency order:
 
@@ -230,14 +255,40 @@ What remains, in dependency order:
 2. **Snapshots + offset commits** — snapshot to `match.snapshots` embedding the command offset,
    *then* commit. Then the crash-recovery drill. This is the largest deferred piece and the one
    the `auto.offset.reset: latest` shortcut is standing in for.
-3. **`match.events`** — incidents currently exist only inside whatever projection is broadcast,
-   so a spectator joining a tick later never learns the flywheel burst.
+3. ~~**`match.events`**~~ — **done, 2026-09-15.** The durable record exists end to end:
+   `ReactorSim::Event` with an enumerated vocabulary, transitions the machine reports
+   (`fire_lit`, `fire_out`, `heater_engaged`, `steam_raised`, `blew_off`) alongside
+   `part_failed`, `EventProducer` dual-writing beside `ViewBroadcaster`, absolute meter
+   readings every 40 ticks, two karafka consumer groups, five tables, and a channel that
+   backfills a joining client from the log. **`Achievement.earned?` reads `awards` now** rather
+   than returning true for everything, so the `requires:` gates in `config/blueprints.yml` are
+   live. Design and findings: [`design_sketches/event_system.md`](design_sketches/event_system.md).
 4. **Turbo incident broadcasts** — the first ViewComponent that earns its keep, replacing the
    client-side incident list.
+
+   **Refactor `console_controller.js` while you are in there.** It has grown past the point where
+   one Stimulus controller should hold it: subscription and resync, delta merging, gauge painting,
+   lever painting and optimistic lever state, the incident feed, the backfill, and now the crew
+   panel. Several of those are independent concerns that happen to share a socket. The Turbo work
+   removes one of them outright (the incident feed), which makes this the natural moment — split
+   the rest by what they paint rather than letting the file keep accreting. **Cheaper than it was**: there is now an `incidents` table to
+   render from rather than a transient projection, and `Incident.backfill` already produces the
+   shape.
 5. **Match lifecycle** — real creation, `match.lifecycle`, and the end of `DevMatch`. This is
-   also what retires the "web process rebuilds a Match to get the panel" shortcut.
-6. **Auth**, then the deferred minion work (fatigue, the `observer` gauge path, finite lever
-   stiffness), then the failure modes from `design_sketches/boiler.md`, then Chemical Vats.
+   also what retires the "web process rebuilds a Match to get the panel" shortcut. **No longer
+   blocks progression**: `run_id` already carries the identity lifecycle will key on, and every
+   fold closes on a transition the engine emits, so a match that never ends still banks what it
+   earned.
+6. **Fatigue**, which now has an obvious home and did not before. Effort is a minion's
+   *subjective* exertion — the same lever position costs a day-labourer far more than it costs a
+   strong fireman — so the rule is that fatigue accrues with `intent ÷ capability` rather than
+   with the lever's position. Working somebody past what they can manage tires them; a strong
+   worker coasting at a setting that is killing a weak one does not. `state[:fatigue]` exists,
+   already multiplies into `Minion#capability`, and nothing advances it. See
+   [`design_sketches/minions.md`](design_sketches/minions.md) §9.
+7. **Auth**, then the rest of the deferred minion work (the `observer` gauge path, finite lever
+   stiffness for a control that should genuinely take time to travel), then the failure modes
+   from `design_sketches/boiler.md`, then Chemical Vats.
 
 **Frictional bearings, and the drive-coupling loss goes with them.** Bearings and their failure
 modes are planned, and they put a second dissipation term on the same shafts that
@@ -692,13 +743,76 @@ In rough priority order. The first two are the ones that most damage the game as
    The player-facing consequence is the good one: **how much water is in the glass now decides
    how badly the boiler fails, not merely whether it fails.**
 
-   **Still open (stage D):** breaches on the cylinder, chest and main steam pipe — until a part
-   has one, its rupture does nothing, which is deliberate but incomplete. Modes carry `derates:`
-   tables that nothing yet reads.
+   **And a mode now changes how a surviving part works.** `derates:` is read by the node's own
+   code, which is what finally made the cylinder's two modes different machines: a **scored
+   bore** turns, pulls, does both badly and can be nursed home; a **blown head** does neither
+   and opens a hole. Until then *any* cylinder failure declared `Intent.none` and stopped the
+   engine dead, so the milder mode was decoration.
+
+   Three breaches are wired on both chassis — boiler, steam chest, cylinder — each shipped by
+   the part that can fail, so fitting a different drum gets you that drum's way of failing.
+   `failure_spec` checks the inverse too: no breach may name a mode its part can never enter,
+   which would leave a hole inert and indistinguishable from a part meant to fail sealed.
+
+   **The conduit case is done too, and it needed no new machinery.** A pipe holds nothing, so
+   its hole has to drain a *holder* — and `Breach` already separated the two questions, because
+   `senses:` is whose failure opens it while the inlet **link** is what empties. Which holder is
+   a declaration rather than a deduction: on the pressure side of every valve, drain upstream
+   and the leak continues whatever the driver shuts; past the restriction, drain downstream and
+   closing the valve isolates it. `steam_pipe_breach` senses the **throttle** and drains the
+   **boiler**, because a locomotive regulator sits in the dome on the boiler side of its own
+   valve — so **the one control that would normally save you is on the wrong side of the hole.**
+
+   A ruptured conduit also *derates* what it still delivers (0.7), which is damage to the pipe
+   and deliberately **not** the leak: material a conduit declines to pass stays upstream as
+   back-pressure, so a throughput term alone spills nothing and writes nothing to the ledger.
+
+   Four breaches wired on both chassis: boiler, main steam pipe, steam chest, cylinder.
+
+   **And escalation finally reaches a real part.** It had unit tests and nothing in any machine
+   could trigger it — the same silent off switch this list keeps recording. The cylinder is the
+   one that can: its `overload?` is hydraulic lock, which is *condition*-driven rather than
+   durability-driven, so it still fires on a part whose durability is long gone. A cylinder worn
+   to `scored_bore` that then takes a slug of water blows its head off, and the event says what
+   it escalated from. A part whose only route is fatigue can never escalate, by construction —
+   and the boiler deliberately cannot, because a split drum loses pressure through its own hole,
+   so the severity that would name a worse mode is falling exactly when it is re-read.
+
+   **What the player is told is thinner than what the engine knows.** There *is* an incident
+   feed — `PlayerView#incidents` carries the events over the wire and the console renders them —
+   but it prints one flat line of engine vocabulary, `vessel rupture (fatigue)`, identical in
+   weight whether a fusible plug melted or the boiler exploded. The `mode` this whole pass
+   exists to produce is not shown at all, nor `escalated_from`, nor `severity`, nor what the
+   failure damaged. That is the next thing worth doing, and it is delivery-tier only: the wire
+   already carries every field.
 
    One consequence worth knowing before `Atmosphere` is built as the universal sink: in-match
    repair is coming as a minion job, and **what a part spills can deny the crew access to it**.
    Once that is true, *where* a spill went matters, and a single global sink cannot express it.
+2b. **Instruments are blueprints too. Half done (2026-09-15).** The pressure gauge became a
+   fitting in stage 5e; the **water gauge** followed, with three tiers — try-cocks, gauge glass,
+   reflex glass. Both instrument slots are optional, which is the safety-device bargain applied
+   to what a driver can *see*. 40 blueprints, up from 37.
+
+   **Both tiers shipped broken the first time and only measurement caught it**, which is the
+   lesson worth keeping. Try-cocks at 25% steps **never moved at all** over 1400 ticks of a level
+   swinging 44% → 56% — the whole working band sits inside one step, so it was an absent gauge
+   rather than a coarse one. And the reflex glass was a **placebo**: it cut noise three-fold and
+   no player could have told, because the needle reads whole percent and the plain glass's ±1.2%
+   was already below one unit of that. The plain glass had been accidentally noise-free, so there
+   was nothing for an upgrade to improve; it is ±2.5% now. **A filter finer than the display's
+   precision does not exist.**
+
+   Measured mean misreading against truth: try-cocks 3.3%, glass 0.8%, reflex 0.3% — a real
+   progression. The *maximum* error stays near 10–17% on all three, because that is lag during a
+   fast change, which no tier removes: **the swell trap survives every upgrade**, which is the
+   rule that instruments may be improved but never bought into telling the truth.
+
+   **Still open:** sixteen instruments remain chassis furniture. Making each a fitting is not
+   automatically right — `safety_valve` is deliberately *not a dial* (you hear it), and
+   `crown_sheet` is vague because that is the hazard. The ones worth doing next are the ones a
+   player would actually buy: the speed indicator and the firebox pyrometer.
+
 3. **The UI is opaque.** No tooltips, no explanation of what any gauge or lever does. Fine for
    someone who knows the simulation, useless to anyone else. Wants hover copy per instrument
    and per lever — which likely means the operation declaring a description alongside each
@@ -786,144 +900,167 @@ before the simulation rewrite but is unaffected by it.
 
 ---
 
-## Traps that have already cost time
+## Traps
 
-Every one of these was a real bug. They are documented where they matter, but collected here
-because they are the kind a fresh reader repeats.
+Each of these is a rule, and each is the kind a fresh reader breaks by accident. They are
+documented where they matter and collected here because the collection is worth reading once.
 
-- **Never pipe a suite run through `tail`.** A background full-suite run was written as
-  `bundle exec rspec | tail -20`, which truncated the failure output *and* masked the exit code —
-  `tail` exits 0 whatever rspec did. The task reported success while printing a list of failed
-  examples, and the tally line the summary needed had been cut off. Capture the whole thing; read
-  the tail afterwards.
-- **Check the example COUNT, not just the failure count.** Same lesson, different mechanism, and
-  it caught the very next run. A background suite under `timeout 1200` was killed at the twenty
-  minute mark; rspec printed `324 examples, 0 failures, 1 pending` and a normal `Finished in
-  19 minutes 52 seconds`, which reads exactly like a clean run. **The suite has 450 examples**
-  (`bundle exec rspec --dry-run` counts them in seconds) — 126 never ran, and the only thing that
-  said so was the exit code, 124. A green summary line is not a green suite. Give a full run a
-  generous timeout, and reconcile the count against the dry run before believing it.
-- **The suite takes about thirty-five minutes, not the "~2.5 min" the root `CLAUDE.md` claimed
-  for a long time.** Measured at 34:08 for 460 examples on 2026-09-14. (A partial run that got
-  through 324 of them took 19:52, which is where an intermediate "~20 min" estimate came from —
-  another reason not to trust a truncated run for anything.) It is dominated by the steam
-  engine's multi-thousand-tick runs. Budget for it when backgrounding one.
+- **Postgres treats NULLs as distinct in a unique index.** `progresses` distinguishes a per-run
+  row from a lifetime total by a null `run_id`, so a plain unique index on
+  `(owner_id, run_id, metric)` enforces nothing for the lifetime rows: `NULL = NULL` is unknown,
+  not true, so `ON CONFLICT` never matches and **every meter reading inserts a fresh row** — 40
+  rows for 10 metrics inside a minute. A spec asserting the *total* passes anyway, because
+  `pluck.to_h` keeps the last value for a repeated key. `nulls_not_distinct: true` (PG 15+) is
+  the fix; **count the rows, not just the total.**
+- **An error CODE of 0 is success, not an error.** `Rdkafka::DeliveryReport#error` is an integer,
+  so `next if report.error.nil?` logs and counts every successful delivery as a failure. A
+  counter that is always wrong in the alarming direction is worse than no counter.
+- **Do not pin a spec to a real minion, or to a balance figure.** Jim's stats are game content
+  and will be tuned as more mechanics land; a spec that names him breaks on every tune, and it
+  breaks looking like a physics regression. Use `spec/support/reference_crew.rb` — a flat-1.0
+  fixture that only changes when somebody changes it on purpose. The same rule covers outcomes:
+  "the drum lets go and Jim dies" asserts the balance pass, where "a real injury carries the
+  person and the verdict" asserts the wiring. **Shape does not move with balance; outcomes do.**
+- **Content is global and is never snapshotted.** `Operation.from_h` rebuilds through the
+  registered builder with no `content:`, so a restored match always resolves against
+  `Content.default` — a registry injected at build does not exist after a round trip, and the
+  rebuild raises `unknown minion`. A spec needing fixture content in a *restore* must stub
+  `Content.default`; passing `content:` only covers the build. And `before(:all)` fires before any
+  `before(:each)`, so a hook-installed stub is not there yet for an expensive setup block.
+- **A tier nothing can reach is a tier that does not exist.** Check that every branch of a ladder
+  is reachable **by driving the real machine, not by reading the arithmetic**. Two shapes of this:
+  an injury band so narrow that a worker goes from unmarked to carried-out in two hits, because
+  bites large enough to get through any resistance are a decent fraction of what a minion has;
+  and a pressure-ratio rule for a boiler explosion that no drum ever reaches.
+- **A zero default is a silent off switch.** `Vessel` has no `overload?` — it depletes durability
+  — so a rig with a tiny `max_pressure_pa` and the default `stress_rate: 0.0` never breaks
+  however far past its rating it goes. Same shape as `max_temperature_k: Infinity` and the
+  flywheel's `fatigue_rate`.
+- **The pressure at rupture is not the pressure a vessel was built with.** The saturation solve
+  settles the liquid/vapour split on the first tick, so calibrating against the constructor
+  figure gives a number that looks right and is not. Read what the part *reported* on its event.
+- **An achievement is only real once something has driven the actual machine through it.** A rule
+  can name a window the machine never produces, and every term in it can exist, so it reads
+  correctly and nothing raises. "Raised steam without the pilot" is the worked example: the
+  igniter is how a cold fire is lit, so `heater_engaged` fires at tick 1 and `fire_lit` at tick 2,
+  and a window opening at the lighting can never contain the disqualifying event. Only an
+  end-to-end spec finds this, because each hop is individually correct.
+- **Hysteresis on a deadband assumes the signal wanders around a level.** A valve sensing
+  `compression_pressure_pa` — reconstructed from crank geometry, so it swings through its whole
+  range every tick rather than hovering — re-arms on every stroke and announces itself 20 times
+  in 40 ticks despite a 2% band. Deadbands do nothing to a cyclical quantity; a **time hold**
+  does.
+- **Never pipe a suite run through `tail`.** It truncates the failure output *and* masks the exit
+  code, since `tail` exits 0 whatever rspec did — so the task reports success while printing a
+  list of failed examples, with the tally line cut off. Capture the whole run; read the tail
+  afterwards.
+- **Check the example COUNT, not just the failure count.** A suite killed by a `timeout` prints
+  `324 examples, 0 failures, 1 pending` and a normal `Finished in 19 minutes 52 seconds`, which
+  reads exactly like a clean run; the only signal is the exit code. **A green summary line is not
+  a green suite.** Give a full run a generous timeout and reconcile its count against
+  `bundle exec rspec --dry-run`, which counts in seconds.
+- **The suite takes the better part of an hour.** Measured at 48:23 for 631 examples, dominated
+  by the steam engine's multi-thousand-tick runs, and it grows with every machine. Budget for it
+  when backgrounding one, and give it a timeout well clear of the last measurement.
 - **A failure that only appears in a full-suite run will not reproduce when you re-run it.**
   `spec/support/loop_rig.rb` is loaded by nothing but a full run, and it registers an operation
-  globally, which poisoned a catalogue derived from that registry. Seventeen examples failed
-  together; every targeted re-run of them passed. When a full run fails and a focused run does
-  not, suspect load order and global registration before suspecting flakiness.
+  globally, which poisons any catalogue derived from that registry — seventeen examples fail
+  together and every targeted re-run passes. When a full run fails and a focused run does not,
+  suspect load order and global registration before suspecting flakiness.
 
-- **Link declaration order changes the answer, and `graph_spec` says it does not.** Measured
-  2026-09-13 while modularising. Reverse the steam engine's link list, change nothing else, and
-  the state diverges on **tick 1** — by `1e-16` relative, which is one unit in the last place of
-  a double, in the order floats are summed. By tick 1800 the boiler reads
-  **608.183 / 608.046 / 607.866 kPa** for the list as declared, reversed and shuffled, and rpm
-  differs by 0.07. **Node order, by contrast, is genuinely bit-identical.**
+- **Link declaration order changes the answer, and `graph_spec` says it does not.** Reverse the
+  steam engine's link list, change nothing else, and the state diverges on **tick 1** — by
+  `1e-16` relative, one unit in the last place of a double, in the order floats are summed. By
+  tick 1800 the boiler reads **608.183 / 608.046 / 607.866 kPa** for the list as declared,
+  reversed and shuffled, and rpm differs by 0.07. **Node order, by contrast, is genuinely
+  bit-identical.**
   **What decides whether an ulp grows is loop gain, and the two chassis are a controlled
   experiment for it**: the high-pressure engine diverges and keeps diverging, while the
   atmospheric one diverges transiently near tick 2700 and returns to a **byte-identical digest
-  by 3600**, mass bit-identical throughout. The difference is the blastpipe — Trevithick's
-  engine exhausts up its own chimney and so carries a closed draught loop that multiplies the
+  by 3600**, mass bit-identical throughout. The difference is the blastpipe — Trevithick's engine
+  exhausts up its own chimney and so carries a closed draught loop that multiplies the
   perturbation; Watt's exhausts into a condenser and has none, so it damps away.
   `graph_spec` asserts both and passes, because it asserts them on `LoopRig` — four nodes, 60
   ticks, nothing to amplify an ulp — so the assertion is true there and does not generalise.
   Invariant 2 is untouched: `seed + command log` still replays exactly, because link order only
   changes when the code does. What this breaks is refactors: **any change that reorders links
-  cannot be accepted on a bit-identical digest**, and modularisation was exactly that change.
-  Use identical node set, identical link *set*, identical panel, identical cold state and
-  per-tick agreement to 1e-15 instead. See `reference/invariants.md` §3.
-- **One conduit without a conductance turns a whole path rate-driven, and a rate-driven path
-  has no head.** `Arbiter.gas_coupling` requires *every* conduit on a path to declare one and
-  returns nil otherwise. Cost, 2026-09-13: promoting the blower from `head_pa:` on the damper
-  to its own `:blower_fan` conduit, left without a conductance because "a fan is a pressure
-  source, not a restriction" — physically true, fatal here. The draught, the chimney and the
-  blower all stopped existing at once: **296 K firebox, 3 kPa boiler, dead on both chassis, no
-  error of any kind.** A pressure source in series wants **`conductance: Float::INFINITY`**,
-  which contributes `1/∞ = 0` to the reciprocal series sum and leaves the real restriction's
-  measured rating exactly where the sweep put it. A finite value re-rates the path — 1000 moves
-  it 0.03%, which is enough to invalidate a measurement. This is the **one** place in the engine
-  where `Float::INFINITY` is a statement rather than a silent off switch, and it is only safe
-  because the restriction it defers to is next door and measured.
-- **A cold digest is not a test.** The first acceptance script for modularisation drove the
-  engine with a startup sequence that never lit the fire — 400 K firebox, zero rpm, boiler at
-  9 kPa — and compared digests across 3000 ticks of a machine doing nothing. It would have
-  passed with the cylinder, the flywheel and the whole drivetrain broken. **Drive the real
-  procedure from the spec's own helper** (`light_and_run`, blower on, mill on the belt before
-  the regulator) and assert on something that proves it ran: 174.8 rpm and a boiler on its
-  safety valve.
+  cannot be accepted on a bit-identical digest.** Use identical node set, identical link *set*,
+  identical panel, identical cold state and per-tick agreement to 1e-15 instead. See
+  `reference/invariants.md` §3.
+- **One conduit without a conductance turns a whole path rate-driven, and a rate-driven path has
+  no head.** `Arbiter.gas_coupling` requires *every* conduit on a path to declare one and returns
+  nil otherwise, so the draught, the chimney and the blower stop existing at once: **296 K
+  firebox, 3 kPa boiler, dead on both chassis, no error of any kind.** The tempting mistake is a
+  fan, on the grounds that a pressure source is not a restriction — physically true, fatal here.
+  A pressure source in series wants **`conductance: Float::INFINITY`**, which contributes
+  `1/∞ = 0` to the reciprocal series sum and leaves the real restriction's measured rating
+  untouched; a finite value re-rates the path, and 1000 already moves it 0.03%. This is the
+  **one** place in the engine where `Float::INFINITY` is a statement rather than a silent off
+  switch, and it is only safe because the restriction it defers to is next door and measured.
+- **A cold digest is not a test.** A startup sequence that never lights the fire — 400 K firebox,
+  zero rpm, boiler at 9 kPa — compares digests across 3000 ticks of a machine doing nothing, and
+  passes with the cylinder, the flywheel and the whole drivetrain broken. **Drive the real
+  procedure from the spec's own helper** (`light_and_run`, blower on, mill on the belt before the
+  regulator) and assert on something that proves it ran: 174.8 rpm and a boiler on its safety
+  valve.
 
-- **A rate cap next to a conductance is a dead number, and it will be read as live.** Chasing the
-  stoking inversion, a sweep set the damper's `draught_kg_per_s` to 4.0, 6.6 and 9.0 and got
-  **byte-identical results at every stoking level and every damper position**. `max_kg_per_s` does
-  not apply to a conduit that declares a `conductance:` — the throttle's comment already says so —
-  so `draught_kg_per_s` has never once limited the draught, and `damper_conductance` is the only
-  air control there is. The trap is not the inert number itself; it is that the comment above it
-  read *"sized so a fully open damper roughly matches a fully stoked grate"*, which is a statement
-  about a quantity that was doing nothing, and is also arithmetically false (a full grate is
-  0.6 kg/s of coal, which at the reaction's 11:1 needs **6.6 kg/s** of air, not 4.0). **Two
-  numbers for one restriction, for the third time in this engine.** Before tuning a constant,
-  check it is on the path that decides the thing — the cheapest possible test is to set it to
-  three different values and see whether anything moves.
+- **A rate cap next to a conductance is a dead number, and it will be read as live.**
+  `max_kg_per_s` does not apply to a conduit that declares a `conductance:`, so any rate beside
+  one is inert — set it to three different values and the results are byte-identical at every
+  setting. **Before tuning a constant, check it is on the path that decides the thing**; that
+  three-value sweep is the cheapest possible test. The same shape applies to the cocks'
+  `drain_kg_per_s`, which is inert across 0.25 → 4.0.
 
-  **Delete a dead constant rather than documenting it as dead.** `draught_kg_per_s` was first left
-  in place with a comment explaining its inertness, which is worse than either removing it or
-  never having written it: the number still *looked* like each engine's fire size, and two docs had
-  already cited it as the reason the atmospheric variant runs a smaller fire. It is gone, the
-  damper's port bound is now plainly structural, and the fire size is attributed to
-  `damper_conductance` where it actually lives. A misleading appendix costs more than it saves.
-  The cocks had the same shape — `drain_kg_per_s` at 0.25, 0.5, 1.0, 2.0 and 4.0 also gives
-  byte-identical results — which is the **fourth**.
+  **Delete a dead constant rather than documenting it as dead.** A number left in place with a
+  comment explaining its inertness still *looks* like a tunable figure, and gets cited elsewhere
+  as the reason for a behaviour it has nothing to do with. A misleading appendix costs more than
+  it saves.
 
 - **An assertion that needs the system unsaturated must assert that, not assume it.** The ashpan
   example claims raking recovers power, which is only true while the drum is **off its safety
   valve** — pinned, it reports every upstream change as zero, and raked-against-banked comes out
   at +0.45 / +0.43 / +0.14 / +0.81 / −0.22 / −0.03 / −0.59 / +0.57 percent across eight settings.
-  Random sign, pure noise, and **indistinguishable from a mechanic that does not work.** It broke
-  twice this way: first at `damper: 85` when the stoker was re-rated, then at `damper: 60` when
-  `damper_conductance` went 0.2 → 0.35 and made 60 deliver what 85 used to. **A setting chosen to
-  dodge saturation goes stale every time the path feeding it moves**, so the fix is not a better
-  number — it is asserting the precondition (`headroom_pa > 10 kPa`) so the failure message says
-  *the boiler was saturated* rather than *raking did not help*, plus a `× 1.01` floor so noise
-  cannot pass. Worth knowing: **raising the relief setting does not create headroom** — measured
-  within 0.4 kPa of zero at margins 100, 70, 40 and 0, because the fire is oversized and the drum
-  just rises to meet the valve wherever it is put. Only a smaller fire gets off it.
-- **Tune a spec's constants through the SPEC's rig.** Directly following the above: the damper
-  that fixed it measured as 35 in a scratch script and was still 4.4 kPa from the valve inside the
-  spec, because the script set `cutoff: 40` while `light_and_run` leaves cut-off at its
-  `ControlPoint` default of **100 — full gear**, a materially different engine (517 kW against
-  364 kW). The real answer was 30. **A scratch rig and a spec rig part company through defaults
-  nobody wrote down**, so when a number is destined for an assertion, sweep it through the spec's
-  own helper and constructor rather than a convenient copy.
+  Random sign, pure noise, and **indistinguishable from a mechanic that does not work.** A
+  setting chosen to dodge saturation goes stale every time the path feeding it moves, so the fix
+  is not a better number — it is asserting the precondition (`headroom_pa > 10 kPa`) so the
+  failure message says *the boiler was saturated* rather than *raking did not help*, plus a
+  `× 1.01` floor so noise cannot pass. Worth knowing: **raising the relief setting does not create
+  headroom** — measured within 0.4 kPa of zero at margins 100, 70, 40 and 0, because the fire is
+  oversized and the drum rises to meet the valve wherever it is put. Only a smaller fire gets off
+  it.
+- **Tune a spec's constants through the SPEC's rig.** A scratch script and a spec rig part
+  company through defaults nobody wrote down: a scratch script setting `cutoff: 40` measures a
+  materially different engine from `light_and_run`, which leaves cut-off at its `ControlPoint`
+  default of **100 — full gear** (517 kW against 364 kW), so a damper that clears the valve in
+  one is 4.4 kPa short in the other. When a number is destined for an assertion, sweep it through
+  the spec's own helper and constructor rather than a convenient copy.
 - **An explicit integrator is only stable while `dt < τ`, and a limiter is not a substitute.**
-  Mass transport used `k·ΔP·dt` with a per-node bound holding it together. Every gas coupling
-  in the steam engine ran **400–600× past** the stability limit (firebox τ = 0.58 ms against a
-  250 ms tick), so the flow was decided by the limiter rather than by conductance — the flue
-  asked for 1972 mol and was granted 1.8. Symptoms: the fire's heat output swung by 5.9× every
-  few ticks forever, and **doubling the draught conductance cut engine power to a fifth**.
-  Fixed by solving the whole network implicitly. Two things follow: never reach for a
-  per-coupling law in a network, and **if a limiter is doing most of the work, the integrator
-  underneath it is wrong.**
-- **`node_headroom` was wrong by exactly a factor of two.** It moved a sender to the
-  receiver's *current* potential, ignoring that the receiver rises as it fills. Two 2 m³
-  vessels holding 6 kg and 1 kg of air joined by a pipe **swapped contents on tick 1 and
-  stayed swapped forever**. It went unnoticed for as long as it did because every gas coupling
-  in the steam engine has `Atmosphere` on one end, whose capacity is ~10⁸× a vessel's, so the
-  receiver never rises and the error vanishes. `transport_spec` asserts equalisation now.
+  `k·ΔP·dt` with a per-node bound holding it together runs **400–600× past** the stability limit
+  on every gas coupling here (firebox τ = 0.58 ms against a 250 ms tick), so the flow is decided
+  by the limiter rather than by conductance — the flue asks for 1972 mol and is granted 1.8. The
+  symptoms are a fire whose heat output swings by 5.9× every few ticks forever, and **doubling
+  the draught conductance cutting engine power to a fifth**. Solve the whole network implicitly
+  instead. Two things follow: never reach for a per-coupling law in a network, and **if a limiter
+  is doing most of the work, the integrator underneath it is wrong.**
+- **A headroom bound that ignores the receiver rising is wrong by exactly a factor of two.**
+  Moving a sender to the receiver's *current* potential makes two 2 m³ vessels holding 6 kg and
+  1 kg of air **swap contents on tick 1 and stay swapped forever**. A graph with `Atmosphere` on
+  one end of every gas coupling hides it, because its capacity is ~10⁸× a vessel's so the
+  receiver never rises. `transport_spec` asserts equalisation.
 - **One restriction, one number.** A path governed by both a conductance and a
   `max_kg_per_s` that disagree is choked at every pressure it can reach, and a choked coupling
   carries a *fixed* flow — which leaves the pressure at either end with no feedback at all.
   The firebox ran to an 80 kPa vacuum in one direction and 3.2 atm at 1079 K in the other,
   depending only on which bound the solve reached first.
 - **A conservation clamp is not a mechanism, and it hides the fact that one is missing.**
-  `Tick#transmit_torque` scales a prime mover's impulse back to what its charge can pay for.
-  That is a correct backstop. But with the cylinder's diagram reading the boiler directly, the
-  regulator could not touch torque at all, and the clamp quietly became the *whole* throttling
-  mechanism — measured discarding **30–50% of the declared work**, scale 0.496 at throttle 20
-  against 0.698 at 60, with declared torque nearly flat. The engine still behaved plausibly,
-  which is what made it invisible. **If a backstop is firing on most ticks, it is standing in
-  for something and the something is what you should build.** Here it was the steam chest;
-  with it the clamp sits at 0.957 and does nothing.
+  `Tick#transmit_torque` scales a prime mover's impulse back to what its charge can pay for,
+  which is a correct backstop. With the cylinder's diagram reading the boiler directly the
+  regulator cannot touch torque at all, and the clamp becomes the *whole* throttling mechanism —
+  discarding **30–50% of the declared work**, scale 0.496 at throttle 20 against 0.698 at 60,
+  with declared torque nearly flat. The engine still behaves plausibly, which is what makes it
+  invisible. **If a backstop is firing on most ticks, it is standing in for something and the
+  something is what you should build.** Here that is the steam chest; with it the clamp sits at
+  0.957 and does nothing.
 - **Do not apply an equalisation rule to a positive-displacement claim.** Two separate bugs,
   the same mistake. `Cylinder#plan` drew `max(displacement, gas_headroom_kg)`, and the headroom
   term — which contains no cut-off, speed or geometry — won every time, so steam consumption
@@ -936,14 +1073,14 @@ because they are the kind a fresh reader repeats.
   rule correctly; the cap contradicted it twenty lines away.
 - **A delta is not a measurement.** A boundary node that ledgers its own before/after totals
   records the **net** of everything that crossed in the tick, and air coming in nets against
-  flue gas going out — 68 kg in and 103 kg out booked as `mass_added` 0.00. Conservation
-  survives it (the net is exactly what the invariant constrains) so no spec fails; every
-  figure is simply useless as a measurement. Book gross crossings from the granted flows.
+  flue gas going out — 68 kg in and 103 kg out booked as `mass_added` 0.00. Conservation survives
+  it (the net is exactly what the invariant constrains) so no spec fails; every figure is simply
+  useless as a measurement. Book gross crossings from the granted flows.
 - **What a sink receives is not what the source sent.** The stream gives up energy to every
   conduit wall it crosses, so `Grant#received` must be built from what advection actually
-  delivered, not from the parcels the source dispatched. Harmless for years because only mass
-  was read from it; the moment the atmosphere ledgered the *enthalpy* it was handed, the
-  energy books drifted 4 kJ a tick.
+  delivered, not from the parcels the source dispatched. It is invisible while only mass is read
+  from it, and worth 4 kJ a tick of drift the moment anything ledgers the *enthalpy* it was
+  handed.
 - **A constraint belongs inside the solve, not after it.** Capping the flue's flow after
   settling left the damper solved against an exhaust four times larger than the one allowed to
   cross, and pumped the firebox to 25 kPa. And a pinned coupling must be able to be released:
@@ -954,19 +1091,19 @@ because they are the kind a fresh reader repeats.
   rule — `draws = throughput − held` — gives the map `h ↦ T − h`: an involution with eigenvalue
   exactly −1, which oscillates forever and cannot damp. Drop the `− held` and you get steady
   flow with an unbounded duct instead (measured: 1.2 kg climbing to 7.0 in a 1 m³ damper).
-  **Steady inventory and steady throughput are mutually exclusive**, which is why `Conduit`
-  stopped being an endpoint rather than getting a cleverer rule. It cost a firebox with no air
-  at all every other tick, a cylinder swinging 16.4/78.2 kW, and every conduit silently
-  delivering half its rating. Two workarounds were written for the symptoms first.
+  **Steady inventory and steady throughput are mutually exclusive**, which is why `Conduit` is
+  not an endpoint rather than having a cleverer rule. The symptoms are a firebox with no air at
+  all every other tick, a cylinder swinging 16.4/78.2 kW, and every conduit silently delivering
+  half its rating — each of which invites its own workaround.
 - **Symbols as *values* do not survive JSON.** Resource ids in parcels and flags in instrument
   state both broke this way. `Operation#restore` normalises them.
 - **A sparse hash cannot express a removal by diffing.** `PlayerView#flags` omits instruments
-  with nothing to say, so rejecting unchanged entries never mentioned a flag that *cleared* —
-  a merging client showed `:pegged_high` forever, and `:warming_up` from the first few ticks
-  of every match never went away. `delta_from` now emits an explicit empty list.
-- **Coerce a value before it reaches the simulation.** `Command.parse` passed `value` through
-  untouched; `ControlPoint#set_target` calls `.to_f` on it; a Hash does not answer to that, so
-  one malformed record killed the runner process and every match on it.
+  with nothing to say, so rejecting unchanged entries never mentions a flag that *cleared* — a
+  merging client shows `:pegged_high` forever, and `:warming_up` from the first few ticks of
+  every match never goes away. `delta_from` emits an explicit empty list.
+- **Coerce a value before it reaches the simulation.** `ControlPoint#set_target` calls `.to_f`,
+  and a Hash does not answer to that, so one malformed record passed through untouched kills the
+  runner process and every match on it.
 - **Builder options must be in `options:`** or a restored snapshot rebuilds a different
   machine.
 - **Gases are limited by pressure, not volume** — and `Holds#room_m3` and `Arbiter#volume_of`
@@ -979,17 +1116,17 @@ because they are the kind a fresh reader repeats.
   dial; Euler returns negative Kelvin at `dt = 100 s`.
 - **Rails 8.1 autoloads `lib` by default.** `config.autoload_lib(ignore:)` must list both
   `reactor_sim` and `reactor_sim.rb` — the ignore list matches exact paths.
-- **A test-by-consequence dies quietly when its premise changes.** The Zeitwerk boundary check
-  asserted that eager loading did not *define* `ReactorSim`; that stopped meaning anything once
-  the delivery tier legitimately required the sim. It now asks
-  `Rails.autoloaders.main.unloadable_cpaths` directly, with positive controls so a typo cannot
-  make it pass vacuously.
+- **A test-by-consequence dies quietly when its premise changes.** Asserting that eager loading
+  does not *define* `ReactorSim` means nothing once the delivery tier legitimately requires the
+  sim. Ask `Rails.autoloaders.main.unloadable_cpaths` directly, with positive controls so a typo
+  cannot make it pass vacuously.
 - **`config/cable.yml` must not use the `async` adapter in development.** It is in-process
   only, so a runner broadcasting from its own process reaches nobody, silently.
-- **`require "rdkafka"` loads `karafka-rdkafka`, not the `rdkafka` gem.** Both are in the
-  lockfile and both define `Rdkafka`; karafka-rdkafka 0.28.0 wins, making the Gemfile's
-  `gem "rdkafka", "~> 0.19"` inert. `poll_batch_nb` happens to exist in both, so nothing broke
-  — but do not reason about the API from the version in the Gemfile.
+- **Two gems define `Rdkafka`, and which one loads is not what the Gemfile says.** Both `rdkafka`
+  and `karafka-rdkafka` are in the lockfile. Measured 2026-09-14, `rdkafka` 0.29.0 is what
+  resolves, and `karafka-core` patches it expecting a constant it does not define — so any broker
+  error kills the process. **Check which gem actually loads rather than reasoning from the
+  Gemfile**; see `app/CLAUDE.md` for the full shape.
 - **rdkafka handles are not fork-safe.** One built before Puma forks is inherited broken and
   produces silently vanish. Build clients lazily, memoised per process id.
 - **Never close an rdkafka handle inside a signal trap.** FFI plus a background polling thread
@@ -999,6 +1136,5 @@ because they are the kind a fresh reader repeats.
 
 ## Repository state
 
-Not committed. `git status` shows the entire simulation rewrite, the steam engine, `content/`
-and `docs/` as uncommitted work on `main`. The last commit is `a26631b architecture looking
-better`, which predates the current paradigm.
+`git status` and `git log` are the truth. Work happens on a branch per release; the minion
+release is `on-to-minions`.

@@ -225,9 +225,13 @@ def failure_mode(state, ctx, _cause)
 end
 ```
 
-`failure_type` and `failure_detail` already live on the node for the event; this sits beside them
-and the event carries all three. A gauge, a log line and a post-match report all want to know
-that it was an explosion rather than a split, and today none of them can.
+`failure_detail` already lives on the node for the event; this sits beside it and the event
+carries both. A gauge, a log line and a post-match report all want to know that it was an
+explosion rather than a split, and today none of them can.
+
+> **Written when `failure_type` still existed.** It has since collapsed into the single
+> `:part_failed` event type — the distinction it drew is `mode:` on the event now, which is
+> exactly what this section was asking for. See [`event_system.md`](event_system.md) §245.
 
 ### The JSON trap, and it is the fifth in this family
 
@@ -280,8 +284,23 @@ Nothing needs to be added to support that, and nothing should be added to forbid
 
 **Stub, do not guess.** Stage A lands the loop and the ordering with every node declaring a
 single mode, so escalation is structurally live and behaviourally inert. What a second failure on
-an already-failed part *should* do is a per-part question and gets answered per part, in §12's
-measurement stage.
+an already-failed part *should* do is a per-part question and gets answered per part.
+
+> **Answered for the cylinder, which is the part that can actually do it.** Its `overload?` is
+> hydraulic lock — condition-driven rather than durability-driven — so it still fires on a part
+> whose durability is long gone, which is precisely the asymmetry above. A cylinder already worn
+> to `scored_bore` that then takes a slug of water into its clearance space **escalates to
+> `blown_head`**, and the event carries `escalated_from: :scored_bore`. Blow it again and nothing
+> is emitted, because the mode has not changed.
+>
+> That matters beyond the cylinder: it is the first proof the mechanism reaches a real part at
+> all. `escalate_to` had unit tests and nothing in any machine could trigger it — the same silent
+> off switch this document keeps warning about, and one this document's own machinery was guilty
+> of for two stages.
+>
+> The **boiler** deliberately cannot escalate, and that is physics rather than an omission: a
+> split drum loses pressure through its own hole, so the flash severity that would name a worse
+> mode is falling exactly when it would be re-read. The hole *is* the relief.
 
 ---
 
@@ -322,7 +341,7 @@ how much, and the engine spends that as durability on the named parts. Conservat
 precisely because nothing is created: damage is a durability write, not a joule.
 
 > **Corrected on the build: the casualties are not in the mode table.** This section put
-> `damages:` alongside `vents:` and `derates:` as one more entry. That breaks the rule that
+> `damages:` alongside the other entries in `failure_modes`. That breaks the rule that
 > everything under `nodes/` is generic — `Nodes::Boiler` cannot name a `:cylinder`, because a
 > boiler in some other machine has no cylinder near it. **Which modes exist belongs to the class;
 > who is standing next to it belongs to the machine.** So they are two declarations:
@@ -418,27 +437,51 @@ they ledger differently — §9.
 > node that holds nothing, so anything it declines to pass simply stays with the upstream
 > holder as back-pressure. There was no leak in it at all, only a throttle.
 >
-> What actually starves the far end is that **the upstream holder is now being drained by two
-> paths**, and the arbiter apportions between them. So the breach is the entire mechanism and
-> `Conduit` needs no failure term whatsoever:
+> What actually starves the far end is that **a holder is now being drained by two paths**, and
+> the arbiter apportions between them.
+
+Both `broken?` guards go — the `gas_conductance` one was the more dangerous, since at zero it
+does not shut the path but drops it out of the pressure-driven regime entirely (§1). What
+replaces them is **two separate effects that must not be confused**:
 
 ```ruby
-def throughput_kg(_state, ctx)        # both `broken?` guards deleted outright
-  port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx)
+def throughput_kg(state, ctx)
+  port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx) * derating(state, :throughput)
 end
 ```
 
-Both guards go. The `gas_conductance` one was the more dangerous of the two — at zero it does
-not shut the path, it drops the path out of the pressure-driven regime entirely (§1).
-
-**The honest consequence: a ruptured conduit with no breach beside it now does nothing at all.**
-That is a deliberate trade rather than an oversight. Plugging was *wrong* — a rupture is not a
-better seal than the working part — and a subtraction would have hidden the spill inside a term
-where it could be neither sized nor pointed anywhere. Conduit breaches are stage D.
+- **The derating is damage to the pipe.** A split line is bent, scaled and partly collapsed
+  around the tear, so it delivers less onward even counting nothing that escapes. 0.7, and
+  honest as a *restriction*.
+- **The spill is a `Breach` drawing on a holder**, and it has to be, because a conduit holds
+  nothing and therefore has no contents of its own to lose. Material a pipe declines to pass
+  does not go anywhere — it stays upstream as back-pressure, `mass_spilled` stays zero, and a
+  throughput term alone is a throttle wearing a leak's name.
 
 This also disposes of the open question this section used to carry, about the leak splitting a
 stream rather than a pressure difference. The breach is its own path with its own conductance,
 so it is rated by the pressure across it like anything else.
+
+### Which holder a conduit's rupture drains is a declaration, not a deduction
+
+A pipe's hole must drain *something*, and the only candidates are the holders at either end. The
+choice is real and the model should not guess:
+
+- **Beyond every valve, on the pressure side** → drain the upstream holder. The leak continues
+  whatever the driver shuts.
+- **Past the restriction** → drain the downstream holder, which blows back out through the hole.
+  Closing the valve upstream now isolates it.
+
+`Breach` already supports both without additions, because **`senses:` and the inlet link are
+independent**: the first is whose failure opens the hole, the second is what empties through it.
+Nothing requires them to be the same node.
+
+The steam engine's main steam pipe is the worked example, and it is the more alarming of the two
+cases. `steam_pipe_breach` **senses the throttle and drains the boiler**, because a locomotive
+regulator sits in the dome, inside the barrel, on the boiler side of its own valve. So a split
+regulator body empties the drum and **the one control that would normally save you is on the
+wrong side of the hole.** That is the whole character of the failure, and it is declared in one
+link rather than inferred — the same reason `Cylinder` states `supplied_by:` and `exhausts_to:`.
 
 ---
 
@@ -446,21 +489,34 @@ so it is rated by the pressure across it like anything else.
 
 This is where the framing's reuse instinct lands, and it is one method:
 
+As built:
+
 ```ruby
-# Concerns::Pressurized — the reusable half: which modes a pressure vessel HAS,
-# in ascending severity, because §5 escalates along this order.
-def failure_modes
-  { seam_split: { vents: 0.03 },
-    explosion:  { vents: 1.0, damages: { flywheel: 0.4 } } }
-end
+# Nodes::Boiler — which modes a drum HAS, in ascending severity,
+# because §5 escalates along this order.
+def failure_modes = { seam_split: {}, explosion: {} }
 
 # Nodes::Cylinder — geometry trumps, exactly as the framing requires
 def failure_modes
-  { scored_bore: { derates: { compression: 0.55 } },
-    bent_rod:    { derates: { stroke: 0.0 } },
-    blown_head:  { vents: 0.6 } }
+  { scored_bore: { derates: { admission: 0.55 } },
+    blown_head:  { derates: { admission: 0.0 } } }
 end
 ```
+
+> **Two things moved out of this table on the build, and both for the same reason** — a value
+> belongs here only if it is a fact about the *class*, and neither of these is.
+>
+> - **`vents:` never existed.** Breach sizes live on the `Breach` as `opens_by:`, per open
+>   question 1. How big a hole a mode opens depends on the part's geometry and wiring, not on
+>   the class, and keeping it at the site where the hazard is wired is this codebase's stated
+>   preference. It also gives a property the table could not: **a mode a breach does not name
+>   opens nothing**, which is how one part carries several holes of different sizes, and how
+>   `scored_bore` — rings leaking *past the piston*, inside the machine — correctly opens no
+>   hole in the casing at all.
+> - **`damages:` moved to `failure_damages`**, configured per instance. See §6.
+>
+> What remains in the table is exactly what a class can know about itself: which modes exist,
+> in what order of severity, and how each derates its own capabilities.
 
 A plain method returning a hash, which is precisely the existing idiom for `reactions`:
 *"chemistry is data; a node just declares which reactions can happen inside it."* Deliberately
@@ -470,16 +526,19 @@ the established convention. One idiom, not two.
 What consumes the table:
 
 - `Wearing` reads the **key order** for the escalation rule in §5.
-- `Breach` reads `vents:` to size its opening (or takes `opens_by:` directly — settled at review:
-  **`opens_by:` for now**, because it keeps the hazard visible at the site where it is wired,
-  which is the codebase's stated preference; revisit once there are enough breaches to see
-  whether the duplication actually hurts).
-- The **node's own `apply`** reads `derates:`, because what a derating means is the node's
-  business — the same division `Obstructs` already draws, where the concern gives you `occupancy`
-  and stops because "what it means is the node's business".
-- The engine spends `damages:` as durability on the named nodes (§6), once, on the transition.
-- A build-time spec reads the whole table and asserts every mode a `failure_mode` can name has an
-  entry, which is the check that makes the generic `:failed` default safe.
+- The **node's own code** reads `derates:` through `Wearing#derating(state, key)`, because what a
+  derating means is the node's business — the same division `Obstructs` already draws, where the
+  concern gives you `occupancy` and stops. `Cylinder` is the worked example: `admission` rations
+  both what it draws and what it can push with, since steam blowing past the rings is neither
+  swallowed usefully nor turned into torque. **`0.0` is how a mode says "this part no longer does
+  that thing at all"** — the same vocabulary rather than a second flag beside it.
+- A build-time spec walks every catalogued operation and fails any part left on the generic
+  fallback, which is the check that keeps `:failed` from becoming a silent off switch.
+
+**Why the derating matters more than it looks.** Until it existed, `scored_bore` and `blown_head`
+were indistinguishable: *any* cylinder failure declared `Intent.none` and stopped the engine
+dead. The milder mode was decoration and "broken is not absent" was a slogan. A scored bore now
+turns, pulls, does both badly, and can be nursed home.
 
 ---
 
@@ -678,10 +737,16 @@ the guard, and it should fail loudly rather than warn.
 
 ### Still open
 
-- **What does a second failure actually do, per part?** Deliberately stubbed at stage B. Needs a
-  part with a real escalation story to answer it.
 - **An instrument's own failure.** Out of scope; belongs in the diagnostic chain as a `Filter`,
-  and is newly possible now that a gauge is a part.
+  and is newly possible now that a gauge is a part. It is the one place where a failure should
+  be *deceptive* rather than merely damaging — a gauge that fails to zero is honest, a gauge that
+  sticks at its last good reading is the dangerous one — so it wants its own thinking.
+- **The player is told less than the engine knows.** There is an incident feed and it works —
+  `PlayerView#incidents` carries the events, the console renders them — but it prints one flat
+  line of engine vocabulary (`vessel rupture (fatigue)`), weighted identically whether a plug
+  melted or the drum exploded. The `mode` this document exists to produce is not shown, and
+  neither is `escalated_from`, `severity`, or what was damaged. Delivery-tier only: the wire
+  already carries every field.
 
 ---
 

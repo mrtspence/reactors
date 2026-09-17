@@ -29,11 +29,19 @@ engine uses 1.0; a mine would use much more.
 | 5 | `react` | Ignition spreads, then chemistry (scaled by the node's `reaction_throttle`), then phase change — local to each node | no |
 | — | `record_injections` | Everything injected or extracted goes on the ledger | no |
 | 6 | `stress` | Durability, overload, failure events | no |
+| 6b | `endanger` | What a failure does to the **people** near it: a Danger Check per minion, against the station they are standing at | no |
 | 7 | `observe` | Instruments sample; their filters advance | **yes** |
 | 8 | publish | Freeze the new state, return this tick's events | no |
 
 Entropy is confined to phases 0 and 7 (plus `initial_state`). That is what makes projection
 pure — see [`invariants.md`](invariants.md#2-determinism).
+
+**Phase 6b draws no entropy, and that is why it can sit here at all.** A minion's `resilience` is
+rolled once at `initial_state`, so the Danger Check is a deterministic comparison rather than a
+throw — which keeps injuries replayable and needed no amendment to the rule above. It runs after
+all wear is settled, never inside it, so two parts failing on the same tick hurt the same people
+whatever order they were visited in. It reads the failure events rather than the nodes, which is
+also what lets a hazard's severity scale with how big the event actually was.
 
 ---
 
@@ -74,29 +82,52 @@ Ledgering before that would miss it entirely — this was a real bug worth ~1.8 
 
 ---
 
-## Phase 0 consults the crew
-
-A control point travels at `stiffness × rate_multiplier × dt`, and the multiplier comes from
-whichever minion is stood at that lever:
-
-```ruby
-control_points.fetch(id).actuate(cp_state, dt:, rate_multiplier: crew_multiplier(id))
-```
+## The crew is consulted twice, and the second one is the one that matters
 
 `Tick#station_index` maps station → minion from **state**, not configuration, because a minion
-who has been reassigned is at the post their state names.
+who has been reassigned is at the post their state names. It is read in two different places.
 
-A lever with `stiffness: Float::INFINITY` — the default, and what every steam engine lever
-uses — snaps `actual` to `target` and discards the multiplier before it is read. So a crew is
-inert until a control point is given a finite stiffness. That is deliberate: it is what let a
-crew be added to the steam engine without re-measuring its skill gradient.
+**Phase 0 — how fast a lever travels.** `actuate` takes `rate_multiplier: crew_multiplier(id)`,
+so a lever with a finite `stiffness` moves at `stiffness × rate_multiplier × dt`. Every shipped
+control keeps the default `Float::INFINITY`, which snaps `actual` to `target` and discards the
+multiplier before it is read — so **this path is currently inert on every machine**, and is kept
+for a lever that should genuinely take time to travel.
 
-Current shortcuts, all marked `TODO` at the code:
+**`control_values` — what comes of the lever.** This is the live path, and it is not phase 0: it
+runs wherever a control becomes the number a node reads.
 
-- An **unmanned** lever moves at full rate rather than not at all.
+```ruby
+control.effort? ? worked(control, s) : control.value(s)
+```
+
+A control declares itself an **effort station** with a weighted stat blend, and what the node
+reads is then `lever × capability`, where capability is the blend × kit × condition:
+
+```ruby
+ControlPoint.new(id: :stoking, effort: { strength: 0.75, dexterity: 0.25 }, aided_by: :shovelling)
+```
+
+> **The lever is the player's intent; the crew supplies the rate.** An earlier design gave weak
+> minions a finite `stiffness` instead, which models the *derivative* — a kobold would take longer
+> to reach the setting and then deliver exactly as much as an ogre. Who can actually do the work
+> is the comparison the game is about, and stiffness could not express it. See
+> [`design_sketches/minions.md`](../design_sketches/minions.md) §9.
+
+Weights must sum to 1.0, enforced, because that is what keeps *a fit unaided human scores 1.0*
+true at every station — and therefore what lets a node's declared throughput mean "what a
+competent person achieves". There is deliberately **no clamp**: the stoker's `0.25 kg/s` is a
+person rather than a firehole, so somebody exceptional exceeds it.
+
+**An unmanned effort station delivers nothing** — an unmanned shovel moves no coal. It applies
+only to the controls that are somebody's work; a valve needs nobody. A minion carried out has
+`station: nil` and therefore mans nothing, which falls out rather than needing a case.
+
+Remaining shortcuts, marked `TODO` at the code:
+
 - Two minions at one station is **last writer wins**.
-- Nothing advances `fatigue` or `health`, so a minion never tires. Accrual belongs here in
-  phase 0, where actuation entropy is already permitted.
+- Nothing advances `fatigue`, so a minion never tires. It already multiplies into `capability`;
+  accrual belongs in phase 0, where actuation entropy is permitted, and the rule is
+  `intent ÷ capability` — effort is *subjective*, so the same lever costs a day-labourer more.
 
 ### The state hash must name it
 

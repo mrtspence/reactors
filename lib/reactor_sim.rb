@@ -69,7 +69,15 @@ require "json"
 
 require_relative "reactor_sim/physics/units"
 require_relative "reactor_sim/rng"
+# The arithmetic a minion's four layers fold through. Before `content`, because the registry
+# folds the first two with it.
+require_relative "reactor_sim/sheet"
+# The escalation rule a failing part and a hurt person share. Before `concerns/`, which uses it.
+require_relative "reactor_sim/severity"
 require_relative "reactor_sim/content"
+# A leaf, required this early only because `Concerns::Wearing` emits one and concerns load
+# before nodes. Conceptually it belongs with the outputs, beside `diagnostics/player_view`.
+require_relative "reactor_sim/event"
 require_relative "reactor_sim/physics/parcel"
 require_relative "reactor_sim/physics/resources"
 require_relative "reactor_sim/physics/resources/saturation"
@@ -104,6 +112,16 @@ require_relative "reactor_sim/nodes/fusible_plug"
 require_relative "reactor_sim/nodes/breach"
 
 require_relative "reactor_sim/control_point"
+# Equipment and training are what a minion carries and what they have learnt — layers three and
+# four of the sheet whose first two live in `content/`. `kit.rb` is the catalogue and must load
+# after both registries it fills.
+require_relative "reactor_sim/equipment"
+require_relative "reactor_sim/training"
+require_relative "reactor_sim/kit"
+# Resolves a roster posting into a folded sheet, so it loads after both registries it reads.
+require_relative "reactor_sim/crew"
+# `Wearing` for people. Before `minion`, which rolls its hidden resilience at initial_state.
+require_relative "reactor_sim/injury"
 require_relative "reactor_sim/minion"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"

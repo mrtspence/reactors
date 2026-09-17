@@ -35,7 +35,59 @@ operations/   specific machines, assembled from everything above
 
 Top-level files: `tick.rb` (the eight phases, in order), `operation.rb` (config, commands,
 projection, serialisation), `match.rb` (many operations in lockstep), `content.rb`,
-`control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `rng.rb`.
+`control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`.
+
+## Events are the other output, and they have one rule
+
+`Event` is what the machine *reported*: a part failing, a fire catching, a drum reaching
+working pressure. `Event::TYPES` is the whole vocabulary and it is enumerated, because a
+consumer keyed to a type that no longer exists is a feature silently switched off.
+
+> **Nothing that happens every tick may be an event.** A per-tick quantity belongs on the
+> `Ledger`, which already accumulates it and is checked by the conservation specs; emitting one
+> as an event would cost four records a second per match forever *and* create a second running
+> total that can drift from the audited one. Measured on a reference cold start: **5 events over
+> 4200 ticks.** If a record's interesting content is a number that changed a little, it is a
+> meter reading and the runner samples it.
+
+Two more rules that cost something to learn:
+
+- **The engine reports transitions; the delivery tier composes them into meaning.** A node may
+  not know what an achievement is, or every new one becomes a simulation change.
+- **Emit on a transition, with hysteresis where the signal is noisy.** `ReliefValve` announced
+  itself 20 times in 40 ticks before it had a time-based re-arm, because it senses a
+  reconstructed per-stroke pressure that swings through its whole range every tick.
+- **Spell the type literally at the `Event.build` call.** `spec/reactor_sim/event_spec.rb`
+  finds emitters by scanning for `type: :name`, which is what makes "no type is unreachable" a
+  check rather than a hope; a computed type is invisible to it.
+
+Plus the crew layer — `minion.rb` (somebody stood at a lever), `equipment.rb` and `training.rb`
+(two small registries), `kit.rb` (their catalogue). A minion's sheet is **four layers, each
+offsetting the last**: archetype → individual → training → equipment. The first two are content
+(`content/archetypes/`, `content/minions/`) and `Content::Registry#sheet` folds them; the last two
+are things a player *owns*, so they are folded at build by the delivery tier and never looked up
+here. **Merge adds, use multiplies** — stats and valued tags sum across layers, and whoever reads
+them multiplies. Getting that round the wrong way makes every piece of kit a rounding error.
+
+> **An archetype is a kind of person; a minion is a person; a role is a job.** `fireman` and
+> `yardhand` are jobs an operation asks for, and the same person can do either. Keep the three
+> apart: what a player unlocks is Jim, not the fireman's post.
+
+`injury.rb` is `Concerns::Wearing` for people, and the copied shape is deliberate while the
+vocabulary is not: a part has `durability` and a `failure`, a person has `resilience` and an
+`injury`. What they genuinely share is `Severity.escalate`, extracted so the one rule that must
+not drift between them cannot.
+
+> **The Danger Check throws no dice, and that is the design rather than a workaround.**
+> `resilience` is rolled ONCE, at `initial_state` — one of the three places entropy is permitted
+> — so every check afterwards is a deterministic comparison. Injuries therefore replay exactly,
+> survive a snapshot, and need no amendment to the entropy invariant. The uncertainty is the
+> hidden threshold, exactly as `durability_range` is for a part.
+>
+> A hazard's severity **scales with a figure the part reports on its failure event**
+> (`scales_with:`/`reference:`), because a small steam escape is not a large one. Reading the
+> event rather than the node keeps phase 6b order-independent and puts the magnitude on the
+> durable record.
 
 Plus the assembly layer — `part.rb` (`Part` and `Fragment`), `parts.rb` (the registry),
 `slot.rb`, `assembly.rb`. **All four are build-time only.** They resolve a chassis and a
@@ -69,7 +121,17 @@ you rearrange:
 
 - **Symbols as *values* do not survive JSON.** `deep_symbolize` converts keys only. Resource
   ids inside parcels, flags inside instrument state, a minion's `station`, a loadout's part
-  ids, and now **a node's `failure` mode** all broke this way. `Operation#restore` normalises
+  ids, **a node's `failure` mode**, **every field of an `Event`**, and now **every id in a
+  roster** (who is filling a job, what they have been trained in, what is in each of their three
+  equipment slots) all broke this way. `Crew.normalise` handles the roster, at the single point
+  where `options:` is resolved — the same shape as `Assembly#resolve_loadout`, and for the same
+  reason.
+  The sixth instance is the worst placed: an event crosses into Kafka, into Postgres `jsonb`,
+  and out to a consumer — three boundaries, **none of which is `Operation#restore`**, which is
+  the single choke point the other five are fixed at. A consumer matching `event[:type] ==
+  :part_failed` against a string matches nothing, silently, and the symptom is an achievement
+  that never fires — indistinguishable from one nobody has earned. Consumers normalise once on
+  the way in; `Achievement`'s definitions are written with String values for the same reason. `Operation#restore` normalises
   all but the loadout, which `Assembly#resolve_loadout` handles — if you add state holding
   symbols as values, normalise it there too. Two of the five are worse than a nil: a part id
   that misses is a **different machine**, rebuilt in silence, and a failure mode that misses

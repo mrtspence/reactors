@@ -7,10 +7,10 @@ require "reactor_sim"
 # that received a full view, because that equivalence is the whole basis of the delta
 # protocol (docs/reference/diagnostics.md).
 RSpec.describe ReactorSim::PlayerView do
-  def view(tick:, gauges: {}, flags: {}, controls: {}, incidents: [])
+  def view(tick:, gauges: {}, flags: {}, controls: {}, incidents: [], crew: {})
     described_class.new(tick: tick, operation_id: :eng, viewer: :player,
                         gauges: gauges, flags: flags, controls: controls,
-                        incidents: incidents)
+                        incidents: incidents, crew: crew)
   end
 
   # What a client actually does with a stream of deltas.
@@ -68,11 +68,50 @@ RSpec.describe ReactorSim::PlayerView do
     end
 
     it "carries this tick's incidents in full, since they are not cumulative" do
-      burst = { type: :flywheel_burst, node: :flywheel }
+      burst = { type: :part_failed, node: :flywheel, mode: :burst }
       first  = view(tick: 1)
       second = view(tick: 2, incidents: [ burst ])
 
       expect(second.delta_from(first)[:incidents]).to eq([ burst ])
+    end
+  end
+
+  # **The seam that was dead and claimed not to be.** `CrewComponent`'s own comment said the
+  # posting "arrives on the projection"; it did not, so the station dropdown always rendered at
+  # its first option however the crew were actually posted, and a reassignment, a reset or a
+  # restore was never reflected back.
+  describe "the crew" do
+    it "reports where each of them is standing" do
+      posted = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil } })
+
+      expect(posted.to_h[:crew]).to eq(fireman: { station: :stoking, injury: nil })
+    end
+
+    it "carries only the ones whose posting or condition moved" do
+      first = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil },
+                                    yardhand: { station: :feed, injury: nil } })
+      second = view(tick: 2, crew: { fireman: { station: :damper_open, injury: nil },
+                                     yardhand: { station: :feed, injury: nil } })
+
+      expect(second.delta_from(first)[:crew]).to eq(fireman: { station: :damper_open,
+                                                               injury: nil })
+    end
+
+    # A minion who has been carried out has `station: nil`, which is a VALUE rather than an
+    # absence — so unlike `flags` there is no vanished-entry case and a plain reject is honest.
+    it "reports somebody being stood down rather than omitting them" do
+      before = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil } })
+      after = view(tick: 2, crew: { fireman: { station: nil, injury: :severe } })
+
+      expect(after.delta_from(before)[:crew])
+        .to eq(fireman: { station: nil, injury: :severe })
+    end
+
+    it "counts a crew change as a reason to broadcast" do
+      before = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil } })
+      after = view(tick: 2, crew: { fireman: { station: :stoking, injury: :minor } })
+
+      expect(after).not_to be_unchanged_from(before)
     end
   end
 

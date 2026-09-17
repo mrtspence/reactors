@@ -426,20 +426,24 @@ RSpec.describe ReactorSim::Assembly do
     # assembles and still passes every route check, and that each one says something before the
     # player finds out the hard way.
     #
-    # `boiler_gauge` is the eighth and the odd one out: every other entry is machinery, and it is
-    # an **instrument**. Leaving it off costs no power and breaks nothing — it takes away the only
-    # honest warning the engine gives, which is the same bargain the safety devices offer applied
-    # to what the driver can see rather than to what can break.
+    # `boiler_gauge` and `water_glass` are the odd ones out: every other entry is machinery, and
+    # these two are **instruments**. Leaving either off costs no power and breaks nothing — it
+    # takes away a warning, which is the same bargain the safety devices offer applied to what
+    # the driver can see rather than to what can break.
+    #
+    # The water gauge is the sharper of the two, because the crown sheet is what actually
+    # destroys this boiler and the glass is the only notice of it. Run without one and the
+    # fusible plug is the whole of your warning system, which means you find out afterwards.
     #
     # The list is deliberately written out rather than derived from the slots, because a slot
     # silently becoming optional — or silently ceasing to be — is exactly the kind of change
     # that should fail a spec rather than pass one.
     describe "what can be left out" do
       OPTIONAL = { ash_pan: :omit, blower: :bypass, boiler_tubes: :bypass,
-                   boiler_gauge: :omit, drain_cocks: :omit, safety_valve: :omit,
-                   fusible_plug: :omit, cylinder_relief: :omit }.freeze
+                   boiler_gauge: :omit, water_glass: :omit, drain_cocks: :omit,
+                   safety_valve: :omit, fusible_plug: :omit, cylinder_relief: :omit }.freeze
 
-      it "is exactly these eight, with these behaviours" do
+      it "is exactly these nine, with these behaviours" do
         declared = SteamEngine.slots(spec).reject(&:required?)
                               .to_h { |s| [ s.id, s.when_empty ] }
 

@@ -193,22 +193,16 @@ module ReactorSim
 
     # The bounds this path's flow must respect, in moles over the step.
     #
-    # **Conductance is the whole restriction on a pressure-driven path**, so the only bound
-    # here is direction: a check valve may not run backwards. `Port#max_kg_per_s` governs
-    # rate-driven paths and nothing else.
+    # **Conductance is the whole restriction on a pressure-driven path**, so the only bound here
+    # is direction: a check valve may not run backwards. `Port#max_kg_per_s` governs rate-driven
+    # paths and nothing else.
     #
-    # It is worth recording what happened when they were both applied, because two numbers for
-    # one restriction looks harmless and is not. The damper's rating (4 kg/s) and its
-    # conductance (2.0 mol/Pa·s) describe restrictions that differ by about fourfold: at that
-    # conductance the rating is reached on 70 Pa, so the throat was choked at essentially every
-    # pressure the firebox could reach. A permanently choked coupling carries a **fixed** flow,
-    # which means the pressure at either end has no feedback left at all — the firebox ran to a
-    # 80 kPa vacuum in one direction and 3.2 atm at 1079 K in the other, depending only on
-    # which bound the solve reached first.
-    #
-    # A real orifice does choke, but on a pressure *ratio* near 2:1, which furnace draught
-    # never approaches. Adding a choke means giving it a physical trigger, not a kg/s taken
-    # from a rate-driven part.
+    # Applying both is not harmless. A rating and a conductance describe restrictions that
+    # rarely agree, so the throat ends up choked at essentially every pressure the graph
+    # reaches — and a permanently choked coupling carries a *fixed* flow, leaving the pressure
+    # at either end with no feedback at all. A real orifice does choke, but on a pressure ratio
+    # near 2:1, which furnace draught never approaches; a choke needs a physical trigger, not a
+    # kg/s borrowed from a rate-driven part.
     def mole_limits(path, nodes)
       one_way?(path, nodes) ? [ 0.0, Float::INFINITY ] : nil
     end
@@ -248,17 +242,14 @@ module ReactorSim
 
     # The pressure a path supplies of its own, on top of the gradient between its ends.
     #
-    # **Buoyancy is what makes a chimney work**, and it is the reason gas transport needs a head
-    # term at all rather than only a gradient. A firebox venting to the same atmosphere it draws
-    # from has no gradient to breathe on: it fills to ambient and then suffocates, which is
-    # exactly what happened when pressure-driven gas landed without this. A stack of hot gas
-    # weighs less than the same column of cold air, and the difference is the draught.
+    # **Buoyancy is what makes a chimney work**, and why gas transport needs a head term rather
+    # than only a gradient: a firebox venting to the same atmosphere it draws from has no
+    # gradient to breathe on, so it fills to ambient and suffocates. A stack of hot gas weighs
+    # less than the same column of cold air, and the difference is the draught.
     #
     #     head = (ρ_ambient − ρ_stream) · g · height
     #
-    # So a hotter fire pulls harder, which feeds the fire. That loop is real, a player can learn
-    # it, and the old model — where the flue conduit simply hauled gas out regardless of
-    # pressure — could not express it at any setting.
+    # So a hotter fire pulls harder, which feeds the fire — a loop a player can learn.
     #
     # Densities come from the ideal gas law at ambient pressure using the SOURCE's own mean
     # molar mass, so flue gas and air are compared on the same footing.
@@ -342,51 +333,26 @@ module ReactorSim
     # What a pressure-driven path carries: the gas the solve settled, plus whatever condensed
     # matter the parts on the path say rides **with** it.
     #
-    # **A pressure solve rates the gas, not the total, and that is why entrainment is additive
-    # here where it is not on a rate-driven path.** A rate limit is a mass throughput and an
-    # affinity must only redistribute it; moles of gas crossing a conductance are unaffected by
-    # a droplet hitching a lift, so the liquid rides on top and the gas figure is preserved
-    # exactly.
+    # **A pressure solve rates the gas, not the total, so entrainment is additive here where it
+    # is not on a rate-driven path.** A rate limit is a mass throughput and an affinity may only
+    # redistribute it; moles of gas crossing a conductance are unaffected by a droplet hitching a
+    # lift, so the liquid rides on top and the gas figure is preserved exactly. Solids still take
+    # the rate term — a stoker really is rated in mass, and coal does not ride on steam.
     #
-    # > **This is the second thing that was wrong about carryover, and it was invisible until
-    # > measured.** Condensed matter used to fall through to the rate term — `apportion(rate,
-    # > bulk)` — where two things went wrong at once. The rate is the *port's* rating, so a
-    # > boiler primed at 4 kg/s regardless of how it was being fired; and a bulk list holding
-    # > only water renormalises to **100% water** whatever weight it is given, so the affinity
-    # > was not merely ignored, it could not apply. Measured: 424–518 kg of water in a 1 m³
-    # > steam chest and a burst flywheel on every run, including at a calm 0.5% wetness.
+    # **Liquid is rated by the bore, gas by the conductance.** The entrainment term is capped by
+    # `rate`, and uncapped it is unbounded: `scale = desired / gas_share` grows without limit as
+    # the stream approaches pure liquid, so a drum on the point of priming claims its entire
+    # inventory in one tick. The only backstop, `scale_by_sink_room`, scales a claim *uniformly*
+    # and so would trim the gas below what the solve settled — breaking the invariant this method
+    # exists to protect. The cap is also the physical rule: conductance rates moles down a
+    # pressure gradient and says nothing about how fast water moves through a pipe, which is set
+    # by the bore.
     #
-    # Solids still take the rate term, because a conveyor or a stoker really is rated in mass
-    # and a lump of coal does not ride on steam.
-    #
-    # ## Liquid is rated by the bore, gas by the conductance
-    #
-    # **The entrainment term is capped by `rate`**, and without that cap it is unbounded:
-    # `scale = desired / gas_share` grows without limit as the stream approaches pure liquid, so
-    # a drum on the point of priming claimed its entire inventory in one tick. The only thing
-    # standing behind it was `scale_by_sink_room`, which scales a claim *uniformly* — so it
-    # trimmed the **gas** figure below what the pressure solve settled, silently breaking the one
-    # invariant this method exists to protect.
-    #
-    # A cap is the physical rule and not merely a guard. Conductance rates a *gas* — moles down a
-    # pressure gradient — and says nothing about how fast water can move through a pipe, which is
-    # set by its bore. So the liquid a line carries is `min(what the mix implies, what the bore
-    # passes)`, and `Port#max_kg_per_s` is a real bound on a pressure-driven path after all,
-    # for liquid only.
-    #
-    # ## A line with no opinion still passes what is in it
-    #
-    # `weights.empty?` used to drop liquid entirely, and because membership in the pressure
-    # regime is *structural* — any conductance-bearing path whose ends declare no intent — that
-    # silently applied to every such path in the graph. **It is why the cylinder relief valve
-    # passed water in exactly zero states**: lifted, its conductance made the path pressure-driven
-    # and the cylinder declares no affinity for `:relief`, so only steam crossed; shut, its
-    # throughput was zero. A valve fitted to relieve hydraulic lock, which could not pass water,
-    # and worst in the case it exists for — a fully locked cylinder holds no gas at all, so
-    # `mean_molar_mass` returns nil and the path carried nothing whatever.
-    #
-    # With no opinion declared, liquid now falls to the same proportional rate term solids take.
-    # That is the honest default: a flooded line flows as a liquid, not as steam's passenger.
+    # **A line with no declared opinion still passes liquid**, falling to the same proportional
+    # rate term solids take. Dropping it instead silently applies to every conductance-bearing
+    # path whose ends declare no intent — which is why a cylinder relief valve would pass water
+    # in exactly zero states: lifted, the path is pressure-driven with no affinity declared;
+    # shut, its throughput is zero. A flooded line flows as a liquid, not as steam's passenger.
     def entrained(desired, gas, bulk, rate, weights, content)
       moved = apportion(desired, gas, weights)
       # Nothing declared: every condensed phase shares the line's rating as **one** budget rather
@@ -551,20 +517,15 @@ module ReactorSim
         # here would be the instantaneous equaliser this stage exists to be, applied on top of
         # the rate that replaced it.
         next claim if gas_kg.key?(path.id)
-        # **A positive-displacement claim is not riding a gradient, so this rule does not
-        # describe it.** `gas_coupling` already refuses to pressure-settle a path whose
-        # destination asked for a specific amount, on exactly these grounds; capping the same
-        # claim against a gradient here contradicted that within one method call.
+        # **A positive-displacement claim is not riding a gradient**, so this rule does not
+        # describe it — `gas_coupling` refuses to pressure-settle such a path on the same
+        # grounds. A piston really does draw its cylinder below chest pressure (that is what
+        # wire-drawing at the port is), and the claim is self-bounding anyway, since a swept
+        # volume filled at supply density cannot exceed the supply's density.
         #
-        # A piston really does draw its cylinder below chest pressure — that is what
-        # wire-drawing at the port is — and the claim is self-bounding anyway, because a swept
-        # volume filled at supply density cannot reach a higher density than the supply.
-        #
-        # It was not a marginal correction. Measured on the steam engine at full gear, this
-        # capped the cylinder's intake on **400 ticks out of 400**, to a scale of 0.81 — a
-        # silent 19% derate whose size was set by the temperature difference between the chest
-        # and the cylinder rather than by anything physical. At 40% cut-off it never fired at
-        # all, so the engine's behaviour changed shape across the lever for no stated reason.
+        # Capping it here derates the cylinder's intake by a factor set by the temperature
+        # difference between chest and cylinder rather than anything physical — and only at some
+        # cut-offs, so the engine changes shape across the lever for no stated reason.
         next claim if intents.fetch(claim.fetch(:sink), Intent.none).draws.key?(path.to_port)
 
         sink = nodes.fetch(claim.fetch(:sink))

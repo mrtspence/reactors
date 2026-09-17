@@ -15,7 +15,11 @@
 
     <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3" aria-label="Incidents">
       <h2 class="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Incidents</h2>
-      <ul class="flex flex-col gap-1 text-xs text-rose-300 max-h-40 overflow-y-auto"
+      <%# Deliberately NOT coloured here. Every entry used to inherit one rose, which made a
+          fusible plug doing its job look exactly like the boiler letting go — and those are a
+          ruined day against a ruined engine. Each entry carries its own weight from the
+          event's `severity`; see `console_controller#buildIncident`. %>
+      <ul class="flex flex-col gap-1.5 text-xs max-h-40 overflow-y-auto"
           data-console-target="incidents">
         <li class="text-slate-500 italic" data-incidents-empty>nothing has gone wrong yet</li>
       </ul>

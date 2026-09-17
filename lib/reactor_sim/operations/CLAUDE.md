@@ -11,8 +11,16 @@ Only **state** is serialised; the graph is rebuilt identically every time from t
 builder. That is what lets a snapshot be a bag of floats rather than an object graph.
 
 **Anything that changes the graph's shape must be in `options:`** so it is snapshotted and
-handed back on restore. The steam engine's `chassis:` and `loadout:` both do this. Miss it and
-an atmospheric engine restores as a high-pressure one — a total, silent divergence.
+handed back on restore. The steam engine's `chassis:`, `loadout:` and `crew:` all do this. Miss it
+and an atmospheric engine restores as a high-pressure one — a total, silent divergence.
+
+> **A crew is a loadout by another name**, and lives in `options:` for the same reason: the moment
+> one can be hired, injured or dismissed, a roster left in code rebuilds a *different* crew from a
+> snapshot.
+> `Crew.normalise` is its `Assembly#resolve_loadout` — every role named including the unfilled
+> ones, every id symbolised, `:none` for a slot deliberately emptied. An unfilled role is not an
+> empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "on the injury
+> list" the same thing to the engine.
 
 Three ways that goes wrong, all of them silent:
 
@@ -121,11 +129,11 @@ able to list what a machine can be built on: every chassis is separately unlocka
 the hash, never write the list out — a copy drifts the first time somebody adds a frame, and it
 drifts silently, because the new frame is simply unreachable. Nothing on the tick path reads it.
 
-**A chassis owns topology and a default loadout, not numbers.** It used to be a flat bag of
-twenty keys, seventeen of which belonged to six parts. Those live on the parts now, with the
-sweeps that chose them; what is left is `exhausts_to`, `condenser` and a `parts:` map of the kinds
-that differ between the two machines. **Topology and nothing else** — `burst_pa` was the last
-holdout and it left on 2026-09-14, when the pressure gauge became a fitting of its own.
+**A chassis owns topology and a default loadout, not numbers.** A figure belongs to the part that
+owns it, beside the sweep that chose it. What is left here is `exhausts_to`, `condenser` and a
+`parts:` map of the kinds that differ between the two machines — **topology and nothing else.**
+A number that looks like a frame property usually belongs to a fitting: a gauge's full-scale
+reading is a property of the dial, not of the drum it is screwed to.
 
 **An instrument can be a part, and `Fragment#diagnostics` is how.** Most parts *name* their
 gauges by id and the panel holds the definitions, because the reasoning about why each gauge lies
@@ -143,6 +151,17 @@ part passes it figures, exactly as a boiler part passes its shell thickness.
 > class of one.** Less lag, less noise, a finer band — never zero lag, and never a number where
 > the design chose prose. `safety_valve`, `crown_sheet` and `flywheel_condition` are exempt
 > outright. The instruments are the game, not an obstacle in front of it.
+>
+> A **downgrade** is the mirror image and a filter *added*: try-cocks are a `Quantize` on top of
+> the water glass's usual three, which makes them a different instrument rather than a worse
+> glass.
+
+> **A tier finer than the display's precision does not exist.** A reflex glass over a ±1.2% plain
+> glass cuts noise three-fold and changes nothing a player can see, because the needle reads whole
+> percent and ±1.2% is already below one unit of that. Check a proposed tier against
+> `Displays::Needle`'s `precision:`, then **measure it against a running engine**: try-cocks at
+> 25% steps never move once across 1400 ticks, because the entire working band fits inside one
+> step. Both shipped looking correct. See `docs/reference/diagnostics.md`.
 
 > **An attribute becomes a node when it is a separate object in the machine, and a variant when
 > it is a different version of the same object.** The blower was the first — a fan bolted to the

@@ -81,14 +81,13 @@ The order nodes and links are declared in cannot affect the result.
 > such loop, so the same perturbation damps away. The last bit is not the problem. The
 > **loop gain** is.
 >
-> **What this does and does not break.** Invariant 2 is untouched: `seed + command log`
-> still reproduces a match bit for bit, because link order is a property of the *code*, and
-> code that changed already changed the physics. What fails is the weaker claim that two
-> different declaration orders of the *same* graph agree bitwise — which matters exactly
-> once, during a refactor that reorders links. Modularisation was that refactor: parts own
-> their links, so the order necessarily changed and the stage could not be accepted on a
-> bit-identical digest. It was accepted on identical node set, identical link **set**,
-> identical panel, identical cold state, and agreement to 1e-15 per tick.
+> **What this does and does not break.** Invariant 2 is untouched: `seed + command log` still
+> reproduces a match bit for bit, because link order is a property of the *code*, and code that
+> changed already changed the physics. What fails is the weaker claim that two different
+> declaration orders of the *same* graph agree bitwise — which matters exactly once, during a
+> refactor that reorders links. Accept such a refactor on identical node set, identical link
+> **set**, identical panel, identical cold state, and agreement to 1e-15 per tick, rather than on
+> a bit-identical digest.
 >
 > `graph_spec` asserts link-order independence and **passes**, because it asserts it on
 > `LoopRig` — four nodes, 60 ticks, no feedback strong enough to amplify an ulp. The

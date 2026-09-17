@@ -159,7 +159,7 @@ partition count, and changing it later reshuffles every match's ownership.
 | Topic | Retention | Purpose |
 |---|---|---|
 | `match.commands` | 7 days | Player intent. Consumed by the runner group. |
-| `match.events` | 7 days | Engine output: ticks, incidents, production. Fan-out to consumers. |
+| `match.events` | 7 days | Engine output: incidents, transitions, meter readings. **Two consumer groups** — `progression` and `incidents` — so one can be restarted or rewound without touching the other, which is the reason this is a topic rather than a direct write. |
 | `match.snapshots` | **compacted** | Latest full state blob per match. Recovery source. |
 | `match.lifecycle` | 7 days | created / started / ended. |
 
@@ -297,6 +297,25 @@ Durable event → `match.events` (the record). Projection delta → ActionCable 
 owns all state — the two writes are a broadcast and a record of the *same already-decided* fact, not
 two parties negotiating. A dropped cable message self-heals on the next tick.
 
+**Built.** `EventProducer` is the record; `ViewBroadcaster` remains the cache. Two things the
+design settled that are not obvious from the paragraph above
+([`design_sketches/event_system.md`](design_sketches/event_system.md)):
+
+- **The log carries more than the panel shows.** Every transition the machine reports goes on the
+  topic; `Operation#incidents` curates the projection down to warnings and criticals, because a
+  feed full of "fire lit" buries a burst flywheel. History and live agree because
+  `Incident.backfill` applies the same filter.
+- **Two records, two idempotence strategies.** *Facts* are append-only and deduped by
+  `(match_id, run_id, operation_id, tick, seq)` — deterministic, because the simulation is, so a
+  replayed tick re-emits identically. *Meter readings* are the ledger **absolute rather than
+  delta**, so the consumer writes `greatest(total, reading)` and redelivery, reordering and a
+  consumer restart are all harmless. That is the same trick absolute commands play on ingress.
+- **`run_id` is not optional.** `Match.create` starts at tick 0 and a reset rebuilds in place
+  under the same `match_id`, so without it two runs both claim tick 412. The runner assigns it —
+  the simulation has no clock — and it is what `match.lifecycle` will key on.
+- **Nothing may block the tick loop.** A lost event is logged and counted onto the heartbeat,
+  never waited on. Durability improves by making the producer better, not by making the loop wait.
+
 ### Resync, reconnect, spectating — one mechanism
 
 Deltas require a base state, so there is a "full projection" request. Everything else falls out of it:
@@ -322,6 +341,21 @@ Match state never reaches Postgres during play. At end of match, the persistence
 
 - **Progression** — resources gained, achievements, unlocks. The only permanently meaningful data,
   since players start each match from a fresh Operation.
+
+> **Amended: progression is folded LIVE, not at end of match** — and the reason is situational
+> as much as architectural. A post-game digest needs a match to *end*; match lifecycle is not
+> built, and the dev match never ends, it gets reset. Digesting only at the end would award
+> nothing in the one environment where this is exercised, and would rot exactly as
+> `Achievement.earned?` did for a release.
+>
+> The rule above is unchanged, because it is about *match state*: a match's physics is still
+> only ever in the runner's memory and in Kafka. Progression is a different object with a
+> different lifetime — small, rare, belonging to a **player** rather than to a match, and
+> explicitly "the only permanently meaningful data". `ProgressionDigest` routes by shape: point
+> facts award on arrival, cumulative ones come from absolute meter readings, and an extent fact
+> keeps its open interval in `achievement_attempts` — in Postgres rather than consumer memory,
+> so a restart resumes it. End of match then stops being a mechanism and becomes the last record
+> in the stream, which means nothing here waits on lifecycle landing.
 - **Replay archive** — `seed + command log`. Because the sim is deterministic, this is a few KB per
   match rather than a recording of every frame.
 

@@ -43,17 +43,37 @@ RSpec.describe MatchRunner do
     def close = @closed = true
   end
 
+  # Stands in for `EventProducer` so the durable path can be exercised with no broker at all —
+  # the same reason the sink is injected.
+  class RecordingEvents
+    attr_reader :facts, :meters, :closed
+
+    def initialize = (@facts = []; @meters = []; @closed = false)
+
+    def publish(match, events, run_id:)
+      events.each { |e| @facts << e.merge(match_id: match.id, run_id: run_id) }
+    end
+
+    def publish_meters(match, tick, run_id:)
+      @meters << { tick: tick, run_id: run_id, ledger: match.operations.first.ledger }
+    end
+
+    def stats = { sent: @facts.length, failed: 0 }
+    def close = @closed = true
+  end
+
   def run_with(batches)
     ref = {}
     sink = RecordingSink.new
+    events = RecordingEvents.new
     source = ScriptedSource.new(batches, ref)
     match = DevMatch.build
     runner = described_class.new(matches: { DevMatch::ID => match },
                                  logger: Logger.new(File::NULL),
-                                 source: source, sink: sink)
+                                 source: source, sink: sink, events: events)
     ref[:runner] = runner
     runner.run
-    { match: match, sink: sink, source: source, runner: runner }
+    { match: match, sink: sink, source: source, runner: runner, events: events }
   end
 
   def control(id, value)
@@ -109,6 +129,39 @@ RSpec.describe MatchRunner do
       result = run_with([ [ { "type" => "resync" } ], [] ])
 
       expect(result[:sink].published.count { |p| p[:full] }).to eq(1)
+    end
+
+    # **The reset hazard, and the reason `run_id` exists at all.** A rebuilt match restarts at
+    # tick 0 under the same `match_id`, so a durable log keyed on `(match_id, tick)` would have
+    # two different moments claiming tick 412 — and a consumer folding that stream corrupts
+    # itself the first time somebody recovers from a burst flywheel.
+    it "starts a new run on reset, so a rebuilt match cannot collide with the old one" do
+      quiet = Array.new(EventProducer::METER_TICKS) { [] }
+      result = run_with(quiet + [ [ { "type" => "reset_match" } ] ] + quiet)
+      meters = result[:events].meters
+
+      # A reset restarts the tick count, so both readings are stamped tick 40 — which is
+      # exactly the collision. Only the run id separates them.
+      expect(meters.map { |m| m[:tick] }).to eq([ EventProducer::METER_TICKS ] * 2)
+      expect(meters.map { |m| m[:run_id] }.uniq.length).to eq(2)
+    end
+  end
+
+  describe "the durable record" do
+    # The dual write. The projection is a cache that self-heals; this is the record that does
+    # not, and it carries everything rather than the curated subset the panel shows.
+    it "samples the ledger on the meter interval, absolutely rather than as a delta" do
+      result = run_with(Array.new(EventProducer::METER_TICKS + 1) { [] })
+      meters = result[:events].meters
+
+      expect(meters.map { |m| m[:tick] }).to eq([ EventProducer::METER_TICKS ])
+      expect(meters.first[:ledger]).to include(:joules_to_work, :mass_added)
+    end
+
+    it "stamps one run id across a match's whole stream" do
+      result = run_with(Array.new(EventProducer::METER_TICKS + 1) { [] })
+
+      expect(result[:events].meters.map { |m| m[:run_id] }.uniq.length).to eq(1)
     end
   end
 

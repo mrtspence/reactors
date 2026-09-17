@@ -26,7 +26,7 @@ export default class extends Controller {
   static PENDING_TIMEOUT_MS = 2000
 
   connect() {
-    this.state = { gauges: {}, flags: {}, controls: {}, tick: null }
+    this.state = { gauges: {}, flags: {}, controls: {}, crew: {}, tick: null }
     this.pending = new Map()
     this.queued = new Map()
     this.timer = null
@@ -40,6 +40,10 @@ export default class extends Controller {
     this.levers = new Map()
     this.element.querySelectorAll("[data-lever-id]").forEach((el) => {
       this.levers.set(el.dataset.leverId, el)
+    })
+    this.crew = new Map()
+    this.element.querySelectorAll("[data-minion-id]").forEach((el) => {
+      this.crew.set(el.dataset.minionId, el)
     })
 
     this.subscription = consumer.subscriptions.create(
@@ -70,6 +74,17 @@ export default class extends Controller {
   // --- incoming ------------------------------------------------------------
 
   apply(message) {
+    // History, sent once on subscribe from the durable log. It arrives BEFORE any view, so it
+    // is handled before the tick-regression check below — which would otherwise have nothing
+    // to compare against and does not apply to it anyway.
+    //
+    // This is what makes joining late honest: the incident list used to accumulate only from
+    // ticks this browser happened to be connected for, so a spectator one tick behind the
+    // flywheel was told nothing had gone wrong.
+    if (message.kind === "backfill") {
+      return this.appendIncidents(message.incidents || [])
+    }
+
     // A tick that goes BACKWARDS means this is a different match than the one we were
     // watching — a reset rebuilds it from tick 0, and so does restarting the runner. The
     // incident list is the only thing that accumulates across ticks, so it is the only thing
@@ -84,6 +99,7 @@ export default class extends Controller {
         gauges: { ...message.view.gauges },
         flags: { ...message.view.flags },
         controls: { ...message.view.controls },
+        crew: { ...message.view.crew },
         tick: message.tick
       }
     } else {
@@ -94,6 +110,7 @@ export default class extends Controller {
       Object.assign(this.state.gauges, message.view.gauges)
       Object.assign(this.state.flags, message.view.flags)
       Object.assign(this.state.controls, message.view.controls)
+      Object.assign(this.state.crew, message.view.crew)
       this.state.tick = message.tick
     }
 
@@ -112,6 +129,33 @@ export default class extends Controller {
     for (const [id, el] of this.levers) {
       this.paintLever(el, id, this.state.controls[id])
     }
+    for (const [id, el] of this.crew) {
+      this.paintMinion(el, this.state.crew[id])
+    }
+  }
+
+  // Where somebody is standing, and what has happened to them.
+  //
+  // The station select is only written when it is NOT focused. A player part-way through
+  // choosing a new posting must not have the dropdown yanked back to the authoritative value
+  // under their cursor four times a second — the same reason paintLever leaves a control alone
+  // while it is being dragged.
+  paintMinion(el, crew) {
+    if (!crew) return
+
+    const select = el.querySelector("[data-minion-station]")
+    if (select && document.activeElement !== select) {
+      select.value = crew.station || ""
+    }
+
+    const injury = el.querySelector("[data-minion-injury]")
+    if (!injury) return
+
+    injury.textContent = crew.injury ? this.words(crew.injury) : ""
+    injury.classList.toggle("hidden", !crew.injury)
+    // A scratch and being carried out are not the same news.
+    injury.classList.toggle("text-amber-400", crew.injury === "minor")
+    injury.classList.toggle("text-rose-400", Boolean(crew.injury) && crew.injury !== "minor")
   }
 
   paintInstrument(el, value, flags) {
@@ -184,16 +228,62 @@ export default class extends Controller {
     this.incidentsTarget.append(empty)
   }
 
+  // A fusible plug melting and a boiler exploding used to read identically here: one flat line
+  // of engine vocabulary, same weight, same colour. The two are a ruined day and a ruined
+  // engine, and the panel has to say which.
+  //
+  // **What a part BECAME is the headline, not what broke it.** `mode` is the word a driver
+  // would use — exploded, blown head, scored bore — and `cause` is the post-mortem. Leading
+  // with the cause buried the one fact that decides what to do next.
   appendIncidents(incidents) {
     if (!incidents.length || !this.hasIncidentsTarget) return
     this.incidentsTarget.querySelector("[data-incidents-empty]")?.remove()
 
     for (const incident of incidents) {
-      const li = document.createElement("li")
-      li.textContent = `t${incident.tick} · ${incident.label || incident.node}: ` +
-        `${(incident.type || "").replace(/_/g, " ")} (${incident.cause || "?"})`
-      this.incidentsTarget.prepend(li)
+      this.incidentsTarget.prepend(this.buildIncident(incident))
     }
+  }
+
+  buildIncident(incident) {
+    const critical = incident.severity === "critical"
+    const li = document.createElement("li")
+    li.className = `border-l-2 pl-2 py-0.5 ${critical ? "border-rose-500" : "border-amber-500"}`
+    li.dataset.severity = incident.severity || "warning"
+
+    const headline = document.createElement("div")
+    headline.className = critical
+      ? "font-semibold text-rose-200"
+      : "text-amber-200"
+    headline.textContent =
+      `${incident.label || incident.node} — ${this.words(incident.mode || incident.type)}`
+    li.append(headline)
+
+    for (const line of this.incidentDetail(incident)) {
+      const div = document.createElement("div")
+      div.className = "text-[11px] text-slate-400"
+      div.textContent = line
+      li.append(div)
+    }
+    return li
+  }
+
+  // Ordered by what a driver needs first: that it got worse, then what it took with it, then
+  // the forensics. `damaged` is the one that would otherwise arrive later as an unexplained
+  // second failure.
+  incidentDetail(incident) {
+    const lines = []
+    if (incident.escalated_from) {
+      lines.push(`worsened from ${this.words(incident.escalated_from)}`)
+    }
+    if (incident.damaged?.length) {
+      lines.push(`took ${incident.damaged.map((n) => this.words(n)).join(", ")} with it`)
+    }
+    lines.push(`t${incident.tick} · ${this.words(incident.cause || "unknown")}`)
+    return lines
+  }
+
+  words(value) {
+    return String(value).replace(/_/g, " ")
   }
 
   // --- outgoing ------------------------------------------------------------

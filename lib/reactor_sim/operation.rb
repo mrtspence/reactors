@@ -21,6 +21,9 @@ module ReactorSim
     # specs refer to it by the name they already know.
     Context = Tick::Context
 
+    # Which severities reach the player's incident feed. See `#incidents`.
+    REPORTED_SEVERITIES = %i[warning critical].freeze
+
     attr_reader :id, :type, :nodes, :links, :paths, :thermal_links, :drive_links,
                 :control_points, :diagnostics, :minions, :state, :content, :time_scale,
                 :options, :rngs
@@ -121,8 +124,33 @@ module ReactorSim
         controls: @state.fetch(:controls).to_h { |id, s|
           [ id, { target: s.fetch(:target), actual: s.fetch(:actual) } ]
         }.freeze,
-        incidents: @state.fetch(:events)
+        incidents: incidents,
+        crew: crew_view
       )
+    end
+
+    # Where each of the crew is standing, and what has happened to them.
+    #
+    # **This closes a seam that was dead and was lying about it.** `CrewComponent` renders a
+    # station dropdown per minion and its own comment claimed the posting "arrives on the
+    # projection" — it did not, so the control always rendered at its first option whatever the
+    # real posting was, and a reassignment, a reset or a restore was never reflected back.
+    #
+    # Only what CHANGES belongs here. A minion's name, job and race are configuration and reach
+    # the client once, with the panel; station and injury are state.
+    def crew_view
+      @state.fetch(:minions).to_h do |id, minion_state|
+        [ id, { station: minion_state[:station], injury: minion_state[:injury] } ]
+      end.freeze
+    end
+
+    # **The feed is curated; the log is complete.** Every event this tick goes to the durable
+    # record, but the panel's incident list is "what has gone wrong" — putting `fire_lit` and
+    # `steam_raised` in it would bury a burst flywheel under the ordinary business of driving an
+    # engine. Filtered here rather than in the client, so the client stays dumb and a second
+    # consumer of the projection cannot forget to do it.
+    def incidents
+      @state.fetch(:events).select { |e| REPORTED_SEVERITIES.include?(e[:severity]) }.freeze
     end
 
     # Sent once when a client subscribes, so it can draw the panel. Values stream after.
@@ -293,8 +321,13 @@ module ReactorSim
       # The digest cannot catch it either. `canonical` runs through JSON.generate, where
       # :stoking and "stoking" are the same string, so a round-trip spec passes with the bug
       # present. Only an identity assertion finds it.
+      # `injury` is the same trap as `station` one field along, and nastier in the same way a
+      # node's `failure` mode is: a String is truthy, so the minion stays hurt — in a mode
+      # nothing matches, with every derating falling back to 1.0. A crew that came back from a
+      # snapshot would be quietly, completely healed while still reading as injured.
       minions = state.fetch(:minions, {}).to_h do |id, minion_state|
-        [ id, minion_state.merge(station: minion_state[:station]&.to_sym).freeze ]
+        [ id, minion_state.merge(station: minion_state[:station]&.to_sym,
+                                 injury: minion_state[:injury]&.to_sym).freeze ]
       end
 
       state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze,

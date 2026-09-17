@@ -86,8 +86,6 @@ module ReactorSim
       # event's detail rather than in the mode.
       def failure_modes = { burst: {} }
 
-      def failure_type = :flywheel_burst
-
       def failure_detail(state, _ctx)
         { rpm: rpm(state).round(1),
           rim_speed_m_s: rim_speed(state).round(1),

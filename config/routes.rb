@@ -28,9 +28,18 @@ Rails.application.routes.draw do
   # The loadout is nested under the operation rather than the match, because a loadout belongs to
   # one machine and a match will eventually hold several. Singular (`resource`) because a machine
   # has exactly one.
+  #   GET   …/crew/edit      the pre-match crew screen
+  #   PATCH …/crew           post them, and rebuild the engine from cold
+  #   POST  …/crew_draft     evaluate a roster without storing it
+  #
+  # A crew is a loadout by another name, so it gets the same three routes and the same nouns. The
+  # draft earns its keep harder here than it does for parts: changing who holds a job changes
+  # **which kit is offered**, because equipment is owned per minion.
   scope "matches/:match_id/operations/:operation_id" do
     resource :loadout, only: %i[edit update]
     resource :loadout_draft, only: %i[create]
+    resource :crew, only: %i[edit update]
+    resource :crew_draft, only: %i[create]
   end
 
   post "matches/:match_id/commands", to: "commands#create", as: :match_commands

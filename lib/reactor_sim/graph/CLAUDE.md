@@ -50,9 +50,9 @@ because the graph is configuration rather than state.
 
 Load-bearing, and each was a bug:
 
-- **An active sink is authoritative about its own intake.** This used to be
-  `max(push, draw)`, which meant a sink could not refuse — a valve shoving its contents at a
-  cylinder overrode the cylinder's limit and packed it to eight times its supply pressure.
+- **An active sink is authoritative about its own intake.** Under `max(push, draw)` a sink
+  cannot refuse — a valve shoving its contents at a cylinder overrides the cylinder's limit and
+  packs it to eight times its supply pressure.
 - **Gas cannot be limited by volume** — it expands and raises pressure instead. It is a **cap
   only**, never a block, so a chimney cannot deadlock waiting for a pressure difference.
   `Atmosphere` reports `gas_headroom_kg` as `Infinity` and is unaffected.
@@ -74,10 +74,9 @@ so the total is larger than the settled figure, deliberately. Full table in
 - **Liquid is bounded by the bore, gas by the conductance.** Unbounded, the entrainment term
   claimed a whole drum in one tick, and the only backstop scaled the claim uniformly — dragging
   the gas figure below what the solve settled.
-- **A path with no declared opinion still passes liquid.** Dropping it there is why the cylinder
-  relief valve passed water in exactly zero states: lifted it was pressure-driven with no
-  affinity, shut its throughput was zero. `spec/reactor_sim/entrainment_spec.rb` exists because
-  none of this was covered.
+- **A path with no declared opinion still passes liquid.** Dropping it there makes the cylinder
+  relief valve pass water in exactly zero states: lifted it is pressure-driven with no affinity,
+  shut its throughput is zero. `spec/reactor_sim/entrainment_spec.rb` covers this.
 
 ## `settle_heat` / `settle_drive` / `settle_gas`
 
@@ -93,10 +92,10 @@ per-node bound that stood in for both is gone, along with `flow_bounds` and `nod
 they were papering over an explicit integrator running 400–600× past its stability limit, and
 the bound was itself wrong by a factor of two.
 
-> **Two vessels joined by a pipe used to swap contents and stay swapped forever.** 6 kg/1 kg
-> became 1 kg/6 kg on tick 1 and never moved again, at every conductance stiffer than
-> `dt < τ`. The engine survived only because every gas coupling in it has `Atmosphere` on one
-> end. `transport_spec` asserts equalisation at five conductances now.
+> **Get this wrong and two vessels joined by a pipe swap contents and stay swapped forever.**
+> 6 kg/1 kg becomes 1 kg/6 kg on tick 1 and never moves again, at every conductance stiffer than
+> `dt < τ`. A graph with `Atmosphere` on one end of every gas coupling hides it.
+> `transport_spec` asserts equalisation at five conductances.
 
 **Conductance is the whole restriction on a pressure-driven path.** `Port#max_kg_per_s`
 governs rate-driven paths and nothing else — applying both makes every throat permanently

@@ -85,12 +85,12 @@ saturation temperature, which condenses it all again — makes a vessel flip bet
 
 - The split is decided by **total enthalpy**, not temperature. That is what makes the
   two-phase plateau work.
-- The inner loop runs on **captured locals only**. Building parcels inside it was 64% of a
+- The inner loop runs on **captured locals only**. Building parcels inside it costs 64% of a
   hundred-node tick.
 - `ITERATIONS = 20` is the first dial to turn if a large operation must be cheaper. The
   solve is currently ~50% of a 100-node step.
-- Phase pairs are indexed **from both sides** — a condenser holding only vapour has no liquid
-  parcel to discover the pair from, and used to never condense.
+- Phase pairs are indexed **from both sides** — indexed one way only, a condenser holding only
+  vapour has no liquid parcel to discover the pair from and never condenses.
 
 **Non-condensables are handled, and the way they are handled looks like a bug until you check
 it.** The pair is solved against its own **partial** pressure — which is what vapour–liquid

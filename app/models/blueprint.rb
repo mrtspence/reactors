@@ -2,25 +2,25 @@
 
 # One unlockable thing, and the catalogue of all of them.
 #
-# A blueprint is the permanent half of the progression model: owning one is the right to mint a
-# **fresh instance** of that thing into any match. It is never consumed by using it, two matches
-# may mint the same boiler at once, and nothing an instance accumulates comes back —
-# `docs/design_sketches/blueprints.md` §1.
+# Owning a blueprint is the right to mint a **fresh instance** of that thing into any match. It
+# is never consumed by use, two matches may mint the same boiler at once, and nothing an instance
+# accumulates comes back. See `docs/design_sketches/blueprints.md` §1.
 #
-# **The catalogue is derived, never hand-written.** Every registered part is a part blueprint,
-# every registered operation an operation blueprint, and so on. That is deliberate: a
-# hand-maintained list of "things you can unlock" drifts the first time somebody registers a part
-# without looking, and it would drift *silently* — the new part would simply be unreachable.
-# `docs/CLAUDE.md` calls this out as the difference between an inventory list and a derivation.
+# **The catalogue is derived, never hand-written.** A hand-maintained list of unlockable things
+# drifts the first time somebody registers a part without looking, and drifts *silently* — the
+# new part is simply unreachable.
 #
 # **It lives on this side of the boundary.** The simulation knows nothing about players,
-# progression or ownership, and must not: `Assembly` answers "will this build run?" and the
-# delivery tier answers "are you allowed this part?" (§2, §6). Nothing here is reachable from a
-# tick.
+# progression or ownership: `Assembly` answers "will this build run?" and the delivery tier
+# answers "are you allowed this part?". Nothing here is reachable from a tick.
 class Blueprint
-  # The four kinds, in the order a player meets them: you get a machine, then a frame for it,
-  # then parts to hang on the frame, then people to work it.
-  KINDS = %i[operation chassis part minion].freeze
+  # The six kinds, in the order a player meets them: you get a machine, then a frame for it,
+  # then parts to hang on the frame, then people to work it — and then you invest in those
+  # people, by training them and by buying them kit.
+  #
+  # **`:equipment` and `:training` are owned per minion**, so their ids are scoped
+  # (`jim/leather_apron`) the way a chassis id is scoped to its operation. See `scoped_id`.
+  KINDS = %i[operation chassis part minion equipment training].freeze
 
   attr_reader :kind, :blueprint_id, :label, :detail, :materials, :requires_achievement
 
@@ -88,7 +88,8 @@ class Blueprint
     # or a rake task pays nothing — forcing it here would quietly undo that for the sake of
     # moving an error a few seconds earlier. `rake blueprints:audit` builds it on demand.
     def catalogue
-      @catalogue ||= (operations + chassis + parts + minions).index_by(&:key).freeze
+      @catalogue ||= (operations + chassis + parts + minions + equipment + training)
+                     .index_by(&:key).freeze
     end
 
     # `config/blueprints.yml`, indexed the way the catalogue is. Delivery tier, deliberately —
@@ -121,9 +122,15 @@ class Blueprint
       { materials: materials, requires_achievement: requires }
     end
 
-    def build(kind, blueprint_id, label:, detail: nil)
+    # `priced_as:` exists for the two kinds whose **ownership is scoped but whose cost is not**.
+    # Equipment and training are unlocked per minion, so the blueprint id is `jim/leather_apron`
+    # — but an apron costs what an apron costs, whoever it is cut for. Pricing the pair would put
+    # one line in `config/blueprints.yml` for every (minion × item) combination: 39 today, every
+    # one of them identical, and a fresh row needed the moment anybody adds a minion. That is the
+    # inventory list that drifts silently, which `docs/CLAUDE.md` names as the thing to avoid.
+    def build(kind, blueprint_id, label:, detail: nil, priced_as: nil)
       new(kind: kind, blueprint_id: blueprint_id, label: label, detail: detail,
-          **gates_for(kind, blueprint_id.to_s))
+          **gates_for(kind, (priced_as || blueprint_id).to_s))
     end
 
     def operations
@@ -151,20 +158,64 @@ class Blueprint
       end
     end
 
-    # **This models the wrong noun and is known to.** It enumerates content archetypes —
-    # `fireman`, `yardhand` — which are **jobs a minion performs**, not minions. What a player
-    # actually unlocks is an individual: Jim, who is human and starts with certain stats and tags,
-    # or Elowynne, who is an elf. Each is their own template, upgradable by further blueprints
-    # (certification courses that grant stat bumps or new tags), and each carries equipment in
-    # three slots — tool set, gear, utility — whose blueprints are unlocked *per minion*.
+    # **Individuals, at last.** This enumerated content archetypes for a release — `fireman`,
+    # `yardhand` — which are *jobs a minion performs*, not minions, and it carried a note saying
+    # so. What a player unlocks is a person: Jim, a human with twenty years on a shovel, or
+    # Elowynne, an elf who reads a gauge glass better than she shifts coal.
     #
-    # Left in place rather than ripped out because the *mechanism* is right and the entities are
-    # not: minions are unlockable, these are simply not the minions. Nothing enforces minion
-    # ownership, so the wrong model cannot yet mislead a player. See
-    # `docs/design_sketches/minion-sketch.md`, and do not build on this.
+    # The label is their NAME, because that is what a roster screen shows and what a player
+    # remembers when one of them is on the injury list.
+    # **`hireable`, not `minions`.** The last-resort standin is an individual like any other and
+    # is deliberately not for sale: it turns up when nobody better will, which is the entire
+    # point of it, so it must never appear as something to unlock.
     def minions
-      ReactorSim::Content.default.minions.map do |id, spec|
-        build(:minion, id, label: spec.fetch(:label, humanize(id)))
+      ReactorSim::Content.default.hireable.map do |id, spec|
+        build(:minion, id, label: spec.fetch(:name), detail: archetype_label(spec))
+      end
+    end
+
+    # "Elf", for the roster card. Read through the registry rather than titleised from the id,
+    # so a race whose label is not its id spelled out still reads correctly.
+    def archetype_label(spec)
+      ReactorSim::Content.default.archetype(spec.fetch(:archetype)).fetch(:label)
+    end
+
+    # **Equipment and training are owned per minion, so their ids are scoped to one.** Jim's
+    # apron and Elowynne's apron are two unlocks, and buying one does not clothe the other.
+    #
+    # The scoping mechanism is `chassis_id`'s, unchanged: a compound id in the existing
+    # `(owner_id, kind, blueprint_id)` triple, which is why per-minion ownership needs no
+    # migration to `unlocks`. See `docs/design_sketches/minions.md` §3.
+    def scoped_id(minion_id, item_id) = "#{minion_id}/#{item_id}"
+
+    def equipment
+      for_each_minion(:equipment, ReactorSim::Equipment.known) do |id|
+        item = ReactorSim::Equipment.fetch(id)
+        [ item.label, item.description ]
+      end
+    end
+
+    def training
+      for_each_minion(:training, ReactorSim::Training.known) do |id|
+        course = ReactorSim::Training.fetch(id)
+        [ course.label, course.description ]
+      end
+    end
+
+    # The cross product, with the minion's name carried in `detail` so a catalogue listing reads
+    # "Leather Apron — Jim Ashfield" rather than three identical rows.
+    def for_each_minion(kind, item_ids)
+      # Hireable only, for the same reason: the standin cannot be trained and cannot be kitted
+      # out. Buying an apron for somebody who turns up from the labour exchange and leaves at
+      # the end of the shift is not a thing.
+      roster = ReactorSim::Content.default.hireable
+
+      roster.flat_map do |minion_id, minion|
+        item_ids.map do |item_id|
+          label, description = yield(item_id)
+          build(kind, scoped_id(minion_id, item_id), priced_as: item_id,
+                label: label, detail: [ minion.fetch(:name), description ].compact.join(" — "))
+        end
       end
     end
 

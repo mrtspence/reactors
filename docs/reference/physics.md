@@ -163,9 +163,9 @@ dial to turn if a large operation needs to be cheaper.
 The split is decided by **total enthalpy**, not temperature — which is what makes the
 two-phase plateau work, where adding energy boils more water without the temperature moving.
 
-Phase pairs are indexed **from both sides** (`content.phase_pair(:steam)` works). A condenser
-holding nothing but vapour has no liquid parcel to discover the pair from, and used to never
-condense at all.
+Phase pairs are indexed **from both sides** (`content.phase_pair(:steam)` works). Indexed one way
+only, a condenser holding nothing but vapour has no liquid parcel to discover the pair from and
+never condenses at all.
 
 ---
 
@@ -189,11 +189,11 @@ so choking a damper throttles a fire through exactly the same code path an empty
 many kilograms of its fuel are alight** — `state[:ignition][reaction_id] = { kg:, oxidiser_kg: }`.
 Only that lit mass reacts.
 
-Combustion used to be gated on the node's bulk temperature, which a lumped-temperature node
-cannot represent honestly: a match does not raise a firebox to 700 K, it raises a few grams.
-As a bulk threshold the fire was all-or-nothing — above the line the whole grate burned, below
-it nothing did and nothing ever could again, so the only winning move was to leave the igniter
-on permanently, turning a match into a throttle.
+Gating combustion on a node's bulk temperature is something a lumped-temperature node cannot do
+honestly: a match does not raise a firebox to 700 K, it raises a few grams. As a bulk threshold
+the fire is all-or-nothing — above the line the whole grate burns, below it nothing does and
+nothing ever can again, so the only winning move is to leave the igniter on permanently, turning
+a match into a throttle.
 
 Four rules, each of which was got wrong first:
 

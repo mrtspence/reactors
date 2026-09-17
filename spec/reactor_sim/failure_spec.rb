@@ -94,13 +94,16 @@ RSpec.describe "failure modes" do
     # every registered type would rope in `spec/support/loop_rig.rb` the moment a full-suite
     # run loads it. Every chassis, though: a frame is separately unlockable, so a part that
     # only appears on one of them still has to answer for itself.
-    def wearing_nodes
+    def machines
       ReactorSim::Operations.catalogued.flat_map do |type|
-        ReactorSim::Operations.chassis_for(type).flat_map do |chassis|
-          op = ReactorSim::Operations.fetch(type).call(id: :probe, seed: 1, chassis: chassis)
-          op.nodes.values.select { |node| node.respond_to?(:apply_wear) }
+        ReactorSim::Operations.chassis_for(type).map do |chassis|
+          ReactorSim::Operations.fetch(type).call(id: :probe, seed: 1, chassis: chassis)
         end
       end
+    end
+
+    def wearing_nodes
+      machines.flat_map { |op| op.nodes.values.select { |node| node.respond_to?(:apply_wear) } }
     end
 
     it "finds parts to check at all" do
@@ -119,6 +122,29 @@ RSpec.describe "failure modes" do
       end
 
       expect(generic.map(&:id)).to be_empty
+    end
+
+    # **A breach naming a mode its part can never enter would simply never open**, and nothing
+    # would say so — the hole would be wired, inert, and indistinguishable from a part that was
+    # meant to fail sealed. One typo in `opens_by:` is all it takes, and it is exactly the class
+    # of silent off switch the walk above exists to prevent.
+    it "wires every breach to a mode its part can actually enter" do
+      wrong = machines.flat_map do |op|
+        op.nodes.values.grep(ReactorSim::Nodes::Breach).flat_map do |breach|
+          part = op.nodes[breach.senses]
+          next [ "#{breach.id} senses #{breach.senses}, which is not a node" ] if part.nil?
+
+          breach.opens_by.keys
+                .reject { |mode| part.failure_modes.key?(mode) }
+                .map { |mode| "#{breach.id} opens on #{mode}, which #{breach.senses} never becomes" }
+        end
+      end
+
+      expect(wrong).to be_empty
+    end
+
+    it "finds breaches to check at all" do
+      expect(machines.flat_map { |op| op.nodes.values.grep(ReactorSim::Nodes::Breach) }).not_to be_empty
     end
   end
 
@@ -140,7 +166,8 @@ RSpec.describe "failure modes" do
 
       expect(broken.fetch(:failure)).to be(:burst)
       expect(broken.fetch(:durability)).to eq(0.0)
-      expect(events.first).to include(type: :flywheel_burst, cause: :overload, mode: :burst)
+      expect(events.first).to include(type: :part_failed, node: :flywheel,
+                                     cause: :overload, mode: :burst)
     end
 
     # The first failure escalated from nothing, so saying so would be noise.
@@ -342,6 +369,48 @@ RSpec.describe "failure modes" do
     end
   end
 
+  # §8: what a mode does to a part that is still there. Before this, `scored_bore` and
+  # `blown_head` were indistinguishable — *any* cylinder failure declared `Intent.none` and
+  # stopped the engine dead, which made the milder mode decoration and "broken is not absent"
+  # a slogan rather than a behaviour.
+  describe "derating" do
+    let(:op) { engine.operation(:eng) }
+    let(:cylinder) { op.nodes.fetch(:cylinder) }
+    let(:sound) { op.state.fetch(:nodes).fetch(:cylinder) }
+
+    def as(mode) = sound.merge(failure: mode)
+
+    it "leaves a sound part fully capable" do
+      expect(cylinder.derating(sound, :admission)).to eq(1.0)
+    end
+
+    it "hobbles a scored bore without silencing it" do
+      expect(cylinder.derating(as(:scored_bore), :admission)).to be_between(0.0, 1.0).exclusive
+    end
+
+    # `0.0` is how a mode says "this part no longer does that thing at all" — in the same
+    # vocabulary as a partial derating rather than a second flag beside it.
+    it "silences a blown head" do
+      expect(cylinder.derating(as(:blown_head), :admission)).to eq(0.0)
+    end
+
+    # A hole in the casing must not imply a worn bore. A mode derates what it names and nothing
+    # else, or every failure quietly becomes every other failure.
+    it "leaves a capability the mode does not name alone" do
+      expect(cylinder.derating(as(:blown_head), :cooling)).to eq(1.0)
+    end
+
+    it "still draws steam with a scored bore, and none with a blown head" do
+      ctx = ReactorSim::Operation::Context.new(
+        controls: { cutoff: 100.0 }, dt: ReactorSim::DT, tick: 1, content: op.content,
+        nodes: op.nodes, states: op.state.fetch(:nodes)
+      )
+
+      expect(cylinder.plan(as(:scored_bore), ctx)).not_to eq(ReactorSim::Intent.none)
+      expect(cylinder.plan(as(:blown_head), ctx)).to eq(ReactorSim::Intent.none)
+    end
+  end
+
   # §6: a bursting part throws its shell at whatever is near it, and that matters in exactly two
   # places — it breaks adjacent machinery and it injures nearby crew. **Fiat, deliberately.**
   # There is no release-energy term and no blast model; a mode names its casualties and the
@@ -386,6 +455,31 @@ RSpec.describe "failure modes" do
         .to be_within(1e-6).of(start.fetch(:durability) - (start.fetch(:initial_durability) * 0.5))
     end
 
+    # **The event has to name the casualties, not merely cause them.** Otherwise the damage
+    # arrives later as an unexplained second failure and nobody watching the panel connects the
+    # two — which is the difference between a consequence and a bug, as far as a player can tell.
+    it "names what it took with it on the event" do
+      op = doomed_rig
+      events = []
+      10.times { |i| events.concat(op.step!(tick: i + 1)) }
+      rupture = events.find { |e| e[:node] == :victim }
+
+      expect(rupture).to include(mode: :rupture, damaged: [ :witness ])
+    end
+
+    # Absent rather than empty when a part hurts nobody, so a panel can branch on presence.
+    it "says nothing about casualties when there are none" do
+      op = engine.operation(:eng)
+      flywheel = op.nodes.fetch(:flywheel)
+      ctx = ReactorSim::Operation::Context.new(
+        controls: {}, dt: ReactorSim::DT, tick: 1, content: op.content,
+        nodes: op.nodes, states: op.state.fetch(:nodes)
+      )
+      _, events = flywheel.break_part(op.state.fetch(:nodes).fetch(:flywheel), ctx, :overload)
+
+      expect(events.first).not_to have_key(:damaged)
+    end
+
     # It is spent on the transition, not every tick the part is broken — otherwise a failed
     # part would grind its neighbours to nothing at the tick rate.
     it "is spent once, not every tick afterwards" do
@@ -418,6 +512,75 @@ RSpec.describe "failure modes" do
 
     it "treats a mode the table does not name as the worst thing available" do
       expect(boiler.escalate_to(:explosion, :something_unmodelled)).to be(:something_unmodelled)
+    end
+
+    # **The mechanism firing on a real part, which unit-testing `escalate_to` does not prove.**
+    # Until this existed, escalation was machinery nothing in any machine could reach — the same
+    # silent off switch the rest of this file guards against.
+    #
+    # The cylinder is the part that can do it, and the story is right: a worn engine that then
+    # takes a slug of water into its clearance space blows the head off. Its `overload?` is
+    # hydraulic lock, which is condition-driven rather than durability-driven, so it still fires
+    # on a part whose durability is long gone — which is exactly why §5 says fatigue cannot
+    # escalate but an overload can.
+    describe "on a real part" do
+      let(:content) { ReactorSim::Content.default }
+      let(:rng) { ReactorSim::Rng.stream(1, :escalation) }
+      let(:node) do
+        ReactorSim::Nodes::Cylinder.new(id: :cylinder, bore_m: 0.45, stroke_m: 1.1,
+                                        drives: :flywheel, exhausts_to: :atmosphere,
+                                        supplied_by: :chest)
+      end
+
+      # Flooded past its clearance, with a heavy wheel turning hard enough to drive the piston
+      # into it. `obstruction_spec` owns the physics; this owns what the failure does next.
+      let(:locked) do
+        full = node.obstruction_volume_m3 * content.density(:water)
+        parcels = [
+          ReactorSim::Parcel.build(resource: :steam, kg: 0.2, temperature_k: 420.0, content: content),
+          ReactorSim::Parcel.build(resource: :water, kg: full * 1.5, temperature_k: 400.0, content: content)
+        ]
+        node.rebalance(node.initial_state(rng, content).merge(parcels: parcels), content)
+      end
+
+      let(:ctx) do
+        flywheel = ReactorSim::Nodes::Flywheel.new(id: :flywheel, mass_kg: 3_200.0, radius_m: 1.5)
+        chest = ReactorSim::Nodes::Vessel.new(id: :chest, volume_m3: 1.0)
+        steam = [ ReactorSim::Parcel.build(resource: :steam, kg: 2.0, temperature_k: 430.0,
+                                           content: content) ]
+        sky = ReactorSim::Nodes::Atmosphere.new
+
+        ReactorSim::Tick::Context.new(
+          controls: {}, dt: 0.25, tick: 1, content: content,
+          nodes: { cylinder: node, flywheel: flywheel, chest: chest, atmosphere: sky },
+          states: { flywheel: { angular_momentum: 15.0 * flywheel.moment_of_inertia },
+                    chest: chest.rebalance(chest.initial_state(rng, content).merge(parcels: steam), content),
+                    atmosphere: sky.initial_state(rng, content) }
+        )
+      end
+
+      it "takes a sound cylinder straight to a blown head" do
+        _, events = node.apply_wear(locked, ctx)
+
+        expect(events.first).to include(cause: :overload, mode: :blown_head)
+        expect(events.first).not_to have_key(:escalated_from)
+      end
+
+      it "escalates one that was already worn, and says where it came from" do
+        worn = locked.merge(failure: :scored_bore, durability: 0.0)
+        state, events = node.apply_wear(worn, ctx)
+
+        expect(state.fetch(:failure)).to be(:blown_head)
+        expect(events.first).to include(mode: :blown_head, escalated_from: :scored_bore)
+      end
+
+      it "stops announcing itself once it is as bad as it gets" do
+        blown = locked.merge(failure: :blown_head, durability: 0.0)
+        state, events = node.apply_wear(blown, ctx)
+
+        expect(state.fetch(:failure)).to be(:blown_head)
+        expect(events).to be_empty
+      end
     end
 
     it "emits nothing when the mode has not changed" do

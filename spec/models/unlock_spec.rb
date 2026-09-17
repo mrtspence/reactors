@@ -111,13 +111,15 @@ RSpec.describe Unlock do
     # that only ever runs in a spec rots.
     describe "earning versus granting" do
       it "earns a blueprint whose prerequisite is met" do
+        Award.grant(owner_id: described_class::ID, achievement_id: :first_full_head_of_steam)
+
         expect(described_class.earn(:part, :ramsbottom_safety_valve)).to be_persisted
         expect(described_class).to be_unlocked(:part, :ramsbottom_safety_valve)
       end
 
+      # No stub: `Achievement.earned?` reads `awards` now, so an owner with no rows has
+      # genuinely earned nothing and the gate is genuinely shut.
       it "refuses to earn one whose prerequisite is not, and stores nothing" do
-        allow(Achievement).to receive(:earned?).and_return(false)
-
         expect(described_class.earn(:part, :ramsbottom_safety_valve)).to be_nil
         expect(described_class).not_to be_unlocked(:part, :ramsbottom_safety_valve)
       end

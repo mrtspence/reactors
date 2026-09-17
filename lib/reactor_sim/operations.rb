@@ -13,23 +13,21 @@ module ReactorSim
     @harnesses = Set.new
 
     class << self
-      # `chassis:` is the list of frames this type can be built on, and it exists so the
-      # registry can be *asked* rather than reached into. The delivery tier needs to enumerate
-      # them — every chassis is separately unlockable — and the alternative was a hand-written
-      # map from operation type to `SomeOperation::CHASSIS`, which is an inventory list that
-      # drifts the first time somebody adds a frame. Pass the keys, never a literal list.
+      # `chassis:` is the list of frames this type can be built on, so the registry can be
+      # *asked* rather than reached into: the delivery tier has to enumerate them, since every
+      # chassis is separately unlockable. **Pass the keys, never a literal list** — a
+      # hand-written map from operation type to `SomeOperation::CHASSIS` drifts the first time
+      # somebody adds a frame. It is introspection, not configuration: nothing in a tick reads
+      # it, and a builder still takes `chassis:` as an ordinary option.
       #
-      # It is introspection, not configuration: nothing in a tick reads this, and a builder
-      # still takes `chassis:` as an ordinary option and still raises on one it does not know.
-      # `harness: true` marks a registration that exists only to exercise the engine — a spec rig,
-      # not a machine anyone plays. It still builds and runs exactly like any other operation;
-      # what it does not do is appear anywhere enumerating *machines*.
+      # `harness: true` marks a registration that exists only to exercise the engine — a spec
+      # rig, not a machine anyone plays. It builds and runs like any other operation; what it
+      # does not do is appear anywhere enumerating *machines*.
       #
-      # This exists because `spec/support/loop_rig.rb` registers globally, as it must for
-      # `Match.create` to find it, and the delivery tier's blueprint catalogue is **derived** from
-      # this registry. The rig therefore became an unlockable operation that had to be priced, and
-      # the whole catalogue refused to build — but only in a full-suite run, because nothing loads
-      # the rig otherwise. Derivation is still right; it just has to derive from the correct set.
+      # It is needed because a rig must register globally for `Match.create` to find it, while
+      # the delivery tier's blueprint catalogue is **derived** from this registry — so an
+      # unmarked rig becomes an unlockable operation nobody has priced, and the whole catalogue
+      # refuses to build. Only in a full-suite run, because nothing else loads the rig.
       #
       # The default is `false` on purpose: forgetting to mark a real machine does nothing, and
       # forgetting to mark a rig fails loudly and points straight at it.

@@ -3,33 +3,20 @@
 module ReactorSim
   module Operations
     module SteamEngine
-      # The engine, as components.
+      # The engine, as components. Each `Parts.register` wraps one of `definition.rb`'s node
+      # builders and adds the wiring that comes with it, so removing a part is a matter of not
+      # fitting it rather than editing four lists across two files.
       #
-      # Each `Parts.register` here wraps one of `definition.rb`'s node builders and adds the
-      # wiring that comes with it. The node configuration itself — and the measurements that
-      # chose every number in it — stays where it was; only the links moved, out of one central
-      # list and onto the parts they belong to.
-      #
-      # **That move is the point of the whole exercise.** Deleting the safety valve used to
-      # mean editing `nodes`, `links`, `control_points` and `diagnostics` across two files and
-      # hoping you found all four; now it means not fitting a part.
-      #
-      # `provides:` is the id contract: the id belongs to the ROLE, not to the part. Every
-      # boiler ever fitted names its drum `:boiler`, so the wiring around it, the gauges
-      # pointed at it and its rng stream all survive a swap untouched.
-      #
-      # See `docs/design_sketches/modular_components.md`.
+      # `provides:` is the id contract: the id belongs to the ROLE, not the part. Every boiler
+      # names its drum `:boiler`, so the wiring around it, the gauges pointed at it and its rng
+      # stream all survive a swap. See `docs/design_sketches/modular_components.md`.
       module_function
 
       # --- shared shapes ---------------------------------------------------------
       #
-      # **Where two parts of one kind differ only in numbers, the wiring is written once.**
-      # Eight kinds have a high-pressure and an atmospheric variant, and the thing that varies
-      # between them is a handful of figures, never the links or the levers — so duplicating the
-      # fragment would be sixteen chances for the two to drift apart on something that is not
-      # supposed to vary at all.
-      #
-      # These are the shapes. The numbers, and the sweeps that chose them, sit on the
+      # **Where two parts of one kind differ only in numbers, the wiring is written once.** Eight
+      # kinds have a high-pressure and an atmospheric variant differing in a handful of figures,
+      # never in links or levers. The numbers, and the sweeps that chose them, sit on the
       # registrations below.
 
       def damper_fragment(conductance:)
@@ -49,14 +36,15 @@ module ReactorSim
         )
       end
 
-      def boiler_fragment(shell_radius_m:, wall_thickness_m:)
+      def boiler_fragment(shell_radius_m:, wall_thickness_m:, working_pressure_pa:)
         Fragment.new(
           # **The drum ships its own hole.** A boiler you can fit is a boiler that can burst, so
           # the breach belongs to this fragment rather than to the chassis — fit a different
           # drum and you get that drum's way of failing, fit none and there is nothing to
           # rupture. It is shut and costs nothing until the shell fails; see `Nodes::Breach`.
           nodes: [ SteamEngine.boiler(shell_radius_m: shell_radius_m,
-                                      wall_thickness_m: wall_thickness_m),
+                                      wall_thickness_m: wall_thickness_m,
+                                      working_pressure_pa: working_pressure_pa),
                    SteamEngine.boiler_breach ],
           links: [
             Link.new(from: [ :boiler, :breach_out ],   to: [ :boiler_breach, :inlet ]),
@@ -89,8 +77,15 @@ module ReactorSim
 
       def cylinder_fragment(spec, bore_m:, stroke_m:, heat_capacity:)
         Fragment.new(
+          # The barrel ships its own hole, the way the drum does: fit a cylinder and you get
+          # that cylinder's way of coming apart. Shut and free until the head lets go.
           nodes: [ SteamEngine.cylinder(spec, bore_m: bore_m, stroke_m: stroke_m,
-                                              heat_capacity: heat_capacity) ],
+                                              heat_capacity: heat_capacity),
+                   SteamEngine.cylinder_breach ],
+          links: [
+            Link.new(from: [ :cylinder, :breach_out ],    to: [ :cylinder_breach, :inlet ]),
+            Link.new(from: [ :cylinder_breach, :outlet ], to: [ :atmosphere, :spill ])
+          ],
           control_points: [
             ControlPoint.new(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0)
           ]
@@ -155,7 +150,17 @@ module ReactorSim
             Link.new(from: [ :bunker, :out ],    to: [ :stoker, :inlet ]),
             Link.new(from: [ :stoker, :outlet ], to: [ :firebox, :fuel_in ])
           ],
-          control_points: [ ControlPoint.new(id: :stoking, label: "Stoking Effort", node: :stoker) ]
+          # **Effort, not a valve**, and the lever here is an instruction rather than a setting:
+          # "fire her as hard as you can" gets you whatever the person at the firehole can
+          # actually shift. Mostly back, a little placement — a shovelful has to go to the right
+          # part of the grate, which is why dexterity is in the blend at all.
+          #
+          # `SteamEngine.stoker`'s 0.25 kg/s is therefore **what a competent human manages**, not
+          # a mechanical limit: a day-labourer moves a third of it and a strong fireman with a
+          # shovel roughly double.
+          control_points: [ ControlPoint.new(id: :stoking, label: "Stoking Effort", node: :stoker,
+                                             effort: { strength: 0.75, dexterity: 0.25 },
+                                             aided_by: :shovelling) ]
         )
       end
 
@@ -172,41 +177,33 @@ module ReactorSim
             Link.new(from: [ :ash_pan, :outlet ], to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
-            ControlPoint.new(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan)
+            # Effort, like the stoker and for the same reason — its own comment on
+            # `SteamEngine.ash_pan` already called it "somebody's effort with a shovel". More
+            # awkward than firing, hence the heavier dexterity share: an ashpan is raked out
+            # bent double under a locomotive rather than swung at from standing.
+            ControlPoint.new(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan,
+                             effort: { strength: 0.6, dexterity: 0.4 },
+                             aided_by: :shovelling)
           ]
         )
       end
 
-      # **`conductance` is the only air control there is, and 0.35 is what the blower was
-      # secretly paying for.** Reported from play: the blower was worth about +60 kW on demand,
-      # for free, and the engine sagged whenever it was shut off. It was not a blower problem —
-      # the damper conductance was undersized by roughly a factor of two, and the blower's 600 Pa
-      # of head, against a 10 m stack worth ~69 Pa and a blastpipe worth ~361 Pa, was making up
-      # the difference.
-      #
-      # Measured at full controls, blower OFF, sweeping this number alone:
+      # **0.35 sits at the knee of the draught curve.** Measured at full controls, blower OFF,
+      # sweeping this number alone:
       #
       #     k     0.20   0.25   0.30   0.35   0.40   0.50   0.60
       #     kW   335.1  432.2  476.6  493.3  491.3  497.4  499.0
       #     fire   986   1000   1002   1001    999    993    988   K
       #                                  ^ here: the knee, and the hottest fire
       #
-      # And what the blower is still worth, by conductance: **+152.7 kW at 0.2, +16.4 at 0.3,
-      # +2.9 at 0.4, and −2.4 at 0.5** — past the knee it over-draughts and cools the fire
-      # (993 → 931 K). So opening the damper does not merely replace the blower, it **removes the
-      # exploit**: there is no longer a free 45% sitting behind a lever, because the engine is
-      # already getting the air. That is what a blower is for — raising the first steam on a cold
-      # stack — and it is inert once the fire is drawing for itself.
+      # What the blower is worth, by conductance: **+152.7 kW at 0.2, +16.4 at 0.3, +2.9 at 0.4,
+      # −2.4 at 0.5** — past the knee it over-draughts and cools the fire. **Sizing the damper
+      # properly is what stops the blower being an exploit**: undersized, the blower's 600 Pa of
+      # head silently makes up the difference and is worth a free 45% on demand. A blower is for
+      # raising first steam on a cold stack, and should be inert once the fire draws for itself.
       #
       # 0.35 rather than 0.4+ because above the knee the engine burns more fuel for no more work
-      # and then starts feathering its safety valve: 0.4 burns 3.4% more coal for 0.4% *less*
-      # power.
-      #
-      # **The old note claiming "×1.5 and above simply pins the boiler on its safety valve and
-      # the engine stops gaining anything" was wrong** — ×1.5 is 0.3, which measures at 599.5 kPa,
-      # off the valve, and +142 kW. It was measured before the steam chest, the regulator trim and
-      # the stoker rating all moved. A stale measurement is worse than none; it had been cited as
-      # a reason not to touch this.
+      # and starts feathering its safety valve: 0.4 burns 3.4% more coal for 0.4% *less* power.
       Parts.register(:wide_damper, kind: :damper, label: "Wide Damper",
                      description: "Sized at the knee of the draught curve.",
                      provides: %i[damper], instruments: %i[air_supply],
@@ -214,15 +211,10 @@ module ReactorSim
         SteamEngine.damper_fragment(conductance: 0.35)
       end
 
-      # **A smaller fire than Trevithick's, and its conductance is the only thing that makes it
-      # smaller.** Period-correct — Watt's engines were low-pressure machines — and also as much
-      # as this one's condenser can swallow: fed the high-pressure draught it makes more steam
-      # than the condenser can lay down, and the vacuum it exists to pull collapses.
-      #
-      # **Deliberately not raised alongside the wide damper.** That one was measured across seven
-      # points; this one has its own condenser balance and wants its own sweep, which nobody has
-      # run. A `draught_kg_per_s` used to sit beside it claiming to be the fire size and was
-      # inert — see `SteamEngine.damper`.
+      # **A smaller fire than Trevithick's, and its conductance is the only thing making it
+      # smaller.** Period-correct, and as much as this chassis's condenser can swallow: fed the
+      # high-pressure draught it makes more steam than the condenser can lay down and the vacuum
+      # collapses. Not swept — it has its own condenser balance and wants its own measurement.
       Parts.register(:narrow_damper, kind: :damper, label: "Narrow Damper",
                      description: "Restricted, to suit a condenser that cannot swallow more.",
                      provides: %i[damper], instruments: %i[air_supply],
@@ -230,18 +222,13 @@ module ReactorSim
         SteamEngine.damper_fragment(conductance: 0.1)
       end
 
-      # **The blower, and it is the first part on this engine that is genuinely optional.**
-      #
-      # `when_empty: :bypass` and not `:omit`, because the air still has to get in: without a
+      # `when_empty: :bypass` rather than `:omit`, because the air still has to get in: without a
       # fan the atmosphere connects straight to the damper and the fire draws on stack buoyancy
-      # alone. That is a real machine — every naturally-drawn boiler is one — and it is a real
-      # decision, because a cold stack has no buoyancy, so an engine built without a blower
-      # cannot raise its own first steam. Exactly the shape the progression wants: no extra
-      # power, and you notice its absence at the worst moment.
+      # alone. That is a real machine and a real decision — a cold stack has no buoyancy, so an
+      # engine built without a blower cannot raise its own first steam. No extra power, and you
+      # notice its absence at the worst moment.
       #
-      # **WIP.** It is still free, and it should not be. See the TODO on
-      # `SteamEngine.blower_fan` for what it owes and the black-start constraint that rules out
-      # the easy answer.
+      # **WIP**: still free, and should not be. See the TODO on `SteamEngine.blower_fan`.
       Parts.register(:stock_blower, kind: :forced_draught, label: "Blower", wip: true,
                      description: "Forced draught for lighting up. Costs nothing yet — it will.",
                      provides: %i[blower_fan],
@@ -276,21 +263,13 @@ module ReactorSim
         )
       end
 
-      # **The blastpipe is part of the chimney, not a part of its own, and the sketch was wrong
-      # about this.** §5 listed it alongside the blower and the stack as an attribute that had to
-      # become its own node to become a part. The blower genuinely did — it is a fan bolted to
-      # the ashpan, and it is now `:blower_fan`. The blastpipe is different on two counts.
-      #
-      # *Physically*, a blastpipe and the chimney above it are one assembly: their proportions
-      # were tuned together, and getting that ratio right was the central art of locomotive
-      # draughting. A nozzle without the stack it points up is not a thing.
-      #
-      # *Mechanically*, splitting them would have been worse than useless. The blast head has to
-      # reach BOTH paths through the chimney — the draught path from the firebox and the
-      # cylinder's own exhaust — and today it does, because the flue sits on both. A separate
-      # blastpipe node between the tubes and the flue would sit on the draught path only, and
-      # one placed to catch both would have to own the chassis's exhaust link, which belongs to
-      # the chassis. So: one part, two variants.
+      # **The blastpipe is part of the chimney, not a part of its own**, on two counts.
+      # *Physically*, a blastpipe and the stack above it are one assembly whose proportions were
+      # tuned together; a nozzle without the stack it points up is not a thing. *Mechanically*,
+      # the blast head has to reach BOTH paths through the chimney — the draught path from the
+      # firebox and the cylinder's exhaust — which works because the flue sits on both. A
+      # separate node between the tubes and the flue would sit on the draught path only, and one
+      # placed to catch both would have to own the chassis's exhaust link.
       #
       # `stack_height_m` is a chimney property and stays here too, which makes a taller chimney a
       # straightforward future variant rather than a promotion.
@@ -351,14 +330,17 @@ module ReactorSim
       Parts.register(:locomotive_boiler, kind: :boiler, label: "Locomotive Boiler",
                      description: "A long riveted barrel, thick enough for real pressure.",
                      provides: %i[boiler],
-                     # **No `boiler_pressure` here.** The dial is its own fitting now
-                     # (`:boiler_gauge`), and a boiler that still claimed it collided with the
-                     # gauge that supplies it — which is the id-collision check earning its keep.
-                     # The water glass and the crown sheet stay: those genuinely read the drum.
-                     instruments: %i[boiler_water crown_sheet],
+                     # **Neither `boiler_pressure` nor `boiler_water` here.** Both dials are
+                     # their own fittings now (`:boiler_gauge`, `:water_glass`), and a boiler
+                     # that still claimed one collided with the gauge that supplies it — the
+                     # id-collision check earning its keep twice, once per gauge that moved out.
+                     # The crown sheet stays: nobody fits a crown sheet, it *is* the drum.
+                     instruments: %i[crown_sheet],
                      stats: { volume_m3: 5.0, shell_radius_m: 0.6, wall_thickness_m: 0.014,
-                              material: :wrought_iron, rated_pressure: "14.39 atm" }) do |_spec|
-        SteamEngine.boiler_fragment(shell_radius_m: 0.6, wall_thickness_m: 0.014)
+                              material: :wrought_iron, rated_pressure: "14.39 atm",
+                              working_pressure: "5 atm" }) do |_spec|
+        SteamEngine.boiler_fragment(shell_radius_m: 0.6, wall_thickness_m: 0.014,
+                                    working_pressure_pa: 5.0 * Units::STANDARD_PRESSURE_PA)
       end
 
       # A wide, thin drum: a beam engine's boiler is a big low-pressure thing, and 6 mm of
@@ -371,11 +353,13 @@ module ReactorSim
       Parts.register(:beam_boiler, kind: :boiler, label: "Beam Engine Boiler",
                      description: "Wide, thin, and low-pressure — a big kettle.",
                      provides: %i[boiler],
-                     # The gauge is a fitting of its own — see `:locomotive_boiler` above.
-                     instruments: %i[boiler_water crown_sheet],
+                     # Both gauges are fittings of their own — see `:locomotive_boiler` above.
+                     instruments: %i[crown_sheet],
                      stats: { volume_m3: 5.0, shell_radius_m: 0.75, wall_thickness_m: 0.006,
-                              material: :wrought_iron, rated_pressure: "4.93 atm" }) do |_spec|
-        SteamEngine.boiler_fragment(shell_radius_m: 0.75, wall_thickness_m: 0.006)
+                              material: :wrought_iron, rated_pressure: "4.93 atm",
+                              working_pressure: "1.2 atm" }) do |_spec|
+        SteamEngine.boiler_fragment(shell_radius_m: 0.75, wall_thickness_m: 0.006,
+                                    working_pressure_pa: 1.2 * Units::STANDARD_PRESSURE_PA)
       end
 
       # --- steam ---------------------------------------------------------------
@@ -394,18 +378,14 @@ module ReactorSim
                                           max_relief_pa: 9.0 * Units::STANDARD_PRESSURE_PA)
       end
 
-      # **The first parts that are instruments rather than machinery**, and the reason they exist
-      # is that `burst_pa` had nowhere honest to live. A gauge's full-scale reading is a property
-      # of the gauge — a 0–14 atm dial and a 0–4 atm dial are different objects, chosen to suit
-      # the drum — so it followed the chassis around until the dial itself became a fitting.
+      # **Parts that are instruments rather than machinery.** A gauge's full-scale reading is a
+      # property of the gauge — a 0–14 atm dial and a 0–4 atm dial are different objects, chosen
+      # to suit the drum — so the dial is a fitting and the number lives on it. They contribute a
+      # `Diagnostic` instead of nodes; the definition stays in `panel.rb` and these hold only the
+      # figures.
       #
-      # They contribute a `Diagnostic` instead of nodes. The definition stays in `panel.rb` with
-      # the rest of the panel's reasoning; these hold only the figures, which is the same division
-      # every other kind here already uses.
-      #
-      # **Not required.** An engine with no pressure gauge assembles, runs, and is a genuinely
-      # frightening way to work — which is the risk/reward axis the safety devices already sit on,
-      # applied to information instead of to metal.
+      # **Not required.** An engine with no pressure gauge assembles, runs, and is a frightening
+      # way to work — the risk/reward axis the safety devices sit on, applied to information.
       Parts.register(:bourdon_pressure_gauge, kind: :boiler_gauge, label: "Bourdon Gauge",
                      description: "Reads to 14 atm. Two ticks late and ±8 kPa, which is most " \
                                   "of the argument for not running close to the valve.",
@@ -446,6 +426,58 @@ module ReactorSim
         ])
       end
 
+      # **The water gauges are the most consequential thing a player can buy.** The crown sheet
+      # is what destroys this boiler and the glass is the only warning — a warning already
+      # compromised by swell, which lifts the reading exactly when a hard pull is uncovering the
+      # plate. Upgrading does not remove that trap, only the noise and delay on top of it.
+      #
+      # **The tier below the glass is a different instrument, not a worse glass.** Try-cocks are
+      # taps at fixed heights: open one and you learn whether steam or water comes out, and
+      # nothing between. That is a `Quantize` filter *added* to the usual three, which is the
+      # shape a genuine downgrade takes.
+      #
+      # 10% steps, measured: at 25% the needle never moves across 1400 ticks of a level swinging
+      # 44% to 56%, because the whole working band sits inside one step. 10% stays visibly steppy
+      # and still lets a trend through — the difference between a bad instrument and none.
+      Parts.register(:try_cocks, kind: :water_glass, label: "Try-Cocks",
+                     description: "Taps up the backhead. You learn roughly where the water is " \
+                                  "and never exactly — and you learn it a moment late.",
+                     instruments: [],
+                     stats: { reads: "in steps of 10%", lag_ticks: 2, noise: "±2%" }) do |_spec|
+        Fragment.new(diagnostics: [
+          SteamEngine.boiler_water(label: "Try-Cocks", lag: 2, noise: 0.02, step: 0.1)
+        ])
+      end
+
+      # **±2.5%, up from ±1.2%, and that is a correction rather than a nerf.** The display reads
+      # whole percent, so the old figure was smaller than one unit of what the player can see:
+      # the glass was very nearly noise-free, which is not what it was written to be and left
+      # nothing for a better glass to improve on. Measured jitter went 0.29 against the reflex
+      # glass's 0.26 — a three-fold cut in noise that a player could not have noticed.
+      Parts.register(:gauge_glass, kind: :water_glass, label: "Gauge Glass",
+                     description: "A plain sight glass. Reads continuously, a tick late, and " \
+                                  "trembles enough that you watch it for a while before " \
+                                  "believing it.",
+                     instruments: [],
+                     stats: { reads: "continuous", lag_ticks: 1, noise: "±2.5%" }) do |_spec|
+        Fragment.new(diagnostics: [ SteamEngine.boiler_water(noise: 0.025) ])
+      end
+
+      # **Less noise, not less lie.** The swell it shows is the real glass's real flaw and no
+      # money removes it — see `SteamEngine.boiler_pressure` for the rule this obeys. What a
+      # better glass buys is a steadier column you can actually read a trend off, which matters
+      # most in the one situation where the trend is the whole story: the level walking down
+      # while the needle sits still.
+      Parts.register(:reflex_gauge_glass, kind: :water_glass, label: "Reflex Gauge Glass",
+                     description: "Prismatic glass: water reads black, steam silver. Steadier " \
+                                  "and easier to read at a glance. It still shows the swell.",
+                     instruments: [],
+                     stats: { reads: "continuous", lag_ticks: 1, noise: "±0.6%" }) do |_spec|
+        Fragment.new(diagnostics: [
+          SteamEngine.boiler_water(label: "Reflex Glass", noise: 0.006)
+        ])
+      end
+
       # **A far narrower band, because a Watt engine has nothing to gain from pressure** — it
       # works by making a vacuum. Winding this up buys almost nothing and risks a 4.93 atm shell.
       Parts.register(:low_pressure_safety_valve, kind: :safety_valve,
@@ -483,10 +515,17 @@ module ReactorSim
                      provides: %i[throttle],
                      stats: { conductance: 1.5e-3, rangeability: 8.0 }) do |_spec|
         Fragment.new(
-          nodes: [ SteamEngine.throttle ],
+          # The regulator ships its own hole, like every other part that can fail — but note
+          # **the breach is fed from the BOILER, not from the throttle.** A conduit holds
+          # nothing, so a burst pipe has no contents of its own to lose; it has to drain a
+          # holder, and naming the drum says the split is on the boiler side of the valve.
+          # `senses:` and the inlet link are deliberately different nodes. See `Nodes::Breach`.
+          nodes: [ SteamEngine.throttle, SteamEngine.steam_pipe_breach ],
           links: [
             Link.new(from: [ :boiler, :steam_out ], to: [ :throttle, :inlet ]),
-            Link.new(from: [ :throttle, :outlet ],  to: [ :steam_chest, :in ])
+            Link.new(from: [ :throttle, :outlet ],  to: [ :steam_chest, :in ]),
+            Link.new(from: [ :boiler, :steam_pipe_out ],   to: [ :steam_pipe_breach, :inlet ]),
+            Link.new(from: [ :steam_pipe_breach, :outlet ], to: [ :atmosphere, :spill ])
           ],
           control_points: [
             ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle)
@@ -497,8 +536,12 @@ module ReactorSim
       Parts.register(:stock_steam_chest, kind: :steam_chest, label: "Steam Chest",
                      provides: %i[steam_chest], stats: { volume_m3: 1.0 }) do |_spec|
         Fragment.new(
-          nodes: [ SteamEngine.steam_chest ],
-          links: [ Link.new(from: [ :steam_chest, :out ], to: [ :cylinder, :inlet ]) ]
+          nodes: [ SteamEngine.steam_chest, SteamEngine.steam_chest_breach ],
+          links: [
+            Link.new(from: [ :steam_chest, :out ], to: [ :cylinder, :inlet ]),
+            Link.new(from: [ :steam_chest, :breach_out ],   to: [ :steam_chest_breach, :inlet ]),
+            Link.new(from: [ :steam_chest_breach, :outlet ], to: [ :atmosphere, :spill ])
+          ]
         )
       end
 
@@ -661,16 +704,11 @@ module ReactorSim
 
       # --- slots ---------------------------------------------------------------
 
-      # **Declaration order is the panel's lever order**, because fragments merge in this
-      # order and `Operation#panel` maps over the control points as it receives them. A player
-      # learns a panel by where things are, so this list is ordered by the cab rather than by
-      # the graph: fire, then water, then steam, then the engine itself. Node order falls out
-      # of it and is nobody's business — `canonical` sorts by key, so it cannot reach the
-      # digest.
-      #
-      # Everything is `required: true` at this stage. Nothing has been made optional yet, and
-      # doing both at once would mean a stage whose acceptance test could not be "the engine is
-      # bit-identical". The slots that become optional are marked below.
+      # **Declaration order is the panel's lever order**, because fragments merge in this order
+      # and `Operation#panel` maps over the control points as it receives them. A player learns a
+      # panel by where things are, so this list is ordered by the cab rather than the graph:
+      # fire, then water, then steam, then the engine itself. Node order falls out of it and
+      # cannot reach the digest, since `canonical` sorts by key.
       def slots(spec)
         # The eight kinds that differ between the two machines. `fetch` throughout, so adding a
         # slot that varies and forgetting to name it on the chassis raises at build rather than
@@ -700,16 +738,11 @@ module ReactorSim
                    bypass: [ [ :atmosphere, :intake ], [ :damper, :inlet ] ]),
           Slot.new(id: :bunker, accepts: :bunker, label: "Fuel Bunker", group: :fire,
                    required: true, default: :stock_bunker),
-          # **Optional, `:bypass`, and it is the biggest single upgrade on the engine.** Without
-          # the bundle the flue gas goes straight from the firebox to the chimney and the only
-          # fire→water path left is the radiant one — which is a plain shell boiler, a perfectly
-          # real machine and the thing tubes were invented to replace.
-          #
-          # The cost is already measured and it is enormous. From the table on
-          # `SteamEngine.boiler_tubes`: radiant only puts the firebox at 676 K and sends **90% of
-          # the fuel up the chimney** for 41 kW of shaft work, against 895 K and 47.3 kW with
-          # tubes fitted — and that comparison was made at a radiant conductance tuned *for*
-          # the tubeless case. This is the part that makes a boiler worth the name.
+          # **The biggest single upgrade on the engine.** Without the bundle the flue gas goes
+          # straight from firebox to chimney and the only fire→water path is the radiant one,
+          # which is a plain shell boiler. Radiant only puts the firebox at 676 K and sends 90%
+          # of the fuel up the chimney for 41 kW of shaft work, against 895 K and 47.3 kW with
+          # tubes — and that comparison uses a radiant conductance tuned *for* the tubeless case.
           #
           # The thermal link to the drum leaves with it, because it is in the part's fragment.
           Slot.new(id: :boiler_tubes, accepts: :boiler_tubes, label: "Boiler Tubes", group: :water,
@@ -730,6 +763,12 @@ module ReactorSim
           # and there is no machinery to bypass.
           Slot.new(id: :boiler_gauge, accepts: :boiler_gauge, label: "Pressure Gauge",
                    group: :water, required: false, default: fitted.fetch(:boiler_gauge),
+                   when_empty: :omit),
+          # Optional for the same reason, and a worse idea for a better one: this is the reading
+          # the crown sheet turns on, so working without it is the sharpest information bargain
+          # on the engine.
+          Slot.new(id: :water_glass, accepts: :water_glass, label: "Water Gauge",
+                   group: :water, required: false, default: fitted.fetch(:water_glass),
                    when_empty: :omit),
           Slot.new(id: :regulator, accepts: :regulator, label: "Regulator", group: :steam,
                    required: true, default: :stock_regulator),
@@ -834,6 +873,10 @@ module ReactorSim
         { slot: :boiler_gauge,
           says: "No pressure gauge. The safety valve is now the first thing that will tell " \
                 "you how hard you are pushing her, and by then it is telling everyone." },
+        { slot: :water_glass,
+          says: "No way to read the water. The crown sheet is what kills a boiler and the " \
+                "fusible plug is now your only warning — which is to say, none at all until " \
+                "it has already happened." },
         { slot: :drain_cocks,
           says: "No cylinder cocks. A cold cylinder fills with its own condensate and a " \
                 "standing one has no way to sweep it out — warming this engine through is " \

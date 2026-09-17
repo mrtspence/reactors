@@ -21,17 +21,14 @@ module ReactorSim
 
       # How much more volume this node can accept.
       #
-      # **Only condensed phases count.** A gas expands to fill whatever it is put in — it
-      # does not run out of room, it raises the pressure. Charging gases against a fixed
-      # volume at a fixed nominal density gets that badly wrong: it capped a high-pressure
-      # pressure vessel at about 1.2 atm no matter what was feeding it, because the mass
-      # limit bit long before the pressure did.
+      # **Only condensed phases count.** A gas expands to fill whatever it is put in — it does not
+      # run out of room, it raises the pressure. Charging gases against a fixed volume at a fixed
+      # nominal density caps a pressure vessel at about 1.2 atm whatever is feeding it, because
+      # the mass limit bites long before the pressure does. A vessel filling with gas is limited
+      # by what its walls can stand, which is both more accurate and considerably more dangerous.
       #
-      # So a vessel filling with gas is limited by what its walls can stand, not by
-      # arithmetic — which is both more accurate and considerably more dangerous.
-      #
-      # Never negative: an over-full node has zero room, and the overflow is the arbiter's
-      # problem rather than a negative number leaking downstream.
+      # Never negative: an over-full node has zero room, and the overflow is the arbiter's problem
+      # rather than a negative number leaking downstream.
       def room_m3(state, content)
         condensed = parcels(state).reject { |p| content.tags(p.fetch(:resource)).include?(:gas) }
 
@@ -49,17 +46,12 @@ module ReactorSim
       # Mean density of everything held, over the node's whole volume.
       #
       # **What a positive-displacement machine downstream actually swallows.** A piston sweeps a
-      # *volume* and gets whatever is in it, so the mass it takes per stroke is this figure times
-      # that volume — not the ideal-gas density of the working fluid, which is the same
-      # mass-for-volume confusion that priced a cylinder's clearance as 0.029 kg of steam.
+      # *volume* and gets whatever is in it, so the mass per stroke is this times that volume, not
+      # the ideal-gas density of the working fluid. Dry, the two agree; wet, this climbs with the
+      # condensate the supply is holding, which is how a priming slug reaches a piston.
       #
-      # Dry, this is the gas density and nothing changes. Wet, it climbs with the condensate the
-      # supply is holding, which is the whole point: a steam chest carrying water hands the
-      # cylinder a far heavier charge, and that is how a priming slug reaches a piston.
-      #
-      # `content` is unused today — the parcels already carry their mass — but it is in the
-      # signature because `Tick::Context#node_reading` passes it, and every other derived
-      # quantity reachable that way takes it.
+      # `content` is unused — the parcels carry their own mass — but stays in the signature
+      # because `Tick::Context#node_reading` passes it.
       def bulk_density_kg_m3(state, _content = nil)
         return 0.0 if volume_m3 <= 0.0
 

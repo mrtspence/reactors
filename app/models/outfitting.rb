@@ -3,14 +3,11 @@
 # Everything the outfitting screen needs, and the act of committing it.
 #
 # **Two validators meet here and stay separate.** `ReactorSim::Assembly` answers *"will this build
-# run?"* — a question about the machine, which is why it can be specced without a player and why
-# it stays simple. This object answers the second question, *"is this yours?"*, which is about a
-# person and belongs on this side of the boundary
-# (`docs/design_sketches/blueprints.md` §2, §6). Nothing here reaches into the simulation; the
-# simulation still knows nothing about players, ownership or cost.
+# run?"*, a question about the machine, which is why it can be specced without a player. This
+# answers *"is this yours?"*, which is about a person and belongs on this side of the boundary.
 #
 # It takes **resolved arguments** — an owner id and a parts hash — never `params`, and never
-# touches `session`, `request` or `flash`. That is what lets a rake task drive it and a spec
+# touches `session`, `request` or `flash`, which is what lets a rake task drive it and a spec
 # exercise it without a request.
 class Outfitting
   # Raised when the engine room cannot be reached. The store succeeded or it did not; either way
@@ -131,20 +128,17 @@ class Outfitting
   # mentioned at all.** Both halves matter and they pull opposite ways.
   #
   # `Assembly#resolve_loadout` falls back to `slot.default` for any slot the loadout does not
-  # name. That is why an unfitted slot has to be submitted as an explicit nil — otherwise taking
-  # the fusible plug off and saving would silently put it back.
+  # name, so an unfitted slot must be submitted as an explicit nil — otherwise taking the fusible
+  # plug off and saving puts it back. But on a **chassis change** the submitting form was drawn
+  # for the old frame, so naming a slot only the new frame has sends an explicit empty for a
+  # question the player was never asked, and switching frames refuses itself with *"Condenser is
+  # required and nothing is fitted"*.
   #
-  # But when the **chassis changes**, the form that submitted was drawn for the old frame, so a
-  # slot only the new frame has was never on it. Naming it anyway — as this method first did —
-  # sends an explicit empty for a question the player was never asked, and switching to the
-  # atmospheric frame refused itself with *"Condenser is required and nothing is fitted"*.
+  # So carry through only the keys the submission contains: a same-frame save names every slot
+  # anyway, and a frame change lets the genuinely new slots arrive with their defaults.
   #
-  # So: carry through only the keys the submission actually contains. A same-frame save names
-  # every slot, because the form renders every slot, and nothing re-defaults. A frame change
-  # names the slots that existed before, and the genuinely new ones arrive with their defaults.
-  #
-  # `to_s` before `presence` so a non-String scalar becomes an id the validator can refuse by
-  # name rather than an object `normalise_part_id` will call `to_sym` on — a JSON body can carry
+  # `to_s` before `presence`, so a non-String scalar becomes an id the validator refuses by name
+  # rather than an object `normalise_part_id` calls `to_sym` on — a JSON body can carry
   # `{"boiler": 1}`, and `Integer#to_sym` does not exist.
   def resolve(parts)
     return nil if parts.nil?

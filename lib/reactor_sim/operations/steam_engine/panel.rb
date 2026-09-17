@@ -27,22 +27,20 @@ module ReactorSim
         condenser_vacuum
       ].freeze
 
-      # **Every gauge this engine knows how to show, indexed by id — not the ones it is
-      # showing.** Parts name the instruments that arrive with them (see `parts.rb`) and
-      # `Assembly` selects from this hash, so a fitting that is not fitted takes its gauge with
-      # it and a part naming a gauge that does not exist fails at build.
+      # **Every gauge this engine knows how to show, indexed by id — not the ones it is showing.**
+      # Parts name the instruments that arrive with them and `Assembly` selects from this hash, so
+      # an unfitted part takes its gauge with it and a part naming a gauge that does not exist
+      # fails at build.
       #
-      # **`boiler_pressure` is deliberately absent.** It is not a property of the boiler, it is a
-      # separate instrument screwed to it — which is why its full-scale reading was the last thing
-      # stranded on the chassis. It arrives with a `:boiler_gauge` part instead, built by
-      # `boiler_pressure` below, and `PANEL_ORDER` still decides where it sits.
+      # **`boiler_pressure` is deliberately absent**: it is a separate instrument screwed to the
+      # boiler rather than a property of it, so it arrives with a `:boiler_gauge` part instead.
       #
-      # Building a gauge costs nothing — a `Diagnostic` is frozen configuration — so the
-      # catalogue holds `condenser_vacuum` on both chassis even though only one can ever fit a
-      # condenser. Filtering happens at selection, where it can be checked.
+      # Building a gauge costs nothing — a `Diagnostic` is frozen configuration — so the catalogue
+      # holds `condenser_vacuum` on both chassis even though only one can fit a condenser.
+      # Filtering happens at selection, where it can be checked.
       def catalogue
         [
-          boiler_water, safety_valve, valve_setting,
+          safety_valve, valve_setting,
           crown_sheet, plug_blown,
           firebox_temp, fire_state,
           flywheel_speed, flywheel_stress, flywheel_condition,
@@ -52,20 +50,18 @@ module ReactorSim
         ].to_h { |d| [ d.id, d ] }.freeze
       end
 
-      # **The gauge that matters most, and now a fitting in its own right.**
+      # **The gauge that matters most, and a fitting in its own right.** The definition stays here
+      # with the rest of the panel's reasoning; the *figures* come from whichever gauge is fitted,
+      # exactly as a boiler's shell thickness comes from whichever boiler is. `full_scale_pa` is a
+      # property of the instrument — a 0–14 atm dial and a 0–4 atm dial are different objects,
+      # chosen to suit the drum.
       #
-      # The definition stays here with the rest of the panel's reasoning; the *figures* come from
-      # whichever gauge is fitted (`parts.rb`), exactly as a boiler's shell thickness comes from
-      # whichever boiler is fitted. `full_scale_pa` is a property of the instrument — a 0–14 atm
-      # gauge and a 0–4 atm gauge are different objects you would choose to suit the drum — and
-      # treating it as a property of the *machine* is what left `burst_pa` on the chassis.
+      # Stock is two ticks late and ±8 kPa, enough to make the last stretch before the relief
+      # valve a genuine judgement call.
       #
-      # Stock is two ticks late and ±8 kPa, which is enough to make the last stretch before the
-      # relief valve a genuine judgement call.
-      #
-      # > **An instrument upgrade may reduce a filter. It may never remove a class of one.**
-      # > Less lag, less noise, a finer band — never zero lag, and never a number where the design
-      # > chose prose. The instruments are not an obstacle between the player and the game; they
+      # > **An instrument upgrade may reduce a filter. It may never remove a class of one.** Less
+      # > lag, less noise, a finer band — never zero lag, and never a number where the design
+      # > chose prose. The instruments are not an obstacle between the player and the game, they
       # > *are* the game, and a panel that can be bought into telling the truth has sold the only
       # > thing it was protecting. `safety_valve`, `crown_sheet` and `flywheel_condition` are
       # > exempt outright: the first is true by design because nobody is reading a dial, and the
@@ -81,32 +77,37 @@ module ReactorSim
         )
       end
 
-      # Run the boiler dry and it will fail long before the gauge looks alarming, which is
-      # exactly why this reads in a sight glass and not in kilograms.
-      # **The water gauge glass**, and the boiler priming mechanic is unreadable without it.
+      # **The water glass**, without which the priming mechanic is unreadable. It reads a sight
+      # glass rather than kilograms because that is the quantity the hazard turns on: carryover
+      # depends on where the water stands relative to the steam offtake.
       #
-      # It used to show the drum's water as a **mass in kilograms**, which is not a thing any cab
-      # has ever displayed and not the quantity the hazard turns on: carryover depends on where
-      # the water stands relative to the steam offtake, and 3 000 kg means nothing without the
-      # vessel's volume beside it. The old range pegged, too — it stopped at 3 500 kg and a
-      # flooded boiler reaches 4 900.
+      # Points at `effective_fill`, so it shows the water **with its bubbles in it** — the real
+      # instrument's defining flaw, and the mechanic: work the engine hard and the level reads
+      # high, shut off and it drops away. Showing the true liquid level would quietly remove the
+      # trap that makes swell interesting. Scaled past 100%, because a glass that cannot show an
+      # overfull boiler cannot warn anyone about one.
       #
-      # Points at `effective_fill`, so it shows the water **with its bubbles in it**. That is the
-      # real instrument's defining flaw and it is the mechanic: work the engine hard and the level
-      # reads high, shut off and it drops away. Showing the true liquid level here would be
-      # showing the player something no glass has ever displayed, and would quietly remove the
-      # trap that makes swell interesting.
+      # **A fitting, like the pressure gauge, and for a sharper reason:** this is the reading the
+      # crown-sheet hazard turns on, so how well you can see the water is the most consequential
+      # thing a player can buy. A boiler with no way to read its level is legal here, and
+      # frightening.
       #
-      # Scaled past 100% deliberately — a glass that cannot show an overfull boiler cannot warn
-      # anyone about one.
-      def boiler_water
+      # `step:` is the try-cocks tier — taps at fixed heights telling you which side of each the
+      # water is, and nothing between. A **fourth filter on top of the other three**, which is
+      # what makes it a downgrade rather than a different flavour. `label:` is the part's, because
+      # try-cocks are not a glass; the **id** stays `:boiler_water` whatever is fitted, because
+      # that is the role and `PANEL_ORDER` keys on it.
+      def boiler_water(label: "Water Glass", lag: 1, noise: 0.012, step: nil, max: 1.25)
+        filters = [ Filters::Lag.new(lag), Filters::Noise.new(noise),
+                    Filters::Range.new(0.0, max) ]
+        filters << Filters::Quantize.new(step) if step
+
         Diagnostic.new(
-          id: :boiler_water, label: "Water Glass", observer: :fireman,
+          id: :boiler_water, label: label, observer: :fireman,
           source: Sources::Derived.new(:boiler, :effective_fill),
-          filters: [ Filters::Lag.new(1), Filters::Noise.new(0.012),
-                     Filters::Range.new(0.0, 1.25) ],
+          filters: filters,
           display: Displays::Needle.new(unit: "%", convert: :percent, precision: 0,
-                                        min: 0.0, max: 1.25)
+                                        min: 0.0, max: max)
         )
       end
 
@@ -351,23 +352,18 @@ module ReactorSim
         )
       end
 
-      # Air reaching the fire. Starve it and the fire dies with no other warning — the
-      # firebox just quietly stops making heat.
-      # **The bands have to sit inside what the firebox can physically hold**, and for a long
-      # time they did not: 0.5 / 3.0 / 10.0 kg, when a 6 m³ box **entirely full of pure air** at
-      # 900 K holds 2.35 kg. "Adequate" and "strong" asked for more air than the vessel can
-      # contain, so the gauge was structurally incapable of reading either, and it sat at
-      # "thin" through half a megawatt.
+      # Air reaching the fire. Starve it and the fire dies with no other warning — the firebox
+      # quietly stops making heat.
       #
-      # Measured across the damper, everything else held: 0.0083 / 0.0269 / 0.0477 / 0.1744 /
-      # 0.3669 kg at 20 / 40 / 60 / 80 / 100, against a fire of 333 / 375 / 409 / 562 / 715 K and
-      # an engine that does not turn at all below 80. The signal is **44× and monotone** — it was
-      # only ever the calibration that was wrong.
+      # **The bands have to sit inside what the firebox can physically hold.** A 6 m³ box
+      # entirely full of pure air at 900 K holds 2.35 kg, so a band above that is one the gauge is
+      # structurally incapable of reading. Measured across the damper: 0.0083 / 0.0269 / 0.0477 /
+      # 0.1744 / 0.3669 kg at 20 / 40 / 60 / 80 / 100, against a fire of 333 / 375 / 409 / 562 /
+      # 715 K — **44× and monotone**.
       #
-      # It remains a *proxy*: draught is a flow and this is an inventory, and a hotter fire holds
-      # less air mass at the same draught because the gas is less dense. The damper's effect
-      # dominates that by a wide margin, but if this gauge ever needs to be trusted rather than
-      # read, the honest quantity is the pressure difference driving the air in.
+      # A *proxy*: draught is a flow and this is an inventory, and a hotter fire holds less air
+      # mass at the same draught. The damper's effect dominates that, but the honest quantity is
+      # the pressure difference driving the air in.
       def air_supply
         Diagnostic.new(
           id: :air_supply, label: "Draught",
@@ -402,8 +398,9 @@ module ReactorSim
     register(SteamEngine::TYPE,
              chassis: SteamEngine::CHASSIS.keys) do |id:, seed:, time_scale: 1.0, state: nil,
                                                      rngs: nil, content: nil,
-                                                     chassis: :high_pressure, loadout: {}|
-      SteamEngine.build(id: id, seed: seed, chassis: chassis, loadout: loadout,
+                                                     chassis: :high_pressure, loadout: {},
+                                                     crew: {}|
+      SteamEngine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
                         time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

@@ -22,15 +22,13 @@ module DevMatch
 
   module_function
 
-  # Both processes MUST read the chassis through here, never from ENV directly. It changes
-  # which diagnostics exist (`condenser_vacuum` is atmospheric-only) and the pressure gauge's
-  # full-scale reading, so a web process disagreeing with the runner would render a panel that
-  # does not match the values arriving on it.
+  # Both processes MUST read the chassis through here, never from ENV directly. It changes which
+  # diagnostics exist (`condenser_vacuum` is atmospheric-only) and the pressure gauge's
+  # full-scale reading, so a web process disagreeing with the runner renders a panel that does
+  # not match the values arriving on it.
   #
-  # `REACTOR_VARIANT` keeps its old spelling as the env var: the concept did not change when
-  # the engine became assembled from parts, only what it is now one axis of. It is the fallback
-  # now rather than the source — a stored loadout carries its own chassis, because a loadout
-  # built against one frame means nothing on the other.
+  # The env var is the fallback rather than the source: a stored loadout carries its own chassis,
+  # because a loadout built against one frame means nothing on the other.
   def default_chassis = ENV.fetch("REACTOR_VARIANT", "high_pressure").to_sym
 
   def chassis = stored&.chassis_sym || default_chassis
@@ -46,18 +44,38 @@ module DevMatch
 
   def stored_parts = stored&.to_sim || {}
 
-  # **The loadout rides INSIDE the reset command, not merely referenced by it.**
+  # **A match beginning, which is the one thing that advances the recovery clock.**
   #
-  # The runner could read the `loadouts` table itself — it has Rails booted. It must not: the web
-  # process writes that row and *then* produces this command, so a runner reading the table would
-  # be reading it at whatever moment the record happened to reach it, and a reset that raced a
-  # save would rebuild the previous machine with no sign anything went wrong. Carried in the
-  # payload, the command says exactly which machine it means, and it stays ordered against the
-  # lever commands around it because it rides the same key on the same topic.
+  # Not in `build`, which the web process also calls to rebuild a `Match` for the panel and the
+  # roster — a decrement there would tick somebody's recovery down every time a page rendered,
+  # so a player could heal their crew by refreshing.
   #
-  # The table is still what a cold runner boots from. It is just not what a reset consults.
+  # TODO: expedient — this belongs on `match.lifecycle` as the `started` record, and the clock
+  # belongs to whatever consumes it. Called today from the two places a match actually starts: a
+  # reset requested by the player, and posting a crew.
+  def start!
+    MinionCondition.advance!(DevPlayer::ID)
+  rescue StandardError => e
+    # A recovery clock that failed to tick must not stop a match from starting.
+    Rails.logger.error("dev_match: could not advance recovery: #{e.class}: #{e.message}")
+  end
+
+  # **The loadout and crew ride INSIDE this command, not merely referenced by it.** The runner
+  # has Rails booted and could read the tables, but the web process writes those rows and *then*
+  # produces this, so a runner reading a table would read it at whatever moment the record
+  # happened to arrive — a reset racing a save rebuilds the previous machine with no sign
+  # anything went wrong. In the payload, the command says exactly which machine it means, and
+  # stays ordered against the lever commands because it rides the same key on the same topic.
+  #
+  # The tables are still what a cold runner boots from; they are just not what a reset consults.
   def reset_command
     { "type" => "reset_match" }.tap do |command|
+      # Availability is applied HERE as well as in `build`, because the runner rebuilds from this
+      # payload rather than from the table — a raw roster would field somebody the screen has
+      # just called unavailable.
+      roster = stored_roster
+      command["crew"] = Roster.stringify_crew(available(roster.to_sim)) if roster
+
       row = stored
       next unless row
 
@@ -72,16 +90,49 @@ module DevMatch
   # development, not a supported difficulty setting.
   def time_scale = Float(ENV.fetch("REACTOR_TIME_SCALE", "1.0"))
 
-  # `chassis:` and `loadout:` are arguments rather than reads, because the runner is given them
-  # by the reset command that rebuilds the match. Left unset they fall back to what is stored,
-  # which is what a cold boot wants.
-  def build(chassis: nil, loadout: nil)
+  # `chassis:`, `loadout:` and `crew:` are arguments rather than reads, because the runner is
+  # given them by the reset command. Left unset they fall back to what is stored, which is what a
+  # cold boot wants.
+  #
+  # An unfilled role is not an empty one — `Crew::STANDIN` turns up — so an empty roster is a
+  # legitimate machine crewed entirely by day-labourers, which is what a player gets before they
+  # have hired anybody.
+  def build(chassis: nil, loadout: nil, crew: nil)
     ReactorSim::Match.create(
       id: ID, seed: SEED, time_scale: time_scale,
       operations: [ { id: OPERATION_ID, type: TYPE,
                       chassis: chassis || self.chassis,
-                      loadout: loadout || stored_parts } ]
+                      loadout: loadout || stored_parts,
+                      crew: crew || stored_crew } ]
     )
+  end
+
+  # The persisted roster, or nothing, in which case every role falls to the standin.
+  #
+  # **Not the authority during a match**, exactly as `stored` is not: the runner is handed the
+  # roster inside the reset command.
+  def stored_roster
+    Roster.find_by(match_id: ID, operation_id: OPERATION_ID.to_s)
+  end
+
+  # **The roster is the player's INTENT; availability is applied when a machine is built.** A
+  # player who posted Jim and then watched him carried out keeps Jim in the roster, and the
+  # labour exchange fills the job meanwhile; when his recovery runs out he is simply back, with
+  # no second decision to make. Rewriting the row would silently discard a choice the player
+  # made and leave them to notice and redo it.
+  #
+  # The whole posting goes, not just the name: a day-labourer who has never met Jim is not
+  # wearing Jim's oilskin.
+  def stored_crew = available(stored_roster&.to_sim || {})
+
+  def available(crew)
+    unavailable = MinionCondition.remaining_for(DevPlayer::ID)
+    return crew if unavailable.empty?
+
+    crew.to_h do |role_id, posting|
+      minion = (posting || {})[:minion] || (posting || {})["minion"]
+      [ role_id, unavailable.key?(minion.to_s) ? {} : posting ]
+    end
   end
 
   # What the outfitting screen reads: the slots, what is fitted, the alternatives, and the
@@ -95,27 +146,19 @@ module DevMatch
 
   # Instrument and lever chrome for the console page.
   #
-  # The web process has no Match — the runner owns it, in another process — so this rebuilds
-  # one purely to ask it. That is sound for one specific reason: `Operation#panel` reads only
-  # CONFIGURATION. It maps over frozen instrument and control-point objects and never touches
-  # `@state`, so a match built from the same builder with the same options returns byte
-  # identical chrome regardless of seed, tick, or anything that has happened in the match.
-  # Operation configuration is code, not data (docs/guides/build-an-operation.md), and this is
-  # the payoff.
+  # The web process has no `Match` — the runner owns it, in another process — so this rebuilds
+  # one purely to ask it. Sound for one checkable reason: **`Operation#panel` reads only
+  # configuration.** It maps over frozen instrument and control-point objects and never touches
+  # `@state`, so the same builder with the same options returns byte-identical chrome regardless
+  # of seed, tick or match history.
   #
-  # **Memoised per LOADOUT, not per process, and that is the whole of the old TODO here.** The
-  # note used to say this would stop being sound the moment a match's configuration was chosen
-  # at creation rather than read from the environment — which is now, because a player picks it
-  # on the outfitting screen. It stays sound for the same reason it always did, with one word
-  # changed: the panel is a pure function of the *loadout*, so as long as both processes read
-  # the same stored loadout they cannot disagree about what the machine is.
+  # **Memoised per LOADOUT, not per process**, because the panel is a pure function of the
+  # loadout — so two processes reading the same stored loadout cannot disagree.
   #
-  # The remaining exposure is a race, not a design flaw: a player saves a loadout and the runner
-  # has not reset yet, so the console renders the new panel over the old machine's values. It
-  # closes itself within a tick or two because the reset is ordered on the same topic as the
-  # commands. A proper implementation still has the panel come FROM the runner — published on a
-  # compacted topic, or sent over the channel on subscribe — which is where this goes when
-  # matches are created on demand.
+  # The remaining exposure is a race, not a design flaw: save a loadout and the console renders
+  # the new panel over the old machine for a tick or two until the reset lands. The real fix is
+  # the panel coming FROM the runner, which is where this goes when matches are created on
+  # demand.
   def panel(loadout: nil)
     key = loadout || stored_parts
     (@panels ||= {})[key] ||= build(loadout: key).panel(operation_id: OPERATION_ID).freeze

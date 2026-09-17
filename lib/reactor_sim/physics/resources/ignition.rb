@@ -4,26 +4,21 @@ module ReactorSim
   module Resources
     # How much of the fuel is actually alight.
     #
-    # Combustion used to be gated on the node's BULK temperature, which is a lie a
-    # lumped-temperature node cannot avoid telling: a match does not raise a coal bunker to
-    # 700 K, it raises a few grams, and those grams raise their neighbours. Modelled as a bulk
-    # threshold the fire became all-or-nothing — above the line the whole grate burned, below
-    # it nothing did and nothing ever could again, because there was no ember left to grow
-    # from. The only winning move was to leave the igniter on permanently, which turned a
-    # match into a throttle (docs/design_sketches/ignition.md).
+    # **Gating combustion on a node's BULK temperature is a lie a lumped-temperature node cannot
+    # avoid telling**: a match does not raise a coal bunker to 700 K, it raises a few grams, and
+    # those grams raise their neighbours. As a bulk threshold the fire is all-or-nothing — above
+    # the line the whole grate burns, below it nothing does and nothing ever can again, because
+    # no ember is left to grow from, so the only winning move is to leave the igniter on
+    # permanently and turn a match into a throttle.
     #
-    # So the state is the ignited MASS, in kg, and the fraction is derived from it. That is the
-    # same choice made everywhere else in the physics — store the extensive quantity, derive
-    # the intensive one — and it pays for itself twice here:
-    #
-    #   * shovelling cold fuel onto a fire dilutes it for free, because the ignited mass does
-    #     not change while the total does, and
-    #   * fuel that burns away takes its share of the fire with it.
+    # So the state is the ignited MASS and the fraction derives from it — store the extensive
+    # quantity, derive the intensive one, as everywhere else in the physics. It pays twice:
+    # shovelling cold fuel onto a fire dilutes it for free, and fuel that burns away takes its
+    # share of the fire with it.
     #
     # This does NOT replace modelling genuinely distinct temperatures as distinct nodes. A
-    # reactor's fuel pin really is hundreds of kelvin above its coolant, and no ignited
-    # fraction can express that — the two approaches answer different questions and are meant
-    # to coexist.
+    # reactor's fuel pin really is hundreds of kelvin above its coolant, and no ignited fraction
+    # expresses that. See `docs/design_sketches/ignition.md`.
     module Ignition
       module_function
 
@@ -36,21 +31,10 @@ module ReactorSim
 
       # How quickly the fire's view of the draught catches up with the draught itself.
       #
-      # **This is deliberate fuel-bed inertia, and it is no longer load-bearing.** It was
-      # written as a workaround: air passes THROUGH a firebox, and the standing inventory used
-      # to oscillate hard — the damper delivered a slug, the flue cleared it, and one tick in
-      # two the node genuinely held no air at all. Read instantaneously that said "starved"
-      # every other tick, on a fire consuming barely one percent of what blew past it.
-      #
-      # That oscillation was a symptom of an unstable mass solver and is gone: transport is
-      # settled implicitly now, and the firebox's air is steady to a coefficient of variation
-      # of 0.0001 with no sign reversals. **Measured: disabling this memory entirely leaves the
-      # steam engine bit-identical** — same fire temperature, same burn rate, same speed.
-      #
-      # It stays because the physics is defensible on its own terms rather than because
-      # anything depends on it: a bed of burning coal does not go out because the draught
-      # faltered for 250 ms. `ignition_spec` pins that behaviour. If it ever gets in the way,
-      # delete it and the spec together — it is no longer propping anything up.
+      # **Deliberate fuel-bed inertia, and nothing depends on it**: a bed of burning coal does not
+      # go out because the draught faltered for 250 ms. Disabling it entirely leaves the steam
+      # engine bit-identical — same fire temperature, same burn rate, same speed — so if it ever
+      # gets in the way, delete it and `ignition_spec`'s example together.
       OXIDISER_MEMORY_PER_S = 1.5
 
       def initial_state = { kg: 0.0, oxidiser_kg: 0.0 }

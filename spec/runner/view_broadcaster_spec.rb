@@ -35,7 +35,8 @@ RSpec.describe ViewBroadcaster do
 
     expect(broadcasts.first[:kind]).to eq("full")
     expect(broadcasts.first[:view].keys)
-      .to contain_exactly(:tick, :operation_id, :viewer, :gauges, :flags, :controls, :incidents)
+      .to contain_exactly(:tick, :operation_id, :viewer, :gauges, :flags, :controls, :incidents,
+                          :crew)
   end
 
   it "labels the shape explicitly rather than leaving the client to sniff it" do

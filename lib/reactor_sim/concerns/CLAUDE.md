@@ -9,7 +9,7 @@ specific heat. Reference:
 |---|---|---|---|
 | `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume`, `bulk_density_kg_m3` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating` |
 | `Pressurized` | needs `Holds` + `Thermal`; optional `material`, `shell_radius_m`, `wall_thickness_m`, `safety_factor`, `max_pressure_pa` | none — derived | `pressure_pa`, `gas_headroom_kg`, `rated_pressure_pa` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
@@ -111,7 +111,14 @@ a number.
 
 `integrity` (0..1) is passed to `overload?` so a worn part fails sooner than a fresh one,
 keeping accumulated history meaningful. Events carry `cause: :fatigue` or `cause: :overload`.
-Override `failure_type` and `failure_detail(state, ctx)` to describe it.
+Override `failure_detail(state, ctx)` to describe it.
+
+> **There is no `failure_type` hook, and there must not be one.** Every part failure is
+> `type: :part_failed`; the part identifies itself through `node`, `mode` and `failure_detail`.
+> A per-part type derived from the node id makes a rename silently rename an event type, and no
+> list of types can exist at all; a per-class override is a worse copy of `mode:`, and any class
+> that forgets to override collapses two distinct failures into one type. One vocabulary, in
+> `failure_modes`. See `ReactorSim::Event::TYPES`.
 
 The rolled starting durability is hidden from the player — that is where the uncertainty
 lives, rather than in the system being arbitrary.
@@ -141,28 +148,53 @@ naming the mode stays a single decision. It emits an event only on a transition.
 
 ### A broken part keeps being evaluated, and can get worse
 
-`apply_wear` used to return early on a failed node. That was a footgun, not an optimisation:
-**an early, mild failure must never immunise a part against a catastrophic one.** A cracked
-pipe that goes on being fed should be able to tear open; a reactor that has lost a seal must
-still be able to melt down. Left as it was, the first failure a part suffered was the last
-thing that could ever happen to it — a *safe harbour* on exactly the machines where that is
-most wrong.
+`apply_wear` must not return early on a failed node, however much it looks like an optimisation:
+**an early, mild failure must never immunise a part against a catastrophic one.** A cracked pipe
+that goes on being fed should be able to tear open; a reactor that has lost a seal must still be
+able to melt down. Returning early makes the first failure a part suffers the last thing that can
+ever happen to it — a *safe harbour* on exactly the machines where that is most wrong.
 
 - **Fatigue cannot escalate; overload can.** Durability is spent once a part has failed, so
   `stress_per_second` has nothing left to consume. That is the right story anyway: a split drum
   that keeps being fired reaches bursting conditions; one that has been shut down does not.
-- **`escalate_to` only moves forward.** Otherwise a drum that had exploded would be
-  re-described as merely split the moment its own hole took the pressure away — the conditions
-  that destroyed it are gone precisely *because* it was destroyed.
+- **`escalate_to` only moves forward.** Otherwise a drum that has exploded is re-described as
+  merely split the moment its own hole takes the pressure away — the conditions that destroyed
+  it are gone precisely *because* it was destroyed.
 - A mode the table does not name sorts last, rather than being discarded quietly.
+
+**`Nodes::Cylinder` is the part that actually escalates**, and the shape is worth copying: its
+`overload?` is hydraulic lock, which is *condition*-driven rather than durability-driven, so it
+still fires on a part whose durability is long gone. A cylinder worn to `scored_bore` that then
+takes a slug of water blows its head off, and the event carries `escalated_from:`. A part whose
+only failure route is fatigue can never escalate, by construction.
+
+The **boiler** deliberately cannot, and that is physics rather than an omission: a split drum
+loses pressure through its own hole, so the severity that would name a worse mode is falling
+exactly when it would be re-read. The hole is the relief.
 
 ### What a mode actually does
 
-Two consumers so far, and they sit on opposite sides of the generic/specific line:
+Three consumers, and where each declaration lives is the line between what a class knows about
+itself and what only the machine knows:
 
-- **`Nodes::Breach`** reads the mode to size the hole a failed holder spills through.
+- **`Nodes::Breach`** reads the mode to size the hole a failed holder spills through. Sizes live
+  on the breach (`opens_by:`), not in the mode table, so **a mode a breach does not name opens
+  nothing** — which is how one part carries several holes of different sizes, and how a
+  cylinder's `scored_bore` correctly opens none at all (worn rings leak *past the piston*, inside
+  the machine).
+- **`derates:`** in the mode table, read by the node's own code via `derating(state, key)`. What
+  a derating means is the node's business. `0.0` is how a mode says "no longer does that thing at
+  all", in the same vocabulary rather than a second flag beside it.
 - **`failure_damages`** — `{ mode => { node_id => share } }` — is what the part takes with it,
   spent by `Tick#spread_damage` as a share of each bystander's *starting* durability.
+
+**`failure_hazards` is `failure_damages` pointed at people**, declared the same way and for the
+same reason, and spent in phase 6b immediately after `spread_damage`. It names **stations**, never
+minions: a station is fixed by the machine and a roster is the player's, so a part naming a minion
+would be naming something it cannot know. That also makes it a coarse notion of *place* with no
+geometry at all — the machine knows which levers sit beside which parts — and it upgrades cleanly
+when volumes arrive. A station's figure is a **weight**; `scales_with:` names a key in the failure
+event's own `detail:` so the size of the event comes from the part rather than from a constant.
 
 **`failure_damages` is deliberately not an entry in `failure_modes`**, and the reason is the
 rule that everything under `nodes/` is generic: `Nodes::Boiler` cannot name a `:cylinder`,
@@ -176,8 +208,10 @@ failing together and damaging each other give the same answer whatever order the
 in. Phase 6 obeys order-independence like everything else.
 
 Everything else a failure does is still generic (a part that has let go stops turning, leaves
-the drivetrain, drives nothing), so **a part with no breach and no casualties fails without
-visible consequence unless it spins.**
+the drivetrain, drives nothing), so **a part with no breach, no derating and no casualties fails
+without visible consequence unless it spins.** `failure_spec` walks every catalogued machine and
+also checks the inverse — that no breach is wired to a mode its part can never enter, which
+would leave a hole inert and indistinguishable from a part meant to fail sealed.
 
 > **The mode is a Symbol held as a VALUE, so JSON hands it back as a String** — the fifth
 > instance of that trap here. `Operation#restore` normalises it. The failure is *partial*, which

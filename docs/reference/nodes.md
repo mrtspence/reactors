@@ -63,7 +63,7 @@ includes nothing carries nothing — an indicator lamp should not have a specifi
 |---|---|---|---|
 | `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating` |
 | `Pressurized` | (needs `Holds` + `Thermal`) | none — derived | `pressure_pa`, `gas_headroom_kg` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
@@ -94,7 +94,11 @@ done on the first stroke after the regulator opens. That is why the remedy (the 
 applied *before* the hazard becomes possible, which is what makes it a procedure rather than a
 reaction.
 
-Override `failure_type` and `failure_detail(state, ctx)` to describe the failure.
+Override `failure_detail(state, ctx)` to describe the failure. **There is no `failure_type`
+hook** — every part failure is `type: :part_failed`, and the part identifies itself through
+`node`, `mode` and that detail. A type derived from the node id would make a rename silently
+rename an event type, with no list of types to check a consumer against. See
+`ReactorSim::Event::TYPES`.
 
 ### What a failed part becomes
 
@@ -110,9 +114,9 @@ a dry crown sheet both end as a hole in the shell, and what separates a seam spl
 explosion is how much pressure was behind the metal. `Nodes::Cylinder` is the converse case,
 where the cause *does* separate them, which is why both hooks exist.
 
-**A failed part keeps being evaluated and can get worse.** `apply_wear` no longer returns early
-on a broken node, because an early mild failure must never immunise a part against a
-catastrophic one. Only an overload can escalate — durability is already spent — and
+**A failed part keeps being evaluated and can get worse.** `apply_wear` does not return early on
+a broken node, because an early mild failure must never immunise a part against a catastrophic
+one. Only an overload can escalate — durability is already spent — and
 `escalate_to` only ever moves forward through the declared order, so a drum that has exploded
 cannot be re-described as merely split once its own hole has taken the pressure away.
 
@@ -120,13 +124,26 @@ cannot be re-described as merely split once its own hole has taken the pressure 
 `spec/reactor_sim/failure_spec.rb` treats a part left on it as a defect — it is the same shape
 of silent off switch as an infinite temperature rating.
 
-**A mode's one consumer today is `Nodes::Breach`** — the hole a failed holder spills through,
-built with the machine and shut until it is needed, opening by `opens_by[mode]` of full bore.
-That is what makes a ruptured drum behave differently from a sound one; the `derates:` and
-`damages:` entries in a mode table are declared and not yet read. Everything else a failure does
-is still generic — a part that has let go stops turning, leaves the drivetrain and drives
-nothing — so **a part with no breach wired to it still fails without visible consequence unless
-it spins.** Staged in [`design_sketches/failure_model.md`](../design_sketches/failure_model.md).
+A mode has three consumers, and which declaration each reads is the line between what a class
+knows about itself and what only the machine knows:
+
+- **`Nodes::Breach`** — the hole a failed holder spills through, built with the machine and shut
+  until it is needed, opening by `opens_by[mode]` of full bore. Sizes live on the breach rather
+  than in the mode table, so **a mode a breach does not name opens nothing**: that is how one
+  part carries several holes of different sizes, and how a cylinder's `scored_bore` (rings
+  leaking *past the piston*, inside the machine) correctly opens no hole in the casing.
+- **`derates:`**, read by the node's own code through `derating(state, key)`. What a derating
+  *means* is the node's business. `0.0` is how a mode says "this part no longer does that thing
+  at all", in the same vocabulary rather than a second flag. Until this existed, a cylinder's
+  `scored_bore` and `blown_head` were indistinguishable — any failure declared `Intent.none` and
+  stopped the engine dead.
+- **`failure_damages`**, configured *per instance* rather than declared in the class, because
+  `Nodes::Boiler` cannot name a `:cylinder`; `Tick#spread_damage` spends it as durability.
+
+Everything else a failure does is still generic — a part that has let go stops turning, leaves
+the drivetrain and drives nothing — so **a part with no breach and no derating still fails
+without visible consequence unless it spins.** Staged in
+[`design_sketches/failure_model.md`](../design_sketches/failure_model.md).
 
 > **The mode is a Symbol held as a value**, so it does not survive JSON and `Operation#restore`
 > normalises it. The digest cannot catch a miss; only an identity assertion can.
@@ -249,18 +266,16 @@ gas a second route past the water removed it.
 
 ### A load needs a torque curve, or the machine has no operating point
 
-A constant-torque brake has no stable intersection with a prime mover's torque curve: the
-engine either overcomes it and accelerates without limit, or it does not and stalls. `Load`
-was one, and the steam engine sat on the knife edge that produces — throttle 80 settled at
-452 rpm, throttle 100 ran away to 1211. All the speed stability came from the cylinder's own
-breathing rather than from what it was driving. (That breathing term is gone now — see the
-next section. It was standing in for the load curve, and once the curve existed it was a prop.)
+A constant-torque brake has no stable intersection with a prime mover's torque curve: the engine
+either overcomes it and accelerates without limit, or it does not and stalls. On that knife edge
+throttle 80 settles at 452 rpm and throttle 100 runs away to 1211, with all the speed stability
+coming from the cylinder's own breathing rather than from what it is driving.
 
-This also inverts where the danger is, correctly. Under a constant-torque brake, **full load
-was the safe setting** and the way to hurt the machine was to open up against it. Under a fan
-law the mill holds the engine at its duty point, and it is *shedding* the load that lets
-everything the boiler is pouring in go into acceleration — which is the classic way real
-machinery destroys itself, and needs no special case.
+A fan law also puts the danger in the right place. Under a constant-torque brake **full load is
+the safe setting** and the way to hurt the machine is to open up against it. Under a fan law the
+mill holds the engine at its duty point, and *shedding* the load is what lets everything the
+boiler is pouring in go into acceleration — the classic way real machinery destroys itself, with
+no special case needed.
 
 > **A transport node may not hold material.** It has to size its intake from tick N−1, before
 > it knows what it will discharge, so the only bounded rule — `draws = throughput − held` —
@@ -277,10 +292,10 @@ machinery destroys itself, and needs no special case.
 
 ### Occupancy is measured against a characteristic volume, not the node's
 
-Volume occupancy used to have exactly two consequences, and both are about *room*: `room_m3`
-caps what a node will accept, and `free_volume` raises the pressure of the gas that is left.
-Neither says a deposit is in the **way** of anything. `Obstructs` is that third consequence, and
-water in a cylinder, ash on a grate, tar in a line and scale in a tube are all the same shape.
+Volume occupancy has two consequences on its own, and both are about *room*: `room_m3` caps what
+a node will accept, and `free_volume` raises the pressure of the gas that is left. Neither says a
+deposit is in the **way** of anything. `Obstructs` is that third consequence, and water in a
+cylinder, ash on a grate, tar in a line and scale in a tube are all the same shape.
 
 **The denominator is the whole idea.** The 14 kg of water that destroys the steam engine's
 cylinder is **7% of its total volume**, so measured against the node the hazard is invisible;
@@ -327,12 +342,12 @@ the compression pressure lifts, and the one sensing `pressure_pa` stays shut on 
 atmosphere **while the piston is pushing against it**. Shut, `bleed` is 0 and the result is exactly
 the supply pressure, so an engine with its cocks closed is bit-identical to one that has none.
 
-> **Draining mass was not enough, and the steam chest is what broke it.** The cocks' only route to
-> the output used to be indirect — drain mass, deplete the chest, lower P₁ — and once the cylinder
-> could refill from a 25 kg/s inlet the chest stopped depleting (543 → 545 kPa with the cocks wide
-> open). Leaving them open cost 4–7% of the power and *gained* 1% at low throttle. `drain_kg_per_s`
-> is inert too: 0.25, 0.5, 1.0, 2.0 and 4.0 give byte-identical results, because the cylinder holds
-> so little gas that the smallest cock already takes all of it.
+> **Draining mass cannot express this.** The indirect route — drain mass, deplete the chest, lower
+> P₁ — closes as soon as the cylinder can refill from a 25 kg/s inlet: the chest stops depleting
+> (543 → 545 kPa with the cocks wide open) and leaving them open costs 4–7% of the power, *gaining*
+> 1% at low throttle. `drain_kg_per_s` is inert for the same reason: 0.25, 0.5, 1.0, 2.0 and 4.0
+> give byte-identical results, because the cylinder holds so little gas that the smallest cock
+> already takes all of it.
 
 The loss is proportional to the pressure difference, so it is largest exactly when the engine is
 working hardest — which is the point. Same correction the regulator needed: **a restriction, not a

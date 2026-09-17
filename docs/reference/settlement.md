@@ -35,16 +35,15 @@ Paths are resolved once at construction by `Path.resolve` — the graph is confi
 state — so there is no per-tick traversal. Order follows the operation's own link list rather
 than any hash, which is what keeps it order-independent.
 
-> **Why a conduit may not hold material.** It used to hold what passed through it for one
-> tick. An intermediate node has to size its intake from tick N−1, before it can know what it
-> will discharge this tick, so the only bounded rule — `draws = throughput − held` — gives the
-> map `h ↦ T − h`. That is an involution with eigenvalue exactly **−1**: it oscillates forever
-> and cannot damp. Removing the `− held` term gives steady flow and an unbounded duct instead.
-> **Steady inventory and steady throughput are mutually exclusive for a stateful intermediate
-> node**, so the fix was to stop it being one.
+> **Why a conduit may not hold material.** An intermediate node has to size its intake from
+> tick N−1, before it can know what it will discharge this tick, so the only bounded rule —
+> `draws = throughput − held` — gives the map `h ↦ T − h`. That is an involution with eigenvalue
+> exactly **−1**: it oscillates forever and cannot damp. Dropping the `− held` term gives steady
+> flow and an unbounded duct instead. **Steady inventory and steady throughput are mutually
+> exclusive for a stateful intermediate node**, so a conduit must not be one.
 >
-> It cost a damper alternating 0.84 kg / 0.000 kg indefinitely, a firebox with *no air at all*
-> every other tick, and a cylinder swinging 16.4/78.2 kW at operating speed. See
+> The symptoms are a damper alternating 0.84 kg / 0.000 kg indefinitely, a firebox with *no air
+> at all* every other tick, and a cylinder swinging 16.4/78.2 kW at operating speed. See
 > [`../design_sketches/flow_through_issue_draft.md`](../design_sketches/flow_through_issue_draft.md).
 
 `Path.resolve` refuses a conduit whose outlet goes nowhere (it would swallow mass rather than
@@ -67,15 +66,13 @@ else                          -> the path itself drives it
 then capped by the narrowest port anywhere along the path, and by every conduit's
 `throughput_kg(state, ctx)` (its rating × its lever, or zero if it has broken).
 
-> **An active sink is authoritative about its own intake.** This used to be
-> `max(push, draw)`, which meant a sink could not refuse — a valve shoving its contents at a
-> cylinder overrode the cylinder's own careful limit and packed it to eight times its supply
-> pressure. A node that declares a draw gets exactly that.
+> **An active sink is authoritative about its own intake.** A node that declares a draw gets
+> exactly that. Under `max(push, draw)` a sink cannot refuse, so a valve shoving its contents at
+> a cylinder overrides the cylinder's own limit and packs it to eight times its supply pressure.
 >
 > **With nothing declared at either end, the path drives the flow.** Holders are passive —
-> `Vessel#plan` and `Atmosphere#plan` both return `Intent.none` — so if the route itself did
-> not drive flow, nothing in the graph would move at all. This replaced the conduit's
-> `pushes: held`.
+> `Vessel#plan` and `Atmosphere#plan` both return `Intent.none` — so if the route did not drive
+> flow, nothing in the graph would move at all.
 
 Material must satisfy **every** port's tag filter along the path, not just the two ends. A
 gas outlet wired to a liquid inlet moves nothing, and so does a gas-only valve halfway down a
@@ -135,22 +132,22 @@ travelling with them, so a pressure-driven path splits into three streams rated 
 | liquid | `min(what the weights imply, the path's rate)` | additive — it rides *on top* of the gas |
 | solid | the path's rate | renormalised within the solid group; a lump of coal does not ride on steam |
 
-Two rules here were each a live bug:
+Two rules here are easy to get wrong:
 
 - **Liquid is bounded by the bore, and gas by the conductance.** The entrainment term is
   `desired × (1 − gas_share)/gas_share`, which grows without limit as a stream approaches pure
-  liquid — a drum on the point of priming claimed its whole inventory in one tick. The only thing
-  behind it was `scale_by_sink_room`, which scales a claim *uniformly* and so trimmed the **gas**
-  figure below what the solve settled, silently breaking the one invariant this stage protects.
-  So `Port#max_kg_per_s` does bound a pressure-driven path after all — for liquid only, because
-  conductance rates a gas and says nothing about how fast water moves through a pipe.
-- **A line with no declared opinion still passes what is in it.** `weights.empty?` used to drop
-  liquid outright, and because membership in the pressure regime is *structural* — any
-  conductance-bearing path whose ends declare no intent — that quietly applied to most of the
-  graph. **It is why the steam engine's cylinder relief valve passed water in exactly zero
-  states**: lifted, its conductance made the path pressure-driven and the cylinder declares no
-  affinity for `:relief`; shut, its throughput was zero. Liquid now falls to the same
-  proportional rate term solids take, which is the honest default — a flooded line flows as a
+  liquid, so a drum on the point of priming claims its whole inventory in one tick. The only
+  backstop, `scale_by_sink_room`, scales a claim *uniformly* and so trims the **gas** figure below
+  what the solve settled, breaking the one invariant this stage protects. So `Port#max_kg_per_s`
+  does bound a pressure-driven path — for liquid only, because conductance rates a gas and says
+  nothing about how fast water moves through a pipe.
+- **A line with no declared opinion still passes what is in it.** Dropping liquid there applies
+  to most of the graph, because membership in the pressure regime is *structural* — any
+  conductance-bearing path whose ends declare no intent. **It is what would make the steam
+  engine's cylinder relief valve pass water in exactly zero states**: lifted, its conductance
+  makes the path pressure-driven and the cylinder declares no affinity for `:relief`; shut, its
+  throughput is zero. Liquid falls to the same proportional rate term solids take, which is the
+  honest default — a flooded line flows as a
   liquid, not as steam's passenger.
 
 > `Flow#requested_kg` is the **gas-only** figure while `granted_kg` sums every parcel, so
@@ -179,13 +176,12 @@ of its own source.
 anything. This is a **cap only**; it never blocks flow outright, so a chimney cannot deadlock
 waiting for a pressure difference to appear.
 
-> **Both ends of a path are now real holders**, which is the only reason this rule is safe. It
-> used to compare against a *conduit's* pressure — a number with no physical meaning, since a
-> duct that is momentarily full or momentarily empty reports 0 → 84 kPa with nothing changing.
-> Sampled against a destination the delay had put in antiphase, the cap turned a bounded
-> oscillation into a locked full/empty orbit. `Cylinder#supplied_by:` used to have to reach
-> *past* its own supply duct for exactly this reason; it now points at a steam chest, which is
-> a real holder directly linked to it, so the reach is gone and the declaration is ordinary.
+> **Both ends of a path must be real holders**, which is the only reason this rule is safe. A
+> *conduit's* pressure has no physical meaning — a duct that is momentarily full or empty reports
+> 0 → 84 kPa with nothing changing — and sampled against a destination the delay has put in
+> antiphase, the cap turns a bounded oscillation into a locked full/empty orbit.
+> `Cylinder#supplied_by:` points at a steam chest, a real holder directly linked to it, rather
+> than reaching past its own supply duct.
 >
 > This stage is **scheduled for deletion**. `gas_headroom_kg` is identically
 > `(V_free·M/RT) × ΔP` — the relaxation transfer without its time constant — so it is an
@@ -221,9 +217,9 @@ Flow(path:, parcels:, requested_kg:, reversed:)
 
 **Ask a flow for its ends by role, never by name.** A path has a nominal direction but gas may
 run the other way down it, so `reversed` is the only place the distinction lives and
-everything downstream reads `source_node` / `sink_node`. Backflow used to be structurally
-impossible — `moles_to_kg` discarded negatives before anything could act on them, which made
-the `one_way:` flag unreachable dead code and meant a single overshoot latched forever.
+everything downstream reads `source_node` / `sink_node`. Discarding negatives in `moles_to_kg`
+would make backflow structurally impossible, the `one_way:` flag unreachable dead code, and a
+single overshoot latch forever.
 
 Energy follows mass proportionally when parcels are extracted, which is exact because a
 node's contents are all at one temperature.
@@ -296,15 +292,15 @@ Solving the network implicitly fixes both at once, and the per-node bound, `flow
 
 `Relaxation.settle` takes an optional `{ link_id => [low, high] }`. A check valve is
 `[0, ∞]`. Limits are **constraints inside the solve** — a breached coupling is pinned to its
-bound and the network re-solved, so every other flow settles against the transfer that
-actually crossed. Clamping afterwards is wrong: capping the flue after the fact let the
-firebox be pumped to 25 kPa, because the damper had been solved against an exhaust four times
-larger than the one allowed to cross.
+bound and the network re-solved, so every other flow settles against the transfer that actually
+crossed. Clamping afterwards is wrong: capping the flue after the fact pumps the firebox down to
+25 kPa, because the damper was solved against an exhaust four times larger than the one allowed
+to cross.
 
-A pinned coupling may be **released once**, and that is not optional either. Pinning the flue
-at a throat it had outgrown drove the firebox pressure down — which is the state in which it
-would no longer be choked — and with no way back it kept extracting a fixed amount from a box
-the damper could not fill. Measured: an 80 kPa vacuum in a firebox open to the sky.
+A pinned coupling may be **released once**, and that is not optional either. Pinning the flue at
+a throat it has outgrown drives the firebox pressure down — which is the state in which it would
+no longer be choked — and with no way back it keeps extracting a fixed amount from a box the
+damper cannot fill: an 80 kPa vacuum in a firebox open to the sky.
 
 > **`Port#max_kg_per_s` does not restrict a pressure-driven path — conductance is the whole
 > restriction.** Applying both was tried and is wrong: the damper's rating (4 kg/s) and its

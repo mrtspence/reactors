@@ -1,23 +1,29 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/reference_crew"
 
 # The first real operation, and the one the architecture was tested against.
 #
 # `docs/design_sketches/boiler.md` set the bar: *if an atmospheric engine and a
 # high-pressure engine can be the same operation with different parts swapped in, the
 # abstractions are the right ones.* The thesis group at the bottom is that test.
-RSpec.describe "the steam engine" do
+RSpec.describe "the steam engine", crew: :reference do
   # Starting from cold and lighting the fire takes real time, so most examples share one
   # warmed-up engine rather than paying for the startup in every one.
   # `chassis:` — the frame, which decides where the exhaust goes and therefore which slots
   # exist. It was `variant:` until the engine became assembled from parts; the concept did not
   # change, only what it is now one axis of. An empty loadout is the stock engine.
+  # **The crew is part of the machine now**, and it is a fixture rather than anybody real.
+  # Stoking is effort, so a lever position is an instruction and what comes of it depends on who
+  # is carrying it out — with no roster at all the engine is crewed by day-labourers and never
+  # raises steam. `ReferenceCrew` is a flat 1.0 at every stat, which is the baseline every work
+  # station's throughput is declared against, and it cannot drift when real people are tuned.
   def engine(chassis: :high_pressure, seed: 42, loadout: {})
     ReactorSim::Match
       .create(id: "e", seed: seed,
               operations: [ { id: "eng", type: :steam_engine, chassis: chassis,
-                              loadout: loadout } ])
+                              loadout: loadout }.merge(ReferenceCrew.options) ])
       .operation(:eng)
   end
 
@@ -71,6 +77,20 @@ RSpec.describe "the steam engine" do
     end
     events
   end
+
+  # Every part failure is one type, `:part_failed`, and the part says which it was through
+  # `node:` and `mode:`. These used to assert `:cylinder_failure` and `:flywheel_burst` — names
+  # derived from the node id or hand-written per class, so they could drift from the part
+  # without a spec noticing. See `ReactorSim::Event::TYPES`.
+  def failures_of(events, node)
+    events.select { |e| e[:type] == :part_failed && e[:node] == node }
+  end
+
+  # **"Nothing went wrong" is not "no events".** These examples used to assert an empty event
+  # list, which meant the right thing when the only events were failures. The engine also
+  # reports ordinary transitions now — a fire catching, a drum reaching working pressure — so a
+  # healthy 4000-tick run emits several and the old assertion would fail on a perfect run.
+  def breakages(events) = events.select { |e| e[:type] == :part_failed }
 
   def rpm(op) = op.nodes.fetch(:flywheel).rpm(op.state.fetch(:nodes).fetch(:flywheel))
 
@@ -271,8 +291,16 @@ RSpec.describe "the steam engine" do
     # Ash reaches 12.17 kg rather than the 20-odd a hard fire banks up, because accumulation
     # scales with firing rate — hence the lower threshold here than in the example above, which
     # runs at `LIGHT`'s damper.
+    # **Somebody has to be standing there.** Raking is effort, not a valve, so setting the lever
+    # with nobody posted moves no ash at all — which is the mechanic rather than a snag: clearing
+    # the grate costs you a pair of hands that were doing something else. The yardhand comes off
+    # the damper to do it, which is exactly the decision a driver makes.
     it "clears when the ashpan is raked, and the engine gets the power back" do
-      raked = engine.tap { |o| o.set_control(:ash_raking, 40); light_and_run(o, ticks: 7200, damper: 30) }
+      raked = engine.tap { |o|
+        o.assign_minion(:yardhand, :ash_raking)
+        o.set_control(:ash_raking, 40)
+        light_and_run(o, ticks: 7200, damper: 30)
+      }
       banked = engine.tap { |o| light_and_run(o, ticks: 7200, damper: 30) }
 
       expect(headroom_pa(banked)).to be > 10_000.0,
@@ -421,7 +449,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events, peak = prime_and_slam(op)
 
-      expect(events.map { |e| e[:type] }).to include(:cylinder_failure)
+      expect(failures_of(events, :cylinder).map { |e| e[:mode] }).to include(:blown_head)
       expect(peak).to be > 1.0
       expect(op.state.fetch(:nodes).fetch(:cylinder).fetch(:failure)).not_to be_nil
     end
@@ -433,7 +461,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events, peak = prime_and_slam(op, cocks: 100)
 
-      expect(events.map { |e| e[:type] }).not_to include(:cylinder_failure)
+      expect(failures_of(events, :cylinder)).to be_empty
       expect(peak).to be < 0.5
     end
 
@@ -467,14 +495,14 @@ RSpec.describe "the steam engine" do
       events = light_and_run(op, throttle: 100, stoking: 80, load: 90, ticks: 4200,
                              shed_at: 3400)
 
-      expect(events.map { |e| e[:type] }).to include(:flywheel_burst)
+      expect(failures_of(events, :flywheel).map { |e| e[:mode] }).to include(:burst)
     end
 
     it "reports how fast it was going when it let go" do
       op = engine
       events = light_and_run(op, throttle: 100, stoking: 80, load: 90, ticks: 4200,
                              shed_at: 3400)
-      burst = events.find { |e| e[:type] == :flywheel_burst }
+      burst = failures_of(events, :flywheel).first
 
       expect(burst.fetch(:cause)).to eq(:overload)
       expect(burst.dig(:detail, :rpm)).to be > 100.0
@@ -486,7 +514,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events = light_and_run(op, throttle: 100, stoking: 80, load: 100, ticks: 4000)
 
-      expect(events).to be_empty
+      expect(breakages(events)).to be_empty
       expect(rpm(op)).to be > 100.0
     end
 
@@ -498,7 +526,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events = light_and_run(op, throttle: 100, stoking: 80, load: 90, ticks: 4200,
                              shed_at: 3400)
-      expect(events.map { |e| e[:type] }).to include(:flywheel_burst)
+      expect(failures_of(events, :flywheel)).not_to be_empty
 
       600.times { |i| op.step!(tick: 4200 + i) }
       state = op.state.fetch(:nodes)
@@ -523,7 +551,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events = light_and_run(op, throttle: 60, stoking: 60, load: 80, ticks: 4000)
 
-      expect(events).to be_empty
+      expect(breakages(events)).to be_empty
       expect(rpm(op)).to be > 10.0
     end
 
@@ -615,7 +643,7 @@ RSpec.describe "the steam engine" do
       op = engine(loadout: { cylinder_relief: nil })
       events = light_and_run(op, ticks: 2400)
 
-      expect(events.map { |e| e[:type] }).to include(:cylinder_failure)
+      expect(failures_of(events, :cylinder)).not_to be_empty
       expect(op.broken?).to be(true)
     end
 

@@ -20,7 +20,12 @@ class MatchResetsController < ApplicationController
   before_action :require_dev_match
 
   def create
-    CommandProducer.instance.produce(match_id: DevMatch::ID, command: DevMatch.reset_command)
+    # The reset command is built BEFORE the clock advances, so somebody whose last match this
+    # was is still unavailable for the machine being built now and becomes available for the
+    # next one. Ticking first would give them back a match early.
+    command = DevMatch.reset_command
+    DevMatch.start!
+    CommandProducer.instance.produce(match_id: DevMatch::ID, command: command)
     head :accepted
   rescue StandardError => e
     Rails.logger.error("match_resets: produce failed: #{e.class}: #{e.message}")

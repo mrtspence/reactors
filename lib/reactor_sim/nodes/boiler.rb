@@ -2,56 +2,39 @@
 
 module ReactorSim
   module Nodes
-    # A vessel where a liquid and its own vapour live together, and the vapour outlet is above
-    # the liquid. A steam drum, an evaporator, a flash vessel, a reboiler.
+    # A vessel where a liquid and its own vapour live together, with the vapour outlet above the
+    # liquid. A steam drum, an evaporator, a flash vessel, a reboiler.
     #
-    # It is a `Vessel` in every respect but one: **what leaves through the vapour outlet is
-    # never quite dry**, and how wet it is depends on how the thing is being run. That is the
-    # whole of the difference, and it is enough to want its own class — a tank does not care
-    # what shape its contents are, and it should not have to carry configuration explaining
-    # that it does not.
+    # A `Vessel` in every respect but one: **what leaves through the vapour outlet is never quite
+    # dry**, and how wet depends on how the thing is being run.
     #
-    # ## Carryover, declared as steam quality
-    #
-    # `Arbiter` biases a stream's composition with a per-tag multiplier (see
-    # `Node#transport_affinity`). **The multiplier for this is around 1.2 × 10⁻⁵ and nobody
-    # could have guessed that**, because it works against the mass ratio actually held: a drum
-    # sitting at 2620 kg of water and 6.2 kg of steam is 424 to 1, so anything near 1.0 sends
-    # almost pure water down the steam line. Measured on the steam engine — opening the outlet
-    # to liquid without this made **99.77%** of what left the boiler water.
-    #
-    # So it is declared the way an engineer already thinks about it, as the **wetness of the
-    # steam delivered**, and the multiplier is solved for:
+    # **Carryover is declared as steam quality.** `Arbiter` biases a stream's composition with a
+    # per-tag multiplier (`Node#transport_affinity`), but that multiplier works against the mass
+    # ratio actually held — a drum at 2620 kg of water and 6.2 kg of steam is 424 to 1, so
+    # anything near 1.0 sends almost pure water down the steam line, and the right figure is
+    # around 1.2 × 10⁻⁵. So the declaration is the **wetness of the steam delivered** and the
+    # multiplier is solved for:
     #
     #     w·L / (w·L + G) = wetness   →   w = wetness · G / ((1 − wetness) · L)
     #
-    # That is also self-calibrating, which a fixed multiplier is not: the same declaration keeps
-    # meaning the same thing as the water level moves through the run.
+    # That is self-calibrating, which a fixed multiplier is not: the declaration keeps meaning
+    # the same thing as the level moves through the run.
     #
-    # ## What makes it worse is the level, which is the lever a player has
-    #
-    # Mechanical carryover comes from the water being too close to the outlet for the drum to
-    # separate — high level, unstable level, sudden load. Below `onset_fill` this is a
-    # 99.5%-dry boiler, which is what a real one manages and is invisible in play. Above it,
-    # the quality degrades toward `foaming_wetness` and the water goes over with the steam.
-    #
-    # **This is the mechanic the feed pump was missing.** Filling the boiler used to be free
-    # above the level needed to avoid burning it — a floor with no ceiling. Now there is both,
-    # and holding the band between them is the job.
+    # **The level is what makes it worse, and the level is the player's lever.** Mechanical
+    # carryover comes from water too close to the outlet for the drum to separate — high level,
+    # unstable level, sudden load. Below `onset_fill` this is a 99.5%-dry boiler and invisible in
+    # play; above it the quality degrades toward `foaming_wetness`. Filling the boiler therefore
+    # has a ceiling as well as a floor, and holding the band between them is the job.
     #
     # Chemical foaming (alkalinity, dissolved solids) is the other real cause and is not
-    # modelled; if water chemistry ever arrives, it belongs here as a second term on `wetness`.
+    # modelled; water chemistry would belong here as a second term on `wetness`.
     class Boiler < Vessel
-      # How far past the offtake the level has to rise before delivery is essentially solid water,
-      # as a fraction of the drum's volume. **Short on purpose**: a pipe whose mouth is under
-      # water draws water almost at once, so this is the depth of submergence at which the drum
-      # has stopped separating at all, not a gradual second ramp.
-      #
-      # It was 0.5, and that made the slug regime unreachable in practice. Reaching a wetness that
-      # can actually flood a cylinder then needed the drum to be **99.9% full of liquid** — and a
-      # boiler that full makes no steam, so `transport_affinity` returns nothing and there is no
-      # flow to carry the water anywhere. The mechanic defeated itself: the only states wet enough
-      # to matter were states with nothing moving.
+      # How far past the offtake the level rises before delivery is essentially solid water, as a
+      # fraction of the drum's volume. **Short on purpose**: a pipe whose mouth is under water
+      # draws water almost at once, so this is the submergence at which the drum has stopped
+      # separating, not a gradual second ramp. A long range makes the slug regime unreachable —
+      # it needs a drum ~99.9% full, and a boiler that full makes no steam, so there is no flow
+      # to carry the water anywhere.
       SLUG_RANGE = 0.15
 
       # Where the metal starts losing strength, as a fraction of the temperature at which it stops
@@ -61,54 +44,32 @@ module ReactorSim
       # point being that a healthy boiler must not be taxed for being hot, only a starved one.
       CREEP_ONSET_FRACTION = 0.7
 
-      # ## Flash evaporation, and why a boiler does not merely leak
-      #
-      # **Over-pressure is not how a boiler is destroyed, and a pressure ratio is the wrong
-      # criterion for how badly.** Measured on this engine: firing hard with the safety valve
-      # removed, the drum peaks at 0.53 of its cold rating and never loses a point of
-      # durability. The shell is rated at nearly 2.4x its working pressure, which is a correct
-      # boiler. An earlier `EXPLOSION_RATIO = 1.5` was therefore unreachable — decoration.
-      #
-      # What actually destroys one is the water. A drum holds water at saturation *under
-      # pressure*; open it and the water is instantly superheated with respect to its new
-      # boiling point, and the excess sensible heat flashes part of it to steam:
+      # **What destroys a boiler is its water, not its pressure.** A drum holds water at
+      # saturation *under pressure*; open it and the water is instantly superheated against its
+      # new boiling point, and the excess sensible heat flashes part of it to steam:
       #
       #     x = c_p · (T_sat(P_vessel) − T_sat(P_ambient)) / h_fg
       #
-      # At this engine's 609 kPa that is **11% of the water, as steam, at once** — 362 kg from a
-      # full drum, which is **604 m³ at atmospheric pressure trying to leave a 5 m³ shell.**
+      # At 609 kPa that is 11% of the water at once — 362 kg from a full drum, **604 m³ at
+      # atmospheric pressure trying to leave a 5 m³ shell.**
       #
-      # **Note what flashing does NOT do: it cannot raise the pressure.** Making steam costs
-      # latent heat, which cools the water, so the pressure follows the water down. (A vessel
-      # run water-solid, with no steam space at all, is the exception, and this engine has no
-      # such part.) The destructive quantity is the *volume* — that expansion is what peels the
-      # plate back from the rent and unzips the shell, which is what the accident reports
-      # describe: one staybolt lets go and the rest follow simultaneously.
+      # **Flashing cannot raise the pressure**: making steam costs latent heat, so the water
+      # cools and the pressure follows it down (a vessel run water-solid is the exception). The
+      # destructive quantity is the *volume*, which peels the plate back from the rent and
+      # unzips the shell — one staybolt lets go and the rest follow together.
       #
-      # So the mode is decided by **how much flash steam is available**, as a multiple of the
-      # drum's own volume. That reproduces the history the pressure rule got backwards:
-      # **a low-water crown-sheet failure at working pressure is the classic catastrophic
-      # explosion**, not a gentle split — heavy locomotives were torn off their frames by
-      # exactly that, and the boilers thrown hundreds of feet. A drum only splits quietly when
-      # there is little superheat to release: low pressure, or nearly no water left.
+      # So the mode turns on how much flash steam is available, as a multiple of the drum's own
+      # volume. That reproduces the history a pressure ratio gets backwards: a low-water
+      # crown-sheet failure at working pressure is the classic catastrophic explosion, not a
+      # gentle split. A drum splits quietly only when there is little superheat to release — low
+      # pressure, or nearly no water left.
       #
-      # ## Where 12 comes from, and why not 20
-      #
-      # Measured at the real event rather than from a table. Running this engine into the
-      # low-water hazard with the plug removed, the drum ruptures on tick 6111 holding 626 kg at
-      # 609 kPa — **67 kg of flash steam, 22.8 drum-volumes.** A synthetic sweep of the same
-      # water mass at a lower pressure says 18.6, which straddles a threshold of 20; tuning to
-      # that table would have put the canonical explosion on the wrong side of the line for a
-      # state the engine never actually occupies.
-      #
-      # 20 was the first guess and it happens to give the right answer here — by 14%. **That
-      # margin is too thin for a case the history is unambiguous about**, and this engine's
-      # balance constants move. 12 keeps the crown-sheet rupture explosive by a factor of 1.9
-      # while still leaving the quiet regimes quiet: a drum at 265 kPa with the same water is
-      # 11.4, a nearly-dry one 4.0, a cold one 0.
-      #
-      # Ten-odd volumes of steam is also where the criterion means something physically — no
-      # rent can pass ten vessel-volumes in the time the flash takes, so the shell has to go.
+      # **12 is measured at the real event**, not from a table: running into the low-water hazard
+      # with the plug removed, the drum ruptures holding 626 kg at 609 kPa — 67 kg of flash
+      # steam, **22.8 drum-volumes**. That keeps the crown-sheet rupture explosive by a factor of
+      # 1.9 while leaving the quiet regimes quiet: the same water at 265 kPa is 11.4, a nearly-dry
+      # drum 4.0, a cold one 0. Ten-odd volumes is also where the criterion means something
+      # physically — no rent passes ten vessel-volumes in the time the flash takes.
       FLASH_EXPANSION_FOR_RUPTURE = 12.0
 
       attr_reader :steam_port, :carryover_tags, :wetness, :foaming_wetness, :priming_wetness,
@@ -119,8 +80,13 @@ module ReactorSim
                      wetness: 0.005, foaming_wetness: 0.30, priming_wetness: 0.97,
                      onset_fill: 0.55, swell_pa_per_s: 0.0, max_swell: 0.35,
                      swell_settle_s: 8.0, swell_rise_s: 2.0,
-                     crown_fill: 0.0, fired_by: nil, **options)
+                     crown_fill: 0.0, fired_by: nil, working_pressure_pa: nil, **options)
         super(id: id, **options)
+        # What this drum is FOR, as opposed to what its shell can stand. `rated_pressure_pa`
+        # comes from hoop stress and is ~2.4x this on a correct boiler, so it is no use as a
+        # "there is a full head of steam" mark. Nil means this drum declines to say — an
+        # evaporator has no working pressure worth announcing — and then nothing is emitted.
+        @working_pressure_pa = working_pressure_pa&.to_f
         @steam_port = steam_port.to_sym
         @carryover_tags = carryover_tags.map(&:to_sym).freeze
         @wetness = wetness.to_f
@@ -184,44 +150,66 @@ module ReactorSim
           crown_temperature_k: crown_temperature_k(next_state, ctx)
         )
 
+        next_state, raised = note_steam_raised(next_state, ctx, now)
+        events += raised
+
         events.empty? ? next_state : [ next_state, events ]
       end
 
-      # ## The crown sheet: the plate over the fire, and the reason low water kills
+      # How far the pressure has to fall before a second full head of steam counts as a new one,
+      # as a fraction of the working pressure. Hysteresis for the same reason `ReliefValve` needs
+      # it, though the danger is milder here: a drum hovering at its working pressure would
+      # otherwise announce itself at the tick rate.
+      REARM_FRACTION = 0.9
+
+      # **This re-arms rather than latching forever**, and that is a deliberate difference from
+      # the fusible plug. "The first time ever" is the delivery tier's question to answer from
+      # its own records; what the drum can honestly report is that it has *a* full head of steam
+      # now, each time it comes back up to one. An interval predicate — an hour of running
+      # without lifting the safety valve — needs that interval re-opened after a bad spell, and a
+      # latch would give it exactly one chance per match.
+      def note_steam_raised(state, ctx, pressure_pa)
+        return [ state, [] ] if @working_pressure_pa.nil?
+
+        had = state.fetch(:full_head, false)
+        has = pressure_pa >= @working_pressure_pa ||
+              (had && pressure_pa > (@working_pressure_pa * REARM_FRACTION))
+        return [ state.merge(full_head: has), [] ] if has == had || !has
+
+        [ state.merge(full_head: true),
+          [ Event.build(type: :steam_raised, node: id, label: label, severity: :info,
+                        tick: ctx.tick,
+                        detail: { pressure_pa: pressure_pa.round(1),
+                                  working_pressure_pa: @working_pressure_pa.round(1) }) ] ]
+      end
+
+      # **The crown sheet: the plate over the fire, and the one hazard a lumped body cannot
+      # express.** `temperature_k` on a drum at 5% water is not high — it is the same saturation
+      # temperature as one at 60%, held by a smaller mass. **A dry boiler in a lumped model is
+      # not hot, merely empty**, so no `max_temperature_k` on this node could ever trip however
+      # far the water fell.
       #
-      # **This is the one hazard a lumped body genuinely cannot express**, and it is worth being
-      # precise about why. Everything else here works because a drum's contents are well mixed;
-      # its temperature is a real number that means something. But `temperature_k` on a boiler at
-      # 5% water is *not high* — it is the same saturation temperature as a boiler at 60%, held
-      # by a smaller mass. **A dry boiler in a lumped model is not hot, merely empty.** So no
-      # `max_temperature_k` on this node could ever trip, however far the water fell, and the
-      # feed lever kept its ceiling and had no floor.
-      #
-      # The real failure is *positional* and a lumped model has no positions. The crown sheet is
-      # the plate forming the top of the firebox. While water covers it, it runs a few degrees
+      # The real failure is *positional*. While water covers the plate it runs a few degrees
       # above the water and is safe at any fire, because boiling water against steel is an
-      # extraordinarily good heat sink. Uncover it and it is a steel plate with a fire on one side
-      # and steam — a poor conductor — on the other. It reaches red heat in minutes, loses its
-      # strength, and lets go; and because the whole water content then flashes through the hole
-      # at once, this is the failure that killed crews rather than merely wrecking engines.
+      # excellent heat sink. Uncover it and it is steel with a fire on one side and steam — a
+      # poor conductor — on the other: red heat in minutes, then it lets go, and the whole water
+      # content flashes through the hole at once.
       #
-      # So the plate gets a derived temperature of its own, blended between the water it is
-      # supposed to be under and the fire it is over:
+      # So the plate gets a derived temperature, blended between the water it should be under and
+      # the fire it is over:
       #
       #     T_crown = T_water + exposure · (T_fire − T_water)
       #
-      # That blend is a lumped approximation of its own and deliberately so — a bare plate does
-      # still conduct something into the steam space, so it does not truly reach fire temperature.
-      # What matters is that it is **monotone in exposure and reaches destructive values before
-      # full exposure**, which is what makes low water a gradient a player can be caught on rather
-      # than a cliff.
+      # A lumped approximation of its own, deliberately: a bare plate still conducts something
+      # into the steam space, so it does not truly reach fire temperature. What matters is that
+      # it is monotone in exposure and destructive before *full* exposure, which makes low water
+      # a gradient rather than a cliff.
       #
-      # > **It reads the TRUE fill, while the gauge glass shows the swelled one, and that gap is
-      # > the trap.** `effective_fill` includes the bubbles the water is holding, because that is
-      # > what a real glass shows; the plate is cooled by water, not by froth. So exactly when the
-      # > engine is being worked hard enough to swell the drum, the glass reads high while the
-      # > plate is uncovering. That is not a contrivance — it is the classic accident, and the
-      # > reason every firing manual tells you to trust the try-cocks over the glass.
+      # > **It reads the TRUE fill while the gauge glass shows the swelled one, and that gap is
+      # > the trap.** `effective_fill` includes the bubbles, because that is what a real glass
+      # > shows; the plate is cooled by water, not froth. So exactly when the engine is worked
+      # > hard enough to swell the drum, the glass reads high while the plate uncovers — which is
+      # > why every firing manual says to trust the try-cocks over the glass.
       def crown_exposure(state, content)
         return 0.0 if @crown_fill <= 0.0 || volume_m3 <= 0.0
 
@@ -283,6 +271,19 @@ module ReactorSim
       # The flash steam's volume at ambient, as a multiple of the drum's own — which is the
       # figure that decides whether a rent relieves or unzips. Dimensionless on purpose: it
       # means the same thing to a locomotive barrel and a tea urn.
+      # **How big it was, not merely that it happened.** `Vessel` reports the temperature and
+      # pressure; a drum adds what actually decides the violence — the flash expansion that
+      # peeled the plate back, and the water behind it.
+      #
+      # This is on the event rather than left to be looked up, because it is what a hazard
+      # SCALES with: a small drum letting go and a locomotive barrel letting go are not the same
+      # event for anybody standing nearby, and `Tick#hazards_from` reads this figure to say so.
+      # It also means the durable record carries why an injury was as bad as it was.
+      def failure_detail(state, ctx)
+        super.merge(flash_expansion: flash_expansion(state, ctx).round(2),
+                    contents_kg: contents_kg(state).round(1))
+      end
+
       def flash_expansion(state, ctx)
         return 0.0 if volume_m3 <= 0.0
 
@@ -342,35 +343,26 @@ module ReactorSim
         excess.positive? ? (excess / ceiling) * stress_rate : 0.0
       end
 
-      # ## The pressure fall the water actually responds to, which is not one tick's worth
+      # **The pressure fall the water responds to, which is not one tick's worth.** A rate of
+      # change measured across a single timestep is whatever the solver did in that step, not a
+      # physical signal — a one-tick 2.3 kPa dip reads as 9 102 Pa/s, past the figure that
+      # saturates the mechanic, so the glass would jump 40 percentage points in 250 ms on
+      # ordinary solver noise.
       #
-      # **A rate of change measured across a single timestep is whatever the solver did in that
-      # step, not a physical signal.** Taken raw, a one-tick 2.3 kPa dip on opening the regulator
-      # read as 9 102 Pa/s — past the 8 000 Pa/s that saturates the mechanic — so the void went
-      # from nothing to its maximum in 250 ms and the gauge glass jumped **40 percentage points
-      # in one tick**, then decayed for twelve seconds. Every isolated blip did that. It was a
-      # spike detector wearing a swell model's clothes, and it made the glass unreadable: at a
-      # steady feed of 35 it showed 90.9% full on a drum genuinely 50.7% full.
+      # Smoothed over `swell_rise_s` because that is the physics rather than a filter: bubbles
+      # take finite time to nucleate and grow, so a void fraction cannot track a 250 ms
+      # transient. It is also the discrimination the mechanic needs — a sustained demand step
+      # saturates within seconds, while one tick of noise reaches a tenth of the way and decays.
       #
-      # Smoothed over `swell_rise_s`, because that is the physics rather than a filter: bubbles
-      # take finite time to nucleate and grow, so a void fraction **cannot** track a 250 ms
-      # transient. It is also exactly the discrimination the mechanic needs — a sustained demand
-      # step still saturates it within a few seconds, while a single tick of solver noise reaches
-      # about a tenth of the way and decays.
-      #
-      # Note the raw signal is zero on most ticks even under load, because a fire keeping up with
-      # demand leaves the pressure *rising*. That is why this must integrate rather than sample:
-      # the interesting quantity is how hard the drum is being pulled down over a second or two,
-      # not whether it happened to be falling on the tick we looked.
+      # The raw signal is zero on most ticks even under load, because a fire keeping up leaves
+      # the pressure *rising*. This must integrate rather than sample: the quantity is how hard
+      # the drum is pulled down over a second or two, not whether it fell on the tick we looked.
       #
       # > **Smooth the SIGNED rate and rectify afterwards, never the other way round.** Rectifying
-      # > first and then averaging takes the mean of `|x|` where the mean of `x` was wanted, so a
-      # > symmetric tick-scale ripple with no net drift averages to a large *positive* fall out of
-      # > nothing at all. Measured: swell pinned at its 45% maximum permanently whenever the engine
-      # > was working, on a boiler whose pressure was not falling — the glass read 92% full on a
-      # > drum genuinely 50.6% full, and a sustained 8 kPa/s would have emptied it of pressure
-      # > eighteen times over in the time it supposedly held. A rectified average is a rectifier,
-      # > not an average.
+      # > first takes the mean of `|x|` where the mean of `x` was wanted, so a symmetric ripple
+      # > with no net drift averages to a large positive fall out of nothing — pinning swell at
+      # > its maximum on a boiler whose pressure is not falling. A rectified average is a
+      # > rectifier, not an average.
       def smoothed_trend(state, instant, dt)
         return instant if @swell_rise_s <= 0.0
 
@@ -423,28 +415,19 @@ module ReactorSim
         @carryover_tags.to_h { |tag| [ tag, weight ] }
       end
 
-      # ## Swell: the bubbles the water is holding, and the reason priming is an *event*
+      # **Swell: the bubbles the water is holding, and the reason priming is an *event*.** A drum
+      # working hard is water full of bubbles, and the bubbles take room. Draw harder and the
+      # pressure falls, the water flashes, the void grows and the level lifts, which is what
+      # carries it over into the offtake; ease off and it collapses back. This is why the sources
+      # put priming at *"the regulator opened sharply or steam demand high"* rather than at any
+      # particular water level: **the hazard is something you do, not somewhere you are.**
       #
-      # A drum working hard is not water with steam above it — it is water full of bubbles, and
-      # the bubbles take room. Draw harder and the pressure falls, the water flashes, the void
-      # grows and **the level lifts**, which is what carries it over into the offtake. Ease off
-      # and it collapses back. This is the shrink/swell every boiler-level controller is built to
-      # fight, and it is why the sources put priming at *"the regulator opened sharply or steam
-      # demand high"* rather than at any particular water level.
+      # Driven by how fast the drum is losing pressure, which is what flashes the water into
+      # bubbles. Zero in steady running whatever the load, so it costs an ordinary engine
+      # nothing. Evolved in `apply`; see `settled_swell` for why it decays rather than tracks.
       #
-      # Without it, carryover was a function of the static level alone: a steady property of how
-      # full the boiler was, with no transient and therefore no moment. A player could be at 74%
-      # for an hour and nothing would ever happen. **The hazard has to be something you do, not
-      # somewhere you are.**
-      #
-      # Driven by how fast the drum is **losing pressure**, which is what flashes the water into
-      # bubbles. Zero in steady running, whatever the load, so this costs an ordinary engine
-      # nothing at all — it is a transient or it is not there. Evolved in `apply`; see
-      # `settled_swell` for why it decays rather than tracking.
-      #
-      # (Named `swell_fraction` rather than `void_fraction` because **`Vessel` already has a
-      # `void_fraction`** — the packing of a bed, which is configuration, not state. Overriding it
-      # here gave one name two meanings and two arities on the same class.)
+      # Named `swell_fraction` rather than `void_fraction` because `Vessel` already has one — the
+      # packing of a bed, which is configuration rather than state.
       def swell_fraction(state) = state.fetch(:swell, 0.0)
 
       # The level the water actually stands at, bubbles included: `fill / (1 − swell)`.
@@ -465,11 +448,10 @@ module ReactorSim
       # Calm below the onset level, degrading linearly toward the foaming figure as it fills.
       #
       # **Level means the LIQUID, and `contents_volume` is not it.** That counts every parcel at
-      # its nominal density, gases included, and a gas has no business being measured that way —
-      # it expands to fill whatever it is in. Using it read a **317% full** boiler and pinned
-      # this at the foaming figure from the first tick, so every engine primed itself to death
-      # regardless of how it was fired. `room_m3` already applies the right rule (condensed
-      # phases only), so the water level is what it has not left room for.
+      # its nominal density, gases included, and a gas expands to fill whatever it is in — read
+      # that way a drum measures over 300% full and pins at the foaming figure from tick one.
+      # `room_m3` applies the right rule (condensed phases only), so the water level is what it
+      # has not left room for.
       #
       # ## Two regimes, because carryover is not one phenomenon
       #

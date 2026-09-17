@@ -21,7 +21,9 @@
 #   * **Material names are resource ids the simulation knows** (`content/resources/`), checked at
 #     catalogue build. There is no `copper` — the six metals are cast_iron, wrought_iron, steel,
 #     bronze, babbitt and fusible_alloy. Quantities are kilograms.
-#   * **`requires` names an achievement** (`Achievement::KNOWN`), also checked. Optional.
+#   * **`requires` names an achievement** (`Achievement.known`, derived from the definitions in
+#     `app/models/achievement.rb`), also checked. Optional — and no longer decorative: the gate
+#     reads the `awards` table, so a blueprint naming one is genuinely locked until it is earned.
 #
 # ## The numbers are provisional and are meant to look it
 #
@@ -49,16 +51,67 @@ chassis:
       cast_iron: 4200
       wrought_iron: 1800
 
-# You unlock the template, never the person. Health, fatigue and station are minted fresh inside
-# each match and die with it, exactly as a part's condition does.
+# **You unlock the person.** This said the opposite for a release — "you unlock the template,
+# never the person" — and it was wrong along with everything else that enumerated `fireman` and
+# `yardhand`, which are jobs rather than people. Health, fatigue, station and injury are still
+# minted fresh inside each match and die with it, exactly as a part's condition does; what
+# persists is who you have hired, what they have been trained in, and what kit they own.
 #
-# Free because a crew is not built out of metal. What a minion should actually cost — wages,
-# reputation, an achievement — is a question for whenever minions do real work.
+# Free because a crew is not built out of metal. What hiring somebody should actually cost —
+# wages, reputation, an achievement — is a question for whenever minions do real work.
 minion:
-  fireman:
+  jim:
     materials: {}
-  yardhand:
+  elowynne:
     materials: {}
+  galathas:
+    materials: {}
+
+# **Priced by the ITEM, not by the (minion, item) pair.** Ownership is per minion — Jim's apron
+# and Elowynne's apron are two separate unlocks with ids `jim/leather_apron` and
+# `elowynne/leather_apron` — but an apron costs what an apron costs, whoever it is cut for.
+#
+# Pricing the pair would mean one line here for every combination: 39 today, every one identical,
+# and a fresh row needed the moment anybody hires a fourth minion. That is precisely the
+# inventory list that drifts silently. `Blueprint.build` takes `priced_as:` for it.
+equipment:
+  stokers_shovel:
+    materials: { steel: 3, wrought_iron: 1 }
+  gauge_spanner:
+    materials: { steel: 2 }
+  crude_miners_tools:
+    materials: { steel: 2, wrought_iron: 2 }
+  leather_apron:
+    materials: {}
+  fettlers_gloves:
+    materials: {}
+  oilskin_coat:
+    materials: {}
+  ear_defenders:
+    materials: {}
+  # Gated: you do not go down a hole with a lamp until you have raised steam above ground.
+  hand_lamp:
+    materials: { bronze: 2, steel: 1 }
+    requires: first_full_head_of_steam
+  lucky_amulet:
+    materials: { bronze: 1 }
+    requires: burst_a_flywheel
+
+# Training is bought with time rather than metal, so every one of these is free of materials and
+# gated on having actually done the thing instead. That is the shape a course *should* have: you
+# cannot certify somebody for hot work in a shop that has never raised steam.
+training:
+  hot_work_ticket:
+    materials: {}
+    requires: first_full_head_of_steam
+  boilermans_course:
+    materials: {}
+    requires: raised_steam_from_cold_alone
+  steady_hands:
+    materials: {}
+  pit_sense:
+    materials: {}
+    requires: ran_an_hour_without_blowing_off
 
 part:
   # --- fire -------------------------------------------------------------------------------
@@ -131,6 +184,27 @@ part:
       bronze: 6
       steel: 3
     requires: ran_an_hour_without_blowing_off
+
+  # The water gauges. Same pricing difficulty as the pressure dials and the same answer: a sight
+  # glass is a tube and two cocks, so the bill of materials cannot carry the progression. What
+  # separates these is what you had to *do* to earn the right to fit one.
+  #
+  # Try-cocks are free and starting kit: the older way of reading the water, and the tier every
+  # new operation begins on.
+  # (No `glass` material: `materials.yml` entries carry tensile strength and density because the
+  # physics reads them, so inventing one to express a shopping cost would put an unrated
+  # structural material in the registry. The brasswork is the part that is actually made.)
+  try_cocks:
+    materials: {}
+  gauge_glass:
+    materials:
+      bronze: 3
+      steel: 1
+  reflex_gauge_glass:
+    materials:
+      bronze: 4
+      steel: 2
+    requires: raised_steam_from_cold_alone
 
   # --- water ------------------------------------------------------------------------------
   stock_water_supply:
