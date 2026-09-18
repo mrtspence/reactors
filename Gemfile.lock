@@ -298,31 +298,31 @@ GEM
       logger
       prism (>= 1.6.0)
       tsort
-    rdkafka (0.29.0)
+    rdkafka (0.29.2)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    rdkafka (0.29.0-aarch64-linux-gnu)
+    rdkafka (0.29.2-aarch64-linux-gnu)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    rdkafka (0.29.0-aarch64-linux-musl)
+    rdkafka (0.29.2-aarch64-linux-musl)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    rdkafka (0.29.0-x86_64-linux-gnu)
+    rdkafka (0.29.2-x86_64-linux-gnu)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    rdkafka (0.29.0-x86_64-linux-musl)
+    rdkafka (0.29.2-x86_64-linux-musl)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
@@ -478,7 +478,7 @@ DEPENDENCIES
   propshaft
   puma (>= 5.0)
   rails (~> 8.1.3, >= 8.1.3.1)
-  rdkafka (~> 0.19)
+  rdkafka (~> 0.29)
   rspec-rails
   rubocop-rails-omakase
   solid_cable
@@ -602,11 +602,11 @@ CHECKSUMS
   rainbow (3.1.1) sha256=039491aa3a89f42efa1d6dec2fc4e62ede96eb6acd95e52f1ad581182b79bc6a
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   rbs (4.1.3) sha256=0c4474a9751cdc14364bfad0b3e53678323bbdc2c31683b0445932867dbab8c4
-  rdkafka (0.29.0) sha256=217e6d59e2ccf6520d0f82315c1927a506953068993f515d6b7064d29d11a393
-  rdkafka (0.29.0-aarch64-linux-gnu) sha256=099db18ab0fcfd1f13ac15ed32bc0855f8ca7a6f8cc48be35f91290dd88b6190
-  rdkafka (0.29.0-aarch64-linux-musl) sha256=ab05195a84f504e4fae7ed51592ed15836e1033b2fbd62043953bc447dec01e5
-  rdkafka (0.29.0-x86_64-linux-gnu) sha256=9bc3fdc9e1a4a5835d89affb5b64c7647382e0bf330fe614de08c47049a289d6
-  rdkafka (0.29.0-x86_64-linux-musl) sha256=f5d892baf99ee0efb1bafe21cf7cbde9b37e006a61d04270e2ec2b34cf910ea7
+  rdkafka (0.29.2) sha256=57307cb7e72e1a5997fb18813e9e079d820a973cbca581b95b9550d73d3634bd
+  rdkafka (0.29.2-aarch64-linux-gnu) sha256=3dadc2d63c7642c9b24b6984c12acb1445f6a3dc3ead765bd217558b2c7edef8
+  rdkafka (0.29.2-aarch64-linux-musl) sha256=5eb69a1ec2dc52bf53e1f15b94171aef10b47c4922ae65c7ec964845fb13cdd0
+  rdkafka (0.29.2-x86_64-linux-gnu) sha256=2d46e80416680689cd3ec9bca44a746f05e13cebb050769d9efb88a31f8e2a2e
+  rdkafka (0.29.2-x86_64-linux-musl) sha256=9800553d5bd05ed419776422293e6412fba221a35f3407f4189dcf425214dd97
   rdoc (8.0.0) sha256=03bf8c08a9639658855a0cfd77c0abca8325c227693f7f33f82957811348c469
   regexp_parser (2.12.0) sha256=35a916a1d63190ab5c9009457136ae5f3c0c7512d60291d0d1378ba18ce08ebb
   reline (0.7.0) sha256=5b012d8e55dbf9d450f12bde2cf7d15ff546ae80b3f8f3b30e570d431815583d
