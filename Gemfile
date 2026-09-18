@@ -43,7 +43,7 @@ gem "solid_cable"
 #     message-driven framework.
 #   * karafka drives the egress consumers, which genuinely are message-driven. Its Web
 #     UI is also where consumer lag and partition assignment become visible.
-gem "rdkafka", "~> 0.19"
+gem "rdkafka", "~> 0.29"
 gem "karafka", "~> 2.4"
 
 # Reduces boot times through caching; required in config/boot.rb
