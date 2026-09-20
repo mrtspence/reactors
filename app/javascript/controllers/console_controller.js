@@ -25,8 +25,16 @@ export default class extends Controller {
   // producer does not wait on delivery.
   static PENDING_TIMEOUT_MS = 2000
 
+  // How long the run we are watching must go quiet before an unfamiliar one is taken as its
+  // successor. A restarted runner announces nothing, so silence is the only signal; a reset
+  // says `supersedes` and does not wait this out.
+  static FOREIGN_RUN_GRACE_MS = 2000
+
   connect() {
     this.state = { gauges: {}, flags: {}, controls: {}, crew: {}, tick: null }
+    this.runId = null
+    this.lastRunAt = 0
+    this.foreignAt = 0
     this.pending = new Map()
     this.queued = new Map()
     this.timer = null
@@ -85,6 +93,8 @@ export default class extends Controller {
       return this.appendIncidents(message.incidents || [])
     }
 
+    if (!this.admitRun(message)) return
+
     // A tick that goes BACKWARDS means this is a different match than the one we were
     // watching — a reset rebuilds it from tick 0, and so does restarting the runner. The
     // incident list is the only thing that accumulates across ticks, so it is the only thing
@@ -120,6 +130,53 @@ export default class extends Controller {
     this.paint()
   }
 
+  // Whether this message describes the match we are watching.
+  //
+  // Nothing stops a second `bin/match_runner` broadcasting onto this stream. It holds its own
+  // match, at its own tick, with its own levers — and only one of them can hold the command
+  // partition, so the other stays cold. An idle engine is skipped until the periodic full view,
+  // which then arrives as one frame of a dead machine and replaces the panel wholesale.
+  //
+  // A run changes legitimately on a reset, which says so, and on a runner restart, which cannot
+  // — so silence from our own run stands in for the announcement a restart never makes.
+  admitRun(message) {
+    const runId = message.run_id
+    if (!runId) return true
+
+    const now = Date.now()
+    const grace = this.constructor.FOREIGN_RUN_GRACE_MS
+
+    if (this.runId === null || runId === this.runId) {
+      this.runId = runId
+      this.lastRunAt = now
+      if (this.foreignAt && now - this.foreignAt > 5 * grace) {
+        this.foreignAt = 0
+        this.setStatus("live", "text-emerald-300")
+      }
+      return true
+    }
+
+    if (message.supersedes !== this.runId && now - this.lastRunAt < grace) {
+      if (!this.foreignAt) {
+        console.warn(`console: ignoring views from run ${runId}; watching ${this.runId}. ` +
+                     "Two runners are broadcasting to this match.")
+      }
+      this.foreignAt = now
+      this.setStatus("two runners", "text-amber-300")
+      return false
+    }
+
+    this.runId = runId
+    this.lastRunAt = now
+    this.clearIncidents()
+    this.state = { gauges: {}, flags: {}, controls: {}, crew: {}, tick: null }
+    if (message.kind !== "full") {
+      this.resync()
+      return false
+    }
+    return true
+  }
+
   paint() {
     if (this.hasTickTarget) this.tickTarget.textContent = this.state.tick ?? "—"
 
@@ -148,6 +205,8 @@ export default class extends Controller {
       select.value = crew.station || ""
     }
 
+    this.paintFatigue(el, crew)
+
     const injury = el.querySelector("[data-minion-injury]")
     if (!injury) return
 
@@ -156,6 +215,19 @@ export default class extends Controller {
     // A scratch and being carried out are not the same news.
     injury.classList.toggle("text-amber-400", crew.injury === "minor")
     injury.classList.toggle("text-rose-400", Boolean(crew.injury) && crew.injury !== "minor")
+  }
+
+  // A spent worker mans nothing at all — capability is exactly zero — so the bar filling is the
+  // warning that a station is about to stop producing, and it is the cue to swap somebody in.
+  paintFatigue(el, crew) {
+    const bar = el.querySelector("[data-minion-fatigue]")
+    if (!bar) return
+
+    const fatigue = typeof crew.fatigue === "number" ? crew.fatigue : 0
+    bar.style.width = `${Math.round(Math.min(Math.max(fatigue, 0), 1) * 100)}%`
+    bar.classList.toggle("bg-slate-400", fatigue < 0.5)
+    bar.classList.toggle("bg-amber-400", fatigue >= 0.5 && fatigue < 0.85)
+    bar.classList.toggle("bg-rose-400", fatigue >= 0.85)
   }
 
   paintInstrument(el, value, flags) {

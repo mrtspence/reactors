@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_16_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -84,6 +84,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_130000) do
     t.string "run_id"
     t.datetime "updated_at", null: false
     t.index ["owner_id", "minion_id"], name: "index_minion_conditions_on_owner_id_and_minion_id", unique: true
+  end
+
+  create_table "operations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "kind", null: false
+    t.string "match_id", null: false
+    t.string "operation_id", null: false
+    t.string "owner_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["match_id", "operation_id"], name: "index_operations_on_match_id_and_operation_id", unique: true
+    t.index ["owner_id"], name: "index_operations_on_owner_id"
   end
 
   create_table "progresses", force: :cascade do |t|

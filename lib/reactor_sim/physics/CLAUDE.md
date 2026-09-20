@@ -51,8 +51,21 @@ extent          = limiting_reagent · (1 − e^(−rate_per_s · dt))   # reacti
 **One solver, three quantities** — heat capacity ↔ moment of inertia ↔ `dn/dP`, temperature ↔
 angular velocity ↔ pressure. Heat conserves **energy** exactly; gas conserves **mass**
 exactly; rotation conserves **momentum** exactly and kinetic energy deliberately not — a
-slipping coupling loses energy, and `Tick#drive` measures the difference and ledgers it as
-`joules_to_friction`.
+slipping coupling and a brake both take energy out, and `Tick#drive` measures the difference,
+splitting it between `joules_to_work` and `joules_to_friction`.
+
+`drags:` is the fourth argument that matters: `{ node_id => conductance }`, a coupling to a
+reservoir at potential zero, so it adds to the diagonal and nothing to `b`. **A drag has to be
+solved with the network rather than applied after it** — composing two exact integrations is
+still first-order splitting, and it left a fan-law mill at 8.5 rad/s against a true equilibrium
+of 19.6 while the coupling above it burned 39% of shaft power. In the solve: 85% mechanical
+efficiency. Halving `dt` halved the gap, which is how a split announces itself.
+
+> **Measure the total, estimate only the split.** Kinetic energy is quadratic, so no intermediate
+> state between two settled ticks means anything: applying the couplings, measuring, then the
+> drags charges each for a state the machine was never in. That inflated a mill's output past its
+> own engine's and drove `joules_to_friction` **negative** while the totals still balanced — so
+> the conservation specs stayed green throughout.
 
 > **The pairwise closed form was not enough and its replacement was worse.** Per-coupling
 > exactness does not compose in a network, and it cannot express flow *through* a body — so

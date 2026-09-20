@@ -40,6 +40,9 @@ class MatchRunner
     # a burst flywheel. Assigned HERE because the simulation may not have a clock; this is
     # also the identifier `match.lifecycle` will carry when matches are created on demand.
     @run_ids = @matches.keys.to_h { |id| [ id, new_run_id ] }
+    # The run each current run replaced, for as long as it is the current one. A client watching
+    # the old run needs to be told this one is its successor rather than a stranger.
+    @superseded = {}
   end
 
   # Time-ordered, so a listing of runs sorts chronologically without a join.
@@ -70,7 +73,7 @@ class MatchRunner
       lateness = monotonic - (deadline - ReactorSim::DT)
 
       drain
-      @matches.each_value { |match| advance(match) }
+      @matches.each_key { |match_id| advance(match_id) }
       heartbeat(ticks, lateness) if (ticks % HEARTBEAT_TICKS).zero?
       sleep_until(deadline)
     end
@@ -94,11 +97,16 @@ class MatchRunner
     @source.drain(@inboxes)
   end
 
-  def advance(match)
-    pending = @inboxes.delete(match.id) || []
+  def advance(match_id)
+    match = @matches.fetch(match_id)
+    pending = @inboxes.delete(match_id) || []
     commands, local = pending.partition { |c| SIM_TYPES.include?(c["type"]) }
 
     local.each { |command| handle_local(match, command) }
+    # A reset swapped in a new Match, and the rest of this tick belongs to it — that is what
+    # makes "reset, then open the throttle" mean what it says. Holding the object from before
+    # the barrier steps and publishes the match that was just discarded.
+    match = @matches.fetch(match_id)
     apply(match, commands)
 
     # **The dual write** (docs/architecture.md §7): the record, then the cache. Order matters
@@ -151,7 +159,12 @@ class MatchRunner
   def publish(match)
     return unless @sink
 
-    match.operations.each { |operation| @sink.publish(match, operation) }
+    match.operations.each { |operation| @sink.publish(match, operation, **run_stamp(match)) }
+  end
+
+  # Which build of this match the values describe. Every projection carries it.
+  def run_stamp(match)
+    { run_id: @run_ids[match.id], supersedes: @superseded[match.id] }
   end
 
   # Commands addressed to the runner rather than to the simulation. They ride the same log as
@@ -160,7 +173,7 @@ class MatchRunner
   def handle_local(match, command)
     case command["type"]
     when "reset_match" then reset(match, command)
-    when "resync"      then @sink&.publish(match, nil, full: true)
+    when "resync"      then @sink&.publish(match, nil, full: true, **run_stamp(match))
     else @logger.warn("runner: unknown command type #{command['type'].inspect}")
     end
   end
@@ -176,19 +189,21 @@ class MatchRunner
   # A proper implementation puts this on `match.lifecycle` with created/started/ended semantics
   # and archives the finished match's seed + command log, since that pair IS the replay.
   def reset(match, command = {})
-    chassis = command["chassis"]&.to_sym
-    loadout = command["loadout"]&.to_h { |slot, part| [ slot.to_sym, part&.to_sym ] }
-    # Handed over as it arrived. `Crew.normalise` does the symbolising at build, where every
-    # role is named and every empty slot made explicit — doing it here as well would be a second
-    # place for the two to disagree about what an empty posting means.
-    crew = command["crew"]
+    # **Keyed by operation**, because a match holds several and a reset rebuilds all of them.
+    # Symbolising and defaulting are `DevMatch#operation_spec`'s job, so this hands the payload
+    # over as it arrived rather than becoming a second place the two can disagree.
+    specs = command["operations"] || {}
 
-    @logger.info("runner: resetting #{match.id}#{" as #{chassis}" if chassis}")
-    @matches[match.id] = DevMatch.build(chassis: chassis, loadout: loadout, crew: crew)
+    @logger.info("runner: resetting #{match.id} (#{specs.keys.join(', ')})")
+    @matches[match.id] = DevMatch.build(specs: specs)
     # A new build is a new run, and the durable log has to say so. Ticks restart at zero, so
     # reusing the id would make the next run's events collide with this one's — and it also
     # tells a consumer to abandon any interval it had open, rather than closing it against a
     # transition from a machine that is not the same machine.
+    #
+    # Naming the run it replaces is what lets a watching client adopt this one immediately
+    # instead of treating an unfamiliar run as a second runner shouting over the first.
+    @superseded[match.id] = @run_ids[match.id]
     @run_ids[match.id] = new_run_id
     @sink&.reset(match.id)
   rescue ReactorSim::Error => e
@@ -202,9 +217,11 @@ class MatchRunner
   # since the loop started rather than the last tick's cost. A loop that sleeps a fixed
   # interval shows near-zero here while silently running slow; this one does not.
   def heartbeat(ticks, lateness)
+    # The first machine, named rather than stumbled into. A heartbeat reporting every operation
+    # would be one line per machine per tick; this is a pulse, not a readout.
     match = @matches.values.first
-    telemetry = match&.telemetry(operation_id: DevMatch::OPERATION_ID) || {}
-    controls = match&.operation(DevMatch::OPERATION_ID)&.state&.fetch(:controls) || {}
+    telemetry = match&.telemetry(operation_id: DevMatch::PRIMARY) || {}
+    controls = match&.operation(DevMatch::PRIMARY)&.state&.fetch(:controls) || {}
 
     # `lost` is the count of event deliveries the broker did not accept. It is on the heartbeat
     # rather than raised because the tick loop may never wait on a delivery handle — so the

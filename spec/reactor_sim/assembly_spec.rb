@@ -559,10 +559,25 @@ RSpec.describe ReactorSim::Assembly do
         expect(real.fragment.nodes.map(&:id)).to include(:blower_fan)
       end
 
-      # It is deliberately half-built: the shape is right, the cost is not modelled. The
-      # outfitting screen has to be able to say so rather than presenting it as finished.
-      it "is flagged as work in progress" do
-        expect(ReactorSim::Parts.fetch(:stock_blower).wip).to be(true)
+      # **The `wip` flag existed because the blower was free**, and it is not any more: the
+      # bellows costs a person on the handles and the donkey costs fuel oil out of its own tank.
+      # Neither is half-built, so neither may claim to be.
+      it "is no longer flagged as work in progress, because it is no longer free" do
+        expect(ReactorSim::Parts.fetch(:hand_bellows).wip).to be(false)
+        expect(ReactorSim::Parts.fetch(:donkey_blower).wip).to be(false)
+      end
+
+      # The two ways to pay, and the whole of the blower slot's decision.
+      it "offers a blower paid for in crew time and one paid for in fuel" do
+        bellows = ReactorSim::Parts.fetch(:hand_bellows)
+        donkey = ReactorSim::Parts.fetch(:donkey_blower)
+
+        expect(bellows.kind).to be(donkey.kind)
+        # The bellows is somebody's work; the donkey is a machine with a tank.
+        expect(real(loadout: { blower: :hand_bellows }).fragment.control_points
+                 .find { |c| c.id == :blower }).to be_effort
+        expect(real(loadout: { blower: :donkey_blower }).fragment.nodes.map(&:id))
+          .to include(:donkey, :donkey_tank)
       end
     end
 

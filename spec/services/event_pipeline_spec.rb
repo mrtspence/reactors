@@ -29,10 +29,14 @@ RSpec.describe "the event pipeline" do
   def raise_steam(ticks: 1_700)
     match = ReactorSim::Match.create(
       id: "p", seed: 42,
-      operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure, loadout: {},
+      operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure,
+                      loadout: ReferenceCrew.loadout,
                       content: ReferenceCrew::CONTENT }.merge(ReferenceCrew.options) ]
     )
     op = match.operation(:eng)
+    # The opening move of a match: crew start in the quarters, so a cold start with nobody sent
+    # to the shovel raises no steam at all.
+    ReferenceCrew.deploy!(op)
     { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
       throttle_open: 0, load_demand: 0 }.each { |k, v| op.set_control(k, v) }
 
@@ -111,16 +115,20 @@ RSpec.describe "the event pipeline" do
     #
     # What does not move with balance is the shape: a real injury on a real machine has to carry
     # the PERSON and whether the injury lasts, because `InjuryList` cannot write the record
-    # without them. `node:` is the job — the fireman's post outlives whoever was standing in it —
-    # and a consumer given only that could not put anybody on the injury list at all.
-    it "carries the person and the verdict on a real injury, not just the job" do
+    # without them. `node:` is the SEAT — the post outlives whoever was standing in it — and a
+    # consumer given only that could not put anybody on the injury list at all.
+    it "carries the person and the verdict on a real injury, not just the seat" do
       match = ReactorSim::Match.create(
         id: "p", seed: 42,
-        operations: [ { id: "eng", type: :steam_engine, loadout: { fusible_plug: nil },
-                        crew: { fireman: { minion: :test_hand_a } },
+        operations: [ { id: "eng", type: :steam_engine,
+                        loadout: ReferenceCrew.loadout(fusible_plug: nil),
+                        crew: { crew_1: { minion: :test_hand_a } },
                         content: ReferenceCrew::CONTENT } ]
       )
       op = match.operation(:eng)
+      # Deploy the shift: crew start in the quarters, so nobody is at the firehole — and nobody
+      # is near the drum when it lets go — until they are sent.
+      op.assign_minion(:crew_1, :stoking)
       { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 0 }
         .each { |k, v| op.set_control(k, v) }
 
@@ -134,7 +142,7 @@ RSpec.describe "the event pipeline" do
       hurt = on_the_wire(match, events).find { |r| r["type"] == "minion_hurt" }
 
       expect(hurt).not_to be_nil, "nobody was hurt, so this proves nothing"
-      expect(hurt["node"]).to eq("fireman")
+      expect(hurt["node"]).to eq("crew_1")
       expect(hurt.fetch("detail")).to include("minion" => "test_hand_a")
       expect(hurt.fetch("detail")).to have_key("lasting")
     end

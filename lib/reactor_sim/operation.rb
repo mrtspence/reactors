@@ -140,7 +140,8 @@ module ReactorSim
     # the client once, with the panel; station and injury are state.
     def crew_view
       @state.fetch(:minions).to_h do |id, minion_state|
-        [ id, { station: minion_state[:station], injury: minion_state[:injury] } ]
+        [ id, { station: minion_state[:station], injury: minion_state[:injury],
+                fatigue: minion_state[:fatigue] } ]
       end.freeze
     end
 
@@ -155,11 +156,16 @@ module ReactorSim
 
     # Sent once when a client subscribes, so it can draw the panel. Values stream after.
     def panel
+      # **`controls` is what a player can move; `stations` is where a person can stand.** They
+      # were one list until the crew quarters, which is a posting with nothing to set — rendering
+      # it as a lever puts a slider on the panel that does nothing, and leaving it out of
+      # `stations` makes the one place crew start unreachable from the crew screen.
       { operation_id: @id,
         instruments: @diagnostics.values.map(&:chrome),
-        controls: @control_points.values.map { |c|
+        controls: @control_points.values.select(&:lever?).map { |c|
           { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit }
-        } }
+        },
+        stations: @control_points.values.map { |c| { id: c.id, label: c.label } } }
     end
 
     # Raw truth, bypassing the instruments entirely. For specs and the runner's stdout —

@@ -16,8 +16,12 @@
 class CrewDraftsController < ApplicationController
   include CrewParams
 
+  before_action :require_operator!
+
   def create
-    @crewing = Crewing.for(owner_id: DevPlayer::ID, crew: submitted_crew)
+    @crewing = Crewing.for(owner_id: current_player,
+                           operation_id: current_operation.operation_id,
+                           crew: submitted_crew)
 
     render "crews/edit"
   end

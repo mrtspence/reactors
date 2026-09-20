@@ -29,12 +29,14 @@ module ReactorSim
       attr_reader :heat_capacity, :ambient_conductance, :ambient_k,
                   :control_id, :max_temperature_k, :stress_rate, :conductance,
                   :stack_height_m, :head_control_id, :blast_from, :blast_pa_per_kg_per_s,
-                  :material
+                  :material, :driven_by, :lift_m, :efficiency, :rated_omega, :delivers_to
 
       def initialize(id:, label: nil, accepts: [], max_kg_per_s:, conductance: nil,
                      one_way: false,
                      stack_height_m: 0.0, head_pa: 0.0, head_control_id: nil,
                      blast_from: nil, blast_pa_per_kg_per_s: 0.0,
+                     driven_by: nil, lift_m: 0.0, efficiency: 1.0, rated_omega: nil,
+                     delivers_to: nil,
                      heat_capacity: 1.0e4, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, control_id: nil,
                      rangeability: 1.0, material: nil,
@@ -58,6 +60,21 @@ module ReactorSim
         @head_control_id = head_control_id&.to_sym
         @blast_from = blast_from&.to_sym
         @blast_pa_per_kg_per_s = blast_pa_per_kg_per_s.to_f
+        # **What pays for the head.** A conduit naming no shaft behaves exactly as it always
+        # did, which is what lets this land without touching anything already working.
+        #
+        # `lift_m` is static head the fitting must OVERCOME where `head_pa` is head it supplies;
+        # they sit in the same term because they are the same physics, differing only in sign.
+        @driven_by = driven_by&.to_sym
+        @lift_m = lift_m.to_f
+        @efficiency = efficiency.to_f
+        # The speed at which a driven fitting delivers its rated `head_pa`. Head goes as ω², so
+        # a machine turning at half speed supplies a quarter of its head — which is what makes a
+        # struggling engine deliver less draught rather than the same draught more slowly.
+        @rated_omega = rated_omega&.to_f
+        # Where the hydraulic half of the bill lands. Defaults to this fitting, which heats what
+        # it is blowing or pumping — see `drag_conductances`.
+        @delivers_to = (delivers_to || id).to_sym
         @heat_capacity = heat_capacity.to_f
         @ambient_conductance = ambient_conductance.to_f
         @ambient_k = ambient_k.to_f
@@ -123,7 +140,25 @@ module ReactorSim
           @head_pa
         end
 
-        fan + blast_pa(ctx)
+        (fan * speed_fraction(ctx)) + blast_pa(ctx)
+      end
+
+      # **Head goes as ω².** A fitting belted to a shaft supplies its rated head only at its
+      # rated speed; a stalling engine delivers a quarter of it at half speed, which is what
+      # makes a driven blower fail the way a real one does rather than merely slowly.
+      #
+      # 1.0 for an undriven conduit, so every existing fitting is untouched. Reads the previous
+      # tick's speed, like every other cross-node read — §4.2 of the sketch: the loop is
+      # negative feedback (faster shaft → more head → more flow → more torque → slower shaft),
+      # and a lag on negative feedback is damped.
+      def speed_fraction(ctx)
+        return 1.0 if @driven_by.nil?
+        return 0.0 if @rated_omega.nil? || !@rated_omega.positive?
+
+        omega = ctx.node_omega(@driven_by).to_f
+        return 0.0 unless omega.positive?
+
+        ((omega / @rated_omega)**2).clamp(0.0, 1.0)
       end
 
       # The blastpipe: exhaust discharged up the chimney drags flue gas with it, which is how a
@@ -210,6 +245,85 @@ module ReactorSim
       # that escapes. The escaping part is a `Nodes::Breach`, and conflating the two is the
       # mistake this model made first — see that class for why a throughput term cannot express
       # a spill.
+      # --- driven fittings ---------------------------------------------------------------
+      #
+      # **The shaft this fitting hangs off.** `Arbiter.drive_drags` already gathers drag from any
+      # node answering to `drag_shaft`, whether or not it rotates — that is exactly what a
+      # `Nodes::Bearing` is — so a driven conduit is picked up with no change to the arbiter, the
+      # relaxation solver or the tick.
+      def drag_shaft = @driven_by
+
+      # What the shaft pays, as a **conductance** rather than a torque.
+      #
+      # A drag conductance `c` means `τ = c·ω`, so `P = c·ω²` and `c = P/ω²`. Declaring it this
+      # way lands it on the diagonal of the backward-Euler drive solve, which is unconditionally
+      # stable at any `dt`; an applied torque would hand that back. It is also the right shape:
+      # for a centrifugal machine head goes as ω² and flow as ω, so `P ∝ ω³` and `c` is linear
+      # in ω — the same curve `Load`'s `:fan` already uses.
+      #
+      #   P_hydraulic = (head_pa + ρ·g·lift_m) · Q
+      #   P_shaft     = P_hydraulic / efficiency
+      #
+      # **Both terms collapse to zero when nothing is flowing**, which is the behaviour that
+      # matters: a pump against a shut valve costs its shaft almost nothing, and one that has
+      # lost its water costs nothing and delivers nothing.
+      #
+      # > A real centrifugal machine still churns against a closed valve — perhaps half its
+      # > rated power — so this understates a throttled pump. Modelling that needs a duty point
+      # > and a curve shape, which is `Load`'s `curve:`/`rated_omega:` machinery again and is
+      # > worth reaching for only if a sweep shows the flat answer makes the choice dull.
+      # **The two halves are different claims and are booked separately.** The hydraulic half
+      # went where the fitting sends it; the rest is what the fitting wasted. `Tick#book_drive`
+      # understands three kinds of destination — `:work` leaves the operation on the ledger,
+      # `:friction` leaves it as loss, and a node id becomes heat in that node's metal.
+      #
+      # `delivers_to:` defaults to the fitting itself, which is right for a **fan**: the air it
+      # blows stays in the operation and the pressure it put there dissipates into the stream,
+      # warming what passes. A **sump pump** says `delivers_to: :work`, because the water it
+      # lifted genuinely leaves and takes that energy with it.
+      def drag_conductances(state, ctx)
+        return {} if @driven_by.nil?
+
+        omega = ctx.node_omega(@driven_by).to_f
+        return {} unless omega.positive? && @efficiency.positive?
+
+        hydraulic_w = hydraulic_w(state, ctx)
+        return {} unless hydraulic_w.positive?
+
+        square = omega * omega
+        lost_w = (hydraulic_w / @efficiency) - hydraulic_w
+
+        { @delivers_to => hydraulic_w / square, id => lost_w / square }
+          .each_with_object(Hash.new(0.0)) { |(to, c), acc| acc[to] += c if c.positive? }
+      end
+
+      # `ΔP × Q`, where `Q` is the volume this wall actually passed last tick and `ΔP` is what
+      # it supplied plus what it had to lift against. `Tick#advect` records both, because a
+      # conduit is resolved through and has no other way to know.
+      def hydraulic_w(state, ctx)
+        return 0.0 unless ctx.dt.positive?
+
+        flow_m3_per_s = state.fetch(:carried_m3, 0.0) / ctx.dt
+        return 0.0 unless flow_m3_per_s.positive?
+
+        delta_pa = head_pa(ctx) + lift_pa(state)
+        return 0.0 unless delta_pa.positive?
+
+        delta_pa * flow_m3_per_s
+      end
+
+      # `ρ·g·h`. Static head is a property of the fluid being lifted, so the density is what
+      # actually went through — `kg/m³` of the stream itself — rather than a configured number
+      # that could disagree with it.
+      def lift_pa(state)
+        return 0.0 unless @lift_m.positive?
+
+        volume = state.fetch(:carried_m3, 0.0)
+        return 0.0 unless volume.positive?
+
+        (state.fetch(:carried_kg, 0.0) / volume) * Units::GRAVITY_M_PER_S2 * @lift_m
+      end
+
       def failure_modes = { rupture: { derates: { throughput: 0.7 } } }
 
       def failure_detail(state, ctx)

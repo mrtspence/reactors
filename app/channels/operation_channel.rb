@@ -2,18 +2,21 @@
 
 # One operation's telemetry, streaming to whoever is watching it.
 #
-# Read-only by design. Commands go over HTTP to `/matches/:id/commands` and into the log, not
-# down the cable — including the client's own resync request. That keeps every input on one
-# ordered path, and it is why this channel has no `receive` and no actions.
+# Read-only by design. Commands go over HTTP and into the log, not down the cable — including
+# the client's own resync request. That keeps every input on one ordered path, and it is why this
+# channel has no `receive` and no actions.
+#
+# **Subscription is gated on `viewable_by?`**, which is the permission that widens when
+# spectating lands; `operable_by?` is the one that will not. Everyone still gets the player view
+# — `project(viewer: :spectator)` exists and is what a non-owner should receive, and choosing
+# between them is stage E of `operator_identity.md`.
 class OperationChannel < ApplicationCable::Channel
   def subscribed
-    # TODO: expedient — anyone may watch anything, and everyone gets the player view. A proper
-    # implementation checks that this player is in this match and streams the spectator
-    # projection to everyone else (`project(viewer: :spectator)` already exists for it).
-    return reject unless params[:match_id] == DevMatch::ID
+    operation = Operation.locate(params[:match_id], params[:operation_id])
+    return reject unless operation&.viewable_by?(DevPlayer::ID)
 
-    stream_from StreamNames.operation(match_id: params[:match_id],
-                                      operation_id: params[:operation_id])
+    stream_from StreamNames.operation(match_id: operation.match_id,
+                                      operation_id: operation.operation_id)
     backfill
   end
 

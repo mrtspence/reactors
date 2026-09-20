@@ -22,7 +22,8 @@ module ReactorSim
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
                   :reactions, :heater_control_id, :heater_watts, :igniter_kg_per_s,
                   :max_pressure_pa, :max_temperature_k, :stress_rate, :material,
-                  :shell_radius_m, :wall_thickness_m, :safety_factor
+                  :shell_radius_m, :wall_thickness_m, :safety_factor,
+                  :emissivity, :radiating_area_m2
 
       def initialize(id:, label: nil, volume_m3:, ports: [],
                      heat_capacity: 5.0e5, ambient_conductance: 0.0,
@@ -32,8 +33,14 @@ module ReactorSim
                      obstruction_tags: [], void_fraction: 1.0, material: nil,
                      shell_radius_m: nil, wall_thickness_m: nil, safety_factor: 1.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
-                     stress_rate: 0.0, damages: {}, endangers: {})
+                     stress_rate: 0.0, damages: {}, endangers: {},
+                     emissivity: 0.0, radiating_area_m2: 0.0)
         super(id: id, label: label, ports: ports)
+        # Radiant loss to the environment, on top of whatever `ambient_conductance` carries.
+        # Both default to nothing, so a vessel that has not been given a surface behaves exactly
+        # as it did before radiation existed.
+        @emissivity = emissivity.to_f
+        @radiating_area_m2 = radiating_area_m2.to_f
         # Who this takes with it when it goes, per failure mode. Configured rather than
         # declared, because which parts are near enough to be wrecked is a fact about the
         # machine and this class may not know a `:cylinder` exists. See `Concerns::Wearing`.

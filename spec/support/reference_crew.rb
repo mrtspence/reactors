@@ -33,8 +33,19 @@ require "reactor_sim"
 module ReferenceCrew
   # Flat 1.0 across the board. Not a race anybody can hire; it exists so a reference machine is a
   # reference machine.
-  ARCHETYPE = { label: "Test Hand", strength: 1.0, toughness: 1.0, intelligence: 1.0,
-                dexterity: 1.0, charisma: 1.0, tags: {} }.freeze
+  # **Endurance is the one stat that is deliberately not 1.0, and it is not a balance figure.**
+  # `endurance` divides fatigue accrual and does NOT enter `capability`, so an arbitrarily large
+  # value leaves every throughput baseline exactly where it was while making the reference hand
+  # tireless. That is what keeps a spec about a *machine* measuring the machine: a real fireman at
+  # the firehole is spent in about five minutes and the fire then dies, which turned a
+  # seven-thousand-tick boiler-burst example into a cold boiler and nobody hurt.
+  #
+  # A spec that is genuinely about fatigue posts its own people, exactly as `injury_spec` and
+  # `crew_spec` do — see `fatigue_spec`.
+  TIRELESS = 1.0e6
+
+  ARCHETYPE = { label: "Test Hand", strength: 1.0, toughness: 1.0, endurance: TIRELESS,
+                intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} }.freeze
 
   # One fixture person per job the steam engine asks for. Separate ids rather than one shared
   # entry, so a spec can hurt one of them without the other changing.
@@ -46,8 +57,35 @@ module ReferenceCrew
   CONTENT = ReactorSim::Content.default
                                .merging(archetypes: { test_hand: ARCHETYPE }, minions: MINIONS)
 
-  CREW = { fireman: { minion: :test_hand_a },
-           yardhand: { minion: :test_hand_b } }.freeze
+  # **Seats, not jobs**, and the roster no longer says where anybody stands — everybody starts in
+  # the crew quarters. A spec that wants the engine actually working has to **deploy the shift**,
+  # which is the opening move of a match now rather than a line on a form. `deploy!` is that move.
+  CREW = { crew_1: { minion: :test_hand_a },
+           crew_2: { minion: :test_hand_b } }.freeze
+
+  # The reference posting: one hand on the shovel, one on the oil round. Reproduces every balance
+  # figure recorded before crew capacity — verified at 547.9 kPa and 495.5 kW against 547.8 and
+  # the same rpm.
+  def self.deploy!(op, stoking: :crew_1, oiling: :crew_2)
+    op.assign_minion(stoking, :stoking) if stoking
+    op.assign_minion(oiling, :oiling) if oiling
+    op
+  end
+
+  # **The reference MACHINE, which is a different idea from the reference crew.**
+  #
+  # The blower slot defaults to `:hand_bellows`, because that is the starting blueprint and
+  # raising steam by hand is meant to be the hard opening. But a bellows is an **effort station**
+  # — a fourth one, against two seats — so an unmanned one delivers 0.302 kg/s, exactly what an
+  # engine with no blower at all gets, and the machine never raises steam.
+  #
+  # Every balance figure in this repository was taken against the donkey, and the sketch says so:
+  # *"deliberately today's figures, exactly."* So a spec measuring the MACHINE fits the donkey and
+  # a spec about the bellows asks for it by name. Measured: donkey 608.8 kPa at t=1600, manned
+  # bellows 608.1 at t=3800, unmanned bellows never.
+  REFERENCE_LOADOUT = { blower: :donkey_blower }.freeze
+
+  def self.loadout(overrides = {}) = REFERENCE_LOADOUT.merge(overrides || {})
 
   # ## Why this stubs `Content.default` rather than passing `content:`
   #

@@ -23,7 +23,8 @@ RSpec.describe "the steam engine", crew: :reference do
     ReactorSim::Match
       .create(id: "e", seed: seed,
               operations: [ { id: "eng", type: :steam_engine, chassis: chassis,
-                              loadout: loadout }.merge(ReferenceCrew.options) ])
+                              loadout: ReferenceCrew.loadout(loadout) }
+                              .merge(ReferenceCrew.options) ])
       .operation(:eng)
   end
 
@@ -51,10 +52,28 @@ RSpec.describe "the steam engine", crew: :reference do
   # behaviour is a **transient** — the warm-through condensate clears the moment the engine is
   # turning properly — and an end-state assertion would pass on a startup that had been knocking
   # badly the whole way up.
+  # `oiler:` posts somebody to the oil round for the whole run. **A run longer than about 4000
+  # ticks needs one**, because the bearings start with a charge and nothing refills it — an
+  # unattended engine wipes a journal and then seizes, which is the stage F mechanic working
+  # rather than a defect.
+  #
+  # **The shift has to be DEPLOYED, and that is the opening move of a match now.** Crew start in
+  # the quarters rather than at a lever, so a run that posts nobody produces 0 kW and a 322 K
+  # firebox — correct, and the whole point of `crew_capacity.md`. `firing:` is the hand on the
+  # shovel; without one there is no fire.
+  #
+  # The second seat goes to the oil round, which is the real competition: three effort stations
+  # (`:stoking`, `:ash_raking`, `:oiling`) against two seats, so something is always unattended.
+  # `:damper_open` is a **valve** and costs nobody, which is why the damper is free to set.
   def light_and_run(op, throttle: 60, stoking: 60, load: 80, ticks: 3600, blower_off: 1600,
-                    shed_at: nil, damper: nil, each_tick: nil)
+                    shed_at: nil, damper: nil, each_tick: nil, oiler: nil, firing: :crew_1)
     LIGHT.each { |k, v| op.set_control(k, v) }
     op.set_control(:damper_open, damper) if damper
+    op.assign_minion(firing, :stoking) if firing
+    if oiler
+      op.assign_minion(oiler, :oiling)
+      op.set_control(:oiling, 100)
+    end
 
     events = []
     (1..ticks).each do |t|
@@ -115,6 +134,69 @@ RSpec.describe "the steam engine", crew: :reference do
       .select { |p| p.fetch(:resource).to_sym == resource }.sum { |p| p.fetch(:kg) }
   end
   def truth(op, gauge) = op.project(viewer: :spectator).gauges.fetch(gauge)
+
+  # **The blower stopped being free, and the two ways to pay for it are the decision.**
+  #
+  # `driven_transport.md`: a pressure source with a lever on it and nobody paying the bill was
+  # the whole gap. The bellows costs a person continuously, the donkey costs fuel oil out of its
+  # own tank, and both honour the black start — neither depends on the engine they are lighting.
+  describe "paying for the blast" do
+    # Raise steam and report where it got to. The boiler's working mark is 500 kPa.
+    def raised_at(op, ticks: 6_000)
+      { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
+        throttle_open: 0, load_demand: 0 }.each { |k, v| op.set_control(k, v) }
+
+      (1..ticks).each do |t|
+        op.set_control(:igniter, 0) if t == 300
+        op.step!(tick: t)
+        return t if pressure_of(op, :boiler) >= 500_000.0
+      end
+      nil
+    end
+
+    # **An unmanned bellows is identical to no blower at all.** Nothing implements that — an
+    # unmanned effort station already delivered nothing — and it is why the bellows is a real
+    # cost rather than a slower button.
+    it "delivers nothing at all from a bellows nobody is working" do
+      idle = engine(loadout: { blower: :hand_bellows })
+      op = idle.tap { |o| o.assign_minion(:crew_1, :stoking) }
+
+      expect(raised_at(op, ticks: 2_000)).to be_nil
+      expect(pressure_of(op, :boiler)).to be < 200_000.0
+    end
+
+    it "raises steam on a bellows somebody is working" do
+      op = engine(loadout: { blower: :hand_bellows })
+      op.assign_minion(:crew_1, :stoking)
+      op.assign_minion(:crew_2, :blower)
+
+      expect(raised_at(op)).not_to be_nil
+    end
+
+    # The bellows is the starting blueprint and the donkey is the unlock, so the donkey has to be
+    # meaningfully faster — and it is the machine every balance figure here was measured against.
+    it "raises steam faster on the donkey than by hand" do
+      hand = engine(loadout: { blower: :hand_bellows })
+                .tap { |o| o.assign_minion(:crew_1, :stoking)
+                           o.assign_minion(:crew_2, :blower) }
+      donkey = engine(loadout: { blower: :donkey_blower })
+                 .tap { |o| o.assign_minion(:crew_1, :stoking) }
+
+      expect(raised_at(donkey)).to be < raised_at(hand)
+    end
+
+    # It burns its own charge rather than the engine's, which is what makes running out a thing
+    # the player watches rather than a surprise.
+    it "burns the donkey's own fuel and leaves the bunker alone" do
+      op = engine(loadout: { blower: :donkey_blower })
+      op.assign_minion(:crew_1, :stoking)
+      before = contents(op, :donkey_tank, :fuel_oil)
+      raised_at(op, ticks: 2_000)
+
+      expect(contents(op, :donkey_tank, :fuel_oil)).to be < before
+      expect(op.state.fetch(:nodes).fetch(:donkey).fetch(:angular_momentum)).to be > 0.0
+    end
+  end
 
   describe "combustion" do
     it "will not light a cold firebox without the igniter" do
@@ -293,11 +375,12 @@ RSpec.describe "the steam engine", crew: :reference do
     # runs at `LIGHT`'s damper.
     # **Somebody has to be standing there.** Raking is effort, not a valve, so setting the lever
     # with nobody posted moves no ash at all — which is the mechanic rather than a snag: clearing
-    # the grate costs you a pair of hands that were doing something else. The yardhand comes off
-    # the damper to do it, which is exactly the decision a driver makes.
+    # the grate costs you a pair of hands that were doing something else. The second seat goes to
+    # the rake here, which is exactly the decision a driver makes: three effort stations, two
+    # hands, and the oil round goes unattended for this run.
     it "clears when the ashpan is raked, and the engine gets the power back" do
       raked = engine.tap { |o|
-        o.assign_minion(:yardhand, :ash_raking)
+        o.assign_minion(:crew_2, :ash_raking)
         o.set_control(:ash_raking, 40)
         light_and_run(o, ticks: 7200, damper: 30)
       }
@@ -470,7 +553,7 @@ RSpec.describe "the steam engine", crew: :reference do
     # offtake and put a hard-pulling engine at a safe level into permanent carryover.
     it "leaves an engine held at a steady throttle dry, however hard it is working" do
       op = engine
-      light_and_run(op, throttle: 100, ticks: 4800)
+      light_and_run(op, throttle: 100, ticks: 4800, oiler: :crew_2)
 
       boiler = op.nodes.fetch(:boiler)
       expect(boiler.swell_fraction(op.state.fetch(:nodes).fetch(:boiler))).to be < 0.05
@@ -512,7 +595,8 @@ RSpec.describe "the steam engine", crew: :reference do
     # take it is a legitimate way to run — hot, loud, and inside the wheel's limit.
     it "runs at full throttle indefinitely as long as the mill is taking the power" do
       op = engine
-      events = light_and_run(op, throttle: 100, stoking: 80, load: 100, ticks: 4000)
+      events = light_and_run(op, throttle: 100, stoking: 80, load: 100, ticks: 4000,
+                             oiler: :crew_2)
 
       expect(breakages(events)).to be_empty
       expect(rpm(op)).to be > 100.0
@@ -811,11 +895,12 @@ RSpec.describe "the steam engine", crew: :reference do
     # up here as a failing expectation rather than as a quietly shifted skill gradient.
     it "leaves a manned lever frictionless, so the minion cannot yet slow it down" do
       op = engine
+      op.assign_minion(:crew_1, :stoking)
       op.set_control(:stoking, 100.0)
       op.step!(tick: 1)
       lever = op.state.fetch(:controls).fetch(:stoking)
 
-      expect(op.state.fetch(:minions).fetch(:fireman).fetch(:station)).to eq(:stoking)
+      expect(op.state.fetch(:minions).fetch(:crew_1).fetch(:station)).to eq(:stoking)
       expect(lever.fetch(:actual)).to eq(lever.fetch(:target))
     end
   end

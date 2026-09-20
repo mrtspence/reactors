@@ -9,20 +9,27 @@
 class CrewsController < ApplicationController
   include CrewParams
 
+  before_action :require_operator!
+
   def edit
-    @crewing = Crewing.for(owner_id: DevPlayer::ID)
+    @crewing = Crewing.for(owner_id: current_player, operation_id: operation_id)
   end
 
   def update
-    @crewing = Crewing.for(owner_id: DevPlayer::ID, crew: submitted_crew)
+    @crewing = Crewing.for(owner_id: current_player, operation_id: operation_id,
+                           crew: submitted_crew)
 
     return render :edit, status: :unprocessable_content unless @crewing.ok?
 
     @crewing.fit!
-    redirect_to console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID),
-                notice: "Crew posted. The engine is being rebuilt — she will be cold."
+    redirect_to console_path(here), notice: "Crew posted. The engine is being rebuilt — she will be cold."
   rescue Outfitting::NotDelivered
-    redirect_to edit_crew_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID),
-                alert: "Could not reach the engine room. Nothing was changed."
+    redirect_to edit_crew_path(here), alert: "Could not reach the engine room. Nothing was changed."
   end
+
+  private
+
+  def operation_id = current_operation.operation_id
+
+  def here = { match_id: current_operation.match_id, operation_id: operation_id }
 end

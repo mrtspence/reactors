@@ -47,7 +47,7 @@ grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n'
 ```
 
 In use at the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`,
-`metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+`lubricant`, `metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 A tag is a vocabulary shared between the content files and every port that filters on one, so
 **introducing a tag means updating this list in the same commit**. An undocumented tag is a
@@ -194,8 +194,9 @@ kinds of person. The same person can do either, which is what made it the wrong 
 # content/archetypes/races.yml — layer one, the baseline for everyone of that race
 elf:
   label: Elf
-  strength: 0.75       # all five stats are required
+  strength: 0.75       # all six stats are required
   toughness: 0.7
+  endurance: 0.85
   intelligence: 1.25
   dexterity: 1.2
   charisma: 1.1
@@ -222,9 +223,13 @@ two already folded.
 
 Rules worth knowing before you add one:
 
-- **The five stats are fixed and every archetype declares all of them.** The engine reads them and
-  needs a number rather than an absence. `strength` drives actuation today, `toughness` drives the
-  Danger Check; the other three are declared and read by nothing yet.
+- **The six stats are fixed and every archetype declares all of them.** The engine reads them and
+  needs a number rather than an absence. `strength` drives actuation, `toughness` drives the
+  Danger Check, `endurance` divides fatigue accrual; the other three are declared and read by
+  nothing yet.
+- **`endurance` is resistance to tiring, 1.0 for a human by definition**, and it is separate from
+  `strength` on purpose: what a worker gets done and what it costs them are different claims.
+  Equipment may carry a negative offset, which is how bulky kit says *"this tires me"*.
 - **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
   things are two different statements about one person, and a steady-handed worker who knocks
   things over is a real person.

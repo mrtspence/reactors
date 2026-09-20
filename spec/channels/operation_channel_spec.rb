@@ -15,8 +15,11 @@ RSpec.describe OperationChannel do
                        "severity" => severity, "detail" => { "rpm" => 311.7 } })
   end
 
+  # An operation has to exist to be viewable — `subscribed` finds the row and asks it.
+  before { DevMatch.provision! }
+
   def subscribe_to_engine
-    subscribe(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID.to_s)
+    subscribe(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY.to_s)
   end
 
   # Channel tests hand back the payload as it was passed, with its Symbol keys; the real path
@@ -36,7 +39,7 @@ RSpec.describe OperationChannel do
     subscribe_to_engine
 
     expect(subscription).to have_stream_from(
-      StreamNames.operation(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID.to_s)
+      StreamNames.operation(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY.to_s)
     )
   end
 

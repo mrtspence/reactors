@@ -69,14 +69,34 @@ are things a player *owns*, so they are folded at build by the delivery tier and
 here. **Merge adds, use multiplies** — stats and valued tags sum across layers, and whoever reads
 them multiplies. Getting that round the wrong way makes every piece of kit a rounding error.
 
-> **An archetype is a kind of person; a minion is a person; a role is a job.** `fireman` and
-> `yardhand` are jobs an operation asks for, and the same person can do either. Keep the three
-> apart: what a player unlocks is Jim, not the fireman's post.
+> **An archetype is a kind of person; a minion is a person; a seat is a place on the payroll.**
+> What a player unlocks is Jim. `crew.rb` resolves a roster of **seats** — `crew_1`, `crew_2`,
+> as many as the fitted crew quarters has `crew_capacity` for — and a seat carries **no
+> station**: everybody starts in the quarters and is *sent* somewhere, so deploying the shift is
+> the opening move of a match. Jobs are derived, never declared: they are exactly the control
+> points with `effort:`. When there are more of those than seats, something is always
+> unattended, which is the point.
 
 `injury.rb` is `Concerns::Wearing` for people, and the copied shape is deliberate while the
 vocabulary is not: a part has `durability` and a `failure`, a person has `resilience` and an
 `injury`. What they genuinely share is `Severity.escalate`, extracted so the one rule that must
 not drift between them cannot.
+
+`fatigue.rb` is the other half of what a shift costs, and it is shaped the same way — a pure
+module over a state hash, drawing no entropy — but it runs **every tick for everybody posted**
+rather than on an event, which is why a station declares `exertion:` and `recovery:` instead of
+there being a hazard table. Effort is *subjective*: accrual is `intent ÷ capability`, squared, so
+the same lever costs a day-labourer far more than a strong fireman.
+
+> **Two things about it are easy to get wrong and silent.** `endurance` is a **divisor** and
+> `Sheet::MIN_STAT` is 0.0, so kit alone could divide by zero — hence `Fatigue::MIN_ENDURANCE`.
+> And `capability` contains `(1 - fatigue)`, so accrual has a pole at 1.0 that a severely injured
+> minion reaches the instant they are hurt — hence `LOAD_CEILING`. That same feedback makes
+> time-to-spent **a third** of what the declared rate suggests; see `docs/reference/tick.md`.
+>
+> **A spent minion mans nothing**, because capability is then exactly zero and an unmanned effort
+> station delivers nothing. Nothing is wired to make the fire go out when a fireman is exhausted;
+> it simply does.
 
 > **The Danger Check throws no dice, and that is the design rather than a workaround.**
 > `resilience` is rolled ONCE, at `initial_state` — one of the three places entropy is permitted

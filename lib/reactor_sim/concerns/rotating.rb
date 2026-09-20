@@ -45,14 +45,37 @@ module ReactorSim
         state.merge(angular_momentum: state.fetch(:angular_momentum) + delta)
       end
 
-      # Bearing drag and windage, relaxing toward rest. Closed form for the same reason
-      # everything else is: `time_scale` is a dial, so nothing may depend on dt being small.
-      # A spinning wheel must coast to a stop, never through it into running backwards.
-      def friction_loss(state, dt)
-        return 0.0 if friction <= 0.0
+      # What drags this body toward rest, in N·m·s/rad, grouped by where the energy it removes
+      # belongs on the ledger. Bearing drag and windage are `:friction`; a load's brake is
+      # `:work`, because that one is the point of the machine.
+      #
+      # **Declared rather than applied**, so `Arbiter.settle_drive` solves it inside the
+      # drivetrain network instead of after it. Applied afterwards it is operator splitting, and
+      # a stiff drag makes that error dominate everything else — see `Relaxation.settle`.
+      #
+      # A body that has let go declares nothing: it is off the drivetrain and `Tick#stress` has
+      # already taken its momentum. **That decision belongs here rather than in the arbiter**,
+      # because it is not universal — a seized bearing drags harder after it fails, which is what
+      # makes a seizure stop the shaft at all.
+      def drag_conductances(state, _ctx)
+        return {} if broken?(state)
 
-        Relaxation.to_reservoir(moment_of_inertia, omega(state), 0.0, friction, dt)
+        friction.positive? ? { friction: friction } : {}
       end
+
+      # Which shaft a declared drag acts on. Itself, for a body dragging against the air — but a
+      # bearing is not the thing that turns, so it names the shaft it carries instead.
+      def drag_shaft = id
+
+      # **A bound on the linearisation, not a stop.** At `c = I/dt` the backward-Euler step leaves
+      # exactly half the speed — `(I/dt + c)·ω′ = (I/dt)·ω` — so this halves a body per tick at
+      # most. Backward Euler is stable at any conductance and cannot reverse a shaft, so nothing
+      # needs this for stability; what it bounds is how far a nonlinear drag may be trusted when
+      # it has been linearised as `τ(ω)/ω`, which diverges as a constant-torque brake slows.
+      #
+      # A drag that genuinely means "this has stopped turning" declares a large multiple of it
+      # instead — see `Nodes::Bearing` on seizure.
+      def max_drag_conductance(dt) = moment_of_inertia / dt
 
       def initial_omega = 0.0
       def friction = 0.0

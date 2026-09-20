@@ -23,7 +23,8 @@ module ReactorSim
         firebox_temp fire_state
         engine_speed flywheel_stress flywheel_condition
         engine_power cylinder_pressure cylinder_water cylinder_relief_valve
-        coal_remaining water_remaining air_supply
+        bearing_temp bearing_condition
+        coal_remaining water_remaining oil_remaining air_supply
         condenser_vacuum
       ].freeze
 
@@ -45,7 +46,8 @@ module ReactorSim
           firebox_temp, fire_state,
           flywheel_speed, flywheel_stress, flywheel_condition,
           engine_power, cylinder_pressure, cylinder_water, cylinder_relief_valve,
-          coal_remaining, water_remaining, air_supply,
+          bearing_temp, bearing_condition,
+          coal_remaining, water_remaining, oil_remaining, air_supply,
           condenser_vacuum
         ].to_h { |d| [ d.id, d ] }.freeze
       end
@@ -343,6 +345,56 @@ module ReactorSim
         )
       end
 
+      # **Quantised coarsely on purpose.** Nobody dips an oil drum to the kilogram — you look in
+      # and judge it, and the number a driver acts on is "getting low" rather than 43.
+      def oil_remaining
+        Diagnostic.new(
+          id: :oil_remaining, label: "Oil in Store",
+          source: Sources::Contents.new(:oil_store, :bearing_oil),
+          filters: [ Filters::Quantize.new(5.0) ],
+          display: Displays::Digital.new(unit: "kg", precision: 0)
+        )
+      end
+
+      # **The slow one, and the only warning a hot box gives.** A bearing that is going to wipe
+      # spends minutes climbing before it does, so this is the instrument that makes the runaway
+      # survivable — lagged and noisy enough that the exact figure is never the point, precise
+      # enough that a rising trend is unmistakable.
+      #
+      # Scaled to the babbitt rather than to the machine: 520 K is where it melts, so a dial that
+      # ends there puts the danger at the top of the sweep where a driver reads it by needle
+      # position rather than by arithmetic.
+      def bearing_temp
+        Diagnostic.new(
+          id: :bearing_temp, label: "Main Bearing Temperature", observer: :yardhand,
+          source: Sources::Derived.new(:main_bearings, :temperature_k),
+          filters: [ Filters::Lag.new(6), Filters::Noise.new(4.0),
+                     Filters::Range.new(273.15, 573.15) ],
+          display: Displays::Needle.new(unit: "°C", convert: :k_to_c, precision: 0,
+                                        min: 273.15, max: 573.15)
+        )
+      end
+
+      # **Never a number, for the same reason the flywheel has none.** A bearing was judged by
+      # hand and nose — crews felt the boxes and smelled them — so this is what somebody reports
+      # walking the length of the engine, not a reading.
+      #
+      # Exempt from the upgrade rule along with `flywheel_condition`: it is vague *because that
+      # is the hazard*, and an instrument that made it precise would sell the only thing it
+      # protects.
+      def bearing_condition
+        Diagnostic.new(
+          id: :bearing_condition, label: "Bearing Condition", observer: :yardhand,
+          source: Sources::Derived.new(:main_bearings, :integrity),
+          filters: [ Filters::Lag.new(10), Filters::Misread.new(chance: 0.14, magnitude: 0.25),
+                     Filters::Bands.new([ 0.2, 0.5, 0.8, 0.97 ]) ],
+          display: Displays::Prose.new([
+            "smells hot, knocking badly", "running warm and noisy", "warm to the hand",
+            "cool enough", "cold and quiet"
+          ])
+        )
+      end
+
       def water_remaining
         Diagnostic.new(
           id: :water_remaining, label: "Water in Supply",
@@ -396,7 +448,10 @@ module ReactorSim
     # frames that actually exist — and is unrelated to the `chassis:` keyword the block takes,
     # which is one chosen frame. See `Operations.register`.
     register(SteamEngine::TYPE,
-             chassis: SteamEngine::CHASSIS.keys) do |id:, seed:, time_scale: 1.0, state: nil,
+             chassis: SteamEngine::CHASSIS.keys,
+             assembler: lambda { |chassis, loadout|
+               SteamEngine.assembly_for(chassis || :high_pressure, loadout || {})
+             }) do |id:, seed:, time_scale: 1.0, state: nil,
                                                      rngs: nil, content: nil,
                                                      chassis: :high_pressure, loadout: {},
                                                      crew: {}|

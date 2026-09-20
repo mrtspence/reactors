@@ -14,11 +14,16 @@ require "support/reference_crew"
 # So the hazard is positional and the plate gets a derived temperature of its own. These examples
 # guard the three things that were each got wrong on the way in.
 RSpec.describe "the crown sheet", crew: :reference do
-  # A fixture crew, not anybody real — see `ReferenceCrew`. Stoking is effort now, so an engine
-  # with no roster is worked by day-labourers and never gets hot enough to uncover anything.
+  # A fixture crew, not anybody real — see `ReferenceCrew`. Stoking is effort, so an engine with
+  # no roster is worked by day-labourers and never gets hot enough to uncover anything — and
+  # **the shift has to be deployed**, because crew start in the quarters rather than at a lever.
+  # Undeployed, this engine sits at 322 K and the plate is never in danger at all.
   def engine(loadout: {})
-    ReactorSim::Operations::SteamEngine.build(id: :engine, seed: 7, loadout: loadout,
-                                              **ReferenceCrew.options)
+    ReferenceCrew.deploy!(
+      ReactorSim::Operations::SteamEngine.build(id: :engine, seed: 7,
+                                                loadout: ReferenceCrew.loadout(loadout),
+                                                **ReferenceCrew.options)
+    )
   end
 
   COLD_START = { igniter: 100, blower: 100, damper_open: 100, stoking: 70, feed: 45,

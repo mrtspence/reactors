@@ -22,6 +22,14 @@ module ReactorSim
                        # moving coal specifically, rather than a small bonus to everything.
                        tags: { shovelling: 0.5 })
 
+    # The shovel's opposite number, and the reason `aided_by:` is per station rather than per
+    # job: the same person is better at one of the two depending on what is in their hand.
+    Equipment.register(:oil_can, slot: :tool, label: "Long-spouted Oil Can",
+                       description: "A pressed-tin can with a spout long enough to reach a " \
+                                    "moving journal without reaching into it.",
+                       stats: { dexterity: 0.2 },
+                       tags: { oiling: 0.5 })
+
     Equipment.register(:gauge_spanner, slot: :tool, label: "Gauge Spanner",
                        description: "A fitter's spanner, sized for boiler mountings.",
                        stats: { dexterity: 0.15 },
@@ -40,11 +48,23 @@ module ReactorSim
 
     Equipment.register(:leather_apron, slot: :gear, label: "Leather Apron",
                        description: "Heavy hide, scorched down one side.",
+                       stats: { endurance: -0.05 },
                        tags: { heat_resistance: 0.3 })
+
+    # **The first item in the catalogue with a real downside rather than a rounding error**, and
+    # the reason `endurance` is worth being a stat. It is the best heat protection here and it is
+    # a quarter of somebody's stamina — so it belongs on whoever is working a hot station lightly,
+    # and ruins whoever is shovelling in it. That is a loadout decision rather than a strict
+    # upgrade, which is what the three slots were built to express.
+    Equipment.register(:asbestos_suit, slot: :gear, label: "Asbestos Suit",
+                       description: "Stifling, rigid, and proof against very nearly anything " \
+                                    "the firebox can do to a person.",
+                       stats: { dexterity: -0.2, endurance: -0.25 },
+                       tags: { heat_resistance: 0.7, scald_resistance: 0.5, burn_resistance: 0.6 })
 
     Equipment.register(:fettlers_gloves, slot: :gear, label: "Fettler's Gloves",
                        description: "Thick enough to hold hot iron, clumsy with a valve.",
-                       stats: { dexterity: -0.1 },
+                       stats: { dexterity: -0.1, endurance: -0.05 },
                        tags: { heat_resistance: 0.45 })
 
     Equipment.register(:oilskin_coat, slot: :gear, label: "Oilskin Coat",

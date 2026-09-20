@@ -84,6 +84,27 @@ All three delegate to `Physics::Relaxation` — heat capacity ↔ moment of iner
 temperature ↔ angular velocity ↔ pressure, same mathematics. See
 [`../physics/CLAUDE.md`](../physics/CLAUDE.md).
 
+**`settle_drive` also gathers `drags`** — every node's `drag_conductances`, summed **per shaft**
+via `drag_shaft`, as a coupling to a reservoir at rest. The declarer need not be the shaft and
+need not rotate at all: that is what a `Nodes::Bearing` is. A brake and a belt pulling on one
+shaft at once is a network, not two steps: applied after the solve instead, a stiff drag's
+splitting error dominates everything else and a fan-law mill sat at 8.5 rad/s against a true
+equilibrium of 19.6.
+
+> **A shaft that has let go is not dragged** — it has left the drivetrain and `Tick#stress` has
+> already taken its momentum. **A failed declarer is still asked**, because whether a broken part
+> still drags is the part's own answer: `Rotating` declines, a seized bearing drags harder, and
+> that is the only mechanism by which a seizure stops a shaft. `Tick#stress` zeroes momentum on
+> the failing node and a bearing does not rotate; `settle_drive` severs a link whose *end* failed
+> and a bearing is not an end. Both look like they would handle it.
+
+**A radiant thermal link's conductance is recomputed every tick.** `ThermalLink` may declare an
+`emissivity:` and `radiating_area_m2:` on top of its constant conductance; `settle_heat` then maps
+it to a `Coupling` — the same struct the gas solve uses to hand `Relaxation` a per-tick figure —
+so the solver knows nothing about radiation and a link with no surface passes through untouched.
+The factoring that makes `T⁴` a conductance is in
+[`../../../docs/reference/physics.md`](../../../docs/reference/physics.md#radiation-is-a-conductance-because-t--t_amb-factors).
+
 **It is one implicit solve over the whole network, not a law applied per coupling.** A
 pairwise closed form does not compose — three 600 K bodies feeding one small 300 K body drove
 it to **1067 K**, energy perfectly conserved and the node simply hotter than anything touching

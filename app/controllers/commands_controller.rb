@@ -2,10 +2,14 @@
 
 # Player intent in. Validate, produce, 202 — the tick barrier decides the rest.
 #
-# TODO: expedient — NO AUTH, AT ALL. Anyone who can reach this endpoint can drive the engine,
-# and anyone who can reach the broker bypasses it entirely. A proper implementation
-# authenticates the player and authorises that they own this operation's control point
-# (docs/architecture.md §7); the ingress path is the only place player identity matters.
+# **Ownership is checked here; the player behind it is still a constant.** `require_operator!`
+# refuses anyone who does not own the machine, which is the rule that makes one player per
+# operation real — but `current_player` is `DevPlayer::ID` until accounts exist, so this
+# authorises without yet authenticating.
+#
+# > **Anyone who can reach the broker still bypasses this entirely**, and identity at the HTTP
+# > edge does not fix that. It is a separate problem for when the ingress is not trusted;
+# > `docs/architecture.md` §7 is where it belongs.
 class CommandsController < ApplicationController
   # A lever id, and nothing that could be mistaken for anything else.
   CONTROL_ID = /\A[a-z][a-z0-9_]{0,39}\z/
@@ -18,13 +22,13 @@ class CommandsController < ApplicationController
   rate_limit to: 30, within: 1.second, by: -> { request.remote_ip },
              with: -> { head :too_many_requests }
 
-  def create
-    return head :not_found unless params[:match_id] == DevMatch::ID
+  before_action :require_operator!
 
+  def create
     command = build_command
     return head :unprocessable_content unless command
 
-    CommandProducer.instance.produce(match_id: DevMatch::ID, command: command)
+    CommandProducer.instance.produce(match_id: current_operation.match_id, command: command)
     head :accepted
   rescue StandardError => e
     # The broker being unreachable is a 503, not a 500 — the request was fine, we could not
@@ -53,8 +57,10 @@ class CommandsController < ApplicationController
     value = Float(params[:value], exception: false)
     return unless value && params[:control_point_id].to_s.match?(CONTROL_ID)
 
+    # **The operation the request was addressed to, never a constant.** This is the line that
+    # lets two consoles drive two machines.
     { "type" => ReactorSim::Command::SET_CONTROL,
-      "operation_id" => DevMatch::OPERATION_ID.to_s,
+      "operation_id" => current_operation.operation_id,
       "control_point_id" => params[:control_point_id].to_s,
       "value" => value }
   end
@@ -66,7 +72,7 @@ class CommandsController < ApplicationController
                   params[:control_point_id].to_s.match?(CONTROL_ID)
 
     { "type" => ReactorSim::Command::ASSIGN_MINION,
-      "operation_id" => DevMatch::OPERATION_ID.to_s,
+      "operation_id" => current_operation.operation_id,
       "minion_id" => params[:minion_id].to_s,
       "control_point_id" => params[:control_point_id]&.to_s }
   end

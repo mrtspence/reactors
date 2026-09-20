@@ -1,7 +1,12 @@
 # frozen_string_literal: true
 
-# The pre-match crew screen: which jobs the machine has, who is available for each, and what
-# they can carry.
+# The pre-match crew screen: how many hands the operation can field, who is in each seat, and
+# what they can carry.
+#
+# **Seats, not jobs.** `crew_1` is "the first person you brought", and where they stand is a
+# decision made during the match rather than a field on this form — everybody starts in the crew
+# quarters and is sent somewhere. How many seats there are comes from the fitted quarters, so
+# capacity is something a player buys.
 #
 # **`Outfitting`'s twin**, down to the shape of the arguments. It takes resolved values and never
 # `params`, so the controller stays routing and this stays testable without one; it answers what
@@ -18,28 +23,35 @@ class Crewing
     def available? = unavailable_for.to_i.zero?
   end
 
-  attr_reader :owner_id, :crew
+  attr_reader :owner_id, :operation_id, :crew
 
-  def self.for(owner_id:, crew: nil)
-    new(owner_id: owner_id, crew: crew)
+  def self.for(owner_id:, operation_id: DevMatch::PRIMARY, crew: nil)
+    new(owner_id: owner_id, operation_id: operation_id, crew: crew)
   end
 
-  # Lives here rather than in the controller so `permit` does not have to know what a role is —
+  # Lives here rather than in the controller so `permit` does not have to know what a seat is —
   # the same division `Outfitting.slot_ids` exists for.
-  def self.role_ids = ReactorSim::Operations::SteamEngine.crew_roles.map { |role| role.id.to_s }
+  def self.seat_ids(operation_id: DevMatch::PRIMARY)
+    new(owner_id: nil, operation_id: operation_id).seats.map(&:to_s)
+  end
 
-  def initialize(owner_id:, crew: nil)
+  def initialize(owner_id:, operation_id: DevMatch::PRIMARY, crew: nil)
     @owner_id = owner_id.to_s
+    @operation_id = operation_id.to_sym
     # nil means "show what is stored"; a hash means "show this draft", and an empty hash means
-    # every role deliberately unfilled — which is a legitimate machine crewed by day-labourers.
+    # every seat deliberately unfilled — which is a legitimate machine crewed by day-labourers.
     @crew = resolve(crew)
   end
 
-  def roles = ReactorSim::Operations::SteamEngine.crew_roles
+  # From the fitted quarters, through the registry — so this screen never names a concrete
+  # operation and a better mess room is what buys another pair of hands.
+  def capacity = DevMatch.outfitting(operation_id: operation_id).crew_capacity
 
-  def posting(role_id) = @crew.fetch(role_id.to_sym, {})
+  def seats = ReactorSim::Crew.seats(capacity)
 
-  # Who this player could put in this job. Everybody they own, plus whoever is already posted
+  def posting(seat_id) = @crew.fetch(seat_id.to_sym, {})
+
+  # Who this player could put in this seat. Everybody they own, plus whoever is already posted
   # even if they have since become unavailable — hiding a fitted choice would report an error
   # about something the player cannot see, which is the rule `Outfitting#available` follows.
   # **Filtered to people the catalogue still knows.** A rename leaves `unlocks` rows pointing at
@@ -48,8 +60,8 @@ class Crewing
   # noun correction. A stale row is a player quietly missing somebody they earned, which is bad;
   # a stale row that raises is a crew screen that will not render at all, which is worse.
   # `rake blueprints:audit` is what finds them.
-  def candidates(role_id)
-    fitted = posting(role_id)[:minion]
+  def candidates(seat_id)
+    fitted = posting(seat_id)[:minion]
     ids = (owned_minions | [ fitted&.to_s ].compact).select { |id| known?(id) }
 
     ids.sort.map { |id| candidate(id) }
@@ -68,16 +80,16 @@ class Crewing
 
   # What this player owns for this minion, in this slot. Scoped ids are what make ownership
   # per-minion without a migration: `jim/leather_apron`.
-  def equipment_for(role_id, slot)
-    minion = posting(role_id)[:minion] or return []
+  def equipment_for(seat_id, slot)
+    minion = posting(seat_id)[:minion] or return []
 
     ReactorSim::Equipment.of_slot(slot).select do |item|
       owns?(:equipment, "#{minion}/#{item.id}")
     end
   end
 
-  def training_for(role_id)
-    minion = posting(role_id)[:minion] or return []
+  def training_for(seat_id)
+    minion = posting(seat_id)[:minion] or return []
 
     ReactorSim::Training.known.map { |id| ReactorSim::Training.fetch(id) }
                         .select { |course| owns?(:training, "#{minion}/#{course.id}") }
@@ -85,10 +97,10 @@ class Crewing
 
   # **The crew a player has posted somebody unavailable into is not a valid crew**, and the
   # screen says so rather than silently substituting. Substituting is what happens at BUILD, for
-  # a role left empty — which is a different statement and should feel different.
+  # a seat left empty — which is a different statement and should feel different.
   def unavailable
-    roles.filter_map do |role|
-      id = posting(role.id)[:minion] or next
+    seats.filter_map do |seat|
+      id = posting(seat)[:minion] or next
       found = candidate(id)
       found unless found.available?
     end
@@ -96,16 +108,16 @@ class Crewing
 
   def ok? = unavailable.empty?
 
-  # Every role named, including the empty ones, so a role a player deliberately left to the
+  # Every seat named, including the empty ones, so a seat a player deliberately left to the
   # standin does not re-default on the next render.
-  def to_sim = roles.to_h { |role| [ role.id, posting(role.id) ] }
+  def to_sim = seats.to_h { |seat| [ seat, posting(seat) ] }
 
   # **Store, then build the command, then advance, then produce.** The roster has to be written
   # before the command is built, or the command carries the previous crew; and the clock advances
   # after the command is built, so somebody whose last match this was is still out for the
   # machine being built now.
   def fit!
-    Roster.fit(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID, crew: to_sim)
+    Roster.fit(match_id: DevMatch::ID, operation_id: operation_id, crew: to_sim)
     command = DevMatch.reset_command
     DevMatch.start!
     CommandProducer.instance.produce(match_id: DevMatch::ID, command: command)
@@ -119,14 +131,18 @@ class Crewing
   def resolve(given)
     return stored if given.nil?
 
-    ReactorSim::Crew.normalise(given, roles: roles)
+    ReactorSim::Crew.normalise(given, capacity: capacity)
   end
 
+  # **A stored roster can name more seats than the fitted quarters has**, because a player may
+  # have downgraded since. `Crew.normalise` refuses that outright, which is right at build and
+  # wrong here: it would leave the crew screen unrenderable with no way back. Drop the seats that
+  # no longer exist for *display*, and let the fit refuse if the player tries to keep them.
   def stored
-    row = Roster.find_by(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+    row = Roster.find_by(match_id: DevMatch::ID, operation_id: operation_id.to_s)
     return {} if row.nil?
 
-    ReactorSim::Crew.normalise(row.to_sim, roles: roles)
+    ReactorSim::Crew.normalise(row.to_sim.slice(*seats.map(&:to_s), *seats), capacity: capacity)
   end
 
   # One query per kind, then membership tests — the shape `Unlock.owned_ids` exists for. This

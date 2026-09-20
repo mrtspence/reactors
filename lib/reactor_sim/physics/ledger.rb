@@ -37,7 +37,18 @@ module ReactorSim
         joules_advected_out: 0.0, # energy carried out with departing mass
         mass_added: 0.0,          # feedstock arriving from outside the operation
         mass_vented: 0.0,         # deliberate discharge through a relief path
-        mass_spilled: 0.0 }       # overflow, leak, or failure
+        mass_spilled: 0.0,        # overflow, leak, or failure
+        # Used up doing the job it was there for, and not recoverable — lubricant flung off a
+        # journal and burnt on it. A separate line from the two above because it is neither a
+        # discharge nor a fault: it is the running cost of the machine, and reading it as a
+        # spill would make an engine that is working properly look like one that is leaking.
+        mass_consumed: 0.0,
+        # **Material that left because the operation did its job**: water lifted out of a mine,
+        # ore sent to the surface, gas delivered to a main. The fourth exit, and the only
+        # productive one — `joules_to_work` has been the energy side of this since the first
+        # ledger and there has never been a mass equivalent, so an operation whose *output* is
+        # material could not be booked at all. A mine's output is material.
+        mass_delivered: 0.0 }
     end
 
     def add(ledger, **amounts)
@@ -46,7 +57,10 @@ module ReactorSim
       end
     end
 
-    def mass_out(ledger)   = ledger.fetch(:mass_vented) + ledger.fetch(:mass_spilled)
+    def mass_out(ledger)
+      ledger.fetch(:mass_vented) + ledger.fetch(:mass_spilled) +
+        ledger.fetch(:mass_consumed) + ledger.fetch(:mass_delivered)
+    end
     # Friction is counted as an exit rather than folded back in as heat. Belt slip really
     # does warm the belt, but attributing it to a particular node is a modelling choice we
     # have not made yet — and an explicit line nobody can miss beats a silent one.

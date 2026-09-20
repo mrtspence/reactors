@@ -140,9 +140,9 @@ RSpec.describe ReactorSim::Minion do
         id: "m", seed: 42, operations: [ { id: "eng", type: :steam_engine } ]
       )
       restored = ReactorSim::Match.from_h(JSON.parse(JSON.generate(match.to_h)))
-      station = restored.operation(:eng).state.fetch(:minions).fetch(:fireman).fetch(:station)
+      station = restored.operation(:eng).state.fetch(:minions).fetch(:crew_1).fetch(:station)
 
-      expect(station).to be(:stoking)
+      expect(station).to be(:quarters)
     end
 
     it "survives a round trip with the crew intact" do
@@ -150,11 +150,11 @@ RSpec.describe ReactorSim::Minion do
         id: "m", seed: 42, operations: [ { id: "eng", type: :steam_engine } ]
       )
       match.apply([ { type: "assign_minion", operation_id: "eng",
-                      minion_id: "yardhand", control_point_id: "feed" } ])
+                      minion_id: "crew_2", control_point_id: "feed" } ])
       restored = ReactorSim::Match.from_h(JSON.parse(JSON.generate(match.to_h)))
 
       expect(restored.digest).to eq(match.digest)
-      expect(restored.operation(:eng).state.fetch(:minions).fetch(:yardhand).fetch(:station))
+      expect(restored.operation(:eng).state.fetch(:minions).fetch(:crew_2).fetch(:station))
         .to be(:feed)
     end
   end

@@ -60,21 +60,24 @@ module ReactorSim
         @max_torque * (@curve == :fan ? ratio * ratio : ratio)
       end
 
-      # Work is measured as the kinetic energy actually removed, not as `torque × ω × dt`.
-      # The two agree only in the limit of small steps, and `time_scale` means steps are not
-      # small — taking the difference keeps the books exact at any dt.
-      def apply(state, ctx, _grant)
+      # The brake, as a conductance toward rest, linearised at this tick's speed: `τ(ω)/ω`.
+      #
+      # **Solved with the drivetrain, not after it.** `L -= τ(ω)·dt` is explicit Euler and is
+      # stable only while `dt < 2I/(dτ/dω)`, which a fan-law mill crosses at ordinary working
+      # speed — 0.156 s against a 250 ms tick. The load was spun up by its coupling and slammed
+      # to a standstill every tick, with the old `max(…, 0.0)` clamp hiding the divergence well
+      # enough to read as a steady state, and the coupling slipping 65% against it.
+      #
+      # Integrating each side exactly and composing them is no fix: that is still splitting, and
+      # it left the mill at 8.5 rad/s against a true equilibrium of 19.6. The linearisation here
+      # is a far smaller error than the split it replaces.
+      def drag_conductances(state, ctx)
+        w = omega(state)
         demand = @control_id ? (ctx.controls.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
-        torque = torque_at(omega(state)) * demand
-        return state.merge(joules_extracted: 0.0) if torque <= 0.0
+        return super if broken?(state) || w <= 0.0 || demand <= 0.0
 
-        before = kinetic_joules(state)
-        # A brake cannot drive the shaft backwards, however hard it is applied.
-        slowed = state.merge(
-          angular_momentum: [ state.fetch(:angular_momentum) - (torque * ctx.dt), 0.0 ].max
-        )
-
-        slowed.merge(joules_extracted: before - kinetic_joules(slowed))
+        brake = [ torque_at(w) * demand / w, max_drag_conductance(ctx.dt) ].min
+        brake.positive? ? super.merge(work: brake) : super
       end
     end
   end

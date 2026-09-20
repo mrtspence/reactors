@@ -44,14 +44,25 @@ RSpec.describe "the kit catalogue" do
     end
 
     # **Stats are OFFSETS, so an item says nothing about what it does not touch.** An archetype
-    # must declare all five; an item almost always speaks to one or two, and a missing key must
+    # must declare all six; an item almost always speaks to one or two, and a missing key must
     # mean "unchanged" rather than "zero" — the second would strip a worker of every stat their
     # gloves had no opinion about.
     it "carries only the stats an item actually speaks to" do
       gloves = described_class.fetch(:fettlers_gloves)
 
-      expect(gloves.stats).to eq(dexterity: -0.1)
+      expect(gloves.stats.keys).to contain_exactly(:dexterity, :endurance)
       expect(gloves.tags).to include(:heat_resistance)
+    end
+
+    # **What `endurance` bought beyond the obvious.** Bulky protective kit could always cost
+    # dexterity and could never say "this tires me" — so the best heat protection in the
+    # catalogue was a strict upgrade for anybody who could afford it. Now it is a trade.
+    it "lets heavy gear charge stamina for protection" do
+      suit = described_class.fetch(:asbestos_suit)
+
+      expect(suit.stats[:endurance]).to be < 0
+      expect(suit.tags[:heat_resistance]).to be > described_class.fetch(:leather_apron)
+                                                                 .tags[:heat_resistance]
     end
 
     # A tag that cuts both ways is the point of the vocabulary, and the sketch's worked example.

@@ -11,7 +11,7 @@
     <div class="grow"></div>
 
     <%= link_to "Back to the console",
-                console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID),
+                console_path(match_id: params[:match_id], operation_id: params[:operation_id]),
                 class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
                        "ring-1 ring-slate-700" %>
   </header>
@@ -30,8 +30,8 @@
     <%= turbo_frame_tag "outfitting",
                         data: { controller: "outfit",
                                 outfit_draft_url_value: loadout_draft_path(
-                                  match_id: DevMatch::ID,
-                                  operation_id: DevMatch::OPERATION_ID
+                                  match_id: params[:match_id],
+                                  operation_id: params[:operation_id]
                                 ) } do %>
 
     <%# **Two verdicts, deliberately kept apart.** "You do not own this" and "this will not run"
@@ -102,8 +102,8 @@
        CSRF verification is off in the test environment, so it passes there and 422s in a
        browser. It was found by driving the real server.
     %>
-    <%= form_with url: loadout_path(match_id: DevMatch::ID,
-                                    operation_id: DevMatch::OPERATION_ID),
+    <%= form_with url: loadout_path(match_id: params[:match_id],
+                                    operation_id: params[:operation_id]),
                   method: :patch, authenticity_token: form_authenticity_token,
                   data: { outfit_target: "form" } do %>
 

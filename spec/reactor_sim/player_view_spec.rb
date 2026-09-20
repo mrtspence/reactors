@@ -82,34 +82,34 @@ RSpec.describe ReactorSim::PlayerView do
   # restore was never reflected back.
   describe "the crew" do
     it "reports where each of them is standing" do
-      posted = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil } })
+      posted = view(tick: 1, crew: { crew_1: { station: :stoking, injury: nil } })
 
-      expect(posted.to_h[:crew]).to eq(fireman: { station: :stoking, injury: nil })
+      expect(posted.to_h[:crew]).to eq(crew_1: { station: :stoking, injury: nil })
     end
 
     it "carries only the ones whose posting or condition moved" do
-      first = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil },
-                                    yardhand: { station: :feed, injury: nil } })
-      second = view(tick: 2, crew: { fireman: { station: :damper_open, injury: nil },
-                                     yardhand: { station: :feed, injury: nil } })
+      first = view(tick: 1, crew: { crew_1: { station: :stoking, injury: nil },
+                                    crew_2: { station: :feed, injury: nil } })
+      second = view(tick: 2, crew: { crew_1: { station: :damper_open, injury: nil },
+                                     crew_2: { station: :feed, injury: nil } })
 
-      expect(second.delta_from(first)[:crew]).to eq(fireman: { station: :damper_open,
-                                                               injury: nil })
+      expect(second.delta_from(first)[:crew]).to eq(crew_1: { station: :damper_open,
+                                                              injury: nil })
     end
 
     # A minion who has been carried out has `station: nil`, which is a VALUE rather than an
     # absence — so unlike `flags` there is no vanished-entry case and a plain reject is honest.
     it "reports somebody being stood down rather than omitting them" do
-      before = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil } })
-      after = view(tick: 2, crew: { fireman: { station: nil, injury: :severe } })
+      before = view(tick: 1, crew: { crew_1: { station: :stoking, injury: nil } })
+      after = view(tick: 2, crew: { crew_1: { station: nil, injury: :severe } })
 
       expect(after.delta_from(before)[:crew])
-        .to eq(fireman: { station: nil, injury: :severe })
+        .to eq(crew_1: { station: nil, injury: :severe })
     end
 
     it "counts a crew change as a reason to broadcast" do
-      before = view(tick: 1, crew: { fireman: { station: :stoking, injury: nil } })
-      after = view(tick: 2, crew: { fireman: { station: :stoking, injury: :minor } })
+      before = view(tick: 1, crew: { crew_1: { station: :stoking, injury: nil } })
+      after = view(tick: 2, crew: { crew_1: { station: :stoking, injury: :minor } })
 
       expect(after).not_to be_unchanged_from(before)
     end

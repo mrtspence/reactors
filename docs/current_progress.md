@@ -17,7 +17,8 @@ DONE      infrastructure                          — Postgres, Redpanda, topics
 DONE      the delivery tier                       — runner, Kafka wiring, web tier, panel
 DONE      minions                                 — individuals, kit, training, injury, the IL
 DONE      the durable record                      — match.events, incidents, progression, awards
-NOT DONE  match lifecycle, snapshots + recovery, auth, fatigue, movement
+DONE      fatigue                                 — endurance, station exertion, recovery, spent
+NOT DONE  match lifecycle, snapshots + recovery, auth, movement
 ```
 
 You can play it. What is missing is everything around a match rather than inside one: a match
@@ -124,7 +125,7 @@ Being built now, as a minimal end-to-end prototype. **Done:**
   skipped, a full view is resent every 40 ticks, and `resync` forces one on demand. Verified
   cross-process: 25 messages written by the runner and read from Postgres by another process,
   1 full + 24 deltas, deltas carrying one changed gauge instead of twelve.
-- **The console page.** `ConsolesController` renders chrome only — 12 instruments, 7 levers,
+- **The console page.** `ConsolesController` renders chrome only — 21 instruments, 14 levers,
   2 crew — from `DevMatch.panel`. ViewComponents dispatch on chrome kind; `console_controller.js`
   merges deltas, drives needles through a CSS custom property, and does optimistic levers with
   a 2 s timeout.
@@ -154,11 +155,11 @@ was refused with 422 and never reached the topic.
 
 - **Minions — built, with two seams left open.** Individuals with stats and tags, a four-layer
   sheet, equipment in three slots, training, a roster in `options:`, injury through a Danger
-  Check, and effort stations that make the crew load-bearing on output. What is still missing:
-  **fatigue** (`state[:fatigue]` multiplies into capability and nothing advances it — item 6
-  below), **`intelligence` and the `Diagnostic#observer` gauge-reading path** (the stat is
-  defined and read by nothing), and **two minions at one station** (last writer wins). Each is
-  marked `TODO` at the code.
+  Check, effort stations that make the crew load-bearing on output, and **fatigue** (phase 6c;
+  `endurance` is the sixth stat). What is still missing: **the `Diagnostic#observer`
+  gauge-reading path** (`intelligence` is read by fatigue's `:oiling` blend but nothing reads a
+  *gauge* yet), and **two minions at one station** (last writer wins). Both are marked `TODO` at
+  the code.
 - **`ControlLink`** — one node sensing another as a declared, breakable graph edge. Needed for
   a governor that can fail on.
 - **Failure modes** from `design_sketches/boiler.md`: governor fail-on, hot box / bearing
@@ -176,8 +177,9 @@ was refused with 422 and never reached the topic.
 | ~~Non-condensables ignored in the phase solve~~ | **Not a gap — this entry described correct physics as a defect.** `Saturation` solves the condensable pair against its own **partial** pressure, which is what vapour–liquid equilibrium actually depends on; the non-condensable then adds its partial pressure to the vessel total through `Pressurized#pressure_pa`. Measured: 10 kg of water at 380 K in 1 m³ gives a 62.1 kPa steam partial pressure with or without air present, and 1 kg of air takes the **vessel** from 62.1 kPa to 166.7 kPa. So a condenser losing its vacuum to inleakage is already modelled. The real simplification is narrower and worth stating instead: the model does not distinguish evaporative equilibrium from **bulk boiling**, which needs the vapour pressure to reach the *total* pressure before bubbles can form. |
 | A ruptured conduit blocks instead of leaking | `Conduit#throughput_kg` returns zero when broken, so a failure is a solid wall and the line backs up to its source. A burst pipe is a **leak**: upstream should still see a moving flow, downstream should starve, and the difference should reach `Atmosphere` as a real loss with `mass_spilled` finally having a writer. Wants the atmosphere to act as the universal sink for anything an operation loses. Marked `TODO` at the code. **Much later** — it needs a rupture size, which is a failure-model decision. **That decision was made 2026-09-14** — see [`design_sketches/blueprints.md`](design_sketches/blueprints.md) §3: a broken part stays in the graph and behaves worse, with the severity declared per part and running as a spectrum rather than a switch. Note also that the sketch questions the *universal* sink: once a spill can deny a repair crew access to the part it came from, where it went starts to matter. |
 | ~~The blower is a free power button~~ | **Closed 2026-09-12, and it was not a blower problem.** Reported from play: the blower was worth about +60 kW on demand, for free, taking a slowly-climbing engine from 230 to 450 kW in twenty seconds and sustaining over 0.5 MW, with output sagging whenever it was shut off. The cause was that **`damper_conductance` was undersized by roughly a factor of two**, and the blower's 600 Pa of head — against a 10 m stack worth ~69 Pa and a blastpipe worth ~361 Pa — was quietly making up the difference. Measured at full controls with the blower OFF, sweeping the conductance alone: **335.1 / 432.2 / 476.6 / 493.3 / 491.3 / 497.4 / 499.0 kW** at 0.20 / 0.25 / 0.30 / 0.35 / 0.40 / 0.50 / 0.60, with the fire hottest at 0.35 (1001 K). Raised to **0.35**, and the exploit disappears on its own: the blower is then worth **+152.7 kW at 0.2, +16.4 at 0.3, +2.9 at 0.4 and −2.4 at 0.5** — past the knee it over-draughts and cools the fire (993 → 931 K). There is no longer a free 45% behind a lever because the engine is already getting the air, which is what a blower is actually for. Above the knee the engine burns more fuel for no more work and starts feathering its safety valve: 0.4 burns 3.4% more coal for 0.4% *less* power. **The old note claiming "×1.5 and above simply pins the boiler on its safety valve and the engine stops gaining anything" was wrong** — ×1.5 is 0.3, which measures at 599.5 kPa, off the valve, and +142 kW. It predated the steam chest, the regulator trim and the stoker rating, and had been cited as a reason not to touch this. *(The blower still wants a cost of its own for the starting phase — crew time, then a fuel reserve — but it is no longer an exploit.)* |
-| The blower is still free, it just no longer buys anything | Design note, 2026-09-12. With the damper correctly sized the blower is worth +2.9 kW and there is nothing to game, but it remains a lever with no cost, and that is not the intent: it should **occupy a crew member full time** to get anything out of, and later carry a limited fuel reserve or equivalent. Note the constraint that rules out the obvious answer — **assume a black start**, since the player may be the only one generating power in a match, so anything requiring electrical supply is not acceptable. Blocked on minions doing real work, which is itself blocked on giving the work-station levers a finite `stiffness:` (see the TODO in `control_points`). |
-| **MUST ADDRESS: 60% of shaft power is going into the drive coupling** | Found 2026-09-12 while budgeting the draught sweep. At full controls the cylinder delivers ~499 kW, the mill receives **199.7 kW**, and `joules_to_friction` takes **297.5 kW**. The books balance exactly — 199.7 + 297.5 ≈ 497 — so nothing is lost silently and `Tick#drive` is measuring and ledgering it honestly. But **a real belt drive loses single-digit percent, not sixty, and this is not acceptable as a permanent figure.** The suspect is `DriveLink` `stiffness: 9_000` on `flywheel=load` held against a fan-law load at a large *steady* speed difference: a soft coupling that never stops slipping is a brake, and `Relaxation` will faithfully charge it forever. **Check the steady-state slip first** — if the two ends sit at a permanent offset rather than converging, the stiffness is wrong rather than the loss model. **Deliberately deferred to the bearings pass, not left alone by accident:** frictional bearings and their failure modes are coming, they will put a second physically-motivated dissipation term on the same shafts, and moving one number now would only have to be redone against the real model. Re-measure `joules_to_friction` as part of that work. `TODO` at `graph/link.rb`. |
+| ~~The blower is still free, it just no longer buys anything~~ | **Closed 2026-09-19** by driven transport: the Hand Bellows occupies a crew member full time and the Donkey Blower carries its own fuel oil. Both honour the black-start constraint the original note set, because neither depends on the engine being lit. The note below is the 2026-09-12 original. Design note, 2026-09-12. With the damper correctly sized the blower is worth +2.9 kW and there is nothing to game, but it remains a lever with no cost, and that is not the intent: it should **occupy a crew member full time** to get anything out of, and later carry a limited fuel reserve or equivalent. Note the constraint that rules out the obvious answer — **assume a black start**, since the player may be the only one generating power in a match, so anything requiring electrical supply is not acceptable. Blocked on minions doing real work, which is itself blocked on giving the work-station levers a finite `stiffness:` (see the TODO in `control_points`). |
+| ~~MUST ADDRESS: 60% of shaft power is going into the drive coupling~~ | **Closed 2026-09-17, and the coupling was never the cause.** Found 2026-09-12: 499 kW delivered, 199.7 kW to the mill, 297.5 kW to `joules_to_friction`. The books balanced, so nothing was lost silently — but a real belt loses single digits. Three layers, each hiding the next. **(1)** `Load#apply` integrated its brake explicitly, and explicit Euler on a fan-law brake is stable only while `dt < 2I/(dτ/dω)` — 0.156 s at working speed against a 250 ms tick. The mill was spun up and slammed to a standstill every tick; the coupling then slipped ~100% against a load that was stationary whenever anything read it. Measured: flywheel 18.24 rad/s, load **0.13**, yet extracting 40 kJ a tick — the kinetic energy of a body at 14.1 rad/s. It read as a steady state only because it saturated into the `max(…, 0.0)` clamp. **(2)** Integrating each curve exactly was necessary and insufficient: friction fell 58.6% → 38.7%, but the mill settled at 8.5 rad/s against a true equilibrium of 19.6, because phases 4d and 4e were each exact while the *split between them* was first order. Halving `dt` halved the gap — the signature. So drag moved **into** the drive solve as a conductance to a reservoir at rest (`Relaxation.settle`'s `drags:`, a diagonal term), with a nonlinear brake linearised as `τ(ω)/ω` capped at `I/dt`. **(3)** Only then was the coupling visibly too soft, at 22% slip; `stiffness` went 9 000 → 150 000. **Result: 88–90% mechanical efficiency across 3× power and 2× speed**, rings 7.7–10.2%, journals 0.2–0.4%, belt 1.6%. Two traps worth keeping: measuring the halves separately charges each for a state the machine was never in, which inflated the mill's output past its own engine's and drove `joules_to_friction` **negative** while the totals still balanced; and **`stiffness` must never be tuned to hit a loss target** — a viscous coupling's loss goes as `P/(k·ω²)`, which is a fluid coupling rather than a belt, so the law has the wrong shape and only its smallness makes it safe. Design: [`design_sketches/bearings.md`](design_sketches/bearings.md) §1.1 and §6.3. |
+| **A lever, not a defect: the prime mover's torque is applied after the drivetrain settles** | Phase 4d solves couplings and drag implicitly; phase 4e then applies the cylinder's impulse separately. Same operator split that was fatal for the load brake, and benign here for a reason worth knowing — **a brake is stiff feedback, a prime mover is a near-constant source**, and splitting a source is first order with a small constant. The residue is real but harmless: the shaft sheds **11% of its speed** in 4d and regains it in 4e every tick, and `indicated_power_w` therefore reads `ΔL²/2I` — about **5%** — high. Nothing is lost; `transmit_torque` bills the measured kinetic energy gain and a steady-state audit closes to **0.01%**. Two consequences: **never use `indicated_power_w` as an efficiency denominator** (`work_joules` is the honest figure, and the `engine_power` gauge already shows it), and the **`extractable_joules` clamp is dormant** — checked at throttle 10, 20, 60 and 100, the impulse lands unscaled every time, so the "discarding 30–50%" figure predates the steam chest. If the sawtooth ever bites, the fix is written up in [`design_sketches/bearings.md`](design_sketches/bearings.md) §6.4: `Relaxation.settle` already accepts current sources on its right-hand side, so the impulse could be solved with the network and `transmit_torque` reduced to its billing. |
 | ~~A vessel's burst pressure was a number somebody picked~~ | **Closed 2026-09-12.** The boiler's `max_pressure_pa` was `relief_pa * 1.5`, which is **circular** — the pressure a shell can survive cannot depend on where somebody set its safety valve — and it made the two impossible to separate, since raising the valve dragged the damage threshold up in lockstep. `Concerns::Pressurized#rated_pressure_pa` now derives it from the plate by hoop stress, `p = σ·t/r·safety_factor`, which is the shape `Flywheel#burst_speed_m_s` has always had (`√(σ/ρ)·safety_factor`). An explicit `max_pressure_pa:` still wins, so a part can be special. Both ratings on a `Vessel` now come from its `material:` — temperature through `Thermal#rated_temperature_k`, pressure through this — and `stress_rate` stays per-part. Derived figures: high-pressure **14.39 atm** (0.6 m radius, 14 mm wrought iron) and atmospheric **4.93 atm** (0.75 m, 6 mm), both landing close to the `burst_pa` each variant already carried, which is a good sign given they came from the plate rather than from a gauge scale. `safety_factor: 0.25` is the **seams, not the metal**: a riveted wrought-iron boiler loses ~30% to joint efficiency before any allowance for the grooving and corrosion that run along a seam. |
 | ~~The flywheel failed before the crown sheet could, so the low-water hazard was unreachable~~ | **Closed 2026-09-12.** Found in play: the crown could not be made to fail because the wheel always went first. Measured — at `safety_factor: 0.35`, winding the safety valve down to 9 atm burst the wheel at **tick 1511, in the acceleration transient, with the plate still at 449 K**. Swept flywheel strength against pressure band and starvation, reporting which part fails first and the wheel's peak stress: at sf 0.35 the crown wins at margins 100/70/40 (wheel 0.27/0.38/0.50) and **the wheel wins at margin 0**; at **sf 0.45** (×1.29 burst speed, ×1.65 energy) the crown wins at every margin with the wheel at 0.16/0.23/0.30/0.41. Higher factors work too (0.55 → 0.11–0.27, steel → 0.09–0.22) and were rejected *because* they work too well — the wheel stops being a hazard at all, and steel is better kept as the modular upgrade. **0.45 is the minimum that works and the minimum is the point**: the Wheel Stress gauge still spans 0.16 → 0.41 as the margin is spent, so the wheel remains something a driver watches. With the plug scaled over the plate ruptures at **711 / 702 / 692 / 675 K** across the same margins — *cooler at higher pressure*, which is the crown's pressure coupling working and why it fails below wrought iron's bare 750 K rating. Watt's wheel stays at 0.35: unmeasured, irrelevant in its normal running (0.007 of burst stress), and 1776 foundry practice was not 1802's. |
 | ~~The cylinder could not fatigue from over-pressure, and its relief valve was not adjustable~~ | **Closed 2026-09-12.** Two things. `Cylinder#stress_per_second` has fatigued on `compression_pressure_pa` since it was written and **had never once fired**, because the steam engine set neither `max_pressure_pa` nor `stress_rate` — the fifth silent-off-switch in this engine, after the four inert rate caps and the material ratings. The barrel now derives its own hoop rating from the **bore** (a cylinder is the one pressure part that never has to be told its radius): 25 mm of cast iron over 0.225 m at `safety_factor: 0.3` gives **49.35 atm**, far above any relief setting, which is right — a barrel is a thick casting and its danger is the compression *spike*, not steady working pressure. And the cylinder relief valve gained the same adjusting screw as the boiler's, margin 100 → 9.00 atm and 0 → 20.00 atm, stated absolutely instead of as `relief_pa * 1.5` because a cylinder valve's setting is a property of the cylinder and not of where the boiler's valve sits. The range is deliberately generous against the current barrel so a better cylinder later finds room rather than a leftover limit. **Narrower in effect than the boiler's screw, and worth being honest about**: this valve never lifts in ordinary running, so the setting does nothing until the cylinder is wet — then a higher setting keeps the engine pulling through a damp patch at the price of telling the last device between a slug and a wrecked cylinder to wait longer. |
@@ -225,6 +227,64 @@ was refused with 422 and never reached the topic.
 
 ---
 
+## Before the mine
+
+Four things, and **two of them are not features** — they are places the delivery tier names the
+steam engine by constant, so a second operation type cannot reach the same code path.
+
+| | | |
+|---|---|---|
+| ~~**1**~~ | ~~**Crew capacity + Crew Quarters**~~ | **Done 2026-09-18.** Seats replace roles, a required `:crew_quarters` slot carries `crew_capacity` and the origin station, and everybody starts there. Three effort stations against two seats. See [`crew_capacity.md`](design_sketches/crew_capacity.md) §8. |
+| ~~**3**~~ | ~~**Registry introspection**~~ | **Done 2026-09-18, with crew capacity.** `Operations.register` takes an `assembler:`; `Operations.assembly_for(type, chassis:, loadout:)` answers what a build would be. `Crewing` and `DevMatch` no longer name `Operations::SteamEngine`. |
+| ~~**2**~~ | ~~**Driven transport**~~ | **Done 2026-09-19**, stages A–E. `mass_delivered` on the ledger, the shaft adapter on `Conduit` (`driven_by:`, `lift_m:`, `efficiency:`, `delivers_to:`), `Nodes::Motor`, and the blower split into Hand Bellows and Donkey Blower. See [`driven_transport.md`](design_sketches/driven_transport.md) §7. |
+| ~~**4**~~ | ~~**`DevMatch` gains an operation axis**~~ | **Done 2026-09-19** with operator identity. `DevMatch::OPERATION_ID` and `DevMatch::TYPE` are gone; `OPERATIONS` is a list and the dev match runs **two steam engines in lockstep**. See [`operator_identity.md`](design_sketches/operator_identity.md) §8. |
+
+**All four pre-mine blockers are closed.**
+
+**Driven transport — built 2026-09-19, stages A–E.** The blower was *"a pressure source with a
+lever on it and nobody paying the bill"*, and now there are two ways to pay: a **Hand Bellows**
+that costs a person on the handles continuously, and a **Donkey Blower** that costs fuel oil out
+of its own tank. Both honour the black start — neither depends on the engine they are lighting.
+
+Measured on a cold start, and the donkey reproduces the pre-release machine exactly:
+
+| blower | fire | boiler | air | 500 kPa at |
+|---|---|---|---|---|
+| donkey | 1015.9 K | 608.8 kPa | 3.093 kg/s | **t=1600** |
+| bellows, manned | 897.3 K | 608.1 kPa | 0.927 | **t=3800** |
+| bellows, nobody on it | 667.8 K | 67.4 kPa | 0.302 | never |
+| none fitted | 667.8 K | 67.3 kPa | 0.302 | never |
+
+An unmanned bellows is **identical to no blower at all**, and nothing implements that — an
+unmanned effort station already delivered nothing. The donkey's 3.093 against the old 3.199 is
+the governor working: it holds ω at 58.4 of a rated 60, so the fan sees `(58.4/60)² = 0.947` of
+its head.
+
+> **Natural draught already existed and nobody had noticed.** 0.302 kg/s with no blower at all —
+> enough to keep a fire alive at 668 K, never enough to raise steam. That deleted the sketch's
+> own fallback plan (§3.4: *"if a bellows cannot raise steam, add natural draught"*), because it
+> was already there and already counted.
+
+> **The bellows ships whole rather than at its sustainable figure**, which the sketch said it
+> could not. Fatigue landing first is what changed: the top of the lever is priced, so working
+> flat out to raise steam in 3800 ticks instead of 1600 is a decision with a cost rather than a
+> free slower button.
+
+**Deliberately not blockers**: snapshots + offset commits, match lifecycle, Turbo incidents and the
+`console_controller.js` split, auth, `ControlLink`, the `boiler.md` failure modes, Chemical Vats.
+None of them is reached by building a second operation. **Probabilistic injury is Tim's to design**
+and is sequenced after, not before.
+
+**The open design question is answered** in [`design_sketches/mine.md`](design_sketches/mine.md):
+getting people to the face needs real distance, and the mine is a single-seam bord-and-pillar shaft
+colliery in its fan-ventilated era. Space is modelled as volume nodes on the existing graph, so one
+topology carries men, material, air and water. Power arrives from the upstream operation as an
+**imported shaft** — a real rotating body the pump and fan couple to — which is the first thing that
+has ever crossed between two operations and wants its own sketch before code. Coal goes outward to a
+third operation, never back into the engine.
+
+---
+
 ## What to do next
 
 **The minion release is built — all seven stages, 2026-09-16.** Design and findings in
@@ -244,7 +304,9 @@ machine's output. What landed:
 - **Effort stations replaced `stiffness`** — the lever is intent, the crew supplies the rate. A
   locomotive cannot be run by day-labourers; a competent human reproduces the tuned machine.
 
-**Movement and the spatial model are the release after**, deliberately.
+**Movement and the spatial model are the release after**, deliberately. The mine's release
+sequence is in [`design_sketches/mine.md`](design_sketches/mine.md) §4.6: the inter-operation
+shaft first, the spatial model second, both provable on a rig before a mine exists.
 
 Steps 1–4 of the original vertical slice are **done** — the prototype is playable in a browser.
 What remains, in dependency order:
@@ -279,24 +341,245 @@ What remains, in dependency order:
    blocks progression**: `run_id` already carries the identity lifecycle will key on, and every
    fold closes on a transition the engine emits, so a match that never ends still banks what it
    earned.
-6. **Fatigue**, which now has an obvious home and did not before. Effort is a minion's
-   *subjective* exertion — the same lever position costs a day-labourer far more than it costs a
-   strong fireman — so the rule is that fatigue accrues with `intent ÷ capability` rather than
-   with the lever's position. Working somebody past what they can manage tires them; a strong
-   worker coasting at a setting that is killing a weak one does not. `state[:fatigue]` exists,
-   already multiplies into `Minion#capability`, and nothing advances it. See
-   [`design_sketches/minions.md`](design_sketches/minions.md) §9.
+6. **Probabilistic injury** — **Tim is designing this one**, after the currently open work closes.
+   It introduces *"an accident happened"* as a thing with a **likelihood**, which is today
+   inexpressible: the only route into harm is a `failure_hazards` table on a part that has just
+   broken. Fatigue is one of its natural inputs.
+
+   **The distinction it turns on, which cost a wrong line in the fatigue sketch.** A tired worker
+   gets their hand caught in the belt; **the belt does not then care how tired they are.** So
+   fatigue belongs on the *incidence* of an injury and never on its severity — and the
+   obvious-looking seam is the wrong one, because `Injury.resistance` reduces the **bite**, so
+   wiring fatigue there would say a tired body is mangled worse by the same blast. `Injury` is
+   deliberately untouched by the fatigue release for this reason.
+
+   Build nothing before then that assumes every injury originates in a part failing.
 7. **Auth**, then the rest of the deferred minion work (the `observer` gauge path, finite lever
    stiffness for a control that should genuinely take time to travel), then the failure modes
    from `design_sketches/boiler.md`, then Chemical Vats.
 
-**Frictional bearings, and the drive-coupling loss goes with them.** Bearings and their failure
-modes are planned, and they put a second dissipation term on the same shafts that
-`DriveLink` already dissipates through. The coupling currently burns **60% of the engine's shaft
-power** (499 kW delivered, 199.7 kW to the mill, 297.5 kW to `joules_to_friction`), which is a
-must-address item held deliberately until then rather than tuned in isolation — see the gaps
-table and the `TODO` at `graph/link.rb`. Doing them together means measuring one loss model, not
-fitting a number twice.
+**Frictional bearings, and the load's integrator goes first.** Designed in
+[`design_sketches/bearings.md`](design_sketches/bearings.md): a bearing is a **modelled friction
+interface** — a place where enough rubbing happens that the heat and the wear should be real — so
+one node class covers a journal under a flywheel, a piston in a bore, and a rope over a pulley
+later, with `duty:` supplying the kinematics. A coarse Stribeck law (boundary term
+load-proportional, Petroff term load-independent, blended by an oil film fraction) puts the
+dissipation into the bearing's **own joules** instead of the `joules_to_friction` exit, which is
+what makes over-temperature wear, the hot-box runaway and seizure all fall out of one mechanism.
+`Cylinder#efficiency`'s 0.85 is deleted and replaced by a `:slide` bearing — it is a torque derate
+that is never ledgered, and folding it in is also what finally makes cylinders wear from ordinary
+hard running rather than only from hydraulic lock. Oiling becomes a dexterity-led effort station.
+**Stages A to D are done, and the engine measures 88–90% mechanical efficiency across 3× power
+and 2× speed** (rings 7.7–10.2%, journals 0.2–0.4%, belt 1.5–1.6%). A put drag inside the drive
+solve; B added the `lubricant` tag, the `bearing_oil` resource, a required `:oil_store` slot
+holding 180 kg and an `oil_remaining` gauge; C brought `Nodes::Bearing`, the two-term friction law
+and bearing heat; D fitted the `:slide` bearing and deleted `Cylinder#efficiency`.
+
+**E is done too, and the hot box is real.** `Nodes::Bearing` carries `Wearing`; one fraction
+(`SERVICE_FRACTION = 0.8`, which the research picked — babbitt melts at 235–370 °C and is run to
+150 °C) turns the material's own rating into both thresholds. A starved journal **wipes at +119 s
+and 487.9 K, then seizes at +150 s and 520.1 K** — a 31-second warning window — and the seizure
+collapses the shaft from 167.7 rpm to 26.9 and shaft power from 400 kW to 57. Two instruments make
+it visible: `bearing_temp` (lagged needle, scaled to the babbitt) and `bearing_condition` (prose,
+exempt from upgrades like `flywheel_condition`). Full write-up and measurements in
+[`design_sketches/bearings.md`](design_sketches/bearings.md) §6.5.
+
+**F is done, and the ladder is now reachable in play.** Bearings draw oil through an `:oil_in`
+inlet, spend it by **sliding distance** rather than by the clock, and book it to a new
+`mass_consumed` ledger line — neither a vent nor a spill, because an engine working properly
+would otherwise read as one that is leaking. `:lubrication` is a required slot with
+`:hand_oiling` in it: one `:oiling` lever, two oil lines, `effort: { dexterity: 0.6,
+intelligence: 0.4 }` — the first station in the game that is not a strength check and the first
+thing that has ever read `intelligence`. With nobody sent to oil, the journal **wipes at 524 s
+and seizes at 632 s**; conservation holds to 2.1 × 10⁻¹⁵. §6.6 has the rest. **G is next.**
+
+Two findings from F, and both are about design rather than physics:
+
+> **Adding a crew role to a station is how you accidentally un-design a mechanic.** The first cut
+> gave `:oiling` an `:oiler` role, and an unfilled role gets `Crew::STANDIN` — so a posted oiler
+> is somebody permanently on the round for free, and the "nobody oiling" run still filled its
+> bearings. A station meant to compete for somebody's time must have **no role of its own**, so
+> that manning it costs the fireman's place at the shovel.
+
+> **`Intent.none` does not mean "I want nothing".** A path with nothing declared at either end is
+> driven by the *path*, so a bearing that stopped declaring a draw once full kept taking oil until
+> its housing was full — 8.9 kg into a 1.2 kg charge, and nothing could ever run dry again.
+> `rate_desired` tests `draws.key?`, not `positive?`: declare the zero.
+
+**G is next and carries three things**, not just the catalogue: the parts themselves, **Archard
+wear** (§3.10) and **melting out** (§3.11). The seizure was audited and is honest — conservation
+exact to 2.3 × 10⁻¹⁵ through the failure, every joule traceable — but its *temperature* is
+unbounded, and only lands somewhere defensible because this flywheel is small; a heavier one takes
+the same bearing to 15,563 K. The fix is the event a hot box is actually made of: the white metal
+melts and runs, carrying its latent heat out.
+
+> **It does not bound the temperature, and the sketch expected it to.** Measured: 6 kg of babbitt
+> takes 31 K off the spike and **nothing** off the 1652 K equilibrium, because a seizure dumps
+> 480 kJ of shaft energy in its first tick — more than the whole lining can absorb. A phase change
+> caps a temperature only when the heat arrives slower than the latent heat can take it, which is
+> true of a plug warmed through a crown sheet and false of a bearing absorbing a flywheel. What
+> would actually bound it is **radiation** — `ambient_conductance` is linear and a body at 1650 K
+> radiates as T⁴ — and that is a change to `settle_ambient` touching every hot node.
+
+What melting does buy is still worth having: `:seized` gets a reason a player can be told (the
+lining ran out and the carrier is riding the shaft), and a re-babbitting job becomes the obvious
+first in-match repair.
+
+It lands as `Concerns::Fusible`, because **`Nodes::FusiblePlug` is the bespoke version of the same
+idea** — it reaches the outcome by proxy, sensing the crown sheet's recorded temperature against a
+configured threshold and latching, with no mass and no latent heat of its own, and a tick of lag
+its own comment apologises for. A plug built on the real thing melts when *its own* temperature
+passes *its own* material's melting point, which deletes the sensed key, the threshold and the
+lag. **Not converted in G** — it is safety-critical and specced, and `crown_sheet_spec` is the
+most expensive file in the suite. Land the concern on the bearing; convert the plug deliberately.
+
+**Radiation — built 2026-09-18.** Designed in
+[`design_sketches/radiation.md`](design_sketches/radiation.md). Nothing in the engine radiated:
+heat left a node one way, linearly, which is why a seized bearing settled at 1652 K and why a
+firebox heated its boiler through a flat conductance. **Balance was explicitly not a
+consideration** — pre-alpha is exactly when to get the physics right, because good physics means
+fewer special cases later and better emergent play.
+
+**It cost almost nothing, because `T⁴ − T_amb⁴` factors exactly** into
+`(T² + T_amb²)(T + T_amb)·(T − T_amb)`. The bracketed part *is* a conductance in W/K, so radiation
+became an ordinary term in machinery that already existed — summed with `ambient_conductance` for
+loss to the environment, and added to a `ThermalLink`'s conductance for body-to-body exchange.
+`Relaxation` needed **no change at all**, and the whole thing inherits backward Euler's
+unconditional stability; an explicit `T⁴` would have been the one integrator this library forbids.
+Opt-in through `emissivity`/`radiating_area_m2`, both defaulting to zero, and a spec asserts a node
+declaring neither is **bit-identical** to before.
+
+Both proofs of concept landed:
+
+- **The firebox.** Brightening the fire 1.056× multiplies convective transfer by 1.102 — exactly
+  the ratio of temperature differences, as a linear term must — and radiant transfer by **1.254**,
+  exactly the ratio of `T⁴ − T_water⁴`. Radiation carries about **63%** of the path, which is a
+  firebox.
+- **The bearing.** A seized one settles far below the old 1652.4 K, because a body that hot
+  radiates far more than 42 W/K can conduct. The unbounded behaviour is gone because the missing
+  physics arrived, not because anything was clamped.
+
+> **The firebox split had to be calibrated against the TOTAL, and the first attempt was wrong by
+> 38%.** It shipped as `900 W/K + ε0.9 / 12 m²`, summing to ~2200 against the flat 3500 it
+> replaced — because the flat figure had been standing in for radiation all along. **An
+> under-strength path makes the fire run hotter, not cooler**, since the heat cannot leave it, so
+> the reading that looked like a better fire was the bottleneck, and a claim that the engine had
+> gained 100 kW went in this file on the strength of it. It cost four spec failures: the reference
+> cold start stopped reaching working pressure, `steam_raised` never fired, and three
+> achievement-pipeline examples went with it. Now `1100 W/K + ε0.9 / 24 m²`, ~3280 total.
+>
+> **Two claims made here were withdrawn.** That the engine became substantially more powerful — it
+> did not — and that more air is no longer simply better. The second may well be true and **was
+> not measured**: the boiler sat at 432.3 K at every damper in that sweep, on its safety valve, so
+> the run could not say. Demonstrating an optimum needs the drum off its valve.
+>
+> **Balance figures from before radiation are still stale**, including the cold-start gradient and
+> the sweeps in `bearings.md` §6.3, because the path's temperature *dependence* changed even
+> though its working-point magnitude did not.
+
+**Fatigue — built 2026-09-18, stages A–E.** Designed in
+[`design_sketches/fatigue.md`](design_sketches/fatigue.md). Phase **6c**, after `endanger` and not
+at phase 0 where a long-standing TODO put it: the effort demanded is settled at phase 1, `endanger`
+already writes `minions`, and somebody carried out must stop working on *that* tick. It draws no
+entropy, exactly as the Danger Check does not. Accrual is `exertion × (intent ÷ capability)² ÷
+endurance`, netted against a recovery rate the *station* declares — so an effort station recovers
+nothing and a valve is somewhere to stand down to. `endurance` is the sixth stat, and heavy kit
+now carries a negative offset, which is the first equipment in the catalogue with a real downside.
+
+**The balance sweep (stage F) is deliberately skipped** — it folds into the larger sweep that comes
+with the mine and the tech tree.
+
+> **One fireman cannot hold the firehole, and nothing was wired to make that true.** `injury_spec`
+> fired at `stoking: 70` for 7000 ticks to burst a drum; it now goes spent at **t=832**, capability
+> zero, **the fire dies** (firebox 918 K → 319 K) and the boiler cools for six thousand ticks with
+> nobody hurt. A spent minion is unmanned in all but name, and an unmanned effort station delivers
+> nothing. `ReferenceCrew` therefore sets `endurance: TIRELESS` — it divides accrual and never
+> enters `capability`, so a machine spec keeps measuring the machine at no cost to any baseline.
+
+**Crew capacity — built 2026-09-18, stages A–C.** Roles are gone: a roster is **seats**
+(`crew_1`, `crew_2`), as many as the fitted `:crew_quarters` part has `crew_capacity` for, and a
+seat carries **no station** — everybody starts in the quarters and is *sent* somewhere, so
+deploying the shift is the opening move of a match. Jobs are derived rather than declared (every
+`ControlPoint` with `effort:`), which makes the scarcity arithmetic: **three effort stations
+against two seats.**
+
+Measured: an engine with nobody deployed sits at **322.8 K and 0 kW**; deploy one hand to the
+shovel and it is **1022.0 K, 547.9 kPa, 495.5 kW** — the pre-release reference exactly. Nothing
+was wired to make the first row true; an unmanned effort station already delivered zero and there
+is simply no way to start manned now.
+
+> **Two things the sketch had wrong, both found by building it.** `provides: %i[quarters]` is a
+> duplicate-id error, because `provides:` names *node* ids and a quarters needs no node — it is a
+> `ControlPoint` with no `node:`, which is what `#lever?` now keys off. And `panel[:controls]` was
+> feeding both the lever strip and the crew station dropdown; those stop being one list the moment
+> a station is not a lever, so `panel` gained `stations:`.
+
+The original sketch, its alternatives and the defect it came from:
+
+**Crew capacity, and the standin defect it comes from.** Designed in
+[`design_sketches/crew_capacity.md`](design_sketches/crew_capacity.md). `Crew.normalise` fills
+*every* declared role with a `STANDIN`, so roles and people are 1:1 and **nothing in the model can
+express scarcity of people** — which is how adding an `:oiler` role silently deleted the oil-round
+mechanic in stage F. Jobs become derived (any `ControlPoint` with `effort:`), hands become declared
+and upgradeable, and the roster becomes positional *seats* rather than job titles — matching the
+noun correction the minions release already made. **The crew quarters is the load-bearing piece**:
+a required part carrying `crew_capacity`, `recovery_rate` and, critically, **the station every seat
+starts at**. Nobody starts at a working station, because a machine that lets them hands the player
+a shift already at the face for free — and for a mine, getting people in and out safely is most of
+what the operation does.
+
+Three findings from E worth carrying:
+
+> **A failure threshold that slides with durability collapses a ladder.** The first `overload?`
+> slid from the melting point to the service limit as integrity drained — the concern's own
+> advice that a worn part fails sooner. The part then crosses the falling threshold *before*
+> fatigue can finish, so it seized at 481.7 K on a 0.63 integrity having never wiped, and the
+> warning rung never happened. The threshold is flat; "worse once damaged" is expressed as a
+> derate that raises the friction, which is a mechanism rather than a second threshold.
+
+> **`max_drag_conductance` is not a stop, and three docs said it was.** At `c = I/dt` backward
+> Euler gives `ω′ = ω/2` — it **halves** a body per tick. It bounds how far a linearised brake is
+> trusted. A drag meaning "this has locked" declares a large multiple of it; a seized bearing
+> uses 40×.
+
+> **Seizure is the first mechanic to make the phase 4d/4e split bite.** A locked bearing cannot
+> quite stop the engine — it limps at 26.9 rpm — because 4e puts the cylinder's impulse back after
+> 4d has taken it out. The lever in `bearings.md` §6.4 stays unpulled, but it now has a cost.
+
+**And one thing E did not deliver, now scheduled.** Stage D claimed that folding in
+`Cylinder#efficiency` would make cylinders wear from ordinary hard running. Measured, the rings
+reach **459.3 K against a 560 K limit at throttle 100 / load 100** — a hundred Kelvin of headroom
+— so that rung is unreachable and hydraulic lock is still the only route to a worn bore.
+
+The cause is that the law describes the wrong thing: **a bearing does not wear because it is hot,
+it wears because it is rubbing, and it is hot for the same reason.** Heat correlates for a journal
+cooking itself and fails completely for rings that shed theirs into a tonne of iron casting. The
+fix is Archard — wear against the **boundary** friction power the friction law already computes,
+with the hydrodynamic term absent because an oil film wears nothing. **Decided 2026-09-17 and
+scheduled for stage G**, beside the parts catalogue, because it makes bearings consume themselves
+in ordinary running and a part that wears out needs somewhere to be bought. Design in
+[`design_sketches/bearings.md`](design_sketches/bearings.md) §3.10.
+
+**Driven transport — BUILT 2026-09-19**, stages A–E; findings in `driven_transport.md` §7 and
+summarised above. The original design note follows.
+
+**Driven transport, and the blower stops being free.** Designed in
+[`design_sketches/driven_transport.md`](design_sketches/driven_transport.md). `Conduit#head_pa` is
+a pressure source with a lever and nobody paying the bill — measured at **1.59 kW given away while
+raising steam**, which is free at the one moment the engine itself produces nothing. Three things
+can pay for a head and only one is missing: **crew effort already works** (`Tick#control_values`
+routes an effort control through the crew, so `effort:` on the lever is the whole change), a
+consumable needs one small prime mover, and **shaft power is the genuine gap** — `Load` absorbs
+and produces nothing, `head_pa` produces and absorbs nothing, and the two halves of a pump cannot
+be wired together. The shaft adapter costs **no arbiter or solver change at all**, because
+`drive_drags` already gathers drag from a non-rotating declarer naming a shaft it is not — which is
+what a `Bearing` is. The blower becomes a slot with two blueprints: a **Hand Bellows** worked by a
+minion, and a **Donkey Blower** at exactly today's figures, so every existing balance measurement
+survives the release.
+
+**This is what the mine needs.** Drainage and ventilation are both *shaft work buys flow*, and a
+mine's output is mass leaving usefully — which the ledger cannot currently say, having
+`mass_vented` and `mass_spilled` and no productive exit.
 
 ### The stated direction, as of 2026-09-12
 
@@ -450,9 +733,11 @@ A self-draughting engine that loses its blastpipe keeps **full power on a perman
 loses 39% of its speed without one. Nothing warns about this and nothing should — a bad swap
 teaching you what the part was for is the mechanic, not an error case.
 
-**It is the sharpest argument yet for giving the blower its cost.** While the blower is free,
-"plain chimney plus a blower left running" is strictly better than it should be and the
-blastpipe's whole value is masked. See the WIP note on `:stock_blower`.
+**It was the sharpest argument for giving the blower its cost**, and that landed 2026-09-19:
+"plain chimney plus a blower left running" now costs either a person on the handles or fuel oil
+from a tank, so the blastpipe's value is no longer masked by a free lever. **Worth re-measuring
+the blastpipe against a blower somebody has to pay for** — the figures here were taken when it
+was free.
 
 #### Stage 4: the outfitting screen
 
@@ -492,7 +777,7 @@ rescues `ReactorSim::Error` so a bad loadout cannot take every match on the runn
 web process would stop being sound the moment configuration was chosen at creation rather than
 read from the environment. It is chosen now, and it stays sound with one word changed: the panel
 is a pure function of the **loadout**, so two processes reading the same stored loadout cannot
-disagree. Verified — removing the safety valve takes the panel from 18 instruments to 16. What
+disagree. Verified — removing the safety valve takes the panel from 21 instruments to 19. What
 remains is a race, not a design flaw: save a loadout and the console renders the new panel over
 the old machine for a tick or two until the reset lands. The real fix is still the panel coming
 *from* the runner, which is where this goes when matches are created on demand.
@@ -905,6 +1190,19 @@ before the simulation rewrite but is unaffected by it.
 Each of these is a rule, and each is the kind a fresh reader breaks by accident. They are
 documented where they matter and collected here because the collection is worth reading once.
 
+- **Check which clock a rate is against before calibrating it.** `dt` is `ReactorSim::DT × the
+  operation's time_scale`, and `DT` is **0.25 s**. The steam engine sets `time_scale: 1.0`
+  deliberately, so one tick is a quarter of a second and the whole reference cold start is about
+  seven simulated minutes. Fatigue's first figures were derived against an assumed `time_scale`
+  40 and were **40× too slow** — a fireman finished raising steam 4.3% tired, and nothing would
+  ever have tired anybody. Nothing announces this: the numbers look reasonable and the mechanic
+  is simply inert.
+- **A rate whose denominator contains its own output is three times faster than it reads.**
+  Fatigue accrues on `intent ÷ capability` and `capability` contains `(1 - fatigue)`, so
+  `df/dt = K/(1-f)²`. That integrates to `t = (1 - (1-f)³)/3K`, so **time-to-spent is `1/3K`, not
+  `1/K`** — at every load. Any constant declared as "per second at full effort" is therefore a
+  *nominal* figure and the real answer is a third of it. Verified against the machine: 824 ticks
+  predicted, 832 measured.
 - **Postgres treats NULLs as distinct in a unique index.** `progresses` distinguishes a per-run
   row from a lifetime total by a null `run_id`, so a plain unique index on
   `(owner_id, run_id, metric)` enforces nothing for the lifetime rows: `NULL = NULL` is unknown,

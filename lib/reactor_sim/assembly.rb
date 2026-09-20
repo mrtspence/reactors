@@ -55,6 +55,41 @@ module ReactorSim
       @fragment ||= @slots.reduce(@fixtures) { |acc, slot| acc.merge(built(slot)) }
     end
 
+    # The control points one slot's part contributes.
+    #
+    # **The crew quarters is what this exists for.** A seat's starting station has to be whatever
+    # the FITTED quarters calls itself, never a hard-coded id — which is what keeps a second
+    # quarters, somewhere else in a larger works, another fitting rather than a new concept.
+    def stations_from(slot_id)
+      slot = @slots.find { |s| s.id == slot_id.to_sym } or return []
+
+      built(slot).control_points
+    end
+
+    # --- crew -------------------------------------------------------------------------------
+    #
+    # **Found by what the slot ACCEPTS, not by a slot id.** Any operation that declares a slot
+    # taking `:crew_quarters` gets capacity and an origin for free, which is what keeps a mine
+    # from having to reimplement either — and `crew_capacity` is read off the fitted part, so
+    # hands are something a player buys rather than something the machine decides.
+    CREW_QUARTERS = :crew_quarters
+
+    def quarters_slot = @slots.find { |slot| slot.accepts == CREW_QUARTERS }
+
+    def crew_capacity
+      slot = quarters_slot or return 0
+
+      part(slot.id)&.stats&.fetch(:crew_capacity, 0).to_i
+    end
+
+    # Where the shift starts. Nil for an operation with no quarters, which `Operation` then
+    # reports as a crew standing nowhere rather than silently posting them to a lever.
+    def crew_origin
+      slot = quarters_slot or return nil
+
+      stations_from(slot.id).first&.id
+    end
+
     # In catalogue order, never in slot order, so the panel does not rearrange itself when a
     # slot list is reordered for some unrelated reason.
     # Gauges arrive two ways, and both end up in one list ordered by the panel.

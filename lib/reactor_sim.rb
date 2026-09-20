@@ -96,6 +96,7 @@ require_relative "reactor_sim/concerns/thermal"
 require_relative "reactor_sim/concerns/holds"
 require_relative "reactor_sim/concerns/obstructs"
 require_relative "reactor_sim/concerns/wearing"
+require_relative "reactor_sim/concerns/fusible"
 require_relative "reactor_sim/concerns/pressurized"
 require_relative "reactor_sim/concerns/rotating"
 
@@ -105,12 +106,19 @@ require_relative "reactor_sim/nodes/vessel"
 require_relative "reactor_sim/nodes/boiler"
 require_relative "reactor_sim/nodes/flywheel"
 require_relative "reactor_sim/nodes/load"
+require_relative "reactor_sim/nodes/bearing"
+# A small engine carrying its own rotor, so a fitting can be driven by something other than the
+# main drivetrain — which is what a blower on a black start needs.
+require_relative "reactor_sim/nodes/motor"
 require_relative "reactor_sim/nodes/atmosphere"
 require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 require_relative "reactor_sim/nodes/fusible_plug"
 require_relative "reactor_sim/nodes/breach"
 
+# How work tires the person doing it. Before `control_point`, which reads its BASE_RECOVERY to
+# default a station that declares none.
+require_relative "reactor_sim/fatigue"
 require_relative "reactor_sim/control_point"
 # Equipment and training are what a minion carries and what they have learnt — layers three and
 # four of the sheet whose first two live in `content/`. `kit.rb` is the catalogue and must load

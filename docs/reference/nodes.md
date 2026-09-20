@@ -66,7 +66,13 @@ includes nothing carries nothing — an indicator lamp should not have a specifi
 | `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating` |
 | `Pressurized` | (needs `Holds` + `Thermal`) | none — derived | `pressure_pa`, `gas_headroom_kg` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
-| `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
+| `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque`, `drag_conductances` |
+| `Fusible` | `fusible_kg`; needs `Thermal` and a `material:` with `latent_heat_of_fusion_j_per_kg` | `fusible_remaining_kg` | `run_melt`, `melt_kg`, `melted_fraction`, `melted_out?`, `fusible_temperature_k` |
+
+`Thermal` also takes **`emissivity`** and **`radiating_area_m2`**, both defaulting to zero. They
+add a radiant path to whatever conduction the node declares, carried as a conductance because
+`T⁴ − T_amb⁴` factors exactly — see [`physics.md`](physics.md#radiation-is-a-conductance-because-t--t_amb-factors).
+`ThermalLink` takes the same two keys for body-to-body exchange.
 
 Config is supplied as **reader methods**, not ivars — `def volume_m3` / `attr_reader
 :volume_m3`. Concerns call them.
@@ -179,14 +185,16 @@ All generic and reusable. Anything genuinely specific to one machine belongs und
 | Node | Concerns | What it is |
 |---|---|---|
 | `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | A tank, vat, drum or pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, and `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke. |
-| `Conduit` | Thermal, Wearing | A pipe or valve. **Transport** — holds nothing; contributes a restriction, a lever, a wall and the ability to fail. Optional `control_id`, `conductance:`, `head_pa:`, `stack_height_m:`, `one_way:`, `rangeability:` (valve trim). |
+| `Conduit` | Thermal, Wearing | A pipe or valve. **Transport** — holds nothing; contributes a restriction, a lever, a wall and the ability to fail. Optional `control_id`, `conductance:`, `head_pa:`, `stack_height_m:`, `one_way:`, `rangeability:` (valve trim). **A driven fitting** names the shaft that pays with `driven_by:` and is charged `(head_pa + ρ·g·lift_m)·Q ÷ efficiency` as a drag conductance — so a fan or a pump costs torque instead of being free. `rated_omega:` makes its head go as ω²; `delivers_to:` says where the hydraulic half lands (`:work` for a sump pump lifting water out, the fitting itself for a fan warming what it blows). Both terms collapse to zero with no flow. |
 | `Boiler` | (a `Vessel`) | A drum where a liquid and its own vapour coexist. Its vapour outlet is **never quite dry**, gets wetter as the level rises past `onset_fill`, and **swells** when the pressure falls sharply — which is what turns a high glass into a slug of water. With `crown_fill:` and `fired_by:` it also has a **crown sheet**: the plate over the fire, which burns when the level falls past it. |
 | `Atmosphere` | Thermal, Holds | The outside world: unlimited source, unlimited sink, fixed pressure reference. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
-| `Load` | Rotating | Where useful work leaves the operation. Has a **torque curve** — `:fan` (τ ∝ ω²), `:viscous` (τ ∝ ω) or `:constant` — absorbing `max_torque` at `rated_omega`. |
+| `Bearing` | Thermal, Holds, Wearing | **A modelled friction interface** — somewhere enough rubbing happens that the heat and the wear should be real. `supports:` names the shaft it drags on; `duty:` supplies the kinematics (`:journal`, `:slide` for a piston); `loaded_by:` names the part whose reported torque or pressure presses it. Does **not** rotate: the shaft turns, this is the stationary half. Its drag books into its own joules, so it can get too hot — then `wiped` (fatigue, above `SERVICE_FRACTION` of the material's rating) and `seized` (overload, at the rating itself). A seized bearing declares a drag 40× the shaft's `I/dt`, which is the only way a seizure stops anything. Holds its own oil charge, **draws exactly what it is short of** through `:oil_in`, and spends it by sliding distance — `oil_loss_kg_per_m`, booked to `mass_consumed`. |
+| `Motor` | Thermal, Holds, Pressurized, Rotating, Wearing | **A small engine that carries its own rotor** — a donkey engine, a standby set. Exists so a fitting can be driven by something other than the main drivetrain, which is what a blower on a **black start** needs. Burns its charge through the ordinary `reactions:` machinery, so it needs air and an exhaust and audits with no special case. `drives` returns its **own id**. Torque is `rated_torque_nm × ignited fraction × (1 − ω/rated_omega)` — **from firing, never from `power ÷ ω`**, which asks for kilonewton-metres at rest. It **breathes by displacement** (`swept_m3`, proportional to speed), because a chamber exchanging gas by thermal cycling alone runs air-starved. Efficiency is emergent: the reaction sets fuel in, `rated_torque_nm` sets work out. |
+| `Load` | Rotating | Where useful work leaves the operation. Has a **torque curve** — `:fan` (τ ∝ ω²), `:viscous` (τ ∝ ω) or `:constant` — absorbing `max_torque` at `rated_omega`. Its brake is a `drag_conductances` entry booked as `:work`, so it is solved with the drivetrain rather than applied after it. |
 | `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at supply density. Working fluid is configuration. `drain_control_id:` + `drain_authority:` let an open cock bleed the working space; `material:` + `wall_thickness_m:` give it a hoop rating off its own bore. |
 | `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity — `senses_quantity:` defaults to `pressure_pa` but need not be it. `ease_control_id:` opens it further by hand (`max`); `control_id:` gags it shut (`×`). Records `lift:`. |
-| `FusiblePlug` | (a `Conduit`) | Senses a **state key** on another node and fails **permanently** open above `melts_above:`. A fuse, not a valve. |
+| `FusiblePlug` | (a `Conduit`) + Fusible | Senses a **state key** on another node — a plug is screwed *through* the crown sheet, so the plate's temperature melts it and its own is beside the point — and **actually melts**, a real mass of alloy with a real latent heat. Opens as it runs rather than switching, and cannot come back. Its melting point is its `material:`'s, so no threshold can disagree with the metal. |
 
 ### Holders and transport are the key distinction
 

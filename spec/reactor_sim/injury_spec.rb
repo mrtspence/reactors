@@ -15,7 +15,8 @@ require "support/reference_crew"
 # assert modes rather than pressures: the curve is a sweep and will move.
 RSpec.describe ReactorSim::Injury, crew: :reference do
   def worker(stats: {}, tags: {})
-    base = { strength: 1.0, toughness: 1.0, intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }
+    base = { strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
+             dexterity: 1.0, charisma: 1.0 }
     ReactorSim::Minion.new(id: :hand, name: "Hand", station: :lever,
                            stats: base.merge(stats), tags: tags)
   end
@@ -184,10 +185,15 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
         # A fixture at the firehole, not anybody real: this example is about whether the same
         # seed hurts the same person the same way, and it must not start failing because
         # somebody tuned Jim.
-        operations: [ { id: :eng, type: :steam_engine, loadout: { fusible_plug: nil },
-                        crew: { fireman: { minion: :test_hand_a } } } ]
+        operations: [ { id: :eng, type: :steam_engine,
+                        loadout: ReferenceCrew.loadout(fusible_plug: nil),
+                        crew: { crew_1: { minion: :test_hand_a } } } ]
       )
       op = match.operation(:eng)
+      # **Deploy the shift, or there is no fire to burst anything.** Crew start in the quarters
+      # now, so posting somebody to the firehole is the opening move — and it is also what puts
+      # them in range of the drum when it goes, which is the whole point of this example.
+      op.assign_minion(:crew_1, :stoking)
       { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 0 }
         .each { |k, v| op.set_control(k, v) }
 
@@ -221,7 +227,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     it "brings an injury back from a snapshot as a Symbol" do
       match, = burst(42)
       restored = ReactorSim::Match.from_h(JSON.parse(JSON.generate(match.to_h)))
-      hurt = restored.operation(:eng).state.fetch(:minions).fetch(:fireman)
+      hurt = restored.operation(:eng).state.fetch(:minions).fetch(:crew_1)
 
       expect(hurt.fetch(:injury)).to be_a(Symbol)
       expect(described_class::ORDER).to include(hurt.fetch(:injury))
@@ -249,8 +255,8 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
         control_points: [ ReactorSim::ControlPoint.new(id: :lever, node: :drum) ],
         minions: [ ReactorSim::Minion.new(id: :hand, name: "Hand", station: :lever,
                                           stats: { strength: 1.0, toughness: 1.0,
-                                                   intelligence: 1.0, dexterity: 1.0,
-                                                   charisma: 1.0 }) ]
+                                                   endurance: 1.0, intelligence: 1.0,
+                                                   dexterity: 1.0, charisma: 1.0 }) ]
       )
     end
 

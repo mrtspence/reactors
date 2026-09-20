@@ -1,0 +1,17 @@
+# What keeps metal off metal.
+#
+# A bearing carries its load on a film of this, and the whole character of a plain bearing is
+# what happens when the film thins: friction rises by a factor of forty or more, the heat that
+# makes goes into the metal, and the metal is chosen to be the part that gives way. See
+# `docs/design_sketches/bearings.md`.
+#
+# **Not a fuel.** `fuel_oil` in `combustion.yml` is something you burn on purpose; this is
+# something that burns off as a loss. Nothing reacts it, and it carries no `fuel` tag, so a
+# firebox will not take it.
+
+# Mineral oil, straight, no additives — which is all 1802 has. Steam-cylinder oils of the
+# period were heavier and often tallow-compounded; this is the bearing grade.
+bearing_oil:
+  tags: [liquid, lubricant]
+  specific_heat_j_per_kg_k: 1900
+  density_kg_per_m3: 890

@@ -17,10 +17,16 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > **A crew is a loadout by another name**, and lives in `options:` for the same reason: the moment
 > one can be hired, injured or dismissed, a roster left in code rebuilds a *different* crew from a
 > snapshot.
-> `Crew.normalise` is its `Assembly#resolve_loadout` — every role named including the unfilled
-> ones, every id symbolised, `:none` for a slot deliberately emptied. An unfilled role is not an
-> empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "on the injury
-> list" the same thing to the engine.
+> `Crew.normalise` is its `Assembly#resolve_loadout` — every **seat** named including the
+> unfilled ones, every id symbolised, `:none` for a slot deliberately emptied. An unfilled seat
+> is not an empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "on the
+> injury list" the same thing to the engine.
+>
+> **How many seats there are comes from the fitted crew quarters**, found by what its slot
+> *accepts* rather than by a slot id — `Assembly#crew_capacity` and `#crew_origin`. A roster
+> naming more seats than that is **refused**, never truncated: truncating silently discards
+> somebody the player chose. And a seat carries no station, because everybody starts in the
+> quarters and is sent somewhere.
 
 Three ways that goes wrong, all of them silent:
 

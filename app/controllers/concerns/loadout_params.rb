@@ -24,7 +24,8 @@ module LoadoutParams
     # Against the **submitted** chassis, not the stored one. They differ for exactly one request —
     # the one where a player changes frame — and permitting against the old chassis would drop
     # the slots only the new one has.
-    submitted.permit(*Outfitting.slot_ids(submitted_chassis)).to_h
+    submitted.permit(*Outfitting.slot_ids(submitted_chassis,
+                                          operation_id: current_operation.operation_id)).to_h
   end
 
   # A bare scalar, so `permit` is not involved; anything that is not a String is nothing

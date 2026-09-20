@@ -53,7 +53,7 @@ module ReactorSim
     # deterministic comparison, which makes injuries replayable, order-independent and
     # snapshot-safe at no cost. See `Injury`.
     def initial_state(rng)
-      { health: 1.0, fatigue: 0.0, station: @default_station }
+      { health: 1.0, fatigue: 0.0, spent: false, station: @default_station }
         .merge(Injury.initial_state(rng, toughness))
     end
 
@@ -85,12 +85,9 @@ module ReactorSim
     # capable hands. Condition and injury multiply in too, which makes a hurt fireman a worse
     # fireman rather than merely a slower one.
     #
-    # TODO: **fatigue belongs here.** Effort is *subjective* exertion — the same lever position
-    # costs a day-labourer far more than a strong fireman — so fatigue should accrue with
-    # `intent ÷ capability` rather than with the lever's position: working somebody past what
-    # they can manage tires them, and a strong worker coasting at a setting that is killing a
-    # weak one does not. `state[:fatigue]` exists and nothing advances it. See
-    # `docs/design_sketches/minions.md` §9.
+    # **`condition` is also what makes fatigue a runaway.** `Fatigue` accrues on
+    # `intent ÷ capability`, so a tiring worker's falling capability raises their own load and
+    # tires them faster still — true of people, and why `Fatigue::LOAD_CEILING` has to exist.
     def capability(state, effort:, aided_by: nil)
       condition = state.fetch(:health) * (1.0 - state.fetch(:fatigue))
       blended = effort.sum { |stat, weight| effective(stat, state) * weight }

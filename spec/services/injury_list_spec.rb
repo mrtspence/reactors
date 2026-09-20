@@ -12,7 +12,7 @@ RSpec.describe InjuryList do
 
   def hurt(mode, minion: "jim", lasting: nil, run_id: "run-a")
     { "kind" => "event", "type" => "minion_hurt", "run_id" => run_id, "match_id" => "dev",
-      "operation_id" => "engine", "tick" => 412, "seq" => 0, "node" => "fireman",
+      "operation_id" => "engine", "tick" => 412, "seq" => 0, "node" => "crew_1",
       "label" => "Jim Ashfield", "severity" => "critical", "mode" => mode,
       "detail" => { "minion" => minion, "station" => "stoking",
                     "lasting" => lasting.nil? ? mode == "mortal" : lasting } }

@@ -1,30 +1,37 @@
 # frozen_string_literal: true
 
 module ReactorSim
-  # Who an operation needs, and who is actually standing there.
+  # How many hands an operation can field, and who is in each seat.
   #
-  # **A role is what the machine asks for; a minion is who fills it.** The steam engine needs a
-  # fireman and a yardhand whoever is on the payroll — those are jobs, fixed by the machine — and
-  # the roster decides that this match the fireman is Jim. Keeping them separate is the noun
-  # correction that ran through this whole release, applied one layer further out.
+  # **A seat is a person you brought; a station is somewhere they can stand.** The two are
+  # declared independently and the gap between them is the game: jobs come from the machine
+  # (every `ControlPoint` with `effort:`), hands come from the fitted crew quarters, and when
+  # there are more of the first than the second somebody has to decide what is not being done.
   #
-  # See docs/design_sketches/minions.md §2 and §7.
+  # > **The roster used to be keyed by JOB, and it filled every job.** A machine declaring three
+  # > jobs got three bodies whether anybody had been hired or not, so nothing in the model could
+  # > express scarcity of people and an operation with enough stations to be interesting ran
+  # > itself. It also contradicted a noun correction this codebase had already made and written
+  # > down: what a player unlocks is Jim, not the fireman's post.
+  #
+  # See docs/design_sketches/crew_capacity.md.
   module Crew
     # Who turns up when nobody better will. Not a constant in code: an ordinary individual in
     # `content/minions/` marked `hireable: false`, so there is exactly ONE way a sheet is folded
     # rather than a special case through the most safety-critical arithmetic in the feature.
     STANDIN = :kobold_temp
 
-    # What the machine asks for. `station:` is where they START — `Minion#station(state)` is
-    # where they are, because posting is a command and must survive a restore.
-    #
-    # Named `Role` rather than `Slot` deliberately: `ReactorSim::Slot` answers "what happens to
-    # the wiring when this is empty", and a job has no wiring.
-    Role = Struct.new(:id, :label, :station, keyword_init: true) do
-      def to_s = label || id.to_s
-    end
+    # Seats are positional and their ids are stable per capacity, because they key the flat id
+    # namespace and the rng table exactly as role ids did.
+    SEAT_PREFIX = "crew_"
 
     module_function
+
+    # `[:crew_1, :crew_2]` for a capacity of two. Ordinal rather than named: "the first person
+    # you brought" is a fact about the roster, where "the fireman" was a fact about the machine.
+    def seats(capacity) = Array.new([ capacity.to_i, 0 ].max) { |i| :"#{SEAT_PREFIX}#{i + 1}" }
+
+    def seat?(id) = id.to_s.start_with?(SEAT_PREFIX)
 
     # Layers three and four, on top of the two `Content::Registry#sheet` has already folded.
     #
@@ -58,15 +65,35 @@ module ReactorSim
     # `Assembly#resolve_loadout` follows, and for the same reason. **A posting that arrives back
     # from a snapshot is JSON**, so its values are Strings; a partial one would let an equipment
     # slot a player deliberately emptied quietly refill itself on restore.
-    def normalise(crew, roles:)
-      crew = crew.to_h { |k, v| [ k.to_sym, v ] }
+    # **A roster naming more seats than the operation has is refused, never truncated.**
+    # Truncating silently discards somebody the player chose, which is the class of failure this
+    # codebase keeps writing rules against — and the cause is always a real mismatch: a
+    # downgraded quarters, or a snapshot predating a capacity change.
+    def normalise(crew, capacity:)
+      crew = (crew || {}).to_h { |k, v| [ k.to_sym, v ] }
+      available = seats(capacity)
 
-      roles.to_h do |role|
-        given = (crew[role.id] || {}).to_h { |k, v| [ k.to_sym, v ] }
-        [ role.id, normalise_posting(given).freeze ]
+      # **Every unrecognised key raises, not just seat-shaped ones.** A roster that named a job
+      # (`fireman`) rather than a seat would otherwise resolve to a full complement of standins
+      # and look like a machine nobody had crewed — which is precisely the silent substitution
+      # this release exists to remove. The delivery tier decides what to do about a stale stored
+      # roster; the library's answer is to say so.
+      extra = crew.keys - available
+      if extra.any?
+        raise Error, "roster names #{extra.join(', ')} but the fitted quarters seats " \
+                     "#{available.length} (#{available.join(', ')})"
+      end
+
+      available.to_h do |seat|
+        given = (crew[seat] || {}).to_h { |k, v| [ k.to_sym, v ] }
+        [ seat, normalise_posting(given).freeze ]
       end.freeze
     end
 
+    # **No `station:` here, deliberately.** Everybody starts in the quarters and is *sent*
+    # somewhere, so deploying the shift is the opening move of a match rather than a field on a
+    # form. A starting station in the posting is the same defect as filling every role: the
+    # machine handing over, for free, the thing it was built to make scarce.
     def normalise_posting(given)
       posting = { minion: symbolise(given[:minion]),
                   name: given[:name],

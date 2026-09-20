@@ -26,8 +26,8 @@ snapshot rather than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-At the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`, `metal`,
-`moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+At the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`, `lubricant`,
+`metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 **Adding a tag means updating this list and
 [`docs/guides/add-content.md`](../docs/guides/add-content.md) in the same commit.** A tag is a
@@ -106,8 +106,9 @@ turns on. See [`docs/design_sketches/minions.md`](../docs/design_sketches/minion
 # content/archetypes/races.yml — the first baseline layer
 elf:
   label: Elf
-  strength: 0.75       # all five are REQUIRED_ARCHETYPE_KEYS
+  strength: 0.75       # all six are REQUIRED_ARCHETYPE_KEYS
   toughness: 0.7
+  endurance: 0.85
   intelligence: 1.25
   dexterity: 1.2
   charisma: 1.1
@@ -129,9 +130,10 @@ Four layers in all: **archetype → individual → training → equipment**, eac
 The last two are the delivery tier's, because they are things a player *owns* and ownership is not
 something the simulation may know about. `Registry#sheet(id)` returns the first two folded.
 
-- **The five stats are fixed; everything else is a tag.** Fixed because the engine reads them and
-  needs a number rather than an absence. `strength` drives actuation today; `toughness` drives the
-  Danger Check; `intelligence`, `dexterity` and `charisma` are declared and read by nothing yet.
+- **The six stats are fixed; everything else is a tag.** Fixed because the engine reads them and
+  needs a number rather than an absence. `strength` drives actuation; `toughness` drives the
+  Danger Check; `endurance` divides fatigue accrual; `intelligence`, `dexterity` and `charisma`
+  are declared and read by nothing yet.
 - **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
   things are two statements about one person.
 - **Minion tags are a MAP, not a list**, unlike resource tags — "how well can you see in the dark"

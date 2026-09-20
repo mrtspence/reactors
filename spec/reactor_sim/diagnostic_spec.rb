@@ -489,9 +489,14 @@ RSpec.describe ReactorSim::Diagnostic do
     # Mean absolute error against the spectator's truth, over a window where the level is being
     # worked up and down — a gauge is only worth anything while the thing it reads is moving.
     def misreading_of(glass)
-      op = ReactorSim::Operations::SteamEngine.build(id: :e, seed: 7,
-                                                     loadout: { water_glass: glass },
-                                                     **ReferenceCrew.options)
+      # Deployed, because crew start in the quarters: an undeployed engine never raises steam,
+      # the water level never moves, and a gauge that reads a still level cannot be wrong.
+      op = ReferenceCrew.deploy!(
+        ReactorSim::Operations::SteamEngine.build(
+          id: :e, seed: 7, loadout: ReferenceCrew.loadout(water_glass: glass),
+          **ReferenceCrew.options
+        )
+      )
       LIGHT.each { |k, v| op.set_control(k, v) }
       errors = []
       (1..2200).each do |t|
@@ -520,9 +525,12 @@ RSpec.describe ReactorSim::Diagnostic do
     # The downgrade has to be coarse rather than dead. One distinct reading across the whole
     # window is a brick, and that is exactly what 25% steps produced.
     it "leaves try-cocks coarse rather than motionless" do
-      op = ReactorSim::Operations::SteamEngine.build(id: :e, seed: 7,
-                                                     loadout: { water_glass: :try_cocks },
-                                                     **ReferenceCrew.options)
+      op = ReferenceCrew.deploy!(
+        ReactorSim::Operations::SteamEngine.build(
+          id: :e, seed: 7, loadout: ReferenceCrew.loadout(water_glass: :try_cocks),
+          **ReferenceCrew.options
+        )
+      )
       LIGHT.each { |k, v| op.set_control(k, v) }
       seen = []
       (1..2200).each do |t|

@@ -11,7 +11,7 @@ RSpec.describe ViewBroadcaster do
   let(:match) { DevMatch.build }
   let(:operation) { match.operations.first }
   let(:stream) do
-    StreamNames.operation(match_id: match.id, operation_id: DevMatch::OPERATION_ID)
+    StreamNames.operation(match_id: match.id, operation_id: DevMatch::PRIMARY)
   end
 
   # Captures what reached the cable without needing a subscriber or a database.
@@ -23,10 +23,10 @@ RSpec.describe ViewBroadcaster do
 
   before { broadcasts }
 
-  def tick!(times = 1, full: false)
+  def tick!(times = 1, full: false, run_id: "run-1", supersedes: nil)
     times.times do
       match.step!
-      broadcaster.publish(match, operation, full: full)
+      broadcaster.publish(match, operation, full: full, run_id: run_id, supersedes: supersedes)
     end
   end
 
@@ -91,6 +91,29 @@ RSpec.describe ViewBroadcaster do
     tick!
 
     expect(broadcasts.last[:kind]).to eq("full")
+  end
+
+  # Nothing stops a second runner broadcasting onto this stream, and it holds its own match at
+  # its own tick with its own levers. Tick alone cannot tell the two apart; the run can.
+  describe "naming the run the values came from" do
+    it "stamps every view, full and delta alike" do
+      tick!(3)
+
+      expect(broadcasts.map { |b| b[:run_id] }.uniq).to eq([ "run-1" ])
+      expect(broadcasts.map { |b| b[:kind] }).to include("full", "delta")
+    end
+
+    # A reset says which run it replaced; a runner restart cannot, which is why a client also
+    # needs a grace period. Carrying it means the reset case never has to wait one out.
+    it "carries the run it replaced" do
+      tick!(2)
+      broadcaster.reset(match.id)
+      tick!(1, run_id: "run-2", supersedes: "run-1")
+
+      expect(broadcasts.last[:run_id]).to eq("run-2")
+      expect(broadcasts.last[:supersedes]).to eq("run-1")
+      expect(broadcasts.first[:supersedes]).to be_nil
+    end
   end
 
   it "publishes every operation when asked for a resync with no operation named" do

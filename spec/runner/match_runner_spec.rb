@@ -35,8 +35,9 @@ RSpec.describe MatchRunner do
 
     def initialize = (@published = []; @resets = []; @closed = false)
 
-    def publish(match, operation, full: false)
-      @published << { tick: match.tick, operation_id: operation&.id, full: full }
+    def publish(match, operation, full: false, run_id: nil, supersedes: nil)
+      @published << { tick: match.tick, operation_id: operation&.id, full: full,
+                      run_id: run_id, supersedes: supersedes, match: match }
     end
 
     def reset(match_id) = @resets << match_id
@@ -77,23 +78,32 @@ RSpec.describe MatchRunner do
   end
 
   def control(id, value)
-    { "type" => "set_control", "operation_id" => DevMatch::OPERATION_ID.to_s,
+    { "type" => "set_control", "operation_id" => DevMatch::PRIMARY.to_s,
       "control_point_id" => id.to_s, "value" => value }
+  end
+
+  def target(match, control_point_id)
+    match.operation(DevMatch::PRIMARY).state.fetch(:controls)
+         .fetch(control_point_id).fetch(:target)
   end
 
   it "applies a command before stepping, so it takes effect on the same tick" do
     result = run_with([ [ control(:damper_open, 80) ] ])
-    controls = result[:match].operation(DevMatch::OPERATION_ID).state.fetch(:controls)
+    controls = result[:match].operation(DevMatch::PRIMARY).state.fetch(:controls)
 
     expect(controls.fetch(:damper_open).fetch(:target)).to eq(80.0)
     expect(result[:match].tick).to eq(1)
   end
 
+  # **Each operation, every tick** — which is what the name always said and what only became
+  # checkable once there was more than one machine. Two operations in lockstep means two views
+  # per tick, each naming itself.
   it "publishes a view for each operation every tick" do
     result = run_with([ [], [], [] ])
+    published = result[:sink].published
 
-    expect(result[:sink].published.map { |p| p[:tick] }).to eq([ 1, 2, 3 ])
-    expect(result[:sink].published.map { |p| p[:operation_id] }.uniq).to eq([ DevMatch::OPERATION_ID ])
+    expect(published.map { |p| p[:tick] }).to eq([ 1, 1, 2, 2, 3, 3 ])
+    expect(published.map { |p| p[:operation_id] }.uniq).to match_array(DevMatch.operation_ids)
   end
 
   # A malformed record must not be able to stop a match. Command.parse and Match#apply are
@@ -101,7 +111,7 @@ RSpec.describe MatchRunner do
   # runner survives the whole path.
   it "survives a command whose value is not a number" do
     result = run_with([ [ control(:damper_open, { "a" => 1 }) ], [ control(:damper_open, 70) ] ])
-    controls = result[:match].operation(DevMatch::OPERATION_ID).state.fetch(:controls)
+    controls = result[:match].operation(DevMatch::PRIMARY).state.fetch(:controls)
 
     expect(result[:match].tick).to eq(2)
     expect(controls.fetch(:damper_open).fetch(:target)).to eq(70.0)
@@ -118,11 +128,23 @@ RSpec.describe MatchRunner do
     # them — "reset, then open the throttle" has to mean what it says.
     it "rebuilds the match on reset rather than passing it to the simulation" do
       result = run_with([ [ control(:damper_open, 80) ], [ { "type" => "reset_match" } ], [] ])
-      controls = result[:match].operation(DevMatch::OPERATION_ID).state.fetch(:controls)
+      controls = result[:match].operation(DevMatch::PRIMARY).state.fetch(:controls)
 
       expect(result[:sink].resets).to eq([ DevMatch::ID ])
       # The original object is untouched — reset swaps in a new Match, it does not mutate.
       expect(controls.fetch(:damper_open).fetch(:target)).to eq(80.0)
+    end
+
+    # The ordering these share a log for. A reset swaps in a new Match, so everything after it
+    # in the same batch belongs to that one — holding the object from before the barrier steps
+    # and publishes the match that was just discarded.
+    it "applies a command that follows a reset to the rebuilt match, not the discarded one" do
+      result = run_with([ [ { "type" => "reset_match" }, control(:damper_open, 80) ], [] ])
+      rebuilt = result[:sink].published.last[:match]
+
+      expect(rebuilt).not_to equal(result[:match])
+      expect(target(rebuilt, :damper_open)).to eq(80.0)
+      expect(target(result[:match], :damper_open)).not_to eq(80.0)
     end
 
     it "asks the sink for a full view on resync" do
@@ -144,6 +166,19 @@ RSpec.describe MatchRunner do
       # exactly the collision. Only the run id separates them.
       expect(meters.map { |m| m[:tick] }).to eq([ EventProducer::METER_TICKS ] * 2)
       expect(meters.map { |m| m[:run_id] }.uniq.length).to eq(2)
+    end
+
+    # A restarted runner announces nothing, so a client falls back to a grace period; a reset
+    # can do better, and saying so is what keeps a legitimate rebuild from looking like a second
+    # runner broadcasting over the first.
+    it "names the run it replaced, so a watching client adopts it rather than ignoring it" do
+      result = run_with([ [], [ { "type" => "reset_match" } ], [] ])
+      before, after = result[:sink].published.partition { |p| p[:supersedes].nil? }
+
+      expect(before).not_to be_empty
+      expect(after).not_to be_empty
+      expect(after.map { |p| p[:supersedes] }.uniq).to eq([ before.first[:run_id] ])
+      expect(after.map { |p| p[:run_id] }.uniq).not_to eq([ before.first[:run_id] ])
     end
   end
 

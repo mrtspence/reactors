@@ -83,12 +83,34 @@ module ReactorSim
     # down to 25 kPa, because the damper was solved against an exhaust flow four times larger
     # than the one allowed to cross. Pinning the coupling and re-solving gives the pressures the
     # network actually reaches.
-    def settle(links, capacities, potentials, dt, heads = nil, limits = nil)
-      return {} if links.empty?
+    # `drags` is optional: `{ node_id => conductance }`, a coupling from that body to a fixed
+    # reservoir **at potential zero** — a brake, bearing drag, windage. It adds conductance to
+    # the diagonal and nothing to the right-hand side, which is what a zero-potential sink is.
+    # Its transfers come back keyed `:"#{node_id}=ground"`, in the same shape as a coupling's.
+    #
+    # **A drag has to be solved WITH the network, not applied after it.** Solving each exactly
+    # and then composing them is Lie–Trotter splitting, first order in `dt`, and the error is
+    # large exactly when the drag is stiff: a fan-law mill whose brake time constant is 0.18 s
+    # against a 250 ms tick settled at **8.5 rad/s against a true equilibrium of 19.6**, and the
+    # coupling above it then slipped 65% and burned 39% of shaft power. Halving `dt` halved the
+    # gap, which is the signature. See `docs/design_sketches/bearings.md` §1.1.
+    def settle(links, capacities, potentials, dt, heads = nil, limits = nil, drags = nil)
+      drags = nil if drags.nil? || drags.empty?
+      return {} if links.empty? && drags.nil?
 
-      components(links).each_with_object({}) do |group, acc|
-        acc.merge!(solve_component(group, capacities, potentials, dt, heads, limits))
+      groups = components(links).map { |group| [ group, group.flat_map { |l| [ l.a, l.b ] }.uniq ] }
+      groups.concat(uncoupled(groups, drags)) if drags
+
+      groups.each_with_object({}) do |(group, ids), acc|
+        acc.merge!(solve_component(group, ids, capacities, potentials, dt, heads, limits, drags))
       end.freeze
+    end
+
+    # A body dragged against a reservoir but coupled to nothing is still a network — a
+    # one-node one — and skipping it would leave a free-spinning shaft with no bearings at all.
+    def uncoupled(groups, drags)
+      coupled = groups.flat_map { |(_, ids)| ids }
+      (drags.keys - coupled).map { |id| [ [], [ id ] ] }
     end
 
     def head(heads, link) = heads ? heads.fetch(link.id, 0.0) : 0.0
@@ -132,8 +154,7 @@ module ReactorSim
       groups.compact
     end
 
-    def solve_component(links, capacities, potentials, dt, heads, limits)
-      ids = links.flat_map { |link| [ link.a, link.b ] }.uniq
+    def solve_component(links, ids, capacities, potentials, dt, heads, limits, drags = nil)
       # link_id => the transfer it has been pinned to. A coupling at its choke carries a
       # fixed amount and contributes no conductance, exactly like a current source.
       pinned = {}
@@ -147,9 +168,10 @@ module ReactorSim
       # cannot chatter between pinned and free.
       released = {}
       transfers = nil
+      settled = nil
 
       (limits ? MAX_CONSTRAINT_PASSES : 1).times do
-        settled = settled_potentials(links, ids, capacities, potentials, dt, heads, pinned)
+        settled = settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags)
         free = links.to_h { |link| [ link.id, free_transfer(link, settled, heads, dt) ] }
 
         transfers = links.to_h do |link|
@@ -182,7 +204,18 @@ module ReactorSim
         break if breached.empty? && loosened.empty?
       end
 
-      transfers
+      drags ? transfers.merge(ground_transfers(ids, settled, drags, dt)) : transfers
+    end
+
+    # What each drag pulled out against the reservoir, at the potential the network settled to.
+    # Keyed `node=ground` so it cannot collide with a coupling's own `a=b` id.
+    def ground_transfers(ids, settled, drags, dt)
+      ids.each_with_object({}) do |id, acc|
+        conductance = drags.fetch(id, 0.0)
+        next unless conductance.positive?
+
+        acc[:"#{id}=ground"] = conductance * settled.fetch(id) * dt
+      end
     end
 
     def free_transfer(link, settled, heads, dt)
@@ -192,7 +225,7 @@ module ReactorSim
     # Assemble `(C/dt + K)·p′ = (C/dt)·p + b` and solve it. `K` is the conductance Laplacian:
     # symmetric, and diagonally dominant because every off-diagonal entry is subtracted from
     # the diagonal it came from.
-    def settled_potentials(links, ids, capacities, potentials, dt, heads, pinned)
+    def settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags = nil)
       n = ids.length
       index = ids.each_with_index.to_h
       matrix = Array.new(n) { Array.new(n, 0.0) }
@@ -200,7 +233,10 @@ module ReactorSim
 
       ids.each_with_index do |id, i|
         stiffness = capacities.fetch(id, 0.0) / dt
-        matrix[i][i] = stiffness
+        # A drag is a coupling whose far end is a reservoir at potential zero, so it adds
+        # conductance to the diagonal and contributes nothing to the right-hand side. That is
+        # the whole of it — the same Laplacian, with one row's sum no longer cancelling.
+        matrix[i][i] = stiffness + (drags ? drags.fetch(id, 0.0) : 0.0)
         rhs[i] = stiffness * potentials.fetch(id)
       end
 

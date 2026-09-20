@@ -13,6 +13,7 @@ module ReactorSim
     #
     #   config: heat_capacity (J/K) — the structure alone
     #           ambient_conductance (W/K) — leak to the environment; 0 for a perfect flask
+    #           emissivity, radiating_area_m2 — radiant loss; 0 for something that does not glow
     #   state:  joules — the structure's energy alone; parcels carry their own
     module Thermal
       def thermal_initial_state(_rng, _content)
@@ -87,6 +88,37 @@ module ReactorSim
       end
 
       def initial_temperature_k = Units::STANDARD_TEMPERATURE_K
+
+      # --- radiation -----------------------------------------------------------
+
+      # **Opt-in, both of them**, so a node that has not been given a surface behaves exactly as
+      # it did before radiation existed.
+      #
+      # **Emissivity belongs to the part, not to its material**, the same call `safety_factor`
+      # makes: a surface property is not a bulk one. Oxidised iron runs near 0.8 and polished
+      # steel near 0.1, and what separates them is a wire brush rather than a different metal.
+      def emissivity = 0.0
+      def radiating_area_m2 = 0.0
+
+      # **Radiation as a conductance in W/K, which is what makes it cheap and stable.**
+      #
+      #   T⁴ − T_amb⁴ ≡ (T² + T_amb²)(T + T_amb)·(T − T_amb)
+      #
+      # That is an identity, so the bracketed part *is* a conductance and radiation becomes an
+      # ordinary term in the backward-Euler machinery that already exists — unconditionally
+      # stable at any `dt`, converging on the sink rather than overshooting it. An explicit `T⁴`
+      # term would be exactly the integrator this library forbids.
+      #
+      # Evaluated at the start of the tick, which is first order like everything else here and
+      # errs safely: a cooling body's true coefficient falls as it cools, so this one
+      # **under**-states the loss rather than overshooting past the sink.
+      def radiative_conductance(temperature_k, sink_k)
+        surface = emissivity * radiating_area_m2
+        return 0.0 unless surface.positive? && temperature_k.positive? && sink_k.positive?
+
+        surface * Units::STEFAN_BOLTZMANN *
+          ((temperature_k**2) + (sink_k**2)) * (temperature_k + sink_k)
+      end
     end
   end
 end

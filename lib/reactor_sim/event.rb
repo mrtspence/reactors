@@ -37,6 +37,7 @@ module ReactorSim
     TYPES = %i[
       part_failed
       minion_hurt
+      minion_spent
       fusible_plug_melted
       fire_lit
       fire_out

@@ -35,15 +35,38 @@ module ReactorSim
   # tick's temperatures simultaneously, there is no "thermal chain order" to get right —
   # you state which things touch and how well, and the tick sorts it out.
   class ThermalLink
-    attr_reader :a, :b, :conductance
+    attr_reader :a, :b, :conductance, :emissivity, :radiating_area_m2
 
-    def initialize(a:, b:, conductance:)
+    # `conductance` is conduction and convection, in W/K, and is constant.
+    #
+    # `emissivity:` and `radiating_area_m2:` add a **radiant** path on top, and that one is not
+    # constant: it goes as T⁴, so the conductance it contributes is recomputed each tick from
+    # both ends. See `radiative_conductance` and `docs/design_sketches/radiation.md`.
+    #
+    # **A firebox heats its water legs mostly by radiation**, and a linear term cannot say the
+    # thing every fireman knows — that a *bright* fire is worth far more than a merely hot one.
+    def initialize(a:, b:, conductance:, emissivity: 0.0, radiating_area_m2: 0.0)
       @a = a.to_sym
       @b = b.to_sym
       @conductance = conductance.to_f
+      @emissivity = emissivity.to_f
+      @radiating_area_m2 = radiating_area_m2.to_f
       raise Error, "conductance must be positive" unless @conductance.positive?
 
       freeze
+    end
+
+    def radiative? = (@emissivity * @radiating_area_m2).positive?
+
+    # The same factoring `Concerns::Thermal` uses, with the far end standing in for the sink:
+    # `T_h⁴ − T_c⁴ ≡ (T_h² + T_c²)(T_h + T_c)·(T_h − T_c)`, so the bracketed part is a
+    # conductance and the whole thing stays inside one backward-Euler solve.
+    def radiative_conductance(temperature_a, temperature_b)
+      return 0.0 unless radiative?
+      return 0.0 unless temperature_a.positive? && temperature_b.positive?
+
+      @emissivity * @radiating_area_m2 * Units::STEFAN_BOLTZMANN *
+        ((temperature_a**2) + (temperature_b**2)) * (temperature_a + temperature_b)
     end
 
     def id = :"#{@a}<->#{@b}"
@@ -58,20 +81,16 @@ module ReactorSim
   # shaft compliance and is what makes transmitted torque a real quantity: `transferred / dt` is
   # what a shaft's wear should be driven by and what a belt should snap from.
   #
-  # TODO: **MUST ADDRESS — the steam engine's coupling dissipates 60% of its shaft power.** At
-  # full controls the cylinder delivers ~499 kW, the mill receives **199.7 kW** and
-  # `joules_to_friction` takes **297.5 kW**. The books balance, and a slipping coupling genuinely
-  # does dissipate, but a real belt drive loses single-digit percent.
+  # TODO: **the steam engine's coupling dissipates 60% of its shaft power, and the cause is not
+  # here.** `Load#apply` integrates its brake explicitly and runs past the stability limit at
+  # working speed, so the mill is spun up and slammed to a standstill every tick; the coupling
+  # then slips ~100% against a load that is stationary whenever it is read. Measured: flywheel
+  # 18.24 rad/s, load 0.13 rad/s, yet the load extracting 40 kJ a tick — which is 14.1 rad/s of
+  # kinetic energy, not 0.13.
   #
-  # The suspect is `stiffness:` (9 000 on `flywheel=load`) held against a fan-law load at a large
-  # steady speed difference: a soft coupling that never stops slipping is a brake, and
-  # `Relaxation` charges it faithfully forever. **Check the steady-state slip first** — if two
-  # ends that should converge sit at a permanent offset, the stiffness is wrong rather than the
-  # loss model.
-  #
-  # **Do not tune this in isolation.** Frictional bearings will put a second,
-  # physically-motivated dissipation term on the same shafts, so do the pass when they land and
-  # re-measure `joules_to_friction` as part of it.
+  # **Fix the integrator first and re-measure before touching `stiffness:`.** Stiffening a
+  # coupling into a ratchet transmits more torque and dissipates more. See
+  # `docs/design_sketches/bearings.md` §1.1.
   class DriveLink
     attr_reader :a, :b, :conductance, :max_torque
 

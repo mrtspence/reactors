@@ -155,6 +155,16 @@ Two rules here are easy to get wrong:
 > fact short. Anything reading back-pressure off those two (`Tick#carry_through`) is reading the
 > gas story only.
 
+> **A conduit cannot learn its own throughput from a `Grant`.** It is resolved *through*, so it
+> is never a flow's endpoint and its grant is empty. `Tick#advect` therefore records
+> **`carried_kg` and `carried_m3`** into every transport node's state — volume as well as mass,
+> because `carry_through` strips `:parcels` from the wall state and neither figure can be
+> recovered from the other afterwards. A **driven** conduit needs it: hydraulic power is `ΔP × Q`
+> with Q volumetric, and a pump against a shut valve must cost its shaft nothing.
+>
+> Both are written to **every** conduit each tick, including the ones nothing crossed. Left
+> stale, a fitting goes on charging its shaft for a flow that has stopped.
+
 `spec/reactor_sim/entrainment_spec.rb` covers this; it exists because the method had none, which
 is exactly how the relief valve shipped broken.
 
@@ -233,7 +243,7 @@ identical for all three:
 
 |  | capacity | potential | conductance |
 |---|---|---|---|
-| heat | heat capacity (J/K) | temperature (K) | W/K |
+| heat | heat capacity (J/K) | temperature (K) | W/K — conduction, **plus radiation** where a link declares a surface |
 | rotation | moment of inertia (kg·m²) | angular velocity (rad/s) | N·m·s/rad |
 | gas | `dn/dP = V_free/(R·T)` (mol/Pa) | pressure (Pa) | mol/(Pa·s) |
 
@@ -248,6 +258,18 @@ transfer_ab     = k · (p′ₐ + head − p′_b) · dt
 
 Solved per connected component by Gaussian elimination — the matrix is symmetric and
 diagonally dominant, so no pivoting is needed and the arithmetic cannot depend on row order.
+
+`settle_drive` also passes **`drags:`** — `{ node_id => conductance }`, a coupling to a reservoir
+at potential zero. It adds to the diagonal and nothing to `b`, and its transfers come back keyed
+`node=ground` alongside the couplings'. A body dragged but coupled to nothing is solved as its own
+one-node component rather than skipped. See
+[`physics.md`](physics.md#rotation) for why a drag may not be applied after the solve instead.
+
+> Drags are summed **per shaft**, through `drag_shaft`, so the node declaring one need not be the
+> node it acts on and need not rotate — that is what a `Nodes::Bearing` is. `drive_drags` skips a
+> drag whose **shaft** has failed, and deliberately still asks a declarer that has failed itself:
+> `Rotating` declines when broken, a seized bearing drags harder, and that is the only route by
+> which a seizure stops a shaft.
 
 **Unconditionally stable at any `dt`.** Backward Euler is L-stable: every eigenvalue of the
 step operator is in (0, 1] however stiff the network, so nothing overshoots and nothing
@@ -342,6 +364,8 @@ crossing the boundary is declared.
 | `joules_advected_out` | out | Energy carried out with departing mass |
 | `mass_vented` | out | Deliberate discharge — what reaches `Atmosphere`'s `:exhaust` inlet |
 | `mass_spilled` | out | Leak or failure — what reaches `Atmosphere`'s `:spill` inlet, which is where a `Nodes::Breach` discharges |
+| `mass_consumed` | out | Used up doing its job and not recoverable — lubricant flung off a journal and burnt on it. Reported by the node, not through a port |
+| `mass_delivered` | out | **Material that left because the operation did its job** — water lifted out of a mine, ore sent up the shaft. The only productive mass exit, and the counterpart of `joules_to_work`; without it an operation whose *output* is material reads as one that is leaking |
 
 The hash also carries `ambient_k` — the environment's temperature, config rather than a flow.
 It is what `settle_ambient` relaxes toward.
@@ -386,6 +410,8 @@ sums those into the ledger after phase 5:
 | `joules_discarded` | `joules_advected_out` |
 | `mass_injected` | `mass_added` |
 | `mass_vented` | `mass_vented` |
+| `mass_consumed` | `mass_consumed` |
+| `mass_delivered` | `mass_delivered` |
 
 `Nodes::Vessel` (heater), `Nodes::Load` (work) and `Nodes::Atmosphere` (boundary crossings)
 are the examples to copy.

@@ -53,10 +53,27 @@ module ReactorSim
             # lie. See `Nodes::Atmosphere`.
             Link.new(from: [ :boiler_breach, :outlet ], to: [ :atmosphere, :spill ])
           ],
-          # The firebox glowing straight at the water legs around it. The other half of the
-          # fire→water path is the tube bundle, which arrives with `:stock_boiler_tubes` — the
-          # split matters more than either number. See `SteamEngine.boiler_tubes`.
-          thermal_links: [ ThermalLink.new(a: :firebox, b: :boiler, conductance: 3_500.0) ]
+          # **The firebox glowing straight at the water legs, and it genuinely glows now.** This
+          # was a flat 3500 W/K, which could not say the thing every fireman knows: a *bright*
+          # fire is worth far more than a merely hot one. The radiant term goes as T⁴, so the
+          # draught and the damper now change how much heat reaches the water rather than only
+          # how much fuel is burnt.
+          #
+          # **The split is calibrated against the total, not chosen freely.** At the working
+          # point — fire ~1020 K, water ~430 K — 24 m² at ε 0.9 gives about 2180 W/K of
+          # radiation, and the 1100 W/K left over is convection: flue gas does touch the legs on
+          # its way to the tubes, and that part is linear. The sum is ~3280 W/K, which is where
+          # the flat figure sat, so the release changes the *shape* of the path rather than its
+          # size. Radiation is two thirds of it, which is a firebox.
+          #
+          # Get that sum wrong and nothing announces it: an under-strength path makes the fire
+          # run HOTTER, because the heat cannot leave it, and the reading that looks like a
+          # better fire is the bottleneck.
+          #
+          # The other half of the fire→water path is the tube bundle, which arrives with
+          # `:stock_boiler_tubes` — the split matters more than either number.
+          thermal_links: [ ThermalLink.new(a: :firebox, b: :boiler, conductance: 1_100.0,
+                                           emissivity: 0.9, radiating_area_m2: 24.0) ]
         )
       end
 
@@ -75,12 +92,43 @@ module ReactorSim
         )
       end
 
+      # **The rings come with the barrel**, because their geometry *is* the barrel's — a ring's
+      # rubbing speed is that cylinder's stroke and its gas load acts over that cylinder's bore.
+      # A separate slot would let a player fit rings from a machine twice the size.
+      #
+      # Load area is the rings' back face: bore circumference × total ring height, not the
+      # piston's own face, which is four times larger and would be a different mechanism.
+      def ring_load_area_m2(bore_m) = Math::PI * bore_m * 0.085
+
       def cylinder_fragment(spec, bore_m:, stroke_m:, heat_capacity:)
         Fragment.new(
           # The barrel ships its own hole, the way the drum does: fit a cylinder and you get
           # that cylinder's way of coming apart. Shut and free until the head lets go.
           nodes: [ SteamEngine.cylinder(spec, bore_m: bore_m, stroke_m: stroke_m,
                                               heat_capacity: heat_capacity),
+                   SteamEngine.piston_rings(stroke_m: stroke_m, material: :bronze,
+                                            load_area_m2: ring_load_area_m2(bore_m),
+                                            mass_kg: 60.0, content: Content.default,
+                                            static_load_n: 2_400.0, film_speed_m_s: 2.2,
+                                            viscous_c: 6.0, oil_charge_kg: 0.8,
+                                            # Rings sit inside a tonne of iron casting, which is
+                                            # a far better heat path than a bearing housing in
+                                            # open air — so they run hot but not dangerously so.
+                                            ambient_conductance: 260.0,
+                                            stress_rate: 45.0,
+                                            # **Rings are the consumable, and this is the number
+                                            # that says so.** 76 kW of boundary rubbing at the
+                                            # reference setting puts a set at roughly 5 hours of
+                                            # running, 4.1 flat out — several sessions, not one.
+                                            wear_rate: 7.3e-7,
+                                            # Rings rub twice a revolution over a long stroke, so
+                                            # they drink faster than a journal does.
+                                            oil_loss_kg_per_m: 1.4e-4,
+                                            # **The route to a worn bore that is not hydraulic
+                                            # lock.** Rings that have wiped no longer seal, and
+                                            # what they score on the way is the barrel.
+                                            damages: { wiped: { cylinder: 0.35 },
+                                                       seized: { cylinder: 0.6 } }),
                    SteamEngine.cylinder_breach ],
           links: [
             Link.new(from: [ :cylinder, :breach_out ],    to: [ :cylinder_breach, :inlet ]),
@@ -111,7 +159,13 @@ module ReactorSim
         Fragment.new(
           nodes: [ SteamEngine.flywheel(mass_kg: mass_kg, radius_m: radius_m,
                                         friction: friction, safety_factor: safety_factor) ],
-          drive_links: [ DriveLink.new(a: :flywheel, b: :load, stiffness: 9_000.0) ]
+          # **A belt drive loses single-digit percent, and `stiffness` is what says so.** At
+          # steady state a viscous coupling dissipates exactly `Δω / ω_driver` of what crosses
+          # it, so the slip fraction *is* the loss fraction and the number follows from a target:
+          # `k ≥ torque / (slip × ω)`. At 9 000 this ran 22% slip and burned a fifth of the
+          # engine — measured only once the load stopped being slammed to a standstill every
+          # tick, which was hiding it. See `docs/design_sketches/bearings.md` §1.1.
+          drive_links: [ DriveLink.new(a: :flywheel, b: :load, stiffness: 150_000.0) ]
         )
       end
 
@@ -142,6 +196,225 @@ module ReactorSim
         Fragment.new(nodes: [ SteamEngine.fuel_bunker ])
       end
 
+      # **A well-oiled journal is very efficient, and that is not a bug in the numbers.** These
+      # carry well under a percent of shaft power flooded — real plain bearings run a friction
+      # coefficient of 0.001–0.005 on a full film — and the engine's mechanical loss lives mostly
+      # in the piston and gland instead. What makes them matter is the *other* end of the
+      # Stribeck curve: starved, the same journal is forty times worse and cooks itself in
+      # minutes. Measured on the reference run: 38 K above ambient wet, and past babbitt's 520 K
+      # rating dry.
+      #
+      # 45 kg is the whole assembly's effective thermal mass, not the white metal alone — the
+      # brasses, their caps and the length of shaft between them all soak the heat.
+      def journal_fragment(mass_kg:, material:, **rest)
+        Fragment.new(
+          nodes: [ SteamEngine.main_bearings(mass_kg: mass_kg, material: material,
+                                             content: Content.default, **rest) ]
+        )
+      end
+
+      # **Harder, hotter, and it takes the shaft with it.** Bronze runs to a 560 K service limit
+      # against babbitt's 416, so it shrugs off neglect that would wipe white metal — and it
+      # declares no latent heat, so it does not melt out and give the housing back.
+      #
+      # That is not a free upgrade, and `failure_damages` is where the price is. **Babbitt is
+      # sacrificial on purpose**: it is the soft thing that goes so the journal does not. Bronze
+      # is harder than the shaft is forgiving, so when it does seize it scores the crank rather
+      # than running out of the housing — the cylinder *and* the flywheel pay.
+      Parts.register(:bronze_journals, kind: :bearings, label: "Bronze Journals",
+                     description: "Solid bronze shells. They will take abuse white metal " \
+                                  "will not, and they are less kind when they finally go.",
+                     provides: %i[main_bearings],
+                     instruments: %i[bearing_temp bearing_condition],
+                     stats: { material: :bronze, mass_kg: 52.0 }) do |_spec|
+        SteamEngine.journal_fragment(
+          mass_kg: 52.0, material: :bronze, stress_rate: 120.0, wear_rate: 4.0e-7,
+          oil_loss_kg_per_m: 2.0e-4,
+          damages: { seized: { cylinder: 0.5, flywheel: 0.4 } },
+          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+                                 reference: 27.0, stations: { oiling: 1.0 } } }
+        )
+      end
+
+      # **The late unlock, and it is an upgrade — which is fine.** Progression is gated and an
+      # earned upgrade is allowed to be better; what it is not allowed to be is *free of
+      # character*. See `docs/design_sketches/bearings.md` §4.5.
+      #
+      # Three things make it a different part rather than a better number:
+      #
+      #   * **It does not care about oil.** Flat friction across the Stribeck curve — that is what
+      #     `mu_film:`/`mu_boundary:` exist for — so no oil charge, no consumption, and the oil
+      #     round stops being about the journals at all.
+      #   * **It barely wears.** Rolling contact, so `wear_rate` is an order down on a plain
+      #     bearing's and `stress_rate` is nearly nothing.
+      #   * **It gives no warning.** A plain bearing telegraphs distress for minutes and can be
+      #     caught; a roller reads sound right up until a race spalls. Here that falls out rather
+      #     than being asserted: durability barely moves, so `bearing_condition` says "cold and
+      #     quiet" — and the failure route is `overload?` on temperature, which arrives without
+      #     the gauge ever having drifted.
+      Parts.register(:roller_bearings, kind: :bearings, label: "Roller Bearings",
+                     description: "Sealed races, packed with grease at the works. Nothing to " \
+                                  "oil, and nothing to hear before they let go.",
+                     provides: %i[main_bearings],
+                     instruments: %i[bearing_temp bearing_condition],
+                     stats: { material: :steel, mass_kg: 38.0 }) do |_spec|
+        SteamEngine.journal_fragment(
+          mass_kg: 38.0, material: :steel,
+          mu_film: 0.0015, mu_boundary: 0.002,
+          oil_charge_kg: 0.0, oil_loss_kg_per_m: 0.0,
+          viscous_c: 1.2, stress_rate: 25.0, wear_rate: 6.0e-8,
+          damages: { seized: { cylinder: 0.5, flywheel: 0.5 } },
+          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+                                 reference: 27.0, stations: { oiling: 1.0 } } }
+        )
+      end
+
+      # **Where the oil is kept, which is not the same question as how it reaches the bearings.**
+      # This part is the store; the lubrication method that draws on it is what differs between a
+      # man with a can, a ring oiler and a forced feed. Separating them is what lets the method be
+      # upgraded without buying a new drum. See `docs/design_sketches/bearings.md` §1.5.
+      Parts.register(:babbitt_journals, kind: :bearings, label: "Babbitt Journals",
+                     description: "White metal poured into bronze shells. Soft, and meant to be.",
+                     provides: %i[main_bearings],
+                     instruments: %i[bearing_temp bearing_condition],
+                     stats: { material: :babbitt, mass_kg: 45.0 }) do |_spec|
+        # **Rated so that a starved journal wipes before it melts.** A bearing losing its oil
+        # takes about 158 s to climb from running temperature to babbitt's 520 K, so the fatigue
+        # path has to finish inside that or the warning rung never happens.
+        #
+        # A seizure takes the cylinder half way to its own failure: the rod keeps driving into a
+        # crank that has stopped turning, and that load goes somewhere.
+        SteamEngine.journal_fragment(
+          mass_kg: 45.0, material: :babbitt, stress_rate: 200.0,
+          # Same coefficient as the rings, and the **4 kW of boundary rubbing** a flooded journal
+          # sees does the rest: 95 hours against the rings' 5. A well-oiled journal is not a
+          # consumable, and it is the oil that makes that true rather than the metal.
+          wear_rate: 7.3e-7,
+          # **The white metal only**, against 45 kg of assembly thermal mass. This is what a
+          # re-babbitting job replaces, and what runs out of the housing when one cooks.
+          lining_kg: 6.0,
+          oil_loss_kg_per_m: 2.0e-4,
+          damages: { seized: { cylinder: 0.5 } },
+          # Whoever is at the crank with a can when it goes. Tags rather than a severity, so
+          # protective kit resolves through `Injury#resistance` by naming convention with no
+          # engine change; `scales_with:` reads the rim speed off the failure event, because a
+          # seizure at 170 rpm is not one at walking pace.
+          # 27 m/s is the reference rim speed — a 1.5 m flywheel at its working 18 rad/s — so a
+          # seizure at ordinary running scales to 1.0 and one on a barred-over engine to almost
+          # nothing.
+          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+                                 reference: 27.0, stations: { oiling: 1.0 } } }
+        )
+      end
+
+      Parts.register(:stock_oil_store, kind: :oil_store, label: "Oil Store",
+                     description: "A drum of straight mineral oil and a filler funnel.",
+                     provides: %i[oil_store], instruments: %i[oil_remaining],
+                     stats: { volume_m3: 0.3, bearing_oil_kg: 180.0 }) do |_spec|
+        Fragment.new(nodes: [ SteamEngine.oil_store ])
+      end
+
+      # **A man with an oil can, and the cheapest lubrication there is.** One lever, two lines:
+      # an oiler walks the machine and does the journals and the gland on the same round.
+      #
+      # **Dexterity-led rather than strength-led**, which makes it the first station in the game
+      # that is not a strength check — oiling is fiddly and attentive, not heavy. The
+      # `intelligence` share is deliberate: the stat is defined and read by nothing else, and
+      # knowing which bearing wants attention is exactly what it should mean.
+      #
+      # The mechanic needs no new engine concept. There is no discrete-action or cooldown
+      # machinery in the simulation and this wants none: the fireman has to **leave the shovel**
+      # to come and oil, which is an `assign_minion` command that already works, and the fire
+      # dies while he is away. That is the whole decision.
+      Parts.register(:hand_oiling, kind: :lubrication, label: "Hand Oiling",
+                     description: "An oil can, a long spout, and somebody to walk the machine.",
+                     provides: %i[oil_feed_journals oil_feed_rings],
+                     stats: { max_kg_per_s: 0.06 }) do |_spec|
+        Fragment.new(
+          nodes: [ SteamEngine.oil_line(id: :oil_feed_journals),
+                   SteamEngine.oil_line(id: :oil_feed_rings) ],
+          links: [
+            Link.new(from: [ :oil_store, :out ],            to: [ :oil_feed_journals, :inlet ]),
+            Link.new(from: [ :oil_feed_journals, :outlet ], to: [ :main_bearings, :oil_in ]),
+            Link.new(from: [ :oil_store, :out ],            to: [ :oil_feed_rings, :inlet ]),
+            Link.new(from: [ :oil_feed_rings, :outlet ],    to: [ :piston_rings, :oil_in ])
+          ],
+          control_points: [
+            # Fiddly and attentive rather than heavy, so the lightest `exertion:` on the engine —
+            # a quarter hour at it flat out, against the stoker's five minutes. The oil round is a
+            # job you can be sent back to.
+            ControlPoint.new(id: :oiling, label: "Oil Round", node: :oil_feed_journals,
+                             effort: { dexterity: 0.6, intelligence: 0.4 },
+                             aided_by: :oiling, exertion: 3.7e-4)
+          ]
+        )
+      end
+
+      # --- crew quarters --------------------------------------------------------------------
+      #
+      # **Where the shift begins, and the only part that is not machinery.** It answers two
+      # questions no other fitting can: how many hands the operation can field, and where they
+      # are standing when the match starts.
+      #
+      # **It builds no node, and that is right rather than a shortcut.** A mess room holds
+      # nothing, conducts nothing and is driven by nothing — it is a *place*, and a place in this
+      # model is a `ControlPoint` somebody can be posted to. `station_index`, `endangers:` and
+      # fatigue all resolve through control points already, so a station with no `node:` needs no
+      # new machinery anywhere. `ControlPoint#lever?` is what keeps it off the lever strip.
+      #
+      # > **Not `provides: %i[quarters]`.** `provides:` names NODE ids a part must build, and
+      # > node, lever, instrument and minion ids share one flat namespace — so declaring a node
+      # > and a control point both called `:quarters` is a duplicate-id build error.
+      #
+      # `recovery:` is the seam the fatigue release left: an ordinary valve recovers at
+      # `Fatigue::BASE_RECOVERY`, and better amenities are a larger number in the same field.
+      # At 2× base a spent worker is back on their feet in ~230 s against ~455 s at a valve.
+      Parts.register(:mess_room, kind: :crew_quarters, label: "Mess Room",
+                     description: "A bench, a kettle on the plate, and room for two off the " \
+                                  "footplate.",
+                     stats: { crew_capacity: 2, recovery_rate: 2.0 }) do |_spec|
+        Fragment.new(
+          control_points: [
+            ControlPoint.new(id: :quarters, label: "Crew Quarters",
+                             recovery: Fatigue::BASE_RECOVERY * 2.0)
+          ]
+        )
+      end
+
+      # **The upgrade that buys back a person, which is the only currency the oil round spends.**
+      # A ring rides on the shaft and lifts oil out of a sump as it turns, so the machine oils
+      # itself while it is running — the lever stops being an effort station and becomes a valve
+      # on the sump feed.
+      #
+      # **That is the whole tradeoff, and it has a real edge**: a ring oiler works because the
+      # shaft is turning. It delivers nothing on a barred-over or stalling engine, which is
+      # exactly when a journal is most at risk, and it cannot be hurried when one is already hot.
+      # A man with a can can oil a stopped engine; this cannot.
+      Parts.register(:ring_oiler, kind: :lubrication, label: "Ring Oilers",
+                     description: "Loose rings riding each journal, lifting oil from a sump as " \
+                                  "the shaft turns. Nobody has to stand there.",
+                     provides: %i[oil_feed_journals oil_feed_rings],
+                     stats: { max_kg_per_s: 0.03 }) do |_spec|
+        Fragment.new(
+          nodes: [ SteamEngine.oil_line(id: :oil_feed_journals, max_kg_per_s: 0.03),
+                   SteamEngine.oil_line(id: :oil_feed_rings, max_kg_per_s: 0.03) ],
+          links: [
+            Link.new(from: [ :oil_store, :out ],            to: [ :oil_feed_journals, :inlet ]),
+            Link.new(from: [ :oil_feed_journals, :outlet ], to: [ :main_bearings, :oil_in ]),
+            Link.new(from: [ :oil_store, :out ],            to: [ :oil_feed_rings, :inlet ]),
+            Link.new(from: [ :oil_feed_rings, :outlet ],    to: [ :piston_rings, :oil_in ])
+          ],
+          # **No `effort:`, and that is the upgrade.** The lever is now a valve on the sump feed
+          # rather than somebody's exertion, so it delivers whether or not anybody is standing
+          # there — and defaults open, because a ring oiler that has to be switched on is a hand
+          # oiler with extra steps.
+          control_points: [
+            ControlPoint.new(id: :oiling, label: "Oil Feed", node: :oil_feed_journals,
+                             default: 100.0)
+          ]
+        )
+      end
+
       Parts.register(:stock_stoker, kind: :stoking_gear, label: "Stoking Line",
                      provides: %i[stoker], stats: { max_kg_per_s: 0.25 }) do |_spec|
         Fragment.new(
@@ -158,9 +431,15 @@ module ReactorSim
           # `SteamEngine.stoker`'s 0.25 kg/s is therefore **what a competent human manages**, not
           # a mechanical limit: a day-labourer moves a third of it and a strong fireman with a
           # shovel roughly double.
+          # **The heaviest station on the engine: about five minutes flat out.** `exertion:` is
+          # fatigue per second for a competent hand with the lever hard over — and the figure that
+          # matters is `1/(3 × exertion)`, not `1/exertion`, because the runaway divides
+          # time-to-spent by three (`Fatigue::LOAD_CEILING`). So 1.1e-3 is ~300 simulated seconds
+          # at `dt` 0.25 s. At a third of the lever the same person lasts most of an hour, which
+          # is what makes firing rate a decision rather than a setting.
           control_points: [ ControlPoint.new(id: :stoking, label: "Stoking Effort", node: :stoker,
                                              effort: { strength: 0.75, dexterity: 0.25 },
-                                             aided_by: :shovelling) ]
+                                             aided_by: :shovelling, exertion: 1.1e-3) ]
         )
       end
 
@@ -183,7 +462,7 @@ module ReactorSim
             # bent double under a locomotive rather than swung at from standing.
             ControlPoint.new(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan,
                              effort: { strength: 0.6, dexterity: 0.4 },
-                             aided_by: :shovelling)
+                             aided_by: :shovelling, exertion: 9.3e-4)
           ]
         )
       end
@@ -228,19 +507,63 @@ module ReactorSim
       # engine built without a blower cannot raise its own first steam. No extra power, and you
       # notice its absence at the worst moment.
       #
-      # **WIP**: still free, and should not be. See the TODO on `SteamEngine.blower_fan`.
-      Parts.register(:stock_blower, kind: :forced_draught, label: "Blower", wip: true,
-                     description: "Forced draught for lighting up. Costs nothing yet — it will.",
+      # **A minion on the handles, and the starting blower.** Measured against the engine: at
+      # 120 Pa full lever it moves about 0.93 kg/s of air against natural draught's 0.30, which
+      # raises steam at t=3800 where the donkey does it at t=1600. Slow is the intent — raising
+      # steam by hand should be slow, and buying the donkey is the way out of it.
+      #
+      # **It costs a person the whole time**, which is the point: three effort stations against
+      # two seats, so somebody on the bellows is somebody not on the shovel exactly when both
+      # matter most. `exertion:` is heavy — the top of this lever is a sprint, priced by the
+      # fatigue release, and a hand held there is spent in about four minutes.
+      Parts.register(:hand_bellows, kind: :forced_draught, label: "Hand Bellows",
+                     description: "Leather and ash, worked by somebody who would rather be " \
+                                  "shovelling.",
                      provides: %i[blower_fan],
-                     stats: { head_pa: 600.0, cost: "none yet (WIP)" }) do |_spec|
+                     stats: { head_pa: 120.0, crew: "one, continuously" }) do |_spec|
         Fragment.new(
-          nodes: [ SteamEngine.blower_fan ],
+          nodes: [ SteamEngine.blower_fan(head_pa: 120.0) ],
           links: [
             Link.new(from: [ :atmosphere, :intake ], to: [ :blower_fan, :inlet ]),
             Link.new(from: [ :blower_fan, :outlet ], to: [ :damper, :inlet ])
           ],
           control_points: [
-            ControlPoint.new(id: :blower, label: "Blower", node: :blower_fan)
+            ControlPoint.new(id: :blower, label: "Bellows", node: :blower_fan,
+                             effort: { strength: 0.8, toughness: 0.2 },
+                             exertion: 1.4e-3)
+          ]
+        )
+      end
+
+      # **The upgrade, and deliberately today's figures exactly.** 600 Pa and the same rating, so
+      # a player who has bought it gets the machine every existing balance measurement was taken
+      # against — the cold-start gradient, the sweeps in `bearings.md` §6.3, all of it. The Hand
+      # Bellows is a new and harder starting condition rather than a rebalancing of the old one.
+      #
+      # It costs fuel instead of a person: its own tank, its own two-stroke, and a fan belted to
+      # it through `driven_by:`. Running out is the failure, and it is one a player can watch
+      # coming on the gauge.
+      Parts.register(:donkey_blower, kind: :forced_draught, label: "Donkey Blower",
+                     description: "A little oil engine on its own bedplate, belted to the fan.",
+                     provides: %i[blower_fan donkey donkey_tank],
+                     stats: { head_pa: 600.0, fuel: "fuel oil, 60 kg" }) do |_spec|
+        Fragment.new(
+          nodes: [ SteamEngine.blower_fan(head_pa: 600.0, driven_by: :donkey),
+                   SteamEngine.donkey_engine, SteamEngine.donkey_tank,
+                   SteamEngine.donkey_fuel_line, SteamEngine.donkey_air_line,
+                   SteamEngine.donkey_flue ],
+          links: [
+            Link.new(from: [ :atmosphere, :intake ],   to: [ :blower_fan, :inlet ]),
+            Link.new(from: [ :blower_fan, :outlet ],   to: [ :damper, :inlet ]),
+            Link.new(from: [ :donkey_tank, :out ],     to: [ :donkey_fuel, :inlet ]),
+            Link.new(from: [ :donkey_fuel, :outlet ],  to: [ :donkey, :fuel ]),
+            Link.new(from: [ :atmosphere, :intake ],   to: [ :donkey_air, :inlet ]),
+            Link.new(from: [ :donkey_air, :outlet ],   to: [ :donkey, :air ]),
+            Link.new(from: [ :donkey, :exhaust ],      to: [ :donkey_flue, :inlet ]),
+            Link.new(from: [ :donkey_flue, :outlet ],  to: [ :atmosphere, :exhaust ])
+          ],
+          control_points: [
+            ControlPoint.new(id: :blower, label: "Donkey Throttle", node: :donkey)
           ]
         )
       end
@@ -495,7 +818,7 @@ module ReactorSim
       # forces the driver to stop, which is the safety function.
       Parts.register(:stock_fusible_plug, kind: :fusible_plug, label: "Fusible Plug",
                      provides: %i[fusible_plug], instruments: %i[plug_blown],
-                     stats: { melts_above_k: 620.0 }) do |_spec|
+                     stats: { material: :fusible_alloy, plug_kg: 0.05 }) do |_spec|
         Fragment.new(
           nodes: [ SteamEngine.fusible_plug ],
           links: [
@@ -557,8 +880,7 @@ module ReactorSim
                      description: "Small bore, short stroke, and it pushes with boiler pressure.",
                      provides: %i[cylinder],
                      instruments: %i[engine_power cylinder_pressure cylinder_water],
-                     stats: { bore_m: 0.45, stroke_m: 1.1, material: :cast_iron,
-                              efficiency: 0.82 }) do |spec|
+                     stats: { bore_m: 0.45, stroke_m: 1.1, material: :cast_iron }) do |spec|
         SteamEngine.cylinder_fragment(spec, bore_m: 0.45, stroke_m: 1.1, heat_capacity: 4.0e5)
       end
 
@@ -570,8 +892,7 @@ module ReactorSim
                      description: "Vast bore, long stroke, and the sky does the pushing.",
                      provides: %i[cylinder],
                      instruments: %i[engine_power cylinder_pressure cylinder_water],
-                     stats: { bore_m: 1.3, stroke_m: 2.4, material: :cast_iron,
-                              efficiency: 0.82 }) do |spec|
+                     stats: { bore_m: 1.3, stroke_m: 2.4, material: :cast_iron }) do |spec|
         SteamEngine.cylinder_fragment(spec, bore_m: 1.3, stroke_m: 2.4, heat_capacity: 2.0e6)
       end
 
@@ -734,7 +1055,7 @@ module ReactorSim
           # The first `:bypass` slot on this engine: with no fan fitted the atmosphere joins
           # straight to the damper and the fire draws on the stack alone.
           Slot.new(id: :blower, accepts: :forced_draught, label: "Blower", group: :fire,
-                   required: false, default: :stock_blower, when_empty: :bypass,
+                   required: false, default: :hand_bellows, when_empty: :bypass,
                    bypass: [ [ :atmosphere, :intake ], [ :damper, :inlet ] ]),
           Slot.new(id: :bunker, accepts: :bunker, label: "Fuel Bunker", group: :fire,
                    required: true, default: :stock_bunker),
@@ -795,7 +1116,30 @@ module ReactorSim
           Slot.new(id: :flywheel, accepts: :flywheel, label: "Flywheel", group: :engine,
                    required: true, default: fitted.fetch(:flywheel)),
           Slot.new(id: :load, accepts: :load, label: "Mill Drive", group: :engine,
-                   required: true, default: fitted.fetch(:load))
+                   required: true, default: fitted.fetch(:load)),
+          # **Required, because an engine with nowhere to keep oil is not a cheaper engine.**
+          # Unlike the safety tier, going without buys nothing at all — there is no power in it
+          # and no information traded away, so it would be a strictly worse build rather than a
+          # decision. What is a decision is how the oil gets from here to the bearings, and that
+          # is a separate fitting.
+          Slot.new(id: :oil_store, accepts: :oil_store, label: "Oil Store", group: :engine,
+                   required: true, default: :stock_oil_store),
+          # Required for the same reason the oil store is: a crankshaft with nothing to turn in
+          # is not a cheaper engine. What varies is the metal, and later whether it needs oiling
+          # at all.
+          Slot.new(id: :bearings, accepts: :bearings, label: "Main Bearings", group: :engine,
+                   required: true, default: :babbitt_journals),
+          # **How the oil gets from the drum to the brasses, which is the decision the store is
+          # not.** Required, because an engine whose oil stays in the drum destroys itself — but
+          # what is fitted here is the whole ladder from a man with a can to a forced feed, and
+          # the cheapest of them costs a person standing at a lever instead of a shovel.
+          Slot.new(id: :lubrication, accepts: :lubrication, label: "Lubrication", group: :engine,
+                   required: true, default: :hand_oiling),
+          # **Required, and it is the one slot that is not part of the machine.** It says how
+          # many hands the operation can field and where they begin the shift — so an engine
+          # without one has no crew at all, rather than a crew that starts nowhere.
+          Slot.new(id: :quarters, accepts: :crew_quarters, label: "Crew Quarters", group: :crew,
+                   required: true, default: :mess_room)
         ]
 
         return base unless spec.fetch(:condenser)

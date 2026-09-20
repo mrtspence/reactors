@@ -11,18 +11,24 @@ module ReactorSim
   #
   # See `docs/design_sketches/minions.md` §4.
   module Sheet
-    # The five every archetype declares. Fixed rather than open because the simulation's own
+    # The six every archetype declares. Fixed rather than open because the simulation's own
     # machinery reads them and needs a number with a meaning rather than an absence.
     #
     #   strength      what they bring to a lever       — Minion#rate_multiplier
     #   toughness     what they shrug off              — the Danger Check
+    #   endurance     how slowly they tire             — Fatigue.accrual
     #   intelligence  what they notice                 — the `observer:` gauge path (reserved)
     #   dexterity     how finely they can work         — reserved
     #   charisma      how others take them             — reserved
     #
     # `dexterity` does NOT replace the `clumsy` tag. How finely somebody works and how often they
     # drop things are two statements about one person.
-    STATS = %i[strength toughness intelligence dexterity charisma].freeze
+    #
+    # **`endurance` is not `strength` slowed down, and it is not `toughness`.** What somebody gets
+    # done and what it costs them are separate claims — an ogre who shifts coal twice as fast and
+    # tires twice as fast is only expressible with both — and toughness is about a blow landing,
+    # which is a different event from a long shift.
+    STATS = %i[strength toughness endurance intelligence dexterity charisma].freeze
 
     # A stat can be driven to zero and no further. Negative strength would drive a lever *away*
     # from its target, which is not "very weak" — it is a different machine.

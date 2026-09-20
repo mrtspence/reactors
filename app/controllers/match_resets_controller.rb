@@ -15,9 +15,7 @@
 # should archive the finished match's seed + command log rather than discarding it, since that
 # pair *is* the replay (docs/architecture.md §8).
 class MatchResetsController < ApplicationController
-  include DevMatchScoped
-
-  before_action :require_dev_match
+  before_action :require_match_operator!
 
   def create
     # The reset command is built BEFORE the clock advances, so somebody whose last match this

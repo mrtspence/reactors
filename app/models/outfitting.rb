@@ -14,7 +14,7 @@ class Outfitting
   # the caller has to decide what to tell the player, and that is a controller's business.
   class NotDelivered < StandardError; end
 
-  attr_reader :owner_id, :chassis, :assembly
+  attr_reader :owner_id, :operation_id, :chassis, :assembly
 
   # `parts` is nil for "show what is fitted" and a hash for "show this draft". They are not the
   # same: an empty hash means every slot explicitly empty, which is a stripped machine.
@@ -22,8 +22,9 @@ class Outfitting
   # A blank `chassis` falls back to what is stored, so an unrecognised one cannot silently become
   # a different machine — `assembly_for` raises on a frame it does not know, which is what we
   # want for a hand-typed id, but not for an empty select.
-  def self.for(owner_id:, parts: nil, chassis: nil)
-    new(owner_id: owner_id, parts: parts, chassis: chassis.presence&.to_sym || DevMatch.chassis)
+  def self.for(owner_id:, operation_id: DevMatch::PRIMARY, parts: nil, chassis: nil)
+    new(owner_id: owner_id, operation_id: operation_id, parts: parts,
+        chassis: chassis.presence&.to_sym || DevMatch.chassis(operation_id: operation_id))
   end
 
   # The keys a form may submit. Lives here rather than in the controller so the controller's
@@ -32,25 +33,31 @@ class Outfitting
   # **Takes the chassis the form submitted, not the stored one.** The two differ for exactly one
   # request — the one where a player changes frame — and permitting against the old chassis would
   # drop the slots the new one has.
-  def self.slot_ids(chassis = nil)
-    DevMatch.outfitting(chassis: chassis.presence&.to_sym).slots.map { |slot| slot.id.to_s }
+  def self.slot_ids(chassis = nil, operation_id: DevMatch::PRIMARY)
+    DevMatch.outfitting(operation_id: operation_id, chassis: chassis.presence&.to_sym)
+            .slots.map { |slot| slot.id.to_s }
   end
 
   # Frames this machine can be built on, filtered the way parts are: what the player owns, plus
   # whatever is currently fitted even if they no longer own it.
-  def self.chassis_choices(owner_id, current = nil)
+  def self.chassis_choices(owner_id, current = nil, operation_id: DevMatch::PRIMARY)
     owned = Unlock.owned_ids(owner_id, :chassis)
-    frames = ReactorSim::Operations.chassis_for(DevMatch::TYPE)
+    kind = DevMatch.kind_of(operation_id)
+    frames = ReactorSim::Operations.chassis_for(kind)
 
-    frames.select { |frame| owned.include?(blueprint_id_for(frame)) || frame == current }
+    frames.select { |frame| owned.include?(blueprint_id_for(frame, kind)) || frame == current }
   end
 
-  def self.blueprint_id_for(frame) = Blueprint.chassis_id(DevMatch::TYPE, frame)
+  def self.blueprint_id_for(frame, kind = DevMatch.kind_of(DevMatch::PRIMARY))
+    Blueprint.chassis_id(kind, frame)
+  end
 
-  def initialize(owner_id:, chassis:, parts: nil)
+  def initialize(owner_id:, chassis:, operation_id: DevMatch::PRIMARY, parts: nil)
     @owner_id = owner_id
+    @operation_id = operation_id.to_sym
     @chassis = chassis
-    @assembly = DevMatch.outfitting(chassis: chassis, loadout: resolve(parts))
+    @assembly = DevMatch.outfitting(operation_id: @operation_id, chassis: chassis,
+                                    loadout: resolve(parts))
   end
 
   delegate :slots, :part, :loadout, to: :assembly
@@ -103,7 +110,7 @@ class Outfitting
   # Caller checks `ok?` first. This does not re-check, because a method that silently did nothing
   # when asked to commit is worse than one that trusts its caller.
   def fit!
-    Loadout.fit(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID,
+    Loadout.fit(match_id: DevMatch::ID, operation_id: operation_id,
                 chassis: chassis, parts: loadout)
     CommandProducer.instance.produce(match_id: DevMatch::ID, command: DevMatch.reset_command)
   rescue StandardError => e
@@ -143,7 +150,7 @@ class Outfitting
   def resolve(parts)
     return nil if parts.nil?
 
-    DevMatch.outfitting(chassis: chassis).slots.filter_map { |slot|
+    DevMatch.outfitting(operation_id: operation_id, chassis: chassis).slots.filter_map { |slot|
       key = slot.id.to_s
       [ slot.id, parts[key].to_s.presence ] if parts.key?(key)
     }.to_h

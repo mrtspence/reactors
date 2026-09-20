@@ -55,7 +55,7 @@ module ReactorSim
         chassis = chassis.to_sym
         assembly = assembly_for(chassis, loadout)
         fragment = assembly.build!
-        roster = Crew.normalise(crew, roles: crew_roles)
+        roster = Crew.normalise(crew, capacity: assembly.crew_capacity)
 
         Operation.new(
           id: id, type: TYPE, seed: seed, time_scale: time_scale,
@@ -68,7 +68,7 @@ module ReactorSim
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           control_points: fragment.control_points,
           diagnostics: assembly.diagnostics,
-          minions: crew_for(roster, content || Content.default)
+          minions: crew_for(roster, content || Content.default, station: assembly.crew_origin)
         )
       end
 
@@ -153,6 +153,71 @@ module ReactorSim
         )
       end
 
+      # The main journals, lumped: the crankshaft's bearings as one part, because a player oils
+      # them as one round and the machine has no notion of place yet.
+      #
+      # **`loaded_by: :cylinder`** is what makes working the engine hard wear its bearings — the
+      # side load on a journal is what the piston is pushing through it, over the crank throw.
+      # Declared rather than discovered, like `Cylinder#drives`.
+      #
+      # `heat_capacity` is mass × the metal's own specific heat, so the figure moves when content
+      # does. `ambient_conductance` is what a housing sheds to the engine room; it is what decides
+      # the equilibrium a hard-run bearing settles at, and therefore whether it ever gets hot
+      # enough to matter.
+      # **It glows, and that is what stops a seized one climbing forever.** A housing in open air
+      # at 0.2 m² and ε 0.8 — oxidised metal, not polished — radiates about 67 kW once it reaches
+      # 1652 K, which is more than the engine driving it can supply. Without the term the same
+      # bearing settled there; with it the runaway has a physical end rather than an arithmetic
+      # one. See `docs/design_sketches/radiation.md`.
+      def main_bearings(mass_kg:, material:, content:, **rest)
+        Nodes::Bearing.new(
+          id: :main_bearings, label: "Main Bearings", supports: :flywheel, duty: :journal,
+          loaded_by: :cylinder, material: material,
+          heat_capacity: mass_kg * content.specific_heat(material),
+          **{ emissivity: 0.8, radiating_area_m2: 0.2 }.merge(rest)
+        )
+      end
+
+      # Rings, crosshead and gland, lumped: everything that rubs as the piston travels.
+      #
+      # **This is where a steam engine's mechanical loss actually lives**, not in its journals. A
+      # flooded journal runs a friction coefficient around 0.002; piston rings are pressed into
+      # the bore by the gas behind them, never get a full hydrodynamic wedge, and run an order of
+      # magnitude worse. It replaces `Cylinder`'s old `efficiency: 0.82`, which derated torque
+      # and charged nobody for it.
+      #
+      # `loaded_by: :cylinder` with `duty: :slide` reads **pressure** rather than torque, so
+      # driving hard on a high boiler pressure is what wears the bore — which is the only route
+      # to a worn cylinder that is not hydraulic lock.
+      def piston_rings(stroke_m:, load_area_m2:, mass_kg:, material:, content:, **rest)
+        Nodes::Bearing.new(
+          id: :piston_rings, label: "Piston Rings", supports: :flywheel, duty: :slide,
+          loaded_by: :cylinder, material: material,
+          heat_capacity: mass_kg * content.specific_heat(material),
+          stroke_m: stroke_m, load_area_m2: load_area_m2,
+          **rest
+        )
+      end
+
+      # The oil the bearings run on. 180 kg is a shop drum — enough that running out is a thing
+      # that happens to somebody who has not been watching, rather than a per-match timer.
+      #
+      # **The outlet's rate is what a hand can pour, not what a bearing can take.** An oiler goes
+      # round with a can; the restriction is the round, and the conduit fitted in the lubrication
+      # slot is what actually rates it.
+      def oil_store
+        Nodes::Vessel.new(
+          id: :oil_store, label: "Oil Store", volume_m3: 0.3,
+          initial_contents: [ { resource: :bearing_oil, kg: 180.0 } ],
+          ambient_conductance: 6.0,
+          # The drum's tap, and deliberately not the restriction — the oil lines are, because
+          # the lever belongs to them. At 0.05 this port throttled both lines at once and made
+          # the second bearing on the round wait for the first.
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :lubricant ],
+                            max_kg_per_s: 0.2) ]
+        )
+      end
+
       # An effort station, not a valve: `stoking` is somebody's exertion, and what reaches the
       # grate is that times their capability.
       #
@@ -172,6 +237,26 @@ module ReactorSim
           id: :stoker, label: "Stoking Line", accepts: [ :fuel ],
           max_kg_per_s: 0.25, heat_capacity: 2.0e3,
           control_id: :stoking
+        )
+      end
+
+      # **The oil round, one can, two stops.** A conduit is one path, and an oiler serves the
+      # journals and the piston gland on the same walk, so the method is one lever with two lines
+      # rather than two jobs.
+      #
+      # Rated at what a hand can pour, not at what a bearing can take: the bearing asks for
+      # exactly what it is short of, and this is the restriction on getting it there.
+      #
+      # **Fast enough that a round is a visit, not a vigil.** At 0.02 kg/s a competent hand
+      # needed minutes at the lever to fill a 0.8 kg gland and the rings never once reached their
+      # charge, so an attentive player got a permanently under-oiled engine. Pouring oil is
+      # quick; what costs the player is being *away from the shovel*, and that is already the
+      # whole price.
+      def oil_line(id:, max_kg_per_s: 0.06)
+        Nodes::Conduit.new(
+          id: id, label: "Oil Line", accepts: [ :lubricant ],
+          max_kg_per_s: max_kg_per_s, heat_capacity: 40.0, ambient_conductance: 0.0,
+          control_id: :oiling
         )
       end
 
@@ -201,16 +286,84 @@ module ReactorSim
       # `:blower_fan` rather than `:blower`, which is already the lever — ids are one flat
       # namespace across nodes, levers, gauges and crew.
       #
-      # TODO: the blower is free and should not be. Intended cost is crew time first, a
-      # consumable second. **Assume a black start** — a player may be the only one generating
-      # power, so nothing may depend on an electrical supply. `heat_capacity` is a placeholder.
-      def blower_fan
+      # **The blower is no longer free**, which is what `driven_transport.md` was written for.
+      # It costs either a person on the handles (`:hand_bellows`) or fuel oil out of a tank
+      # (`:donkey_blower`) — and both honour the black start, because neither depends on the
+      # engine this is trying to bring to life.
+      #
+      # `driven_by:` names the shaft that pays: head then goes as ω², so a donkey engine still
+      # coming up to speed delivers less draught rather than the same draught later. A bellows
+      # names no shaft and is charged in crew time instead.
+      #
+      # **`rated_omega` is the donkey's governed speed**, so a healthy engine delivers its full
+      # 600 Pa and a struggling one does not.
+      def blower_fan(head_pa: 600.0, driven_by: nil)
         Nodes::Conduit.new(
           id: :blower_fan, label: "Blower", accepts: [ :gas ],
           max_kg_per_s: 12.0, conductance: Float::INFINITY,
           heat_capacity: 2.0e3, ambient_conductance: 0.0,
-          head_pa: 600.0, head_control_id: :blower
+          head_pa: head_pa, head_control_id: (:blower unless driven_by),
+          driven_by: driven_by, rated_omega: (DONKEY_OMEGA if driven_by),
+          efficiency: 0.55
         )
+      end
+
+      # --- the donkey engine ------------------------------------------------------------
+      #
+      # A small oil engine on its own bedplate. It exists so the blower can work on a black
+      # start: a fan hung off the main drivetrain cannot help bring that drivetrain to life.
+      #
+      # Sized against what the fan actually needs — 600 Pa at 2.65 m³/s is 1.59 kW of hydraulic
+      # power, so about 2.9 kW at the belt. Peak shaft power is `rated_torque × ω_rated / 4`,
+      # at half the governed speed.
+      DONKEY_OMEGA = 60.0
+
+      def donkey_engine
+        Nodes::Motor.new(
+          id: :donkey, label: "Donkey Engine", volume_m3: 0.15,
+          fuel_charge_kg: 0.0002, swept_m3: 0.004, moment_of_inertia: 0.4,
+          reactions: %i[oil_combustion], control_id: :blower,
+          rated_torque_nm: 200.0, rated_omega: DONKEY_OMEGA,
+          heat_capacity: 8.0e3, ambient_conductance: 25.0,
+          material: :cast_iron,
+          ports: [
+            Port.new(id: :fuel, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 0.05),
+            Port.new(id: :air, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 1.0),
+            Port.new(id: :exhaust, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 1.0)
+          ]
+        )
+      end
+
+      # **Its own tank, deliberately, rather than a line off anything else.** `oil_combustion` is
+      # already in the firebox's reaction list, so a fuel-oil line routed to the fire would let a
+      # player burn the donkey's fuel in the main grate. A separate tank makes that
+      # unexpressible rather than merely discouraged — and running dry is then something the
+      # player can watch happen.
+      def donkey_tank
+        Nodes::Vessel.new(
+          id: :donkey_tank, label: "Donkey Fuel", volume_m3: 0.08,
+          ambient_conductance: 0.0,
+          initial_contents: [ { resource: :fuel_oil, kg: 60.0 } ],
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ],
+                            max_kg_per_s: 0.05) ]
+        )
+      end
+
+      def donkey_fuel_line
+        Nodes::Conduit.new(id: :donkey_fuel, label: "Donkey Fuel Line", accepts: [ :fuel ],
+                           max_kg_per_s: 0.05, heat_capacity: 50.0, ambient_conductance: 0.0)
+      end
+
+      def donkey_air_line
+        Nodes::Conduit.new(id: :donkey_air, label: "Donkey Intake", accepts: [ :gas ],
+                           max_kg_per_s: 1.0, conductance: 0.02,
+                           heat_capacity: 200.0, ambient_conductance: 0.0)
+      end
+
+      def donkey_flue
+        Nodes::Conduit.new(id: :donkey_flue, label: "Donkey Exhaust", accepts: [ :gas ],
+                           max_kg_per_s: 1.0, conductance: 0.02,
+                           heat_capacity: 200.0, ambient_conductance: 20.0)
       end
 
       # Where fuel and air meet. The igniter is a small, deliberate heat input — coal will
@@ -583,7 +736,11 @@ module ReactorSim
         Nodes::FusiblePlug.new(
           id: :fusible_plug, label: "Fusible Plug",
           senses: :boiler, senses_key: :crown_temperature_k,
-          melts_above: 620.0,
+          # **The alloy carries its own melting point**, so there is no threshold here to drift
+          # from the metal it is supposed to describe. `fusible_alloy` is rated 620 K, well below
+          # the wrought iron around it — a safety device that goes at the same temperature as the
+          # thing it protects is not one.
+          material: :fusible_alloy, plug_kg: 0.05,
           accepts: [ :gas, :liquid ], max_kg_per_s: 2.0,
           heat_capacity: 2.0e2, ambient_conductance: 0.0
         )
@@ -717,7 +874,7 @@ module ReactorSim
           # regulator a real control: it is where the diagram takes its admission pressure and
           # whose density sizes the intake.
           drives: :flywheel, exhausts_to: spec.fetch(:exhausts_to), supplied_by: :steam_chest,
-          cutoff_control_id: :cutoff, efficiency: 0.82,
+          cutoff_control_id: :cutoff,
           # **What makes the cocks cost something.** An open cock bleeds the working space to
           # atmosphere while the piston pushes against it — a pressure divider on the admission
           # pressure. See `Cylinder#admission_pressure_pa`.
@@ -898,23 +1055,19 @@ module ReactorSim
       # nobody — but an *effort* station with nobody on it delivers nothing, so a machine whose
       # roster leaves these empty is worked by the labour exchange and barely runs.
       #
+      # **The roster, resolved.** An empty seat gets the standin, which is what makes an unfilled
+      # seat and a minion on the injury list the same thing to the engine: somebody turned up,
+      # and they are not who you wanted.
+      #
       # NOTE the ids. The obvious name for the person shovelling coal is `stoker`, and `:stoker`
       # is already the conduit carrying fuel to the firebox. Ids are shared across nodes, levers,
       # instruments and crew because they key one rng table, so that collision would hand two
-      # components the same stream. `validate_graph!` refuses it outright.
-      def crew_roles
-        [ Crew::Role.new(id: :fireman, label: "Fireman", station: :stoking),
-          Crew::Role.new(id: :yardhand, label: "Yardhand", station: :damper_open) ]
-      end
+      # components the same stream — hence `crew_1`, which cannot collide with machinery.
+      def crew_for(roster, content, station:)
+        roster.map do |seat, posting|
+          sheet = Crew.resolve(posting, content: content)
 
-      # **The roster, resolved.** An unfilled role gets the standin, which is what makes an empty
-      # slot and a minion on the injury list the same thing to the engine: somebody turned up,
-      # and they are not who you wanted.
-      def crew_for(roster, content)
-        crew_roles.map do |role|
-          sheet = Crew.resolve(roster[role.id], content: content)
-
-          Minion.new(id: role.id, station: role.station, name: sheet.fetch(:name),
+          Minion.new(id: seat, station: station, name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
                      stats: sheet.fetch(:stats), tags: sheet.fetch(:tags))
         end

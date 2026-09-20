@@ -187,6 +187,17 @@ module ReactorSim
         value.nil? ? Float::INFINITY : value.to_f
       end
 
+      # What it costs to melt a kilogram of this, once it is already at its melting point.
+      #
+      # **Infinity means "does not melt in this model"**, not "melts for free" — a part made of
+      # something with no figure declared simply keeps heating, which is the behaviour every
+      # material had before any of them declared one. Zero would mean the opposite and would
+      # vaporise a part's whole substance in a single tick.
+      def latent_heat_of_fusion_j_per_kg(id)
+        value = resource(id)[:latent_heat_of_fusion_j_per_kg]
+        value.nil? ? Float::INFINITY : value.to_f
+      end
+
       # Enthalpy of formation relative to the 0 K reference, per kg. This is what makes
       # phase change conserve energy exactly: boiling 1 kg of water at constant
       # temperature costs precisely the latent heat, no more and no less.

@@ -102,36 +102,54 @@ RSpec.describe ReactorSim::Crew do
   end
 
   describe "the roster in options" do
-    it "names every role, including the ones nobody was posted to" do
-      roster = engine(crew: { fireman: { minion: :jim } }).operation(:eng).options.fetch(:crew)
+    it "names every seat, including the ones nobody was posted to" do
+      roster = engine(crew: { crew_1: { minion: :jim } }).operation(:eng).options.fetch(:crew)
 
-      expect(roster.keys).to contain_exactly(:fireman, :yardhand)
+      expect(roster.keys).to contain_exactly(:crew_1, :crew_2)
     end
 
     it "puts the resolved crew on the operation" do
-      op = engine(crew: { fireman: { minion: :elowynne }, yardhand: { minion: :galathas } })
+      op = engine(crew: { crew_1: { minion: :elowynne }, crew_2: { minion: :galathas } })
            .operation(:eng)
 
-      expect(op.minions.fetch(:fireman).name).to eq("Elowynne")
-      expect(op.minions.fetch(:yardhand).name).to eq("Galathas")
+      expect(op.minions.fetch(:crew_1).name).to eq("Elowynne")
+      expect(op.minions.fetch(:crew_2).name).to eq("Galathas")
     end
 
     # Two elves, and not the same worker. The entire argument for an individual layer.
     it "separates two members of one race" do
-      op = engine(crew: { fireman: { minion: :elowynne }, yardhand: { minion: :galathas } })
+      op = engine(crew: { crew_1: { minion: :elowynne }, crew_2: { minion: :galathas } })
            .operation(:eng)
 
-      expect(op.minions.fetch(:yardhand).strength)
-        .to be > op.minions.fetch(:fireman).strength
-      expect(op.minions.fetch(:yardhand).dexterity)
-        .to be < op.minions.fetch(:fireman).dexterity
+      expect(op.minions.fetch(:crew_2).strength)
+        .to be > op.minions.fetch(:crew_1).strength
+      expect(op.minions.fetch(:crew_2).dexterity)
+        .to be < op.minions.fetch(:crew_1).dexterity
+    end
+
+    # **The rule the whole release exists for, and it has to be structural.** A machine that lets
+    # an effort station be a starting post hands the player a shift already at the face for free.
+    it "starts every seat in the quarters, never at a working station" do
+      op = engine(crew: { crew_1: { minion: :jim } }).operation(:eng)
+
+      op.minions.each_value do |minion|
+        expect(minion.default_station).to be(:quarters)
+        expect(op.control_points.fetch(minion.default_station)).not_to be_effort
+      end
+    end
+
+    # Capacity is bought, not decided by the machine — so a roster naming more seats than the
+    # fitted quarters has is a real mismatch and is refused rather than quietly truncated.
+    it "refuses a roster naming more seats than the quarters has" do
+      expect { engine(crew: { crew_1: {}, crew_2: {}, crew_3: { minion: :jim } }) }
+        .to raise_error(ReactorSim::Error, /crew_3/)
     end
   end
 
   describe "snapshot and restore" do
     let(:posting) do
-      { fireman: { minion: :elowynne, training: [ :boilermans_course ], utility: :ear_defenders },
-        yardhand: { minion: :galathas, gear: :fettlers_gloves } }
+      { crew_1: { minion: :elowynne, training: [ :boilermans_course ], utility: :ear_defenders },
+        crew_2: { minion: :galathas, gear: :fettlers_gloves } }
     end
 
     it "rebuilds the same crew, not a different one" do
@@ -154,10 +172,10 @@ RSpec.describe ReactorSim::Crew do
     it "brings every id back as a Symbol" do
       roster = round_trip(engine(crew: posting)).operation(:eng).options.fetch(:crew)
 
-      expect(roster.fetch(:fireman).fetch(:minion)).to be(:elowynne)
-      expect(roster.fetch(:fireman).fetch(:training).first).to be(:boilermans_course)
-      expect(roster.fetch(:fireman).fetch(:utility)).to be(:ear_defenders)
-      expect(roster.fetch(:yardhand).fetch(:gear)).to be(:fettlers_gloves)
+      expect(roster.fetch(:crew_1).fetch(:minion)).to be(:elowynne)
+      expect(roster.fetch(:crew_1).fetch(:training).first).to be(:boilermans_course)
+      expect(roster.fetch(:crew_1).fetch(:utility)).to be(:ear_defenders)
+      expect(roster.fetch(:crew_2).fetch(:gear)).to be(:fettlers_gloves)
     end
 
     it "keeps the digest identical across the round trip" do
@@ -169,20 +187,20 @@ RSpec.describe ReactorSim::Crew do
     end
 
     # A slot a player deliberately emptied must not quietly refill itself, which is the same
-    # rule `Assembly#loadout` follows for parts — and the reason every role is named in the
+    # rule `Assembly#loadout` follows for parts — and the reason every seat is named in the
     # stored roster rather than only the ones somebody chose.
     it "does not grow kit back into a slot that was left empty" do
-      restored = round_trip(engine(crew: { fireman: { minion: :jim, tool: :stokers_shovel } }))
-      fireman = restored.operation(:eng).options.fetch(:crew).fetch(:fireman)
+      restored = round_trip(engine(crew: { crew_1: { minion: :jim, tool: :stokers_shovel } }))
+      seat = restored.operation(:eng).options.fetch(:crew).fetch(:crew_1)
 
-      expect(fireman).not_to have_key(:gear)
-      expect(fireman).not_to have_key(:utility)
+      expect(seat).not_to have_key(:gear)
+      expect(seat).not_to have_key(:utility)
     end
 
-    it "restores the standin for a role nobody filled" do
-      restored = round_trip(engine(crew: { fireman: { minion: :jim } }))
+    it "restores the standin for a seat nobody filled" do
+      restored = round_trip(engine(crew: { crew_1: { minion: :jim } }))
 
-      expect(restored.operation(:eng).minions.fetch(:yardhand).minion)
+      expect(restored.operation(:eng).minions.fetch(:crew_2).minion)
         .to be(described_class::STANDIN)
     end
   end

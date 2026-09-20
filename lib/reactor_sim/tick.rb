@@ -15,6 +15,8 @@ module ReactorSim
   #   4 TRANSFER  a advection  b conduction  c ambient  d drivetrain  e torque
   #   5 REACT     phase change and chemistry, local to each node
   #   6 STRESS    durability, overload, failure events
+  #     a endanger — what a failure does to the people near it
+  #     b tire     — what the work does to the people doing it
   #   7 OBSERVE   instruments sample and their filters advance
   #
   # Phase 4's internal order matters: mass moves before heat so a parcel's energy travels with
@@ -108,6 +110,7 @@ module ReactorSim
       ledger = record_injections(ledger, next_nodes)
       next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx)  # phase 6
       next_minions, hurt_events = endanger(wear_events, ctx)     # phase 6b
+      next_minions, spent_events = tire(next_minions, controls, ctx)     # phase 6c
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
 
       # Phase 8. Note that this hash IS the next state — a key not named here is silently
@@ -116,12 +119,9 @@ module ReactorSim
       { nodes: next_nodes.freeze,
         controls: controls.freeze,
         diagnostics: next_diagnostics.freeze,
-        # TODO: fatigue accrual belongs in phase 0, alongside the actuation entropy it would
-        # feed. Deferred because the rate at which a minion tires is a balance decision.
-        # Injury, unlike fatigue, is settled in 6b above.
         minions: next_minions.freeze,
         ledger: ledger.freeze,
-        events: (events + wear_events + hurt_events).freeze }.freeze
+        events: (events + wear_events + hurt_events + spent_events).freeze }.freeze
     end
 
     private
@@ -201,6 +201,21 @@ module ReactorSim
       additions = Hash.new { |h, k| h[k] = [] }
       delivered = Hash.new { |h, k| h[k] = Hash.new { |i, j| i[j] = [] } }
       walls = {}
+      # **What each conduit actually passed this tick, by mass AND by volume.** A conduit is
+      # resolved *through*, so it is never a flow's endpoint and its `Grant` is empty — it has
+      # no other way to learn its own throughput. A driven fitting needs it: hydraulic power is
+      # `ΔP × Q` with Q volumetric, and a pump against a shut valve has to cost its shaft
+      # nothing.
+      #
+      # Volume as well as mass because both are wanted and neither can be recovered from the
+      # other here: `carry_through` drops `:parcels` from the wall state, so a conduit cannot
+      # look up what it was carrying after the fact.
+      #
+      # Summed across flows, because several paths may cross one wall in a tick, and written to
+      # **every** conduit below including the untouched ones — a stale figure from last tick
+      # would keep charging a shaft for a flow that has stopped.
+      carried_kg = Hash.new(0.0)
+      carried_m3 = Hash.new(0.0)
 
       flows.each do |flow|
         next if flow.parcels.empty?
@@ -212,6 +227,8 @@ module ReactorSim
         # opposite order, and on a multi-conduit line that decides which wall sees the stream
         # while it is still hot.
         flow.conduits.each do |conduit_id|
+          carried_kg[conduit_id] += Parcel.total_kg(carried)
+          carried_m3[conduit_id] += Parcel.total_volume(carried, content)
           carried, walls[conduit_id] =
             carry_through(nodes.fetch(conduit_id), walls[conduit_id] || read.fetch(conduit_id), carried)
         end
@@ -222,11 +239,15 @@ module ReactorSim
 
       next_states = read.to_h do |id, state|
         state = walls.fetch(id, state)
+        node = nodes.fetch(id)
+        if node.transport?
+          state = state.merge(carried_kg: carried_kg[id], carried_m3: carried_m3[id])
+        end
         next [ id, state ] unless state.key?(:parcels)
 
         held = Parcel.subtract(state.fetch(:parcels), removals[id])
         held = Parcel.normalise(held + additions[id])
-        [ id, nodes.fetch(id).rebalance(state.merge(parcels: held), content) ]
+        [ id, node.rebalance(state.merge(parcels: held), content) ]
       end
 
       [ next_states, delivered ]
@@ -287,20 +308,99 @@ module ReactorSim
         net[link.a] -= delta
         net[link.b] += delta
       end
+      rotating_ids.each { |id| net[id] -= transfers.fetch(:"#{id}=ground", 0.0) }
 
       spun = states.to_h do |id, state|
-        node = nodes.fetch(id)
-        next [ id, state ] unless node.respond_to?(:omega)
+        next [ id, state ] if net[id].zero?
 
-        state = node.add_angular_momentum(state, net[id]) unless net[id].zero?
-        loss = node.friction_loss(state, ctx.dt)
-        [ id, loss.zero? ? state : node.add_angular_momentum(state, -loss) ]
+        [ id, nodes.fetch(id).add_angular_momentum(state, net[id]) ]
       end
 
-      dissipated = before - rotating_kinetic_joules(spun)
-      return [ spun, ledger ] if dissipated.abs <= Parcel::EPSILON
+      book_drive(spun, before - rotating_kinetic_joules(spun), transfers, ledger, ctx)
+    end
 
-      [ spun, Ledger.add(ledger, joules_to_friction: dissipated) ]
+    # What the drivetrain lost, split between work taken out and heat.
+    #
+    # **The total is measured and the split is estimated, never the other way round.** Kinetic
+    # energy is quadratic, so no intermediate state between two settled ticks means anything:
+    # applying the couplings first and measuring, then the drags, charges each for a state the
+    # machine was never in — it inflated a mill's output past its own engine's and drove
+    # `joules_to_friction` negative.
+    #
+    # So each term is estimated at the speed the network **settled** to, which is what backward
+    # Euler says the step was taken at: a drag did `momentum × ω`, a coupling dissipated
+    # `transferred × Δω`. Those are proportions; the measured total is then divided by them, so
+    # the books close exactly whatever the estimates are worth.
+    def book_drive(states, lost, transfers, ledger, ctx)
+      estimates = drag_estimates(states, transfers, ctx)
+      total = estimates.values.sum + slip_estimate(states, transfers)
+      scale = total.positive? ? lost / total : 0.0
+
+      # Work leaves through `joules_extracted`, which `record_injections` already sums — a load
+      # reports its own extraction exactly as an injector reports its own.
+      booked = states.to_h do |id, state|
+        next [ id, state ] unless rotating_ids.include?(id)
+
+        [ id, state.merge(joules_extracted: estimates.fetch([ id, :work ], 0.0) * scale) ]
+      end
+
+      # **A drag that names a node heats that node**, so its energy never leaves the system and
+      # never reaches the ledger. That is what makes a bearing able to run hot.
+      kept = 0.0
+      estimates.each do |(_, into), estimate|
+        next if %i[work friction].include?(into)
+
+        joules = estimate * scale
+        kept += joules
+        booked[into] = nodes.fetch(into).add_joules(booked.fetch(into), joules, ctx.content)
+      end
+
+      taken = booked.sum { |id, s| rotating_ids.include?(id) ? s.fetch(:joules_extracted, 0.0) : 0.0 }
+      friction = lost - taken - kept
+      return [ booked, ledger ] if friction.abs <= Parcel::EPSILON
+
+      [ booked, Ledger.add(ledger, joules_to_friction: friction) ]
+    end
+
+    # `momentum × ω` per `[shaft, destination]`. Every drag on one shaft shares its settled
+    # speed, so the momentum each removed is exactly proportional to its conductance — and the
+    # destination is whatever declared it: `:work` out of the machine, `:friction` off the
+    # books, a node id into that node's metal.
+    def drag_estimates(states, transfers, ctx)
+      drag_shares(states, ctx).each_with_object(Hash.new(0.0)) do |(shaft, shares), acc|
+        removed = transfers.fetch(:"#{shaft}=ground", 0.0)
+        total = shares.values.sum
+        next if removed.zero? || !total.positive?
+
+        carried = removed * nodes.fetch(shaft).omega(states.fetch(shaft))
+        shares.each { |into, conductance| acc[[ shaft, into ]] += carried * (conductance / total) }
+      end
+    end
+
+    # Everything dragging on each shaft, gathered from whoever declared it. A shaft's own windage
+    # and the bearings carrying it all land on the same row.
+    def drag_shares(states, ctx)
+      nodes.each_with_object({}) do |(id, node), acc|
+        next unless node.respond_to?(:drag_conductances)
+
+        declared = node.drag_conductances(states.fetch(id), ctx)
+        next if declared.empty?
+
+        into = acc[node.drag_shaft] ||= Hash.new(0.0)
+        declared.each { |destination, conductance| into[destination] += conductance }
+      end
+    end
+
+    # `transferred × Δω` across every coupling — the classic slip loss, and never negative.
+    def slip_estimate(states, transfers)
+      drive_links.sum do |link|
+        delta = transfers.fetch(link.id, 0.0)
+        next 0.0 if delta.zero?
+
+        gap = nodes.fetch(link.a).omega(states.fetch(link.a)) -
+              nodes.fetch(link.b).omega(states.fetch(link.b))
+        (delta * gap).abs
+      end
     end
 
     # Phase 4e. A prime mover — a cylinder, a turbine — declares the torque it is exerting
@@ -310,6 +410,15 @@ module ReactorSim
     # the first-order `torque × ω × dt` alone would quietly manufacture the second term.
     # Invisible at small timesteps and very visible at `time_scale` 100 — so the gain is
     # measured rather than predicted, and the driver's charge loses precisely that.
+    #
+    # **Applied after the drivetrain settles rather than inside it**, which is an operator split
+    # and leaves a residue: the shaft sheds 11% of its speed in 4d and regains it here, every
+    # tick, and `indicated_power_w` therefore reads `ΔL²/2I` — about 5% — high. It is benign
+    # because a prime mover is a near-constant *source* where a brake is stiff feedback, and
+    # splitting a source is first order with a small constant. **The lever, if it ever matters,
+    # is written up in `docs/design_sketches/bearings.md` §6.4**: `Relaxation.settle` already
+    # takes current sources on its right-hand side, so the impulse could be solved with the
+    # network and this method reduced to its billing.
     def transmit_torque(states, ctx)
       drivers = nodes.select { |_, n| n.respond_to?(:drives) && n.respond_to?(:extractable_joules) }
       return states if drivers.empty?
@@ -346,11 +455,16 @@ module ReactorSim
         # above is what its charge could actually pay for. The two are anti-correlated where they
         # disagree — 566 kW at 167 rpm against 479 kW at 187 rpm — so the diagram reading falls
         # as the engine speeds up. This figure is the honest one.
-        acc.merge(
-          driver.drives => spun.freeze,
-          id => driver.add_joules(acc.fetch(id), -work, ctx.content)
-                      .merge(work_joules: work, shaft_power_w: work / ctx.dt).freeze
-        )
+        # **A prime mover may carry its own rotor**, and then `id == driver.drives` — a donkey
+        # engine is one lump of machinery, not an engine belted to a separate flywheel. Merging
+        # two entries under one key would silently drop the spin, so the charge is folded into
+        # the spun state instead of written beside it.
+        charged = driver.add_joules(id == driver.drives ? spun : acc.fetch(id), -work,
+                                    ctx.content)
+                        .merge(work_joules: work, shaft_power_w: work / ctx.dt).freeze
+        next acc.merge(id => charged) if id == driver.drives
+
+        acc.merge(driver.drives => spun.freeze, id => charged)
       end
     end
 
@@ -397,11 +511,15 @@ module ReactorSim
       burnt  = states.values.sum { |s| s.fetch(:joules_from_reactions, 0.0) }
       vented = states.values.sum { |s| s.fetch(:mass_vented, 0.0) }
       spilled = states.values.sum { |s| s.fetch(:mass_spilled, 0.0) }
+      consumed = states.values.sum { |s| s.fetch(:mass_consumed, 0.0) }
+      delivered = states.values.sum { |s| s.fetch(:mass_delivered, 0.0) }
       dumped = states.values.sum { |s| s.fetch(:joules_discarded, 0.0) }
-      return ledger if [ joules, mass, work, vented, spilled, dumped, burnt ].all?(&:zero?)
+      totals = [ joules, mass, work, vented, spilled, consumed, delivered, dumped, burnt ]
+      return ledger if totals.all?(&:zero?)
 
       Ledger.add(ledger, joules_added: joules, mass_added: mass, joules_to_work: work,
-                         mass_vented: vented, mass_spilled: spilled,
+                         mass_vented: vented, mass_spilled: spilled, mass_consumed: consumed,
+                         mass_delivered: delivered,
                          joules_advected_out: dumped, joules_from_reactions: burnt)
     end
 
@@ -633,6 +751,45 @@ module ReactorSim
       end
 
       [ next_states, events ]
+    end
+
+    # Phase 6c. What the work does to the people doing it.
+    #
+    # **Runs after `endanger`, not at phase 0.** Three reasons, and the third is the one that
+    # bites: the effort actually demanded this tick is settled at phase 1, so accruing at phase 0
+    # charges people for last tick's levers; `endanger` already writes `minions`, and a second
+    # writer would need a merge rule between them; and a minion carried out in 6b has
+    # `station: nil` on this tick and must stop working on this tick, not the next one.
+    #
+    # Reads the post-injury state deliberately — a hurt fireman is a worse fireman, so the same
+    # lever costs them more from the moment they are hurt.
+    #
+    # **No entropy**, exactly as the Danger Check draws none, so a tired minion replays exactly.
+    def tire(minions_state, controls, ctx)
+      events = []
+
+      next_states = minions_state.to_h do |id, minion_state|
+        minion = minions[id]
+        next [ id, minion_state ] if minion.nil?
+
+        control = control_points[minion_state[:station]]
+        demand = control ? control.demand(controls.fetch(control.id)) : 0.0
+
+        tired = Fatigue.advance(minion, minion_state, control: control, demand: demand, dt: ctx.dt)
+        tired, spent = Fatigue.check_spent(tired)
+        events << spent_event(minion, control, ctx) if spent
+        [ id, tired.freeze ]
+      end
+
+      [ next_states, events ]
+    end
+
+    # The person and the post, the same split `hurt_event` makes: the post outlives whoever was
+    # standing at it, and a consumer given only the job could not say who needs a rest.
+    def spent_event(minion, control, ctx)
+      Event.build(type: :minion_spent, node: minion.id, label: minion.name,
+                  severity: :warning, tick: ctx.tick,
+                  detail: { minion: minion.minion, station: control&.id })
     end
 
     # Severity ADDS where two failures endanger one station on the same tick, because two things

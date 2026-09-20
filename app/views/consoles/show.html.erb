@@ -4,14 +4,26 @@
      data-controller="console"
      data-console-match-id-value="<%= @match_id %>"
      data-console-operation-id-value="<%= @operation_id %>"
-     data-console-commands-url-value="<%= match_commands_path(match_id: @match_id) %>"
+     data-console-commands-url-value="<%= operation_commands_path(match_id: @match_id, operation_id: @operation_id) %>"
      data-console-reset-url-value="<%= match_reset_path(match_id: @match_id) %>">
 
   <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
     <h1 class="text-sm uppercase tracking-widest text-slate-300">
       <%= @operation_id.to_s.titleize %>
-      <span class="text-slate-500">/ <%= DevMatch.chassis.to_s.tr("_", " ") %></span>
+      <span class="text-slate-500">
+        / <%= DevMatch.chassis(operation_id: @operation_id).to_s.tr("_", " ") %>
+      </span>
     </h1>
+
+    <%# **The hatch says when it is open.** A development affordance that looks identical to the
+        real thing is how somebody debugs the wrong rule for an afternoon. %>
+    <% if @borrowed %>
+      <span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded
+                   bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40"
+            title="Operated through the development bypass — you do not own this machine.">
+        borrowed
+      </span>
+    <% end %>
 
     <span class="text-xs text-slate-500 tabular-nums">
       tick <span data-console-target="tick">—</span>
@@ -26,6 +38,17 @@
 
     <% if DevMatch.time_scale != 1.0 %>
       <span class="text-xs text-amber-300">time ×<%= DevMatch.time_scale %></span>
+    <% end %>
+
+    <%# Every machine in this match you may look at. One link while there is one operation, which
+        is why it costs nothing to render unconditionally. %>
+    <% @siblings.each do |sibling| %>
+      <%= link_to sibling.operation_id.titleize,
+                  console_path(match_id: sibling.match_id, operation_id: sibling.operation_id),
+                  class: "text-xs px-2 py-1 rounded ring-1 #{
+                    sibling.operation_id == @operation_id.to_s ?
+                      'bg-slate-700 ring-slate-500' : 'bg-slate-800 ring-slate-700 hover:bg-slate-700'
+                  }" %>
     <% end %>
 
     <%= link_to "Outfitting",

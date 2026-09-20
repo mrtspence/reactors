@@ -8,7 +8,14 @@ module ReactorSim
     #
     # **Torque, not power**, from the pressure difference across the piston:
     #
-    #     torque = ΔP × piston_area × crank_radius × efficiency
+    #     torque = ΔP × piston_area × crank_radius
+    #
+    # **Indicated, with nothing taken off for friction.** There was a `0.85` here and it did not
+    # do what it looked like: `Tick#transmit_torque` bills a driver for the kinetic energy the
+    # shaft *measurably gained*, so derating the torque never removed the other 15% from the
+    # charge — it was energy nobody claimed rather than energy that went anywhere. Rubbing is
+    # modelled where it happens now, by a `Nodes::Bearing` with `duty: :slide` carrying the
+    # rings, crosshead and gland, so the loss is real, lands as heat, and wears the part out.
     #
     # independent of speed. Deriving torque from a power figure means dividing by ω, which is
     # infinite at rest, so the machine could not be started from standstill. This way a stalled
@@ -49,7 +56,7 @@ module ReactorSim
       MIN_ENTRAINMENT = 0.02
 
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
-                  :bore_m, :stroke_m, :crank_radius_m, :efficiency, :drives,
+                  :bore_m, :stroke_m, :crank_radius_m, :drives,
                   :cutoff_control_id, :clearance_fraction, :max_pressure_pa, :stress_rate,
                   :drain_control_id, :drain_authority,
                   :material, :wall_thickness_m, :safety_factor,
@@ -57,7 +64,7 @@ module ReactorSim
                   :compression_fraction
 
       def initialize(id:, label: nil, bore_m:, stroke_m:, drives:, exhausts_to:, supplied_by:,
-                     crank_radius_m: nil, efficiency: 0.85, clearance_fraction: 0.08,
+                     crank_radius_m: nil, clearance_fraction: 0.08,
                      heat_capacity: 6.0e4, ambient_conductance: 25.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, cutoff_control_id: nil,
                      drain_control_id: nil, drain_authority: 0.25,
@@ -71,7 +78,6 @@ module ReactorSim
         @stroke_m = stroke_m.to_f
         # Half the stroke, unless the crank is geared otherwise.
         @crank_radius_m = (crank_radius_m || (@stroke_m / 2.0)).to_f
-        @efficiency = efficiency.to_f
         @clearance_fraction = clearance_fraction.to_f
         # Swept volume plus the clearance the piston never sweeps.
         @swept_m3 = Math::PI * ((@bore_m / 2.0)**2) * @stroke_m
@@ -385,7 +391,7 @@ module ReactorSim
         # with more, `overload?` has already destroyed the cylinder on the same tick.
         if locked?(state, ctx.content)
           resisting = compression_pressure_pa(state, ctx.content) *
-                      piston_area_m2 * @crank_radius_m * @efficiency
+                      piston_area_m2 * @crank_radius_m
           return state.merge(torque: -resisting, indicated_power_w: 0.0)
         end
 
@@ -393,7 +399,7 @@ module ReactorSim
         exhaust_pressure = ctx.node_pressure(@exhausts_to) || Units::STANDARD_PRESSURE_PA
         admission = admission_pressure_pa(supply_pressure, exhaust_pressure, ctx)
         mep = mean_effective_pressure(admission, exhaust_pressure, cutoff_fraction(ctx))
-        torque = mep * piston_area_m2 * @crank_radius_m * @efficiency * works
+        torque = mep * piston_area_m2 * @crank_radius_m * works
 
         state.merge(torque: torque, indicated_power_w: torque * omega)
       end

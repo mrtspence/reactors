@@ -46,7 +46,7 @@ module ReactorSim
         flows: settle_mass(nodes:, states:, paths:, intents:, content:, dt:, ctx:),
         heat: settle_heat(nodes:, states:, thermal_links:, content:, dt:),
         ambient: settle_ambient(nodes:, states:, content:, dt:),
-        drive: settle_drive(nodes:, states:, drive_links:, dt:)
+        drive: settle_drive(nodes:, states:, drive_links:, dt:, ctx:)
       ).freeze
     end
 
@@ -578,7 +578,26 @@ module ReactorSim
         capacities[id] = node.total_heat_capacity(states.fetch(id), content)
       end
 
-      Relaxation.settle(thermal_links, capacities, temperatures, dt)
+      Relaxation.settle(heat_couplings(thermal_links, temperatures), capacities, temperatures, dt)
+    end
+
+    # **A radiant link's conductance is recomputed every tick**, because it depends on both end
+    # temperatures. `Coupling` is the same vehicle the gas solve uses for exactly this, so
+    # `Relaxation` needs to know nothing about radiation — it is handed a conductance either way.
+    #
+    # A link with no radiant surface is passed through untouched, which is what keeps the digest
+    # bit-identical for everything that has not opted in.
+    def heat_couplings(thermal_links, temperatures)
+      return thermal_links if thermal_links.none?(&:radiative?)
+
+      thermal_links.map do |link|
+        next link unless link.radiative?
+
+        radiant = link.radiative_conductance(temperatures.fetch(link.a),
+                                             temperatures.fetch(link.b))
+        Coupling.new(id: link.id, a: link.a, b: link.b,
+                     conductance: link.conductance + radiant)
+      end
     end
 
     # --- rotation -----------------------------------------------------------
@@ -590,26 +609,48 @@ module ReactorSim
     # Momentum is conserved to the bit. Kinetic energy is NOT, and should not be: what a
     # slipping coupling loses becomes friction heat, and the Operation puts that difference
     # on the ledger rather than letting it vanish.
-    def settle_drive(nodes:, states:, drive_links:, dt:)
-      return {} if drive_links.empty?
-
+    # Drag rides in the same solve, keyed `node=ground`, because a brake and a coupling pulling
+    # on one shaft at once is a network rather than two steps — see `Relaxation.settle`.
+    def settle_drive(nodes:, states:, drive_links:, dt:, ctx: nil)
       # A coupling to a part that has let go transmits nothing. Without this a burst flywheel
       # stayed on the drivetrain and kept accelerating — measured at 2365 rpm and 3.97 MW, on
       # a wheel whose own burst limit is 322 rpm.
       live = drive_links.reject do |link|
         states.fetch(link.a)[:failure] || states.fetch(link.b)[:failure]
       end
-      return {} if live.empty?
+      drags = drive_drags(nodes, states, ctx)
+      return {} if live.empty? && drags.empty?
 
       velocities = {}
       inertias = {}
-      live.flat_map { |l| [ l.a, l.b ] }.uniq.each do |id|
+      (live.flat_map { |l| [ l.a, l.b ] } + drags.keys).uniq.each do |id|
         node = nodes.fetch(id)
         velocities[id] = node.omega(states.fetch(id))
         inertias[id] = node.moment_of_inertia
       end
 
-      Relaxation.settle(live, inertias, velocities, dt)
+      Relaxation.settle(live, inertias, velocities, dt, nil, nil, drags)
+    end
+
+    # Total conductance toward rest per **shaft**, which is not always the node that declared it:
+    # a bearing drags on what it carries. **A shaft that has let go is not dragged** — it has left
+    # the drivetrain, and `Tick#stress` has already taken its momentum.
+    #
+    # **Whether a broken declarer still drags is the declarer's to answer**, not this method's. A
+    # burst flywheel stops dragging on itself; a seized bearing drags harder than it ever did, and
+    # that is the only mechanism by which a seizure stops anything.
+    def drive_drags(nodes, states, ctx)
+      return {} if ctx.nil?
+
+      nodes.each_with_object(Hash.new(0.0)) do |(id, node), acc|
+        next unless node.respond_to?(:drag_conductances)
+
+        shaft = node.drag_shaft
+        next if states.fetch(shaft, {})[:failure]
+
+        total = node.drag_conductances(states.fetch(id), ctx).values.sum
+        acc[shaft] += total if total.positive?
+      end.select { |_, total| total.positive? }
     end
 
     # --- ambient ------------------------------------------------------------
@@ -620,17 +661,26 @@ module ReactorSim
     # This is what stops a long chain being a perfect heat accumulator, and it is also what
     # makes exact energy conservation cheap: the environment is an explicit sink with a
     # ledger, not a silent hole (docs/simulation_architecture.md §8).
+    # **Two mechanisms, summed as one conductance.** Conduction and convection to the air are
+    # linear; radiation goes as T⁴ and is linearised exactly by factoring (`Thermal`), so both
+    # are W/K and the closed form takes their sum. A part is entitled to differ in each — a
+    # lagged drum does neither, a bare hot pipe does both.
+    #
+    # **The guard is on the total, not on conduction.** Skipping a node whose
+    # `ambient_conductance` is zero would skip everything that radiates and barely conducts,
+    # which is most hot things in a machine.
     def settle_ambient(nodes:, states:, content:, dt:)
       nodes.each_value.filter_map do |node|
         next unless node.respond_to?(:ambient_conductance)
-        next if node.ambient_conductance <= 0.0
 
         state = states.fetch(node.id)
-        q = Relaxation.to_reservoir(
-          node.total_heat_capacity(state, content),
-          node.temperature_k(state, content),
-          node.ambient_k, node.ambient_conductance, dt
-        )
+        temperature = node.temperature_k(state, content)
+        conductance = node.ambient_conductance +
+                      node.radiative_conductance(temperature, node.ambient_k)
+        next if conductance <= 0.0
+
+        q = Relaxation.to_reservoir(node.total_heat_capacity(state, content),
+                                    temperature, node.ambient_k, conductance, dt)
         next if q.abs <= Parcel::EPSILON
 
         [ node.id, q ] # positive = node sheds to the environment

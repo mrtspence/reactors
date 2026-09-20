@@ -44,7 +44,17 @@ written before the simulation rewrite and is unaffected by it.
    into a service object beside it.
 
 **A controller may express routing, authorisation, parameter permitting, and which template or
-redirect follows. Nothing else.** No domain rules, no multi-step orchestration, no assembling a
+redirect follows. Nothing else.**
+
+> **Authorisation is a `before_action`, and the rule lives on the model.** `current_player`,
+> `current_operation`, `require_viewer!` and `require_operator!` are on `ApplicationController`;
+> `Operation#operable_by?` / `#viewable_by?` decide. **404 for a machine you cannot see, 403 for
+> one you can see but may not touch** — not leaking existence is the right default, and a
+> spectator reaching for a lever should be told *"not yours"* rather than *"no such thing"*.
+>
+> Four controllers used to answer this by comparing a path segment against `DevMatch::ID`. Four
+> copies of a rule with no owner, and the reason a second operation could not exist. See
+> [`design_sketches/operator_identity.md`](../docs/design_sketches/operator_identity.md). No domain rules, no multi-step orchestration, no assembling a
 view's data out of three collaborators. If an action needs more than a few lines, the lines are
 in the wrong file.
 
@@ -102,7 +112,7 @@ Verified: a cold engine and one 500 ticks into a hot run produce identical panel
 different seeds.
 
 **The one thing that must not differ between the processes is `chassis:`**, which changes both
-which diagnostics exist (`condenser_vacuum` is atmospheric-only: 13 instruments vs 12) and the
+which diagnostics exist (`condenser_vacuum` is atmospheric-only: 20 instruments vs 19) and the
 pressure gauge's full-scale reading. That is why both processes read it through
 `DevMatch.chassis` and never from `ENV` directly.
 
@@ -110,8 +120,13 @@ pressure gauge's full-scale reading. That is why both processes read it through
 > configuration on the outfitting screen, which is exactly the moment the old TODO warned about.
 > It stays sound with one word changed: **the panel is a pure function of the LOADOUT**, so two
 > processes reading the same stored loadout cannot disagree. `DevMatch.panel` is therefore
-> memoised **per loadout**, not per process. Verified — removing the safety valve takes the panel
-> from 18 instruments to 16.
+> memoised **per (operation, loadout)**, not per process. Verified — removing the safety valve
+> takes the panel from 21 instruments to 19, and two operations of the same kind and loadout
+> return identical chrome apart from their own id.
+>
+> **The key has to name what was actually built.** A first cut keyed on `[operation, loadout]`
+> and then called `build` with no arguments, so asking for a different loadout got a fresh cache
+> entry holding the *stored* machine's panel — a cache answering the question it was not asked.
 >
 > What remains is a race rather than a design flaw: save a loadout and the console renders the
 > new panel over the old machine for a tick or two until the reset lands. The real fix is still
@@ -268,11 +283,15 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   globally and `known` includes it, so deriving from `known` made `spec/support/loop_rig.rb` an
   unlockable machine nobody had priced — which took the whole catalogue down, and **only in a
   full-suite run**, because nothing else loads that file.
-> **`Blueprint.minions` enumerates people, never roles.** `fireman` and `yardhand` are *jobs an
-> operation asks for*, and the same person can do either; what a player unlocks is an individual.
-> Because ids like these have been renamed, `Crewing#candidates` skips ids the catalogue does not
-> know — a stale `unlocks` row otherwise crashes the crew screen — and `rake blueprints:audit`
-> finds them. See [`design_sketches/minions.md`](../docs/design_sketches/minions.md).
+> **`Blueprint.minions` enumerates people, never seats.** What a player unlocks is an individual;
+> `crew_1` is a place on the payroll, sized by the fitted crew quarters. Because minion ids have
+> been renamed before, `Crewing#candidates` skips ids the catalogue does not know — a stale
+> `unlocks` row otherwise crashes the crew screen — and `rake blueprints:audit` finds them.
+>
+> **The crew screen asks the registry by TYPE**, never `Operations::SteamEngine` by name:
+> `Operations.assembly_for(type, chassis:, loadout:)` answers what a build would be, and
+> `Assembly#crew_capacity` how many seats it has. A second machine is then a registration rather
+> than a branch here. See [`design_sketches/crew_capacity.md`](../docs/design_sketches/crew_capacity.md).
 
 > **`rake blueprints:audit` after renaming anything.** Validation refuses to *create* a row naming
 > a blueprint that does not exist, but nothing revalidates rows already in the table. A stranded
@@ -300,6 +319,10 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   Solid Queue → ~1 s polling, handing your realtime path a job queue's latency.
 - **`config/cable.yml` must not use the `async` adapter in development.** It is in-process
   only, so a runner broadcasting from its own process reaches nobody, silently.
+- **A reset swaps in a new `Match`, so re-read it from `@matches` before stepping.** Runner-addressed
+  and simulation commands ride one log precisely so "reset, then open the throttle" means what it
+  says; holding the object from before the barrier applies the throttle to the match that was just
+  discarded, then steps and publishes it.
 - **Commands are absolute intents, never deltas.** `set_control` with a `value`, never
   `adjust_control` with a `delta`. Absolute values make Kafka's at-least-once delivery harmless
   with no dedup table — this is the highest-leverage decision in the ingress design, and it is
@@ -348,6 +371,15 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   game feel instant.
 - **Gauge chrome is rendered once** by a ViewComponent carrying `data-` attributes; only values
   stream. `op.panel` supplies it.
+- **Every projection carries its `run_id`, and the client watches exactly one.** Nothing stops a
+  second `bin/match_runner` broadcasting onto the same stream — `Procfile.dev` already starts one,
+  so `bin/dev` plus a manual runner is two. Only one can hold the `match.commands` partition, so
+  the other stays cold at ambient with every lever at its default, says nothing while
+  `unchanged_from?` skips it, and then lands a periodic **full** view that replaces the panel
+  wholesale. A run changes legitimately on a reset, which sets `supersedes`, and on a runner
+  restart, which cannot — so the client adopts an unfamiliar run only when it supersedes the one
+  being watched or when that one has gone quiet for `FOREIGN_RUN_GRACE_MS`. Otherwise it drops
+  the views and shows **two runners**.
 
 ## Kafka, as actually wired
 

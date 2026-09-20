@@ -10,13 +10,14 @@ module CrewParams
 
   private
 
-  # `{ role_id => { minion:, training: [], tool:, gear:, utility: } }`, and every id is a scalar
+  # `{ seat_id => { minion:, training: [], tool:, gear:, utility: } }`, and every id is a scalar
   # except `training`, which is genuinely a list.
   def submitted_crew
     submitted = params[:crew]
     return {} unless submitted.is_a?(ActionController::Parameters)
 
-    Crewing.role_ids.to_h { |role| [ role.to_sym, posting_for(submitted[role]) ] }
+    Crewing.seat_ids(operation_id: current_operation.operation_id)
+           .to_h { |seat| [ seat.to_sym, posting_for(submitted[seat]) ] }
   end
 
   def posting_for(given)

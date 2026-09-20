@@ -14,9 +14,15 @@ module ReactorSim
     # property is irreversibility must not be built on one that is reversible**, however similar
     # the opening rule looks. The melt is latched in state instead: one boolean, snapshot-safe.
     #
-    # **Generic, despite the name.** Anything that senses a quantity elsewhere and fails
-    # permanently open fits: a rupture disc, a shear pin, a thermal cut-out. `senses_key:` and
-    # `melts_above:` carry no units — the sensed node decides what the number means.
+    # **It actually melts**, through `Concerns::Fusible` — a real mass of soft alloy with a real
+    # latent heat, which runs out and cannot come back. It used to be a boolean latched against a
+    # configured threshold, and the conversion deleted the threshold (the alloy's own melting
+    # point replaces it), the boolean (an inventory replaces it) and a whole failure mode where
+    # the two could disagree with the material they were supposed to describe.
+    #
+    # **`senses:` is physics, not a workaround.** A plug is screwed *through* the crown sheet, so
+    # the plate's temperature is the one that melts it and its own bulk temperature is beside the
+    # point. That is why it overrides `fusible_temperature_k` rather than using its own.
     #
     # **It senses a recorded state KEY, not a method, unlike `ReliefValve`.** `node_reading` calls
     # `node.public_send(quantity, state, content)`, which works for anything a node derives from
@@ -25,49 +31,64 @@ module ReactorSim
     # boiler records the value in its own state and this reads the key. One node owns the
     # derivation, everyone else reads the number, at the usual cost of one tick of lag.
     class FusiblePlug < Conduit
-      attr_reader :senses, :senses_key, :melts_above
+      include Concerns::Fusible
+
+      attr_reader :senses, :senses_key, :plug_kg
 
       # Always a check valve. Steam goes out through a blown plug; the firebox must never push
       # flue gas back into the drum through one.
-      def initialize(id:, senses:, senses_key:, melts_above:, **options)
+      #
+      # `material:` carries the melting point now, so there is no `melts_above:` to disagree with
+      # it — a plug made of `fusible_alloy` melts at what `fusible_alloy` melts at.
+      def initialize(id:, senses:, senses_key:, plug_kg: 0.05, **options)
         super(id: id, one_way: true, **options)
         @senses = senses.to_sym
         @senses_key = senses_key.to_sym
-        @melts_above = melts_above.to_f
+        @plug_kg = plug_kg.to_f
         freeze
       end
+
+      def fusible_kg = @plug_kg
 
       def initial_state(rng, content)
         super.merge(melted: false).freeze
       end
 
-      # Shut until it has melted, then open for good. Reads its **own** previous-tick state,
-      # because `open_fraction` is handed only the context. `super` keeps whatever lever the
-      # conduit carries, so a plug can be isolated by a valve in the same line — but no lever can
-      # un-melt it.
-      def open_fraction(ctx)
-        return 0.0 unless ctx.node_state(id)&.fetch(:melted, false)
+      # The plate's temperature, not its own. See the class comment.
+      def fusible_temperature_k(_state, ctx) = sensed_value(ctx).to_f
 
-        super
+      # **Opens as it melts, rather than all at once.** A plug does not vanish on a threshold; it
+      # runs, and a partly-run plug passes part of what a gone one does. `super` keeps whatever
+      # lever the conduit carries, so a plug can still be isolated by a valve in the same line —
+      # but no lever can un-melt it, because the metal is gone.
+      def open_fraction(ctx)
+        melted = melted_fraction(ctx.node_state(id) || {})
+        melted.positive? ? super * melted : 0.0
       end
 
-      # The latch. Reads the previous tick, so it is order-independent.
+      # Melts whatever the plate's heat pays for. **The event fires on the first drop**, not on
+      # the last: a plug that has started to go has already failed at its job of staying put, and
+      # a driver needs telling then rather than when it finishes.
       def apply(state, ctx, _grant)
-        return state if state.fetch(:melted, false)
+        before = state.fetch(:fusible_remaining_kg, fusible_kg)
+        melted = run_melt(state, ctx)
+        # `melted:` is kept in state because the panel's `plug_blown` lamp is a `Sources::Flag`,
+        # which reads a state key and cannot call a method. Derived here rather than stored as
+        # the truth — the metal left is the truth.
+        melted = melted.merge(melted: melted_fraction(melted).positive?)
+        return melted unless before >= fusible_kg && melted.fetch(:fusible_remaining_kg) < before
 
-        sensed = sensed_value(ctx)
-        return state if sensed.nil? || sensed <= @melts_above
-
-        [ state.merge(melted: true),
+        [ melted,
           [ Event.build(type: :fusible_plug_melted, node: id, label: label, severity: :warning,
                         tick: ctx.tick,
                         detail: { senses: @senses, key: @senses_key,
-                                  reading: sensed.round(2), melts_above: @melts_above }) ] ]
+                                  reading: sensed_value(ctx).to_f.round(2),
+                                  melts_at: melting_point_k(ctx.content).round(2) }) ] ]
       end
 
       def sensed_value(ctx) = ctx.node_state(@senses)&.fetch(@senses_key, nil)
 
-      def melted?(state) = state.fetch(:melted, false)
+      def melted?(state) = melted_fraction(state).positive?
     end
   end
 end

@@ -269,9 +269,10 @@ and the part passes it figures.
 
 > **An instrument upgrade may reduce a filter. It may never remove a class of one.** Less lag,
 > less noise, a finer band — never zero lag, and never a number where the design chose prose.
-> Three gauges on the steam engine are exempt outright: `safety_valve`, which is *true* by design
-> because the player is not reading a dial at all, and `crown_sheet` and `flywheel_condition`,
-> whose vagueness **is** the hazard they name.
+> Four gauges on the steam engine are exempt outright: `safety_valve`, which is *true* by design
+> because the player is not reading a dial at all, and `crown_sheet`, `flywheel_condition` and
+> `bearing_condition`, whose vagueness **is** the hazard they name. The last is what a bearing was
+> actually judged by — crews felt the boxes and smelled them — so it is a report, not a reading.
 >
 > The reason is the whole premise of this file: the instruments are not an obstacle between the
 > player and the game, they *are* the game. A panel that can be bought into telling the truth has

@@ -6,10 +6,10 @@ require "reactor_sim"
 # and an unbalanced reaction quietly creates matter every time it fires. Validation is
 # eager and loud for exactly that reason — a bad content file should never reach a tick.
 RSpec.describe ReactorSim::Content do
-  # A complete archetype, so a spec about one thing does not have to spell out five stats it
+  # A complete archetype, so a spec about one thing does not have to spell out six stats it
   # does not care about. Every one of them is required, deliberately — see `STATS`.
   def human
-    { label: "Human", strength: 1.0, toughness: 1.0, intelligence: 1.0,
+    { label: "Human", strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
       dexterity: 1.0, charisma: 1.0 }
   end
 
@@ -66,7 +66,7 @@ RSpec.describe ReactorSim::Content do
       expect { registry.resource(:nope) }.to raise_error(ReactorSim::Error, /unknown resource/)
     end
 
-    it "rejects an archetype missing any of the five stats" do
+    it "rejects an archetype missing any of the six stats" do
       expect {
         described_class.build(archetypes: { idler: { label: "Idler", strength: 1.0 } })
       }.to raise_error(ReactorSim::Error, /idler: missing toughness/)

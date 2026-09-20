@@ -10,6 +10,7 @@ module ReactorSim
   module Operations
     @builders = {}
     @chassis = {}
+    @assemblers = {}
     @harnesses = Set.new
 
     class << self
@@ -31,11 +32,29 @@ module ReactorSim
       #
       # The default is `false` on purpose: forgetting to mark a real machine does nothing, and
       # forgetting to mark a rig fails loudly and points straight at it.
-      def register(type, chassis: [], harness: false, &builder)
+      # `assembler:` is the same idea as `chassis:` one step further: a callable taking
+      # `(chassis, loadout)` and returning the `Assembly`, so the delivery tier can ask **what
+      # would this build be** — its slots, its crew capacity, where a shift starts — without
+      # naming a concrete operation module. Without it, an outfitting or crew screen has to say
+      # `Operations::SteamEngine` out loud, and a second machine needs a second branch in every
+      # such place.
+      def register(type, chassis: [], harness: false, assembler: nil, &builder)
         @builders[type.to_sym] = builder
         @chassis[type.to_sym] = Array(chassis).map(&:to_sym).freeze
+        @assemblers[type.to_sym] = assembler
         @harnesses << type.to_sym if harness
       end
+
+      # Raises rather than returning nil for a type that declared none: an operation nobody can
+      # ask about is a screen that cannot be rendered, and finding that out here names the type.
+      def assembly_for(type, chassis: nil, loadout: {})
+        assembler = @assemblers[type.to_sym] or
+          raise Error, "operation #{type.inspect} declares no assembler:"
+
+        assembler.call(chassis, loadout)
+      end
+
+      def assembler?(type) = !@assemblers[type.to_sym].nil?
 
       def fetch(type)
         @builders.fetch(type.to_sym) do
