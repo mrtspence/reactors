@@ -26,8 +26,8 @@ snapshot rather than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-At the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`, `metal`,
-`moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+At the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`, `lubricant`,
+`metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 **Adding a tag means updating this list and
 [`docs/guides/add-content.md`](../docs/guides/add-content.md) in the same commit.** A tag is a
@@ -95,23 +95,52 @@ never appear in here: the simulation has no concept of value and must not acquir
 `rake blueprints:audit` after a rename; it builds the catalogue and so catches a bill left
 pointing at nothing.
 
-## A minion archetype
+## An archetype, and an individual — two files, two nouns
+
+**A minion is a person; an archetype is what kind of person they are.** These were one table
+holding `fireman` and `yardhand` for a release, which are *jobs an operation asks for*, not kinds
+of person — and the same person can do either. Splitting them is what the whole minion release
+turns on. See [`docs/design_sketches/minions.md`](../docs/design_sketches/minions.md).
 
 ```yaml
-fireman:
-  label: Fireman
-  strength: 1.0        # required — actuation rate at full health
-  tags: [ practised ]
+# content/archetypes/races.yml — the first baseline layer
+elf:
+  label: Elf
+  strength: 0.75       # all six are REQUIRED_ARCHETYPE_KEYS
+  toughness: 0.7
+  endurance: 0.85
+  intelligence: 1.25
+  dexterity: 1.2
+  charisma: 1.1
+  tags:
+    darkvision: 0.3
+
+# content/minions/crew.yml — layer two: who they actually are, as OFFSETS
+galathas:
+  name: Galathas        # required. A name is what separates a person from a race.
+  archetype: elf        # required, and checked — an unknown race is refused at boot
+  stats:
+    strength: 0.35      # strong for an elf…
+    dexterity: -0.25    # …and heavy-handed with it
+  tags:
+    clumsy: 0.2
 ```
 
-`strength` is what a minion brings to a lever: a control point travels at
-`stiffness × strength × health × (1 − fatigue)`, so the archetype sets the ceiling and the
-minion's condition erodes it. **Health and fatigue are state, not archetype** — they change
-during a match; strength does not.
+Four layers in all: **archetype → individual → training → equipment**, each offsetting the last.
+The last two are the delivery tier's, because they are things a player *owns* and ownership is not
+something the simulation may know about. `Registry#sheet(id)` returns the first two folded.
 
-`REQUIRED_MINION_KEYS` is `label` and `strength`. Only the actuation path is modelled today;
-intelligence (which would drive the gauge-reading path through a diagnostic's `observer:`),
-skills, and tags like `undead` / `covetous` / `licensed` are designed but not built.
+- **The six stats are fixed; everything else is a tag.** Fixed because the engine reads them and
+  needs a number rather than an absence. `strength` drives actuation; `toughness` drives the
+  Danger Check; `endurance` divides fatigue accrual; `intelligence`, `dexterity` and `charisma`
+  are declared and read by nothing yet.
+- **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
+  things are two statements about one person.
+- **Minion tags are a MAP, not a list**, unlike resource tags — "how well can you see in the dark"
+  has a number for an answer. `true` means simply present.
+- **Values ADD across layers, then clamp. Consumers multiply.** Merge adds, use multiplies.
+- **Health, fatigue, station and injury are state, not content** — they change during a match and
+  live in `state[:minions]`. Getting that backwards would make a hurt minion recover on restore.
 
 ## Validation and testing
 

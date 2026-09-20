@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/reference_crew"
 
 # The low-water hazard, and the two parts that make it one.
 #
@@ -12,9 +13,17 @@ require "reactor_sim"
 #
 # So the hazard is positional and the plate gets a derived temperature of its own. These examples
 # guard the three things that were each got wrong on the way in.
-RSpec.describe "the crown sheet" do
+RSpec.describe "the crown sheet", crew: :reference do
+  # A fixture crew, not anybody real — see `ReferenceCrew`. Stoking is effort, so an engine with
+  # no roster is worked by day-labourers and never gets hot enough to uncover anything — and
+  # **the shift has to be deployed**, because crew start in the quarters rather than at a lever.
+  # Undeployed, this engine sits at 322 K and the plate is never in danger at all.
   def engine(loadout: {})
-    ReactorSim::Operations::SteamEngine.build(id: :engine, seed: 7, loadout: loadout)
+    ReferenceCrew.deploy!(
+      ReactorSim::Operations::SteamEngine.build(id: :engine, seed: 7,
+                                                loadout: ReferenceCrew.loadout(loadout),
+                                                **ReferenceCrew.options)
+    )
   end
 
   COLD_START = { igniter: 100, blower: 100, damper_open: 100, stoking: 70, feed: 45,
@@ -75,7 +84,7 @@ RSpec.describe "the crown sheet" do
       op = engine
       events = starve(op, feed: 0)
 
-      expect(events.map { |e| e[:type] }).not_to include(:vessel_rupture)
+      expect(events.map { |e| e.values_at(:type, :node) }).not_to include([ :part_failed, :boiler ])
       expect(op.nodes.fetch(:boiler).integrity(boiler_state(op))).to eq(1.0)
       # Steam onto the grate puts the fire out, so the engine stops. That is the cost.
       expect(op.state.fetch(:nodes).fetch(:cylinder).fetch(:shaft_power_w)).to be < 1_000.0
@@ -107,7 +116,7 @@ RSpec.describe "the crown sheet" do
       op = engine(loadout: { fusible_plug: nil })
       events = starve(op, feed: 0)
 
-      expect(events.map { |e| e[:type] }).to include(:vessel_rupture)
+      expect(events).to include(hash_including(type: :part_failed, node: :boiler, mode: :explosion))
       expect(boiler_state(op).fetch(:failure)).to be(:explosion)
       # **The whole point of the failure model: a failed drum is not a sealed drum.** Before
       # `Nodes::Breach` a burst boiler kept its contents and went on making steam.

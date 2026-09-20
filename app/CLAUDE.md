@@ -6,18 +6,19 @@ before assuming anything here exists.
 ```
 app/simulation/   DevMatch, StreamNames — the ONLY code both web and runner touch
 app/runner/       MatchRunner (4 Hz loop), CommandConsumer, ViewBroadcaster — bin/match_runner
-app/kafka/        CommandProducer — web side, produces to match.commands
-app/controllers/  Consoles(show), Commands(create), Loadouts(edit/update), LoadoutDrafts(create), MatchResets(create)
-app/channels/     OperationChannel — read-only, telemetry out
+app/kafka/        CommandProducer, EventProducer — web and runner side
+app/controllers/  Consoles, Commands, Loadouts, LoadoutDrafts, MatchResets, Crews, CrewDrafts
+app/channels/     OperationChannel — read-only, telemetry out, backfills a joining client
 app/components/   PanelComponent -> InstrumentComponent -> Instruments::{Needle,Digital,Prose,Lamp}
+app/services/     Outfitting, ProgressionDigest, InjuryList — resolved arguments, never params
 app/javascript/   controllers/console_controller.js, channels/consumer.js
 ```
 
-`app/models/loadout.rb` is the **only** model and `db/migrate` holds one migration. That is
-deliberate: match runtime state never touches Postgres (it lives in the runner's memory and
-snapshots to Kafka), so what earns a table is the durable, low-volume stuff. A loadout — which
-parts a machine is built from — is the first of it, because it has to survive a runner restart
-and be readable by both processes.
+`ls app/models/` is the truth. **Match runtime state never touches Postgres** — it lives in the
+runner's memory and snapshots to Kafka — so what earns a table is the durable, low-volume stuff a
+player keeps between matches: what they own (`loadout`, `unlock`, `roster`), what they have done
+(`match_run`, `incident`, `progress`, `award`), and what happened to their crew
+(`minion_condition`). Anything per-tick belongs on the `Ledger` inside the sim instead.
 
 **Zeitwerk treats every directory under `app/` as an autoload root**, so
 `app/runner/match_runner.rb` defines `MatchRunner`, not `Runner::MatchRunner`. Don't fight it —
@@ -43,7 +44,17 @@ written before the simulation rewrite and is unaffected by it.
    into a service object beside it.
 
 **A controller may express routing, authorisation, parameter permitting, and which template or
-redirect follows. Nothing else.** No domain rules, no multi-step orchestration, no assembling a
+redirect follows. Nothing else.**
+
+> **Authorisation is a `before_action`, and the rule lives on the model.** `current_player`,
+> `current_operation`, `require_viewer!` and `require_operator!` are on `ApplicationController`;
+> `Operation#operable_by?` / `#viewable_by?` decide. **404 for a machine you cannot see, 403 for
+> one you can see but may not touch** — not leaking existence is the right default, and a
+> spectator reaching for a lever should be told *"not yours"* rather than *"no such thing"*.
+>
+> Four controllers used to answer this by comparing a path segment against `DevMatch::ID`. Four
+> copies of a rule with no owner, and the reason a second operation could not exist. See
+> [`design_sketches/operator_identity.md`](../docs/design_sketches/operator_identity.md). No domain rules, no multi-step orchestration, no assembling a
 view's data out of three collaborators. If an action needs more than a few lines, the lines are
 in the wrong file.
 
@@ -100,17 +111,22 @@ same options returns byte-identical chrome regardless of seed, tick, or match hi
 Verified: a cold engine and one 500 ticks into a hot run produce identical panels, as do two
 different seeds.
 
-**The one thing that must not differ between the processes is `chassis:`** (formerly
-`variant:`), which changes both which diagnostics exist (`condenser_vacuum` is
-atmospheric-only: 13 instruments vs 12) and the pressure gauge's full-scale reading. That is
-why both processes read it through `DevMatch.chassis` and never from `ENV` directly.
+**The one thing that must not differ between the processes is `chassis:`**, which changes both
+which diagnostics exist (`condenser_vacuum` is atmospheric-only: 20 instruments vs 19) and the
+pressure gauge's full-scale reading. That is why both processes read it through
+`DevMatch.chassis` and never from `ENV` directly.
 
 > **`loadout:` is the second thing, and it came due in stage 4.** A player now chooses the
 > configuration on the outfitting screen, which is exactly the moment the old TODO warned about.
 > It stays sound with one word changed: **the panel is a pure function of the LOADOUT**, so two
 > processes reading the same stored loadout cannot disagree. `DevMatch.panel` is therefore
-> memoised **per loadout**, not per process. Verified — removing the safety valve takes the panel
-> from 18 instruments to 16.
+> memoised **per (operation, loadout)**, not per process. Verified — removing the safety valve
+> takes the panel from 21 instruments to 19, and two operations of the same kind and loadout
+> return identical chrome apart from their own id.
+>
+> **The key has to name what was actually built.** A first cut keyed on `[operation, loadout]`
+> and then called `build` with no arguments, so asking for a different loadout got a fresh cache
+> entry holding the *stored* machine's panel — a cache answering the question it was not asked.
 >
 > What remains is a race rather than a design flaw: save a loadout and the console renders the
 > new panel over the old machine for a tick or two until the reset lands. The real fix is still
@@ -183,16 +199,15 @@ validator already refused.
 > with a 422. Passing `authenticity_token: form_authenticity_token` (no form options) supplies
 > the global session token, which Rails accepts for any action.
 >
-> **CSRF verification is off in the test environment**, so the request specs passed with this
-> broken. It was found by driving the real server with curl — which is the general lesson: a
-> request spec proves routing and behaviour, not that a browser can submit the form.
+> **CSRF verification is off in the test environment**, so a request spec passes with this
+> broken. Drive the real server with curl instead: a request spec proves routing and behaviour,
+> not that a browser can submit the form.
 
-> **`permit` with the keys you mean, never `permit!` — and the security warning is the lesser
-> half.** Brakeman flagged `params.fetch(:loadout, {}).permit!` as mass assignment, which it is.
-> What it was also doing was admitting **non-scalars**: `loadout[boiler][]=x` arrived as an Array,
-> reached `Assembly#normalise_part_id`, and `Array#to_sym` raised. On `fit` that is caught by the
-> rescue; on the **preview** action, which has none, it is a 500 — reachable by anyone who can
-> open the page. `{"boiler": 1}` in a JSON body did the same through `Integer#to_sym`.
+> **`permit` with the keys you mean, never `permit!` — and mass assignment is the lesser half.**
+> `permit!` also admits **non-scalars**: `loadout[boiler][]=x` arrives as an Array, reaches
+> `Assembly#normalise_part_id`, and `Array#to_sym` raises. On `fit` that is caught by the rescue;
+> on the **preview** action, which has none, it is a 500 reachable by anyone who can open the
+> page. `{"boiler": 1}` in a JSON body does the same through `Integer#to_sym`.
 >
 > `permit(*slot_ids)` fixes both at once, because `permit` only admits scalar values. Two habits
 > that follow: **coerce a permitted value with `to_s` before treating it as an id**, since a JSON
@@ -202,7 +217,7 @@ validator already refused.
 > and come back as "no such part", never as an exception.
 
 **Run `bin/brakeman` before calling controller work done.** `bin/ci` does, but the feedback loop
-is four seconds on its own, and this one was found by a scan on GitHub rather than locally.
+is four seconds on its own and a scan that only runs on GitHub finds it far later.
 
 ## Blueprints: what a player owns
 
@@ -235,21 +250,51 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   for the same reason `content_spec` refuses a structural material with no temperature rating.
 - **`DevPlayer.earn` goes through the gates; `grant` is an override.** Different words on
   purpose — if the only path bypassed the check, the check would have no live call site and
-  would rot. `Achievement.earned?` is a stub returning true, so the gate never closes today; the
-  specs prove it is wired by stubbing it `false`.
+  would rot. `Achievement.earned?` **reads `awards` now** and the gate genuinely closes; the
+  specs open it by granting a real `Award` rather than by stubbing. It returned `true`
+  unconditionally until the event system was built, because nothing could observe a match
+  closely enough to award anything — and the day it started telling the truth, two specs
+  written against the stub failed, which was the point.
+- **An owner nobody can name has earned nothing.** `earned?(id, owner_id: nil)` is `false`, not
+  true: there is no auth yet, and an unattributable gate should stay shut rather than open for
+  everybody.
+- **A roster is intent; availability is applied at build.** A minion on the injury list stays in
+  the `rosters` row and is dropped when the machine is built, so recovery restores them with no
+  second decision from the player. It must be applied in **both** `DevMatch.build` and
+  `reset_command` — the runner rebuilds from the command payload, not from the table, so
+  filtering only one of them fields somebody the screen has just refused.
+- **Refusing and substituting are different statements.** Posting somebody unavailable is refused
+  by the screen; leaving a post *empty* substitutes the standin silently, because that is a
+  choice rather than a mistake.
+- **The recovery clock may not live in `DevMatch.build`.** The web process calls it to rebuild a
+  `Match` for the panel and the roster, so a decrement there would let a player heal their crew by
+  refreshing the page. `DevMatch.start!` is called where a match actually starts.
+- **Minions come from `Content.hireable`, never `Content.minions`.** The last-resort standin is an
+  ordinary individual in content — one resolution path rather than a special case in the engine —
+  and `hireable: false` is the single field keeping it out of the shop. Enumerate all minions and
+  you put the thing a player is *given* when they have nothing left on the list of things to buy.
+- **Equipment and training are owned per minion, so their ids are scoped** — `jim/leather_apron`,
+  exactly as a chassis id is scoped to its operation. That is what lets per-minion ownership use
+  the existing `(owner_id, kind, blueprint_id)` triple with no migration. **The price is looked up
+  by the bare item id** (`Blueprint.build(priced_as:)`): an apron costs what an apron costs, and
+  pricing every pairing would put 39 identical lines in `config/blueprints.yml` today and need a
+  fresh one whenever anybody hires a minion.
 - **Operations come from `Operations.catalogued`, never `Operations.known`.** A spec rig registers
   globally and `known` includes it, so deriving from `known` made `spec/support/loop_rig.rb` an
   unlockable machine nobody had priced — which took the whole catalogue down, and **only in a
   full-suite run**, because nothing else loads that file.
-- **`Blueprint.minions` enumerates the wrong noun and is marked as such.** It lists content
-  archetypes — `fireman`, `yardhand` — which are *jobs*, not minions. A player unlocks an
-  individual (Jim, Elowynne), each their own upgradable template carrying equipment in three
-  slots. Nothing enforces minion ownership, so it cannot mislead anyone yet. Do not build on it;
-  see [`design_sketches/minion-sketch.md`](../docs/design_sketches/minion-sketch.md).
+> **`Blueprint.minions` enumerates people, never seats.** What a player unlocks is an individual;
+> `crew_1` is a place on the payroll, sized by the fitted crew quarters. Because minion ids have
+> been renamed before, `Crewing#candidates` skips ids the catalogue does not know — a stale
+> `unlocks` row otherwise crashes the crew screen — and `rake blueprints:audit` finds them.
+>
+> **The crew screen asks the registry by TYPE**, never `Operations::SteamEngine` by name:
+> `Operations.assembly_for(type, chassis:, loadout:)` answers what a build would be, and
+> `Assembly#crew_capacity` how many seats it has. A second machine is then a registration rather
+> than a branch here. See [`design_sketches/crew_capacity.md`](../docs/design_sketches/crew_capacity.md).
 
-> **`rake blueprints:audit` after renaming anything.** Validation refuses to *create* a row
-> naming a blueprint that does not exist, but nothing revalidates rows already in the table —
-> and stage 3 of the modularisation renamed `:stock_boiler` to `:locomotive_boiler`. A stranded
+> **`rake blueprints:audit` after renaming anything.** Validation refuses to *create* a row naming
+> a blueprint that does not exist, but nothing revalidates rows already in the table. A stranded
 > row is not a crash; it is a player quietly missing something they earned, which is the class of
 > bug that survives for months. The audit is deliberately **not** a boot check: building the
 > catalogue reads the content YAML, which `config/initializers/reactor_sim.rb` keeps lazy on
@@ -274,6 +319,10 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   Solid Queue → ~1 s polling, handing your realtime path a job queue's latency.
 - **`config/cable.yml` must not use the `async` adapter in development.** It is in-process
   only, so a runner broadcasting from its own process reaches nobody, silently.
+- **A reset swaps in a new `Match`, so re-read it from `@matches` before stepping.** Runner-addressed
+  and simulation commands ride one log precisely so "reset, then open the throttle" means what it
+  says; holding the object from before the barrier applies the throttle to the match that was just
+  discarded, then steps and publishes it.
 - **Commands are absolute intents, never deltas.** `set_control` with a `value`, never
   `adjust_control` with a `delta`. Absolute values make Kafka's at-least-once delivery harmless
   with no dedup table — this is the highest-leverage decision in the ingress design, and it is
@@ -322,6 +371,15 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   game feel instant.
 - **Gauge chrome is rendered once** by a ViewComponent carrying `data-` attributes; only values
   stream. `op.panel` supplies it.
+- **Every projection carries its `run_id`, and the client watches exactly one.** Nothing stops a
+  second `bin/match_runner` broadcasting onto the same stream — `Procfile.dev` already starts one,
+  so `bin/dev` plus a manual runner is two. Only one can hold the `match.commands` partition, so
+  the other stays cold at ambient with every lever at its default, says nothing while
+  `unchanged_from?` skips it, and then lands a periodic **full** view that replaces the panel
+  wholesale. A run changes legitimately on a reset, which sets `supersedes`, and on a runner
+  restart, which cannot — so the client adopts an unfamiliar run only when it supersedes the one
+  being watched or when that one has gone quiet for `FOREIGN_RUN_GRACE_MS`. Otherwise it drops
+  the views and shows **two runners**.
 
 ## Kafka, as actually wired
 
@@ -329,18 +387,16 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
 runner's tick barrier. Verified end to end: both records of a two-command burst landed on **one
 partition** in order, and the runner applied them within a tick.
 
-- **The rdkafka duplication now crashes the process, and which gem wins has INVERTED.** Both
-  `rdkafka` and `karafka-rdkafka` are in the lockfile and both define `Rdkafka`. This note used
-  to say karafka-rdkafka 0.28.0 won and the duplication was harmless; measured 2026-09-14, it is
-  **`rdkafka` 0.29.0** that loads (`Rdkafka::Bindings` resolves into that gem), while
-  `karafka-core` 2.6.2 monkey-patches `Rdkafka::Bindings` expecting a constant
-  (`RD_KAFKA_RESP_ERR__FATAL`) that 0.29.0 does not define.
-  **Consequence: any broker error takes the process down.** The patched error callback raises
-  `NameError` on rdkafka's background poll thread, so with Redpanda stopped, one produce is
-  enough to kill Puma — which is exactly how this was found. It is latent whenever the broker is
-  healthy, which is why it survived this long. Resolve the duplication (almost certainly by
-  dropping `gem "rdkafka"`, since karafka-core patches the karafka fork) before the egress
-  consumers, and do not reason from the version in the Gemfile.
+- **The rdkafka duplication crashes the process.** Both `rdkafka` and `karafka-rdkafka` are in
+  the lockfile and both define `Rdkafka`. Measured 2026-09-14, **`rdkafka` 0.29.0** is what loads
+  (`Rdkafka::Bindings` resolves into that gem), while `karafka-core` 2.6.2 monkey-patches
+  `Rdkafka::Bindings` expecting a constant (`RD_KAFKA_RESP_ERR__FATAL`) that 0.29.0 does not
+  define. **Any broker error therefore takes the process down**: the patched error callback
+  raises `NameError` on rdkafka's background poll thread, so with Redpanda stopped, one produce
+  kills Puma. It is latent whenever the broker is healthy, which is what makes it easy to miss.
+  Resolve the duplication (almost certainly by dropping `gem "rdkafka"`, since karafka-core
+  patches the karafka fork) before the egress consumers, and **check which gem actually loads
+  rather than reasoning from the Gemfile**.
 - **Build clients lazily, never in an initializer.** An initializer opens a broker connection
   inside `assets:precompile`, `rails console` and the test suite. `CommandProducer.instance` is
   memoised **per process id** because rdkafka handles are not fork-safe — one created before

@@ -126,6 +126,113 @@ RSpec.describe "thermal integration" do
     end
   end
 
+  # Radiation is `T⁴` and this library forbids an integrator that is only stable for small steps,
+  # so it is carried as a **conductance** obtained by exact factoring:
+  #
+  #   T⁴ − T_amb⁴ ≡ (T² + T_amb²)(T + T_amb)·(T − T_amb)
+  #
+  # Everything below exists to hold that claim to account. See
+  # `docs/design_sketches/radiation.md`.
+  describe "radiation" do
+    def glowing(kelvin:, emissivity: 0.8, area: 0.2, conduction: 0.0, capacity: 5.0e4)
+      node = ReactorSim::Nodes::Vessel.new(
+        id: :hot, volume_m3: 1.0, heat_capacity: capacity, initial_temperature_k: kelvin,
+        ambient_conductance: conduction, emissivity: emissivity, radiating_area_m2: area
+      )
+      ReactorSim::Operation.new(id: :rig, type: :rig, seed: 1, nodes: [ node ])
+    end
+
+    def hot_temp(op) = op.nodes.fetch(:hot).temperature_k(op.state.fetch(:nodes).fetch(:hot), content)
+
+    # **The one thing here that is an identity, so it is tested as one.** If this drifts, the
+    # factoring is wrong and every other radiative figure in the engine is quietly wrong with it.
+    it "is exactly Stefan-Boltzmann, not an approximation of it" do
+      node = glowing(kelvin: 1000.0).nodes.fetch(:hot)
+      sigma = ReactorSim::Units::STEFAN_BOLTZMANN
+
+      [ 300.0, 500.0, 1200.0, 3000.0 ].each do |t|
+        amb = node.ambient_k
+        linearised = node.radiative_conductance(t, amb) * (t - amb)
+        exact = 0.8 * 0.2 * sigma * ((t**4) - (amb**4))
+
+        expect(linearised).to be_within(1e-9).of(exact), "drifted at #{t} K"
+      end
+    end
+
+    it "cools a hot body faster than conduction alone, and more so the hotter it is" do
+      gaps = [ 600.0, 1400.0 ].map do |t|
+        plain = glowing(kelvin: t, emissivity: 0.0, conduction: 50.0)
+        shiny = glowing(kelvin: t, emissivity: 0.8, conduction: 50.0)
+        [ plain, shiny ].each { |op| op.step!(tick: 1, dt: 1.0) }
+        (hot_temp(plain) - hot_temp(shiny)) / t
+      end
+
+      expect(gaps.first).to be > 0.0
+      expect(gaps.last).to be > gaps.first * 2.0
+    end
+
+    # The reason the factoring was chosen over an explicit term. An explicit `T⁴` at dt = 1e6
+    # returns nonsense; this cannot pass the sink however large the step.
+    it "never overshoots ambient, at any dt" do
+      [ 0.25, 10.0, 1_000.0, 1.0e6 ].each do |dt|
+        op = glowing(kelvin: 2000.0)
+        op.step!(tick: 1, dt: dt)
+
+        expect(hot_temp(op)).to be_between(op.nodes.fetch(:hot).ambient_k, 2000.0),
+                                "overshot at dt=#{dt}: #{hot_temp(op)}"
+      end
+    end
+
+    # **The claim that lets this release land without touching anything.** A node that declares
+    # no surface must be bit-identical to one from before radiation existed.
+    it "changes nothing at all for a node with no emissivity" do
+      before = glowing(kelvin: 900.0, emissivity: 0.0, conduction: 50.0)
+      after = glowing(kelvin: 900.0, emissivity: 0.0, area: 5.0, conduction: 50.0)
+      [ before, after ].each { |op| 20.times { |i| op.step!(tick: i + 1) } }
+
+      expect(ReactorSim.canonical(after.state)).to eq(ReactorSim.canonical(before.state))
+    end
+
+    # The boiler's case: a radiant link moves heat superlinearly in the temperature difference,
+    # which is what a flat conductance cannot say and why the firebox was converted.
+    describe "between two bodies" do
+      def radiant_pair(t_a:)
+        a = ReactorSim::Nodes::Vessel.new(id: :a, volume_m3: 1.0, heat_capacity: 5.0e4,
+                                          initial_temperature_k: t_a)
+        b = ReactorSim::Nodes::Vessel.new(id: :b, volume_m3: 1.0, heat_capacity: 5.0e4,
+                                          initial_temperature_k: 400.0)
+        ReactorSim::Operation.new(
+          id: :pair, type: :pair, seed: 1, nodes: [ a, b ],
+          thermal_links: [ ReactorSim::ThermalLink.new(a: :a, b: :b, conductance: 100.0,
+                                                       emissivity: 0.9, radiating_area_m2: 12.0) ]
+        )
+      end
+
+      it "moves more than proportionally more heat as the hot end brightens" do
+        cool, hot = [ 800.0, 1000.0 ].map do |t|
+          op = radiant_pair(t_a: t)
+          before = temperatures(op)
+          op.step!(tick: 1, dt: 1.0)
+          before[:b] && (temperatures(op)[:b] - 400.0)
+        end
+
+        # A linear link would give the ratio of the temperature differences, (1000-400)/(800-400).
+        expect(hot / cool).to be > 600.0 / 400.0
+      end
+
+      it "still converges rather than overshooting, at any dt" do
+        [ 0.25, 100.0, 1.0e6 ].each do |dt|
+          op = radiant_pair(t_a: 1400.0)
+          op.step!(tick: 1, dt: dt)
+          t = temperatures(op)
+
+          expect(t[:a]).to be_between(t[:b], 1400.0), "a overshot at dt=#{dt}"
+          expect(t[:b]).to be_between(400.0, t[:a]), "b overshot at dt=#{dt}"
+        end
+      end
+    end
+  end
+
   describe "phase change" do
     # Pressure and the liquid/vapour split are coupled. Solving them in sequence — boil at
     # last tick's pressure, then recompute pressure — oscillates violently: 0 kg of steam

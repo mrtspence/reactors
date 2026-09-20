@@ -14,14 +14,14 @@
 # POST rather than GET so a twenty-slot loadout rides in the body instead of going into the query
 # string — and from there into history and logs — on every dropdown change.
 class LoadoutDraftsController < ApplicationController
-  include DevMatchScoped
   include LoadoutParams
 
-  before_action :require_dev_operation
+  before_action :require_operator!
 
   def create
-    @outfitting = Outfitting.for(owner_id: DevPlayer::ID, parts: submitted_parts,
-                                 chassis: submitted_chassis)
+    @outfitting = Outfitting.for(owner_id: current_player,
+                                 operation_id: current_operation.operation_id,
+                                 parts: submitted_parts, chassis: submitted_chassis)
     render "loadouts/edit"
   end
 end

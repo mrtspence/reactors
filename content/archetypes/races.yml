@@ -1,0 +1,90 @@
+# What a minion IS, as opposed to who they are.
+#
+# An archetype is a kind of person — a race — and it is the **first baseline layer** of four:
+#
+#   1. archetype   this file. What every member of that race starts from.
+#   2. individual  content/minions/. Who they are — offsets and tags of their own, so Elowynne
+#                  and Galathas are both elves and are not the same worker.
+#   3. training    a permanent upgrade to one individual, bought with a blueprint.
+#   4. equipment   three fitted items, swapped per match.
+#
+# Each layer OFFSETS the ones above it. A race is therefore never the whole answer about anybody,
+# which is the point — and it is why an individual's sheet is worth reading.
+#
+# **This file used to be `content/minions/crew.yml` and used to hold `fireman` and `yardhand`,
+# which are JOBS rather than kinds of person.** That was the wrong noun and was marked as such in
+# three places for a release before it was fixed. A job is something an operation asks for — a
+# crew slot — and the same person can do two of them.
+#
+# ## The six stats are fixed, and every archetype declares all of them
+#
+# Fixed because the simulation's own machinery reads them and needs a number with a meaning
+# rather than an absence:
+#
+#   strength      what they bring to a lever       — Minion#rate_multiplier
+#   toughness     what they shrug off              — the Danger Check
+#   endurance     how slowly they tire             — Fatigue.accrual
+#   intelligence  what they notice                 — the `observer:` gauge path (reserved)
+#   dexterity     how finely they can work         — precision tasks, and reserved for repair
+#   charisma      how others take them             — reserved
+#
+# **`endurance` is 1.0 for a human by definition, and it divides rather than multiplies.** What a
+# worker gets done and what it costs them are separate claims: somebody can be strong and short of
+# wind. It is also the axis heavy kit is priced against, which is how "this armour tires me"
+# becomes something the three equipment slots can say.
+#
+# Anything else goes in `tags:`, which is open on purpose so a new trait costs a line here rather
+# than a schema change. See docs/design_sketches/minions.md §4.
+#
+# **`dexterity` does not replace `clumsy`, and the two are not the same statement.** Dexterity is
+# how well somebody can do fine work when it goes right; `clumsy` is how often it goes wrong. A
+# steady-handed worker who knocks things over is a real person and both numbers describe them.
+#
+# ## Tags here are a MAP, not a list
+#
+# Resource tags are a flat list — a thing either is `:liquid` or is not. Minion tags carry a
+# value, because "how well can you see in the dark" is a question with a number for an answer.
+# `true` is the honest way to write a trait that is simply present.
+#
+# Values from archetype, individual, training and equipment are **added**, then clamped.
+# Consumers multiply what they read. Merge adds, use multiplies — see the sketch §4.
+
+human:
+  label: Human
+  strength: 1.0
+  toughness: 1.0
+  endurance: 1.0
+  intelligence: 1.0
+  dexterity: 1.0
+  charisma: 1.0
+  tags: {}
+
+# Sharper eyes, sharper mind, less back. Darkvision is the tag a mine will read once there is a
+# mine; it is declared now because a race's traits are not contingent on somewhere to use them.
+elf:
+  label: Elf
+  strength: 0.75
+  toughness: 0.7
+  endurance: 0.85
+  intelligence: 1.25
+  dexterity: 1.2
+  charisma: 1.1
+  tags:
+    darkvision: 0.3
+
+# The bottom of the labour market, and deliberately so — this is what the last-resort standin is
+# made of. Good in the dark, hopeless at everything else, and `clumsy` is not flavour: the Danger
+# Check reads it directly, so a kobold is not merely weak, they are more likely to be hurt. That
+# is the whole point of being forced to field one.
+kobold:
+  label: Kobold
+  strength: 0.35
+  toughness: 0.4
+  endurance: 0.7
+  intelligence: 0.3
+  dexterity: 0.6
+  charisma: 0.2
+  tags:
+    darkvision: 0.5
+    clumsy: 0.3
+    skittish: true

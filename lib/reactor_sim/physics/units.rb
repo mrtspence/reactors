@@ -17,6 +17,13 @@ module ReactorSim
     STANDARD_PRESSURE_PA   = 101_325.0
     GAS_CONSTANT           = 8.314462618 # J/(mol·K)
     GRAVITY_M_PER_S2       = 9.80665     # what makes a chimney draw and a header tank feed
+    # W/(m²·K⁴). What makes a bright fire worth more than a merely hot one, and what stops a
+    # seized bearing climbing forever — see docs/design_sketches/radiation.md.
+    STEFAN_BOLTZMANN       = 5.670374419e-8
+    # kg/m³ at standard temperature and pressure. For sizing a positive-displacement intake,
+    # where what matters is roughly how much air a swept volume holds rather than its exact
+    # state — a node that needs the real figure derives it from its own contents.
+    AIR_DENSITY_KG_PER_M3  = 1.204
 
     module_function
 

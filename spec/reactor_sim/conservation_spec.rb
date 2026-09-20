@@ -80,7 +80,7 @@ RSpec.describe "conservation" do
     events = []
     600.times { |i| events.concat(op.step!(tick: i + 1)) }
 
-    expect(events.map { |e| e[:type] }).to include(:vessel_rupture)
+    expect(events.map { |e| e[:type] }).to include(:part_failed)
     mass, = balances(op)
     expect(mass).to be_within(1e-6).of(400.0)
   end

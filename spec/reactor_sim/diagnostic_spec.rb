@@ -2,6 +2,7 @@
 
 require "reactor_sim"
 require "support/loop_rig"
+require "support/reference_crew"
 
 # Instruments: Source -> Filters -> Display.
 #
@@ -463,6 +464,98 @@ RSpec.describe ReactorSim::Diagnostic do
 
       expect(restored.digest).to eq(match.digest)
       expect(restored.project(operation_id: :rig).to_h).to eq(match.project(operation_id: :rig).to_h)
+    end
+  end
+
+  # **An instrument is a fitting, and an upgrade to one has to be measurable or it is a
+  # placebo.** Both halves of that were got wrong when the water gauges were first written, and
+  # each looked fine until it was measured against a running engine:
+  #
+  #   * Try-cocks at 25% steps **never moved at all** over 1400 ticks of a level swinging 44% to
+  #     56% — the whole working band fits inside one step, so the gauge was not coarse, it was
+  #     absent. 10% steps read in visible jumps and still carry a trend.
+  #   * The reflex glass cut noise three-fold and a player could not have told. The display reads
+  #     whole percent and the plain glass's ±1.2% was **smaller than one unit of what is shown**,
+  #     so it was already very nearly noise-free and there was nothing to improve on. The plain
+  #     glass went to ±2.5%, which is what it was always meant to be.
+  #
+  # Asserts the **ordering**, never the figures: the point is that each tier is measurably
+  # better than the one below, and pinning the numbers would make every balance change a spec
+  # failure. Compare `spec/CLAUDE.md` on `damper:`.
+  describe "instrument tiers are a real progression", crew: :reference do
+    LIGHT = { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
+              throttle_open: 0, load_demand: 0 }.freeze
+
+    # Mean absolute error against the spectator's truth, over a window where the level is being
+    # worked up and down — a gauge is only worth anything while the thing it reads is moving.
+    def misreading_of(glass)
+      # Deployed, because crew start in the quarters: an undeployed engine never raises steam,
+      # the water level never moves, and a gauge that reads a still level cannot be wrong.
+      op = ReferenceCrew.deploy!(
+        ReactorSim::Operations::SteamEngine.build(
+          id: :e, seed: 7, loadout: ReferenceCrew.loadout(water_glass: glass),
+          **ReferenceCrew.options
+        )
+      )
+      LIGHT.each { |k, v| op.set_control(k, v) }
+      errors = []
+      (1..2200).each do |t|
+        op.set_control(:igniter, 0) if t == 300
+        op.set_control(:throttle_open, 60) if t == 1200
+        op.set_control(:feed, (t / 200).even? ? 90 : 0) if t > 1200
+        op.step!(tick: t)
+        next unless t > 1200
+
+        read = op.project(viewer: :player, tick: t).gauges[:boiler_water]
+        truth = op.project(viewer: :spectator, tick: t).gauges[:boiler_water]
+        errors << (read - truth).abs.to_f if read && truth
+      end
+      errors.sum / errors.length
+    end
+
+    it "orders try-cocks worse than a glass, and a plain glass worse than a reflex one" do
+      cocks = misreading_of(:try_cocks)
+      plain = misreading_of(:gauge_glass)
+      reflex = misreading_of(:reflex_gauge_glass)
+
+      expect(cocks).to be > plain * 2.0
+      expect(plain).to be > reflex * 1.5
+    end
+
+    # The downgrade has to be coarse rather than dead. One distinct reading across the whole
+    # window is a brick, and that is exactly what 25% steps produced.
+    it "leaves try-cocks coarse rather than motionless" do
+      op = ReferenceCrew.deploy!(
+        ReactorSim::Operations::SteamEngine.build(
+          id: :e, seed: 7, loadout: ReferenceCrew.loadout(water_glass: :try_cocks),
+          **ReferenceCrew.options
+        )
+      )
+      LIGHT.each { |k, v| op.set_control(k, v) }
+      seen = []
+      (1..2200).each do |t|
+        op.set_control(:igniter, 0) if t == 300
+        op.set_control(:throttle_open, 60) if t == 1200
+        op.set_control(:feed, (t / 200).even? ? 90 : 0) if t > 1200
+        op.step!(tick: t)
+        seen << op.project(viewer: :player, tick: t).gauges[:boiler_water] if t > 1200
+      end
+
+      expect(seen.compact.uniq.length).to be > 1
+    end
+
+    # **No upgrade removes the lie.** The swell that lifts the reading exactly when a hard pull
+    # is uncovering the crown sheet is the mechanic, not a defect to be bought off — so every
+    # tier still points at `effective_fill` and every tier still lags.
+    it "keeps lag and the swelled reading on every tier" do
+      %i[try_cocks gauge_glass reflex_gauge_glass].each do |glass|
+        op = ReactorSim::Operations::SteamEngine.build(id: :e, seed: 7,
+                                                       loadout: { water_glass: glass })
+        filters = op.diagnostics.fetch(:boiler_water).filters
+
+        expect(filters.map(&:class)).to include(ReactorSim::Filters::Lag,
+                                                ReactorSim::Filters::Noise)
+      end
     end
   end
 end

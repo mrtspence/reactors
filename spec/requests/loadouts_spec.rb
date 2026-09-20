@@ -18,9 +18,12 @@ RSpec.describe "Outfitting", type: :request do
   # for fitting anything at all, so without this every example here would fail for a reason it is
   # not about. The enforcement examples revoke what they need.
   before { DevPlayer.grant_everything! }
+  # An operation has to exist to be owned: every controller finds the row and asks whether this
+  # player may touch it, so without this the filter answers 404 before the action runs.
+  before { DevMatch.provision! }
 
-  def path = edit_loadout_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
-  def fit_path = loadout_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+  def path = edit_loadout_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
+  def fit_path = loadout_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
 
   # Every slot named explicitly, which is what the form submits — a partial loadout would
   # re-default and silently refit the parts a player just removed.
@@ -41,7 +44,7 @@ RSpec.describe "Outfitting", type: :request do
 
     # The hole where a part would go is the point of the screen.
     it "shows an empty optional slot as empty rather than hiding it" do
-      Loadout.fit(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID,
+      Loadout.fit(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY,
                   chassis: :high_pressure,
                   parts: DevMatch.outfitting(loadout: { fusible_plug: nil }).loadout)
 
@@ -52,7 +55,7 @@ RSpec.describe "Outfitting", type: :request do
     end
 
     it "404s anything that is not the dev match" do
-      get edit_loadout_path(match_id: "nope", operation_id: DevMatch::OPERATION_ID)
+      get edit_loadout_path(match_id: "nope", operation_id: DevMatch::PRIMARY)
 
       expect(response).to have_http_status(:not_found)
     end
@@ -67,7 +70,7 @@ RSpec.describe "Outfitting", type: :request do
     # the query string, and from there into history and logs.
     describe "previewing a draft" do
       def preview_path
-        loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+        loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
       end
 
       it "renders into the same frame the form lives in" do
@@ -121,7 +124,7 @@ RSpec.describe "Outfitting", type: :request do
       patch fit_path, params: { loadout: full_loadout(safety_valve: "") }
 
       expect(response).to redirect_to(
-        console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+        console_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
       )
 
       stored = Loadout.find_by(match_id: DevMatch::ID)
@@ -139,8 +142,14 @@ RSpec.describe "Outfitting", type: :request do
         match_id: DevMatch::ID,
         command: hash_including(
           "type" => "reset_match",
-          "chassis" => "high_pressure",
-          "loadout" => hash_including("safety_valve" => nil)
+          # Keyed by operation now: a reset rebuilds every machine in the match, each with its
+          # own frame, fittings and crew.
+          "operations" => hash_including(
+            DevMatch::PRIMARY.to_s => hash_including(
+              "chassis" => "high_pressure",
+              "loadout" => hash_including("safety_valve" => nil)
+            )
+          )
         )
       )
     end
@@ -192,7 +201,7 @@ RSpec.describe "Outfitting", type: :request do
   # follow the *submitted* chassis rather than the stored one.
   describe "choosing a chassis" do
     def draft_path
-      loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+      loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
     end
 
     it "offers every frame the player owns" do
@@ -230,7 +239,11 @@ RSpec.describe "Outfitting", type: :request do
       expect(Loadout.find_by(match_id: DevMatch::ID).chassis).to eq("atmospheric")
       expect(producer).to have_received(:produce).with(
         match_id: DevMatch::ID,
-        command: hash_including("chassis" => "atmospheric")
+        command: hash_including(
+          "operations" => hash_including(
+            DevMatch::PRIMARY.to_s => hash_including("chassis" => "atmospheric")
+          )
+        )
       )
     end
 
@@ -243,7 +256,10 @@ RSpec.describe "Outfitting", type: :request do
     end
 
     describe "a frame the player has not unlocked" do
-      before { DevPlayer.revoke(:chassis, Blueprint.chassis_id(DevMatch::TYPE, :atmospheric)) }
+      before do
+        DevPlayer.revoke(:chassis,
+                         Blueprint.chassis_id(DevMatch.kind_of(DevMatch::PRIMARY), :atmospheric))
+      end
 
       it "is refused, on its own line rather than as a part's fault" do
         patch fit_path, params: { chassis: "atmospheric", loadout: full_loadout }
@@ -288,7 +304,7 @@ RSpec.describe "Outfitting", type: :request do
     # still shown — see the example below. The two rules only look contradictory: what is fitted
     # is a fact about the machine, what is offered is a fact about the workshop.
     it "disappears from the dropdown it would have been offered in" do
-      post loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID),
+      post loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY),
            params: { loadout: full_loadout(safety_valve: "low_pressure_safety_valve") }
 
       expect(response.body).not_to include(%(value="ramsbottom_safety_valve"))
@@ -319,7 +335,7 @@ RSpec.describe "Outfitting", type: :request do
       patch fit_path, params: { loadout: full_loadout(safety_valve: "") }
 
       expect(response).to redirect_to(
-        console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+        console_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
       )
       expect(Loadout.find_by(match_id: DevMatch::ID).parts.fetch("safety_valve")).to be_nil
     end
@@ -341,7 +357,7 @@ RSpec.describe "Outfitting", type: :request do
   # particular verdict: what matters is that malformed input reaches the validator as data.
   describe "a malformed loadout parameter" do
     def preview_path
-      loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+      loadout_draft_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
     end
 
     # `permit` drops a non-scalar outright, so the key never reaches `Outfitting` and the slot
@@ -383,7 +399,7 @@ RSpec.describe "Outfitting", type: :request do
       patch fit_path, params: { loadout: full_loadout.merge("mainframe" => "locomotive_boiler") }
 
       expect(response).to redirect_to(
-        console_path(match_id: DevMatch::ID, operation_id: DevMatch::OPERATION_ID)
+        console_path(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY)
       )
       expect(Loadout.find_by(match_id: DevMatch::ID).parts).not_to have_key("mainframe")
     end

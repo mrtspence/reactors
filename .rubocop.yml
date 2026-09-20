@@ -50,6 +50,15 @@ Lint/RedundantDirGlobSort:
 # `dt` is the domain's name for the timestep and appears in nearly every physics signature;
 # `a`/`b` are the two ends of a coupling in Relaxation and the link types. Renaming them to
 # satisfy a length rule would make the equations harder to read, not easier.
+# **Off, because both of its styles fight this codebase's units.** Names here carry dimensions —
+# `volume_m3`, `radiating_area_m2`, `max_kg_per_s` — and `normalcase` wants `volume_m3` while
+# `snake_case` wants `volume_m_3`; whichever is chosen, the other half of the vocabulary is
+# wrong. Crew seats (`crew_1`, `crew_2`) are the same shape from the other direction: ordinal
+# ids spelled identically by the roster, the rng table, the projection and the crew screen.
+# A cop that cannot be satisfied without renaming the physics is not earning its keep.
+Naming/VariableNumber:
+  Enabled: false
+
 Naming/MethodParameterName:
   AllowedNames:
     - a

@@ -2,43 +2,106 @@
 
 # Things a player has done, which some blueprints require before they can be unlocked.
 #
-# **A stub, and deliberately a shallow one.** Every achievement reports as earned, because
-# nothing observes a match closely enough to award one yet: incidents exist only inside whatever
-# projection is broadcast, `match.events` is not built, and a match does not end. Awarding is the
-# whole feature and it is not this stage's.
+# **The rules live here and the simulation knows nothing about them.** The engine reports
+# *transitions in the machine* — `:fire_lit`, `:steam_raised`, `:blew_off`, `:part_failed` — and
+# this composes them into meaning. A predicate in a node would make the sim learn what an
+# achievement is, and every new one a simulation change needing both dev processes restarted.
 #
-# What stage 5c decides — and the only decision here worth making early — is **where a
-# prerequisite lives: on the blueprint**. A blueprint then carries everything needed to answer
-# "may I have this yet?" in one place, rather than that answer being assembled from a separate
-# rules engine nobody can read end to end. See `docs/design_sketches/blueprints.md` §7.
+# **A prerequisite lives on the blueprint**, so a blueprint carries everything needed to answer
+# "may I have this yet?" in one place rather than in a rules engine nobody can read end to end.
 #
-# The ids below are named for things the simulation can already observe, so that when awarding
-# arrives it has somewhere obvious to hook: the boiler reaching its relief pressure, an hour of
-# running without the safety valve lifting, raising steam from cold without the igniter held in.
+# Three shapes, because most achievements should cost one line:
+#
+#   when_seen:   a point fact, complete the moment it arrives
+#   when_meter:  a threshold on a cumulative quantity, folded from absolute meter readings
+#   between:     an interval, with `disqualified_by` naming what spoils it
+#
+# Anything stranger takes a `predicate:` receiving the fold and the record — the seam this is
+# meant to be extended through. See `docs/design_sketches/event_system.md` §2 and §10.
 module Achievement
-  # Checked against, for the same reason every other id in this system is: a blueprint naming an
-  # achievement that does not exist would be a permanent lock nobody could explain, and a lookup
-  # that silently misses is a feature silently switched off.
-  KNOWN = %i[
-    first_full_head_of_steam
-    raised_steam_from_cold_alone
-    ran_an_hour_without_blowing_off
-    burst_a_flywheel
-  ].freeze
+  Definition = Struct.new(:id, :label, :when_seen, :when_meter, :reaches, :scope,
+                          :between, :lasting_ticks, :disqualified_by, :predicate,
+                          keyword_init: true) do
+    def point? = !when_seen.nil?
+    def meter? = !when_meter.nil?
+    def extent? = !between.nil?
+  end
+
+  DEFINITIONS = {}
 
   module_function
 
-  def known?(id) = KNOWN.include?(id.to_sym)
-
-  # TODO: expedient — always true. Nothing awards an achievement, so gating on one would lock
-  # every blueprint that names a prerequisite, permanently and with no way to earn it. Returning
-  # true keeps the call site live and honest: it is wired, it is specced against a stubbed
-  # `false`, and the day awarding exists this is the only method that changes.
-  #
-  # **The signature is the useful part of the stub** — an achievement is earned by *somebody*,
-  # so `owner_id:` is named here even though nothing reads it yet. Dropping it would mean
-  # changing every call site later rather than one method body.
-  def earned?(_id, owner_id: nil) # rubocop:disable Lint/UnusedMethodArgument
-    true
+  def define(id, label:, **options)
+    DEFINITIONS[id.to_sym] = Definition.new(id: id.to_sym, label: label, **options).freeze
   end
+
+  # **Derived from the definitions, never written out beside them.** It was a hand-maintained
+  # array, which is the shape `docs/CLAUDE.md` calls an inventory list — it drifts the moment
+  # somebody adds a definition without looking, and it drifts silently, because the new
+  # achievement is simply unreachable.
+  def known = DEFINITIONS.keys
+
+  def known?(id) = DEFINITIONS.key?(id.to_sym)
+
+  def fetch(id) = DEFINITIONS.fetch(id.to_sym)
+
+  def all = DEFINITIONS.values
+
+  # Whether this owner has earned it.
+  #
+  # **This used to return `true` for everything**, with a TODO saying the day awarding existed
+  # would be the day this method changed. It is that day. The stub was honest — nothing
+  # observed a match closely enough to award anything, so gating on one would have locked every
+  # blueprint naming a prerequisite, permanently and with no way to earn it.
+  #
+  # `owner_id` may still be nil (no auth yet, `DevPlayer::ID` is the only owner there is) and a
+  # nil owner has earned nothing, which is the safe answer: an unattributable gate stays shut.
+  def earned?(id, owner_id: nil)
+    return false if owner_id.nil?
+
+    Award.exists?(owner_id: owner_id.to_s, achievement_id: id.to_s)
+  end
+
+  # --- the catalogue -------------------------------------------------------
+  #
+  # In Ruby rather than YAML, on the same reasoning that settled parts authorship: these are
+  # authored in-house, they are game design rather than configuration, and half of them will
+  # eventually want a predicate. Blueprints are YAML because they are a flat catalogue of
+  # numbers; achievements are rules.
+
+  define :first_full_head_of_steam,
+         label: "A Full Head of Steam",
+         when_seen: { type: "steam_raised" }
+
+  # **"Without the pilot at all" is not expressible**, because the igniter is what lights a cold
+  # fire: `heater_engaged` always arrives before `fire_lit`, so a window opening at the lighting
+  # can never contain it and the achievement would be awarded on every ordinary start.
+  #
+  # What the machine can express is the skill that matters — the igniter is a match, not a
+  # furnace, and a player who leans on it is a player whose fire is dying. So the window runs
+  # from the fire catching to working pressure, spoilt by the pilot coming back on or the fire
+  # going out.
+  define :raised_steam_from_cold_alone,
+         label: "A Clean Cold Start",
+         between: { opens: "fire_lit", closes: "steam_raised" },
+         disqualified_by: [ { type: "heater_engaged" }, { type: "fire_out" } ]
+
+  # An hour of simulated running at 4 Hz. `closes:` is the fire going out rather than the match
+  # ending, deliberately — nothing here may wait on match lifecycle, which is not built.
+  define :ran_an_hour_without_blowing_off,
+         label: "An Hour of Quiet Steam",
+         between: { opens: "steam_raised", closes: "fire_out" },
+         lasting_ticks: 14_400,
+         disqualified_by: [ { type: "blew_off", node: "relief" } ]
+
+  define :burst_a_flywheel,
+         label: "Centrifugal Education",
+         when_seen: { type: "part_failed", node: "flywheel" }
+
+  # The ledger's own line, read straight off a meter reading. No event counts this and none
+  # should: it changes every tick, so it belongs to the accumulator that already tracks it and
+  # is checked by the conservation specs.
+  define :generated_a_gigajoule,
+         label: "A Gigajoule of Honest Work",
+         when_meter: "joules_to_work", reaches: 1.0e9, scope: :lifetime
 end

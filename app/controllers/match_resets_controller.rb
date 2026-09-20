@@ -15,12 +15,15 @@
 # should archive the finished match's seed + command log rather than discarding it, since that
 # pair *is* the replay (docs/architecture.md §8).
 class MatchResetsController < ApplicationController
-  include DevMatchScoped
-
-  before_action :require_dev_match
+  before_action :require_match_operator!
 
   def create
-    CommandProducer.instance.produce(match_id: DevMatch::ID, command: DevMatch.reset_command)
+    # The reset command is built BEFORE the clock advances, so somebody whose last match this
+    # was is still unavailable for the machine being built now and becomes available for the
+    # next one. Ticking first would give them back a match early.
+    command = DevMatch.reset_command
+    DevMatch.start!
+    CommandProducer.instance.produce(match_id: DevMatch::ID, command: command)
     head :accepted
   rescue StandardError => e
     Rails.logger.error("match_resets: produce failed: #{e.class}: #{e.message}")

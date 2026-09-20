@@ -10,9 +10,9 @@ module ReactorSim
   # Two flavours: `:player` gets the instruments as they actually read; `:spectator` gets a
   # god-view of the truth. Both are projections, and both go through the same path.
   PlayerView = Struct.new(:tick, :operation_id, :viewer, :gauges, :flags, :controls,
-                          :incidents, keyword_init: true) do
+                          :incidents, :crew, keyword_init: true) do
     def to_h
-      { tick:, operation_id:, viewer:, gauges:, flags:, controls:, incidents: }
+      { tick:, operation_id:, viewer:, gauges:, flags:, controls:, incidents:, crew: }
     end
 
     # Only what changed since the last view. This is what actually goes over the wire each
@@ -28,7 +28,12 @@ module ReactorSim
         gauges: gauges.reject { |id, v| previous.gauges[id] == v },
         flags: flag_delta(previous),
         controls: controls.reject { |id, v| previous.controls[id] == v },
-        incidents: incidents }
+        incidents: incidents,
+        # **Not sparse, so a plain reject is honest here.** Every role is always present — an
+        # unfilled one is filled by the standin — so unlike `flags` there is no "this entry
+        # vanished" case to emit explicitly. A minion who is stood down has `station: nil`,
+        # which is a value rather than an absence.
+        crew: (crew || {}).reject { |id, v| previous.crew&.dig(id) == v } }
     end
 
     # True when nothing at all moved. The runner can skip the broadcast entirely.
@@ -36,8 +41,8 @@ module ReactorSim
       return false if previous.nil?
 
       delta = delta_from(previous)
-      delta[:gauges].empty? && delta[:flags].empty? &&
-        delta[:controls].empty? && delta[:incidents].empty?
+      delta[:gauges].empty? && delta[:flags].empty? && delta[:controls].empty? &&
+        delta[:incidents].empty? && delta[:crew].empty?
     end
 
     private

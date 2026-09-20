@@ -10,34 +10,51 @@ module ReactorSim
   module Operations
     @builders = {}
     @chassis = {}
+    @assemblers = {}
     @harnesses = Set.new
 
     class << self
-      # `chassis:` is the list of frames this type can be built on, and it exists so the
-      # registry can be *asked* rather than reached into. The delivery tier needs to enumerate
-      # them — every chassis is separately unlockable — and the alternative was a hand-written
-      # map from operation type to `SomeOperation::CHASSIS`, which is an inventory list that
-      # drifts the first time somebody adds a frame. Pass the keys, never a literal list.
+      # `chassis:` is the list of frames this type can be built on, so the registry can be
+      # *asked* rather than reached into: the delivery tier has to enumerate them, since every
+      # chassis is separately unlockable. **Pass the keys, never a literal list** — a
+      # hand-written map from operation type to `SomeOperation::CHASSIS` drifts the first time
+      # somebody adds a frame. It is introspection, not configuration: nothing in a tick reads
+      # it, and a builder still takes `chassis:` as an ordinary option.
       #
-      # It is introspection, not configuration: nothing in a tick reads this, and a builder
-      # still takes `chassis:` as an ordinary option and still raises on one it does not know.
-      # `harness: true` marks a registration that exists only to exercise the engine — a spec rig,
-      # not a machine anyone plays. It still builds and runs exactly like any other operation;
-      # what it does not do is appear anywhere enumerating *machines*.
+      # `harness: true` marks a registration that exists only to exercise the engine — a spec
+      # rig, not a machine anyone plays. It builds and runs like any other operation; what it
+      # does not do is appear anywhere enumerating *machines*.
       #
-      # This exists because `spec/support/loop_rig.rb` registers globally, as it must for
-      # `Match.create` to find it, and the delivery tier's blueprint catalogue is **derived** from
-      # this registry. The rig therefore became an unlockable operation that had to be priced, and
-      # the whole catalogue refused to build — but only in a full-suite run, because nothing loads
-      # the rig otherwise. Derivation is still right; it just has to derive from the correct set.
+      # It is needed because a rig must register globally for `Match.create` to find it, while
+      # the delivery tier's blueprint catalogue is **derived** from this registry — so an
+      # unmarked rig becomes an unlockable operation nobody has priced, and the whole catalogue
+      # refuses to build. Only in a full-suite run, because nothing else loads the rig.
       #
       # The default is `false` on purpose: forgetting to mark a real machine does nothing, and
       # forgetting to mark a rig fails loudly and points straight at it.
-      def register(type, chassis: [], harness: false, &builder)
+      # `assembler:` is the same idea as `chassis:` one step further: a callable taking
+      # `(chassis, loadout)` and returning the `Assembly`, so the delivery tier can ask **what
+      # would this build be** — its slots, its crew capacity, where a shift starts — without
+      # naming a concrete operation module. Without it, an outfitting or crew screen has to say
+      # `Operations::SteamEngine` out loud, and a second machine needs a second branch in every
+      # such place.
+      def register(type, chassis: [], harness: false, assembler: nil, &builder)
         @builders[type.to_sym] = builder
         @chassis[type.to_sym] = Array(chassis).map(&:to_sym).freeze
+        @assemblers[type.to_sym] = assembler
         @harnesses << type.to_sym if harness
       end
+
+      # Raises rather than returning nil for a type that declared none: an operation nobody can
+      # ask about is a screen that cannot be rendered, and finding that out here names the type.
+      def assembly_for(type, chassis: nil, loadout: {})
+        assembler = @assemblers[type.to_sym] or
+          raise Error, "operation #{type.inspect} declares no assembler:"
+
+        assembler.call(chassis, loadout)
+      end
+
+      def assembler?(type) = !@assemblers[type.to_sym].nil?
 
       def fetch(type)
         @builders.fetch(type.to_sym) do

@@ -1,23 +1,30 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/reference_crew"
 
 # The first real operation, and the one the architecture was tested against.
 #
 # `docs/design_sketches/boiler.md` set the bar: *if an atmospheric engine and a
 # high-pressure engine can be the same operation with different parts swapped in, the
 # abstractions are the right ones.* The thesis group at the bottom is that test.
-RSpec.describe "the steam engine" do
+RSpec.describe "the steam engine", crew: :reference do
   # Starting from cold and lighting the fire takes real time, so most examples share one
   # warmed-up engine rather than paying for the startup in every one.
   # `chassis:` — the frame, which decides where the exhaust goes and therefore which slots
   # exist. It was `variant:` until the engine became assembled from parts; the concept did not
   # change, only what it is now one axis of. An empty loadout is the stock engine.
+  # **The crew is part of the machine now**, and it is a fixture rather than anybody real.
+  # Stoking is effort, so a lever position is an instruction and what comes of it depends on who
+  # is carrying it out — with no roster at all the engine is crewed by day-labourers and never
+  # raises steam. `ReferenceCrew` is a flat 1.0 at every stat, which is the baseline every work
+  # station's throughput is declared against, and it cannot drift when real people are tuned.
   def engine(chassis: :high_pressure, seed: 42, loadout: {})
     ReactorSim::Match
       .create(id: "e", seed: seed,
               operations: [ { id: "eng", type: :steam_engine, chassis: chassis,
-                              loadout: loadout } ])
+                              loadout: ReferenceCrew.loadout(loadout) }
+                              .merge(ReferenceCrew.options) ])
       .operation(:eng)
   end
 
@@ -45,10 +52,28 @@ RSpec.describe "the steam engine" do
   # behaviour is a **transient** — the warm-through condensate clears the moment the engine is
   # turning properly — and an end-state assertion would pass on a startup that had been knocking
   # badly the whole way up.
+  # `oiler:` posts somebody to the oil round for the whole run. **A run longer than about 4000
+  # ticks needs one**, because the bearings start with a charge and nothing refills it — an
+  # unattended engine wipes a journal and then seizes, which is the stage F mechanic working
+  # rather than a defect.
+  #
+  # **The shift has to be DEPLOYED, and that is the opening move of a match now.** Crew start in
+  # the quarters rather than at a lever, so a run that posts nobody produces 0 kW and a 322 K
+  # firebox — correct, and the whole point of `crew_capacity.md`. `firing:` is the hand on the
+  # shovel; without one there is no fire.
+  #
+  # The second seat goes to the oil round, which is the real competition: three effort stations
+  # (`:stoking`, `:ash_raking`, `:oiling`) against two seats, so something is always unattended.
+  # `:damper_open` is a **valve** and costs nobody, which is why the damper is free to set.
   def light_and_run(op, throttle: 60, stoking: 60, load: 80, ticks: 3600, blower_off: 1600,
-                    shed_at: nil, damper: nil, each_tick: nil)
+                    shed_at: nil, damper: nil, each_tick: nil, oiler: nil, firing: :crew_1)
     LIGHT.each { |k, v| op.set_control(k, v) }
     op.set_control(:damper_open, damper) if damper
+    op.assign_minion(firing, :stoking) if firing
+    if oiler
+      op.assign_minion(oiler, :oiling)
+      op.set_control(:oiling, 100)
+    end
 
     events = []
     (1..ticks).each do |t|
@@ -71,6 +96,20 @@ RSpec.describe "the steam engine" do
     end
     events
   end
+
+  # Every part failure is one type, `:part_failed`, and the part says which it was through
+  # `node:` and `mode:`. These used to assert `:cylinder_failure` and `:flywheel_burst` — names
+  # derived from the node id or hand-written per class, so they could drift from the part
+  # without a spec noticing. See `ReactorSim::Event::TYPES`.
+  def failures_of(events, node)
+    events.select { |e| e[:type] == :part_failed && e[:node] == node }
+  end
+
+  # **"Nothing went wrong" is not "no events".** These examples used to assert an empty event
+  # list, which meant the right thing when the only events were failures. The engine also
+  # reports ordinary transitions now — a fire catching, a drum reaching working pressure — so a
+  # healthy 4000-tick run emits several and the old assertion would fail on a perfect run.
+  def breakages(events) = events.select { |e| e[:type] == :part_failed }
 
   def rpm(op) = op.nodes.fetch(:flywheel).rpm(op.state.fetch(:nodes).fetch(:flywheel))
 
@@ -95,6 +134,69 @@ RSpec.describe "the steam engine" do
       .select { |p| p.fetch(:resource).to_sym == resource }.sum { |p| p.fetch(:kg) }
   end
   def truth(op, gauge) = op.project(viewer: :spectator).gauges.fetch(gauge)
+
+  # **The blower stopped being free, and the two ways to pay for it are the decision.**
+  #
+  # `driven_transport.md`: a pressure source with a lever on it and nobody paying the bill was
+  # the whole gap. The bellows costs a person continuously, the donkey costs fuel oil out of its
+  # own tank, and both honour the black start — neither depends on the engine they are lighting.
+  describe "paying for the blast" do
+    # Raise steam and report where it got to. The boiler's working mark is 500 kPa.
+    def raised_at(op, ticks: 6_000)
+      { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
+        throttle_open: 0, load_demand: 0 }.each { |k, v| op.set_control(k, v) }
+
+      (1..ticks).each do |t|
+        op.set_control(:igniter, 0) if t == 300
+        op.step!(tick: t)
+        return t if pressure_of(op, :boiler) >= 500_000.0
+      end
+      nil
+    end
+
+    # **An unmanned bellows is identical to no blower at all.** Nothing implements that — an
+    # unmanned effort station already delivered nothing — and it is why the bellows is a real
+    # cost rather than a slower button.
+    it "delivers nothing at all from a bellows nobody is working" do
+      idle = engine(loadout: { blower: :hand_bellows })
+      op = idle.tap { |o| o.assign_minion(:crew_1, :stoking) }
+
+      expect(raised_at(op, ticks: 2_000)).to be_nil
+      expect(pressure_of(op, :boiler)).to be < 200_000.0
+    end
+
+    it "raises steam on a bellows somebody is working" do
+      op = engine(loadout: { blower: :hand_bellows })
+      op.assign_minion(:crew_1, :stoking)
+      op.assign_minion(:crew_2, :blower)
+
+      expect(raised_at(op)).not_to be_nil
+    end
+
+    # The bellows is the starting blueprint and the donkey is the unlock, so the donkey has to be
+    # meaningfully faster — and it is the machine every balance figure here was measured against.
+    it "raises steam faster on the donkey than by hand" do
+      hand = engine(loadout: { blower: :hand_bellows })
+                .tap { |o| o.assign_minion(:crew_1, :stoking)
+                           o.assign_minion(:crew_2, :blower) }
+      donkey = engine(loadout: { blower: :donkey_blower })
+                 .tap { |o| o.assign_minion(:crew_1, :stoking) }
+
+      expect(raised_at(donkey)).to be < raised_at(hand)
+    end
+
+    # It burns its own charge rather than the engine's, which is what makes running out a thing
+    # the player watches rather than a surprise.
+    it "burns the donkey's own fuel and leaves the bunker alone" do
+      op = engine(loadout: { blower: :donkey_blower })
+      op.assign_minion(:crew_1, :stoking)
+      before = contents(op, :donkey_tank, :fuel_oil)
+      raised_at(op, ticks: 2_000)
+
+      expect(contents(op, :donkey_tank, :fuel_oil)).to be < before
+      expect(op.state.fetch(:nodes).fetch(:donkey).fetch(:angular_momentum)).to be > 0.0
+    end
+  end
 
   describe "combustion" do
     it "will not light a cold firebox without the igniter" do
@@ -271,8 +373,17 @@ RSpec.describe "the steam engine" do
     # Ash reaches 12.17 kg rather than the 20-odd a hard fire banks up, because accumulation
     # scales with firing rate — hence the lower threshold here than in the example above, which
     # runs at `LIGHT`'s damper.
+    # **Somebody has to be standing there.** Raking is effort, not a valve, so setting the lever
+    # with nobody posted moves no ash at all — which is the mechanic rather than a snag: clearing
+    # the grate costs you a pair of hands that were doing something else. The second seat goes to
+    # the rake here, which is exactly the decision a driver makes: three effort stations, two
+    # hands, and the oil round goes unattended for this run.
     it "clears when the ashpan is raked, and the engine gets the power back" do
-      raked = engine.tap { |o| o.set_control(:ash_raking, 40); light_and_run(o, ticks: 7200, damper: 30) }
+      raked = engine.tap { |o|
+        o.assign_minion(:crew_2, :ash_raking)
+        o.set_control(:ash_raking, 40)
+        light_and_run(o, ticks: 7200, damper: 30)
+      }
       banked = engine.tap { |o| light_and_run(o, ticks: 7200, damper: 30) }
 
       expect(headroom_pa(banked)).to be > 10_000.0,
@@ -421,7 +532,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events, peak = prime_and_slam(op)
 
-      expect(events.map { |e| e[:type] }).to include(:cylinder_failure)
+      expect(failures_of(events, :cylinder).map { |e| e[:mode] }).to include(:blown_head)
       expect(peak).to be > 1.0
       expect(op.state.fetch(:nodes).fetch(:cylinder).fetch(:failure)).not_to be_nil
     end
@@ -433,7 +544,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events, peak = prime_and_slam(op, cocks: 100)
 
-      expect(events.map { |e| e[:type] }).not_to include(:cylinder_failure)
+      expect(failures_of(events, :cylinder)).to be_empty
       expect(peak).to be < 0.5
     end
 
@@ -442,7 +553,7 @@ RSpec.describe "the steam engine" do
     # offtake and put a hard-pulling engine at a safe level into permanent carryover.
     it "leaves an engine held at a steady throttle dry, however hard it is working" do
       op = engine
-      light_and_run(op, throttle: 100, ticks: 4800)
+      light_and_run(op, throttle: 100, ticks: 4800, oiler: :crew_2)
 
       boiler = op.nodes.fetch(:boiler)
       expect(boiler.swell_fraction(op.state.fetch(:nodes).fetch(:boiler))).to be < 0.05
@@ -467,14 +578,14 @@ RSpec.describe "the steam engine" do
       events = light_and_run(op, throttle: 100, stoking: 80, load: 90, ticks: 4200,
                              shed_at: 3400)
 
-      expect(events.map { |e| e[:type] }).to include(:flywheel_burst)
+      expect(failures_of(events, :flywheel).map { |e| e[:mode] }).to include(:burst)
     end
 
     it "reports how fast it was going when it let go" do
       op = engine
       events = light_and_run(op, throttle: 100, stoking: 80, load: 90, ticks: 4200,
                              shed_at: 3400)
-      burst = events.find { |e| e[:type] == :flywheel_burst }
+      burst = failures_of(events, :flywheel).first
 
       expect(burst.fetch(:cause)).to eq(:overload)
       expect(burst.dig(:detail, :rpm)).to be > 100.0
@@ -484,9 +595,10 @@ RSpec.describe "the steam engine" do
     # take it is a legitimate way to run — hot, loud, and inside the wheel's limit.
     it "runs at full throttle indefinitely as long as the mill is taking the power" do
       op = engine
-      events = light_and_run(op, throttle: 100, stoking: 80, load: 100, ticks: 4000)
+      events = light_and_run(op, throttle: 100, stoking: 80, load: 100, ticks: 4000,
+                             oiler: :crew_2)
 
-      expect(events).to be_empty
+      expect(breakages(events)).to be_empty
       expect(rpm(op)).to be > 100.0
     end
 
@@ -498,7 +610,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events = light_and_run(op, throttle: 100, stoking: 80, load: 90, ticks: 4200,
                              shed_at: 3400)
-      expect(events.map { |e| e[:type] }).to include(:flywheel_burst)
+      expect(failures_of(events, :flywheel)).not_to be_empty
 
       600.times { |i| op.step!(tick: 4200 + i) }
       state = op.state.fetch(:nodes)
@@ -523,7 +635,7 @@ RSpec.describe "the steam engine" do
       op = engine
       events = light_and_run(op, throttle: 60, stoking: 60, load: 80, ticks: 4000)
 
-      expect(events).to be_empty
+      expect(breakages(events)).to be_empty
       expect(rpm(op)).to be > 10.0
     end
 
@@ -615,7 +727,7 @@ RSpec.describe "the steam engine" do
       op = engine(loadout: { cylinder_relief: nil })
       events = light_and_run(op, ticks: 2400)
 
-      expect(events.map { |e| e[:type] }).to include(:cylinder_failure)
+      expect(failures_of(events, :cylinder)).not_to be_empty
       expect(op.broken?).to be(true)
     end
 
@@ -783,11 +895,12 @@ RSpec.describe "the steam engine" do
     # up here as a failing expectation rather than as a quietly shifted skill gradient.
     it "leaves a manned lever frictionless, so the minion cannot yet slow it down" do
       op = engine
+      op.assign_minion(:crew_1, :stoking)
       op.set_control(:stoking, 100.0)
       op.step!(tick: 1)
       lever = op.state.fetch(:controls).fetch(:stoking)
 
-      expect(op.state.fetch(:minions).fetch(:fireman).fetch(:station)).to eq(:stoking)
+      expect(op.state.fetch(:minions).fetch(:crew_1).fetch(:station)).to eq(:stoking)
       expect(lever.fetch(:actual)).to eq(lever.fetch(:target))
     end
   end

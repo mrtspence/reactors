@@ -403,7 +403,7 @@ a good sign.
 | 5a | The blueprint registry and `unlocks`, typed by `(kind, blueprint_id)`, with a boot-time sweep that refuses an unlock naming something no registry has. `DevPlayer` owns everything. **Built 2026-09-14 — see §14, and note the sweep moved.** | Boot fails loudly on a typo'd blueprint id. Existing behaviour unchanged — everything is unlocked, so the screen looks the same. |
 | 5b | Enforcement. The outfitting screen offers only unlocked parts; fitting refuses a locked one and says so in its own panel. A dev affordance grants and revokes. **Built 2026-09-14 — see §15.** | Revoke a part, and it disappears from the dropdown *and* is refused when posted directly. `Assembly` is unchanged and still knows nothing about players. |
 | 5c | Gates, stubbed in their real shape: a bill of materials naming substances the sim knows, and an achievement prerequisite that always reports earned. **Built 2026-09-14 — see §16.** | A blueprint naming a material `content/` does not have fails the same boot sweep. |
-| 5d | Chassis, operation and minion-template blueprints on the same mechanism. **Chassis built 2026-09-14; operations have nothing to enforce yet; the minion row is NOT done and is modelling the wrong noun — see §17.** | Unlocking is one code path for all four kinds; minion templates are filtered but not yet plumbed into `options:` — that is stage 6. |
+| 5d | Chassis, operation and minion blueprints on the same mechanism. **Chassis built 2026-09-14; operations have nothing to enforce yet; minions re-pointed at individuals 2026-09-16, with `:equipment` and `:training` alongside — see §17.** | Unlocking is one code path for all six kinds; the roster is not yet plumbed into `options:` — that is the next stage of the minion work. |
 | 5e | Instruments become parts under §9's rule; `burst_pa` leaves the chassis with them. **Built 2026-09-14 — see §19.** | `CHASSIS` holds `exhausts_to`, `condenser` and `parts:` — topology and nothing else. |
 
 5a is deliberately a no-op from the player's side. The whole of it is a table, a registry sweep
@@ -456,7 +456,12 @@ Built 2026-09-14. Four departures, two of which matter.
 
 `Blueprint` (the derived catalogue), `Unlock` (the rows), `DevPlayer` (the stub owner),
 `rake blueprints:{catalogue,audit,grant_all}`, and one change inside `lib/reactor_sim`. 34
-blueprints: 1 operation, 2 chassis, 29 parts, 2 minions.
+blueprints at the time: 1 operation, 2 chassis, 29 parts, 2 minions.
+
+> A snapshot, and it has moved twice since — derive it with `rake blueprints:catalogue` rather
+> than trusting the line above. **80** as of 2026-09-16: 1 operation, 2 chassis, 35 parts,
+> 3 minions, 27 equipment and 12 training, the last two being the cross product of the kit
+> catalogue with the hireable roster.
 
 ### The boot sweep moved, and the reason is that it was guarding the wrong thing
 
@@ -721,11 +726,25 @@ Three consequences this sketch had not allowed for:
 - **A pre-match screen** to assign minions, swap their equipment, and post them to starting roles
   before commencing.
 
-**What was built is left in place and marked.** The mechanism is right — minions *are* unlockable
-— and the entities are not. Nothing enforces minion ownership, so the wrong model cannot mislead
-a player today; `Blueprint.minions` says plainly that it enumerates jobs and that nothing should
-be built on it. Stage 5d's minion row is **not** done, and re-pointing it at individuals is part
-of the minion work rather than a tidy-up.
+**Fixed 2026-09-16.** The catalogue enumerates individuals — Jim Ashfield, Elowynne, Galathas —
+and `content/` is split in two: `archetypes/` holds kinds of person and `minions/` holds people.
+`Blueprint::KINDS` gained `:equipment` and `:training`, both **scoped per minion**
+(`jim/leather_apron`) by the same compound-id mechanism a chassis already used, so per-minion
+ownership needed no migration to `unlocks`. A minion's sheet is four layers — archetype,
+individual, training, equipment — each offsetting the last.
+
+Two things this section did not anticipate, both found on the way:
+
+- **The price is the item's, not the pairing's.** Pricing every (minion × item) combination meant
+  39 identical lines in `config/blueprints.yml` today and a fresh one whenever anybody hires a
+  minion — the inventory list that drifts silently. `Blueprint.build(priced_as:)` looks the bill
+  up by the bare id, so an apron costs what an apron costs.
+- **The last-resort standin is an individual too, and must never be for sale.** It lives in
+  content like anybody else with `hireable: false`, which keeps one resolution path through the
+  stat arithmetic rather than a constant the engine has to fold differently. Everything deriving
+  a catalogue reads `Content.hireable`, never `Content.minions`.
+
+The full model is in [`minions.md`](minions.md).
 
 The sketch also flags what comes after: **minion position and transit**, probably the next thing
 after this modularisation pass. Injuries depend on where somebody is standing relative to a

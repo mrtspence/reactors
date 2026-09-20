@@ -51,8 +51,21 @@ extent          = limiting_reagent · (1 − e^(−rate_per_s · dt))   # reacti
 **One solver, three quantities** — heat capacity ↔ moment of inertia ↔ `dn/dP`, temperature ↔
 angular velocity ↔ pressure. Heat conserves **energy** exactly; gas conserves **mass**
 exactly; rotation conserves **momentum** exactly and kinetic energy deliberately not — a
-slipping coupling loses energy, and `Tick#drive` measures the difference and ledgers it as
-`joules_to_friction`.
+slipping coupling and a brake both take energy out, and `Tick#drive` measures the difference,
+splitting it between `joules_to_work` and `joules_to_friction`.
+
+`drags:` is the fourth argument that matters: `{ node_id => conductance }`, a coupling to a
+reservoir at potential zero, so it adds to the diagonal and nothing to `b`. **A drag has to be
+solved with the network rather than applied after it** — composing two exact integrations is
+still first-order splitting, and it left a fan-law mill at 8.5 rad/s against a true equilibrium
+of 19.6 while the coupling above it burned 39% of shaft power. In the solve: 85% mechanical
+efficiency. Halving `dt` halved the gap, which is how a split announces itself.
+
+> **Measure the total, estimate only the split.** Kinetic energy is quadratic, so no intermediate
+> state between two settled ticks means anything: applying the couplings, measuring, then the
+> drags charges each for a state the machine was never in. That inflated a mill's output past its
+> own engine's and drove `joules_to_friction` **negative** while the totals still balanced — so
+> the conservation specs stayed green throughout.
 
 > **The pairwise closed form was not enough and its replacement was worse.** Per-coupling
 > exactness does not compose in a network, and it cannot express flow *through* a body — so
@@ -85,12 +98,12 @@ saturation temperature, which condenses it all again — makes a vessel flip bet
 
 - The split is decided by **total enthalpy**, not temperature. That is what makes the
   two-phase plateau work.
-- The inner loop runs on **captured locals only**. Building parcels inside it was 64% of a
+- The inner loop runs on **captured locals only**. Building parcels inside it costs 64% of a
   hundred-node tick.
 - `ITERATIONS = 20` is the first dial to turn if a large operation must be cheaper. The
   solve is currently ~50% of a 100-node step.
-- Phase pairs are indexed **from both sides** — a condenser holding only vapour has no liquid
-  parcel to discover the pair from, and used to never condense.
+- Phase pairs are indexed **from both sides** — indexed one way only, a condenser holding only
+  vapour has no liquid parcel to discover the pair from and never condenses.
 
 **Non-condensables are handled, and the way they are handled looks like a bug until you check
 it.** The pair is solved against its own **partial** pressure — which is what vapour–liquid

@@ -96,27 +96,49 @@ Give the two things that will kill the player the best instruments — and even 
 
 ## Crew
 
+**Jobs come from the machine; hands come from the player, and the gap between them is the game.**
+
 ```ruby
-Minion.new(id: :fireman, archetype: :fireman, station: :stoking)
+stations = control_points.select(&:effort?)   # what needs doing — DERIVED, never declared
+assembly.crew_capacity                        # what you can bring — from the fitted quarters
 ```
 
-The archetype names an entry in `content/minions/`; `station:` is the lever they start at.
-Where they *are* lives in `state[:minions]`, because assignment is a command
-(`assign_minion`, absolute and idempotent like `set_control`).
+Your operation declares **no roles at all**. It declares a slot that accepts `:crew_quarters`,
+and the part fitted there says how many seats there are and where they start:
 
-Three things to know:
+```ruby
+Slot.new(id: :quarters, accepts: :crew_quarters, label: "Crew Quarters",
+         required: true, default: :mess_room)
 
-- **Ids are one flat namespace** with nodes, control points and diagnostics, because they key
-  one RNG table. `validate_graph!` refuses a duplicate. The natural name for a steam engine's
-  fireman is `stoker` — which is already the conduit feeding the firebox, so it is `:fireman`.
-- **A crew only matters if a lever has finite `stiffness`.** The default is
-  `Float::INFINITY`, which snaps `actual` to `target` and discards the minion's rate entirely.
-  Giving a work station a finite stiffness is what makes minion condition felt — and it shifts
-  the machine's skill gradient, so re-measure it.
-- **A fixed roster stays out of `options:`**, because it is rebuilt from code like the node
-  list. The moment a crew can be hired, injured or dismissed it must move into `options:`, or
-  a restored snapshot rebuilds a different crew — the same trap `chassis:` and `loadout:` are
-  there to avoid. A crew is a loadout by another name, and will become one.
+Parts.register(:mess_room, kind: :crew_quarters, label: "Mess Room",
+               stats: { crew_capacity: 2, recovery_rate: 2.0 }) do |_spec|
+  Fragment.new(control_points: [ ControlPoint.new(id: :quarters, label: "Crew Quarters",
+                                                  recovery: Fatigue::BASE_RECOVERY * 2.0) ])
+end
+```
+
+`Crew.seats(capacity)` then gives `[:crew_1, :crew_2]`, and `Assembly#crew_origin` gives the
+station they all start at. Where they *are* lives in `state[:minions]`, because assignment is a
+command (`assign_minion`, absolute and idempotent like `set_control`).
+
+Five things to know:
+
+- **Nobody starts at a working station, and it has to stay that way.** A machine that lets an
+  effort station be a starting post hands the player a shift already at the face for free — which
+  for a mine is most of the operation given away. Deploying the shift is the opening move.
+- **A crew quarters builds no node.** It is a *place*, and a place is a `ControlPoint` with no
+  `node:` — `ControlPoint#lever?` is what keeps it off the lever strip while leaving it on the
+  crew screen. Do **not** write `provides: %i[quarters]`: `provides:` names NODE ids, and node,
+  lever, instrument and minion ids share one namespace, so that is a duplicate-id build error.
+- **Ids are one flat namespace** with nodes, control points and diagnostics, because they key one
+  RNG table. `validate_graph!` refuses a duplicate. Seats are `crew_1`, `crew_2` precisely so
+  they cannot collide with machinery — the natural name for a steam engine's fireman is `stoker`,
+  which is already the conduit feeding the firebox.
+- **An unmanned effort station delivers nothing**, and so does one manned by somebody spent —
+  `capability` reaches exactly zero at `fatigue` 1.0. Neither is wired; both simply follow.
+- **The roster rides in `options:`**, like the loadout, or a restored snapshot rebuilds a
+  different crew. A roster naming more seats than the fitted quarters has is **refused**, never
+  truncated.
 
 ---
 

@@ -28,46 +28,30 @@ module ReactorSim
   #     Inflow and outflow are settled simultaneously, so a firebox with a damper at one end
   #     and a chimney at the other passes a steady draught while its pressure barely moves.
   #
-  # ## Why this replaced a pairwise closed form and a limiter
-  #
-  # Heat and rotation used to use the exact two-body solution per coupling; mass could not,
-  # because that form caps a transfer at what would equalise the pair, and a through-flow has
-  # nothing to do with the amount that would equalise anything. So mass used the linear law
-  # `k·ΔP·dt` — which is explicit Euler, and therefore stable only while `dt < τ`.
-  #
-  # **Every gas coupling in the steam engine ran 400–600× past that limit.** A firebox holds
-  # 9.8e-4 mol/Pa against a damper conductance of 1.7 mol/(Pa·s), so τ = 0.58 ms against a
-  # 250 ms tick. What kept it from exploding was a per-node bound, and the bound was itself
-  # wrong: it capped a sender at the amount that would bring it to the receiver's *current*
-  # potential, ignoring that the receiver rises as it fills. For two equal bodies that
-  # overshoots by exactly 2× and **swaps them**.
-  #
-  # Measured, on two 2 m³ vessels holding 6 kg and 1 kg of air joined by one pipe:
+  # **A pairwise closed form is not enough, and an explicit law with a limiter is worse.** The
+  # exact two-body solution caps a transfer at what would equalise the pair, which cannot express
+  # a through-flow at all. The linear law `k·ΔP·dt` is explicit Euler, stable only while
+  # `dt < τ` — and gas couplings routinely run hundreds of times past that, a firebox holding
+  # 9.8e-4 mol/Pa against a conductance of 1.7 mol/(Pa·s) giving τ = 0.58 ms against a 250 ms
+  # tick. A per-node bound standing in for stability is wrong in its own right: capping a sender
+  # at what brings it to the receiver's *current* potential ignores the receiver rising as it
+  # fills, which for two equal bodies overshoots by exactly 2× and **swaps them**:
   #
   #     k = 0.001  (dt/τ = 0.6)    both settle to 147 287 Pa    correct
   #     k = 0.01   (dt/τ = 6)      42 082 Pa and 252 492 Pa     swapped, forever
   #     k = 0.1    (dt/τ = 61)     42 082 Pa and 252 492 Pa     swapped, forever
   #     k = 1.0    (dt/τ = 610)    42 082 Pa and 252 492 Pa     swapped, forever
   #
-  # The engine survived only because every gas coupling in it has `Atmosphere` on one end,
-  # whose capacity is ~10⁸× a vessel's, so the receiver never rises and the 2× error vanishes.
-  # In the firebox the damage showed up instead as a relaxation oscillation: the flue asked
-  # for 1972 mol and the bound granted 1.8, the fire's heat output swung by a factor of 5.9
-  # every few ticks, and doubling the draught conductance *cut engine power to a fifth*.
-  # `Ignition::OXIDISER_MEMORY_PER_S` and the averaging filters on the power gauges were both
-  # written to hide this.
+  # A network with `Atmosphere` on one end of every coupling hides this, because its capacity is
+  # ~10⁸× a vessel's so the receiver never rises. Inside a firebox it shows up instead as a
+  # relaxation oscillation, with the fire's heat output swinging by a factor of 5.9 every few
+  # ticks and *more* draught conductance cutting engine power.
   #
-  # ## What the implicit form costs
-  #
-  # Backward Euler is first order where the pairwise form was exact, so a coupling relaxes
-  # slightly slower than the true exponential over a single step: it moves `x/(1+x)` of the
-  # way where the exact answer is `1 − e⁻ˣ`, for `x = dt/τ`. Both converge on the same
-  # equilibrium and neither can pass it. At heat's `dt/τ ≈ 0.008` the difference is 0.4% of
-  # one step's transfer and invisible; at a stiff drive coupling it is a fraction of a tick of
-  # extra compliance, which is a tuning number rather than a behaviour.
-  #
-  # Exactness for one isolated pair is not worth reintroducing a scheme that is wrong for a
-  # network, which is what everything in this engine actually is.
+  # **What the implicit form costs** is first-order accuracy where the pairwise form was exact: a
+  # coupling closes `x/(1+x)` of the gap where the exponential closes `1 − e⁻ˣ`. Both converge on
+  # the same equilibrium and neither can pass it. At heat's `dt/τ ≈ 0.008` that is 0.4% of one
+  # step's transfer; on a stiff drive coupling it is a fraction of a tick of extra compliance.
+  # Exactness for one isolated pair is not worth a scheme that is wrong for a network.
   module Relaxation
     EPSILON = 1e-12
 
@@ -93,20 +77,40 @@ module ReactorSim
     # `limits` is optional: `{ link_id => [low, high] }`, the most this coupling may carry in
     # each direction over the step, in the transfer's own units. A check valve is `[0, high]`.
     #
-    # **A limit is a constraint on the solve, not a clamp applied after it.** Clamping
-    # afterwards leaves every other coupling settled against a transfer that did not happen,
-    # and the error lands on whatever node sits between them: capping the flue after the fact
-    # let a firebox be pumped down to 25 kPa, because the damper had been solved against an
-    # exhaust flow four times larger than the one that was allowed to cross. Pinning the
-    # coupling and re-solving gives the pressures the network actually reaches, and the
-    # firebox settles a few hundred pascals below ambient with the damper choking it — which
-    # is what a damper is for.
-    def settle(links, capacities, potentials, dt, heads = nil, limits = nil)
-      return {} if links.empty?
+    # **A limit is a constraint on the solve, not a clamp applied after it.** Clamping afterwards
+    # leaves every other coupling settled against a transfer that did not happen, and the error
+    # lands on whatever node sits between them — capping a flue after the fact pumps a firebox
+    # down to 25 kPa, because the damper was solved against an exhaust flow four times larger
+    # than the one allowed to cross. Pinning the coupling and re-solving gives the pressures the
+    # network actually reaches.
+    # `drags` is optional: `{ node_id => conductance }`, a coupling from that body to a fixed
+    # reservoir **at potential zero** — a brake, bearing drag, windage. It adds conductance to
+    # the diagonal and nothing to the right-hand side, which is what a zero-potential sink is.
+    # Its transfers come back keyed `:"#{node_id}=ground"`, in the same shape as a coupling's.
+    #
+    # **A drag has to be solved WITH the network, not applied after it.** Solving each exactly
+    # and then composing them is Lie–Trotter splitting, first order in `dt`, and the error is
+    # large exactly when the drag is stiff: a fan-law mill whose brake time constant is 0.18 s
+    # against a 250 ms tick settled at **8.5 rad/s against a true equilibrium of 19.6**, and the
+    # coupling above it then slipped 65% and burned 39% of shaft power. Halving `dt` halved the
+    # gap, which is the signature. See `docs/design_sketches/bearings.md` §1.1.
+    def settle(links, capacities, potentials, dt, heads = nil, limits = nil, drags = nil)
+      drags = nil if drags.nil? || drags.empty?
+      return {} if links.empty? && drags.nil?
 
-      components(links).each_with_object({}) do |group, acc|
-        acc.merge!(solve_component(group, capacities, potentials, dt, heads, limits))
+      groups = components(links).map { |group| [ group, group.flat_map { |l| [ l.a, l.b ] }.uniq ] }
+      groups.concat(uncoupled(groups, drags)) if drags
+
+      groups.each_with_object({}) do |(group, ids), acc|
+        acc.merge!(solve_component(group, ids, capacities, potentials, dt, heads, limits, drags))
       end.freeze
+    end
+
+    # A body dragged against a reservoir but coupled to nothing is still a network — a
+    # one-node one — and skipping it would leave a free-spinning shaft with no bearings at all.
+    def uncoupled(groups, drags)
+      coupled = groups.flat_map { |(_, ids)| ids }
+      (drags.keys - coupled).map { |id| [ [], [ id ] ] }
     end
 
     def head(heads, link) = heads ? heads.fetch(link.id, 0.0) : 0.0
@@ -150,8 +154,7 @@ module ReactorSim
       groups.compact
     end
 
-    def solve_component(links, capacities, potentials, dt, heads, limits)
-      ids = links.flat_map { |link| [ link.a, link.b ] }.uniq
+    def solve_component(links, ids, capacities, potentials, dt, heads, limits, drags = nil)
       # link_id => the transfer it has been pinned to. A coupling at its choke carries a
       # fixed amount and contributes no conductance, exactly like a current source.
       pinned = {}
@@ -165,9 +168,10 @@ module ReactorSim
       # cannot chatter between pinned and free.
       released = {}
       transfers = nil
+      settled = nil
 
       (limits ? MAX_CONSTRAINT_PASSES : 1).times do
-        settled = settled_potentials(links, ids, capacities, potentials, dt, heads, pinned)
+        settled = settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags)
         free = links.to_h { |link| [ link.id, free_transfer(link, settled, heads, dt) ] }
 
         transfers = links.to_h do |link|
@@ -200,7 +204,18 @@ module ReactorSim
         break if breached.empty? && loosened.empty?
       end
 
-      transfers
+      drags ? transfers.merge(ground_transfers(ids, settled, drags, dt)) : transfers
+    end
+
+    # What each drag pulled out against the reservoir, at the potential the network settled to.
+    # Keyed `node=ground` so it cannot collide with a coupling's own `a=b` id.
+    def ground_transfers(ids, settled, drags, dt)
+      ids.each_with_object({}) do |id, acc|
+        conductance = drags.fetch(id, 0.0)
+        next unless conductance.positive?
+
+        acc[:"#{id}=ground"] = conductance * settled.fetch(id) * dt
+      end
     end
 
     def free_transfer(link, settled, heads, dt)
@@ -210,7 +225,7 @@ module ReactorSim
     # Assemble `(C/dt + K)·p′ = (C/dt)·p + b` and solve it. `K` is the conductance Laplacian:
     # symmetric, and diagonally dominant because every off-diagonal entry is subtracted from
     # the diagonal it came from.
-    def settled_potentials(links, ids, capacities, potentials, dt, heads, pinned)
+    def settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags = nil)
       n = ids.length
       index = ids.each_with_index.to_h
       matrix = Array.new(n) { Array.new(n, 0.0) }
@@ -218,7 +233,10 @@ module ReactorSim
 
       ids.each_with_index do |id, i|
         stiffness = capacities.fetch(id, 0.0) / dt
-        matrix[i][i] = stiffness
+        # A drag is a coupling whose far end is a reservoir at potential zero, so it adds
+        # conductance to the diagonal and contributes nothing to the right-hand side. That is
+        # the whole of it — the same Laplacian, with one row's sum no longer cancelling.
+        matrix[i][i] = stiffness + (drags ? drags.fetch(id, 0.0) : 0.0)
         rhs[i] = stiffness * potentials.fetch(id)
       end
 

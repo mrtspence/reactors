@@ -6,6 +6,13 @@ require "reactor_sim"
 # and an unbalanced reaction quietly creates matter every time it fires. Validation is
 # eager and loud for exactly that reason — a bad content file should never reach a tick.
 RSpec.describe ReactorSim::Content do
+  # A complete archetype, so a spec about one thing does not have to spell out six stats it
+  # does not care about. Every one of them is required, deliberately — see `STATS`.
+  def human
+    { label: "Human", strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
+      dexterity: 1.0, charisma: 1.0 }
+  end
+
   describe "validation" do
     it "rejects a resource missing its physical properties" do
       expect {
@@ -59,17 +66,77 @@ RSpec.describe ReactorSim::Content do
       expect { registry.resource(:nope) }.to raise_error(ReactorSim::Error, /unknown resource/)
     end
 
-    it "rejects a minion archetype with no strength to work a lever with" do
+    it "rejects an archetype missing any of the six stats" do
       expect {
-        described_class.build(minions: { idler: { label: "Idler" } })
-      }.to raise_error(ReactorSim::Error, /idler: missing strength/)
+        described_class.build(archetypes: { idler: { label: "Idler", strength: 1.0 } })
+      }.to raise_error(ReactorSim::Error, /idler: missing toughness/)
     end
 
-    it "raises on an unknown minion archetype rather than returning nil" do
-      registry = described_class.build(minions: {})
+    it "raises on an unknown archetype rather than returning nil" do
+      registry = described_class.build(archetypes: {})
 
-      expect { registry.minion_archetype(:nope) }
-        .to raise_error(ReactorSim::Error, /unknown minion archetype/)
+      expect { registry.archetype(:nope) }
+        .to raise_error(ReactorSim::Error, /unknown archetype/)
+    end
+
+    # An individual naming a race that does not exist is a person with no stats at all, and the
+    # failure would otherwise surface as a KeyError from inside the stat arithmetic, at the
+    # moment somebody tried to work a lever with them.
+    it "rejects a minion whose archetype does not exist" do
+      expect {
+        described_class.build(minions: { nobody: { name: "Nobody", archetype: :ghost } })
+      }.to raise_error(ReactorSim::Error, /nobody: unknown archetype :ghost/)
+    end
+
+    it "rejects a minion with no name, which is all that separates one from an archetype" do
+      expect {
+        described_class.build(archetypes: { human: human }, minions: { jim: { archetype: :human } })
+      }.to raise_error(ReactorSim::Error, /jim: missing name/)
+    end
+  end
+
+  # Layers one and two of the four. Training and equipment are the delivery tier's, because they
+  # are things a player OWNS — see docs/design_sketches/minions.md §2.
+  describe "a minion's sheet" do
+    let(:registry) do
+      described_class.build(
+        archetypes: { elf: human.merge(label: "Elf", strength: 0.75, dexterity: 1.2,
+                                       tags: { darkvision: 0.3, clumsy: 0.1 }) },
+        minions: { quick: { name: "Quick", archetype: :elf, stats: { dexterity: 0.15 },
+                            tags: { keen_eyed: 0.25 } },
+                   heavy: { name: "Heavy", archetype: :elf, stats: { strength: 0.35 },
+                            tags: { darkvision: 0.2, clumsy: true } } }
+      )
+    end
+
+    it "folds the race's baseline with the individual's own offsets" do
+      expect(registry.sheet(:quick)[:stats][:dexterity]).to be_within(1e-9).of(1.35)
+      expect(registry.sheet(:heavy)[:stats][:strength]).to be_within(1e-9).of(1.1)
+    end
+
+    it "leaves a stat the individual says nothing about at the race's figure" do
+      expect(registry.sheet(:quick)[:stats][:strength]).to be_within(1e-9).of(0.75)
+    end
+
+    # **Two members of the same race are not the same worker**, which is the entire reason the
+    # individual layer exists. Galathas is strong for an elf and heavy-handed with it.
+    it "separates two individuals of one race" do
+      quick = registry.sheet(:quick)[:stats]
+      heavy = registry.sheet(:heavy)[:stats]
+
+      expect(heavy[:strength]).to be > quick[:strength]
+      expect(heavy[:dexterity]).to be < quick[:dexterity]
+    end
+
+    it "adds tag values from both layers and keeps the ones only one layer has" do
+      expect(registry.sheet(:heavy)[:tags][:darkvision]).to be_within(1e-9).of(0.5)
+      expect(registry.sheet(:quick)[:tags]).to include(darkvision: 0.3, keen_eyed: 0.25)
+    end
+
+    # `true` means a trait is simply present. Adding to it would be nonsense, so it wins outright
+    # rather than being coerced into arithmetic.
+    it "lets a present-or-absent tag win over a numeric one rather than summing them" do
+      expect(registry.sheet(:heavy)[:tags][:clumsy]).to be(true)
     end
   end
 

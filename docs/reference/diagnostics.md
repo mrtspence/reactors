@@ -174,13 +174,46 @@ op.panel                                          #=> instrument + lever chrome,
 ```
 
 ```ruby
-PlayerView(tick:, operation_id:, viewer:, gauges:, flags:, controls:, incidents:)
+PlayerView(tick:, operation_id:, viewer:, gauges:, flags:, controls:, incidents:, crew:)
   #.delta_from(previous)  # only what changed — what goes over the wire each tick
   #.unchanged_from?(previous)
 ```
 
 `controls` reports `{ target:, actual: }` per lever, so a client can show a valve that is
 still travelling.
+
+`crew` reports `{ station:, injury: }` per minion — **only what changes.** A minion's name, job
+and race are configuration and reach the client once with the panel; where they are standing and
+what has happened to them are state.
+
+It exists because the console's crew dropdown could *send* an assignment with no source of truth
+to display one, so it rendered at its first option whatever the real posting was, and a
+reassignment, a reset or a restore was never reflected back. **A station's output now depends on
+who is at it**, which makes this load-bearing rather than chrome: an effort lever that does
+nothing because nobody is manning it is indistinguishable from a broken machine unless the panel
+can say so.
+
+### `incidents` are appended, not merged
+
+Everything else in a view is *state* and merges; incidents are a **record of what happened on
+one tick**. The simulation replaces its event list every tick, so a client that assigns rather
+than appends loses the entry one tick after it appears.
+
+A failure event carries more than the fact of it, and the panel is expected to use all of it:
+
+| Field | What it is for |
+|---|---|
+| `mode` | **what the part became** — `explosion`, `blown_head`, `scored_bore`. The headline |
+| `cause` | `:fatigue` or `:overload` — the post-mortem, not the lead |
+| `severity` | `:critical` or `:warning`, and they must not look alike |
+| `escalated_from` | present only when the part was already broken and got worse |
+| `damaged` | node ids this failure took with it, or absent |
+| `detail` | per-part forensics: rpm at burst, occupancy, pressure |
+
+**Lead with `mode`, not `cause`.** What a part became decides what the operator does next; what
+broke it is history. The console led with the cause for a while and buried the one fact that
+mattered. And a fusible plug doing its job must not read like a boiler letting go — those are a
+ruined day against a ruined engine, and `severity` is what separates them.
 
 Spectators get `truth` (undistorted, transforms applied) and no instrument flags — they have
 no instrument.
@@ -191,10 +224,10 @@ An instrument with nothing to say has **no key** in `flags` — `project` only w
 the list is non-empty. That makes the map cheap, and it makes one thing easy to get wrong.
 
 Rejecting unchanged entries is not sufficient on its own, because `reject` iterates the
-*current* flags and an instrument whose flags cleared is no longer among them. The clear was
-therefore never mentioned, and a client merging deltas went on showing `:pegged_high` forever
-after a single pressure excursion. `:warming_up` was worse: every lagged gauge raises it for
-its first few ticks, so a fresh panel lit up with warnings that could never be retracted.
+*current* flags and an instrument whose flags cleared is not among them. The clear then never
+gets mentioned, and a client merging deltas goes on showing `:pegged_high` forever after a single
+pressure excursion. `:warming_up` is worse: every lagged gauge raises it for its first few ticks,
+so a fresh panel lights up with warnings that can never be retracted.
 
 `delta_from` emits an **explicit empty list** for an instrument that fell silent, so a merge
 clears it. `unchanged_from?` reads the same path, which is what stops the runner skipping a
@@ -223,9 +256,9 @@ to diff flags itself.
 
 ## When the gauge is itself a part
 
-Most instruments belong to a machine part: the water glass arrives with the boiler, the wheel
-stress gauge with the flywheel. Those name gauge ids and the panel holds the definitions, which
-is what keeps the reasoning about how each one lies in one readable file.
+Most instruments belong to a machine part: the wheel stress gauge arrives with the flywheel, the
+crown sheet with the boiler. Those name gauge ids and the panel holds the definitions, which is
+what keeps the reasoning about how each one lies in one readable file.
 
 **A gauge that is a separate object gets to be a part.** The boiler pressure gauge is a brass
 instrument screwed to the drum, and its full-scale reading is a property of *it* — a 0–14 atm
@@ -236,10 +269,41 @@ and the part passes it figures.
 
 > **An instrument upgrade may reduce a filter. It may never remove a class of one.** Less lag,
 > less noise, a finer band — never zero lag, and never a number where the design chose prose.
-> Three gauges on the steam engine are exempt outright: `safety_valve`, which is *true* by design
-> because the player is not reading a dial at all, and `crown_sheet` and `flywheel_condition`,
-> whose vagueness **is** the hazard they name.
+> Four gauges on the steam engine are exempt outright: `safety_valve`, which is *true* by design
+> because the player is not reading a dial at all, and `crown_sheet`, `flywheel_condition` and
+> `bearing_condition`, whose vagueness **is** the hazard they name. The last is what a bearing was
+> actually judged by — crews felt the boxes and smelled them — so it is a report, not a reading.
 >
 > The reason is the whole premise of this file: the instruments are not an obstacle between the
 > player and the game, they *are* the game. A panel that can be bought into telling the truth has
 > sold the only thing it was protecting.
+
+The steam engine has two instrument slots — `:boiler_gauge` and `:water_glass` — and both are
+**optional**, which is the same bargain the safety devices offer applied to what a driver can
+*see* rather than to what can break. The water gauge is the sharper of the two: the crown sheet
+is what destroys that boiler and the glass is the only notice of it.
+
+A downgrade is a filter **added**, not a bigger number in an existing one. Try-cocks are taps at
+fixed heights — a `Quantize` on top of the usual three — which is a different instrument rather
+than a worse glass, and historically exact, since cocks predate the glass and many boilers
+carried both.
+
+### Measure an instrument tier against a running engine, or ship a placebo
+
+Both water-gauge tiers were wrong on the first pass, and both looked fine until measured:
+
+- **Try-cocks at 25% steps never moved at all.** Over 1400 ticks of a level swinging 44% → 56%,
+  the whole working band sat inside one step: not a coarse gauge, an absent one. 10% steps read
+  in visible jumps and still carry a trend.
+- **A reflex glass over a ±1.2% plain glass is a placebo.** It cuts noise three-fold and no
+  player can tell, because the display reads **whole percent** and ±1.2% is already smaller than
+  one unit of what is shown. The plain glass sits at ±2.5% so there is something for an upgrade
+  to improve on.
+
+> **A filter finer than the display's precision does not exist.** Check a proposed tier against
+> `Displays::Needle`'s `precision:` before believing it changes anything.
+
+Measured mean error against the spectator's truth, level moving: try-cocks 3.3%, gauge glass
+0.8%, reflex glass 0.3%. Note the *maximum* error stays near 10–17% on all three — that is
+**lag** during a fast change, which no tier removes, so the swell trap survives every upgrade.
+`spec/reactor_sim/diagnostic_spec.rb` asserts the ordering and never the figures.

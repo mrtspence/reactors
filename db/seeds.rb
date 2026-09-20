@@ -9,4 +9,9 @@
 # starts taking things away. See `docs/design_sketches/blueprints.md` §11.
 DevPlayer.grant_everything!
 
+# **The machines, and who owns them.** Idempotent and never touches an existing `owner_id`, so
+# re-seeding cannot transfer a machine out from under whoever holds it.
+DevMatch.provision!
+
 Rails.logger.debug { "seeded #{DevPlayer.unlocks.count} unlocks for #{DevPlayer::ID}" }
+Rails.logger.debug { "provisioned #{Operation.in_match(DevMatch::ID).count} operations" }

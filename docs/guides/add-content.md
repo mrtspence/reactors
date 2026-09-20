@@ -6,9 +6,10 @@ disk, and only once, never during a tick.
 
 ```
 content/
-  resources/   water.yml, combustion.yml, materials.yml
-  reactions/   combustion.yml
-  minions/     crew.yml
+  resources/    water.yml, combustion.yml, materials.yml
+  reactions/    combustion.yml
+  archetypes/   races.yml     — kinds of person
+  minions/      crew.yml      — the people themselves
 ```
 
 Every `*.yml` in a folder is loaded and merged, so file names are organisational only.
@@ -46,7 +47,7 @@ grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n'
 ```
 
 In use at the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`,
-`metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+`lubricant`, `metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 A tag is a vocabulary shared between the content files and every port that filters on one, so
 **introducing a tag means updating this list in the same commit**. An undocumented tag is a
@@ -183,26 +184,66 @@ at all — the boiler drains heat faster than any plausible firelighter supplies
 
 ---
 
-## A minion archetype
+## An archetype, and an individual
+
+**A minion is a person; an archetype is what kind of person they are.** One table held both for a
+release, under the names `fireman` and `yardhand` — which are *jobs an operation asks for*, not
+kinds of person. The same person can do either, which is what made it the wrong noun.
 
 ```yaml
-fireman:
-  label: Fireman
-  strength: 1.0        # required
-  tags: [ practised ]
+# content/archetypes/races.yml — layer one, the baseline for everyone of that race
+elf:
+  label: Elf
+  strength: 0.75       # all six stats are required
+  toughness: 0.7
+  endurance: 0.85
+  intelligence: 1.25
+  dexterity: 1.2
+  charisma: 1.1
+  tags:
+    darkvision: 0.3
+
+# content/minions/crew.yml — layer two, who they are, written as OFFSETS
+galathas:
+  name: Galathas        # required — a name is what separates a person from a race
+  archetype: elf        # required, and checked at boot
+  stats:
+    strength: 0.35      # strong for an elf…
+    dexterity: -0.25    # …and heavy-handed with it
+  tags:
+    clumsy: 0.2
 ```
 
-`strength` is what a minion brings to a lever. A control point travels at
-`stiffness × strength × health × (1 − fatigue)`, so the archetype sets the ceiling and the
-minion's condition erodes it.
+Omit a stat to take the race's figure unchanged; omit `stats:` entirely for somebody unremarkable.
 
-**Health and fatigue are state, not archetype.** They change during a match and live in
-`state[:minions]`; strength does not and lives here. Getting that backwards would make a
-worn-out minion recover on restore.
+There are four layers — **archetype → individual → training → equipment** — and each offsets the
+last. Only the first two are content: training and equipment are things a player *owns*, and the
+simulation is not allowed to know what a player is. `Content::Registry#sheet(id)` returns the first
+two already folded.
 
-Only the actuation path is modelled. Intelligence (which would drive the gauge-reading path
-through a diagnostic's `observer:`), skills, and tags like `undead` / `covetous` / `licensed`
-are designed but not built — see `docs/simulation_architecture.md` §7.
+Rules worth knowing before you add one:
+
+- **The six stats are fixed and every archetype declares all of them.** The engine reads them and
+  needs a number rather than an absence. `strength` drives actuation, `toughness` drives the
+  Danger Check, `endurance` divides fatigue accrual; the other three are declared and read by
+  nothing yet.
+- **`endurance` is resistance to tiring, 1.0 for a human by definition**, and it is separate from
+  `strength` on purpose: what a worker gets done and what it costs them are different claims.
+  Equipment may carry a negative offset, which is how bulky kit says *"this tires me"*.
+- **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
+  things are two different statements about one person, and a steady-handed worker who knocks
+  things over is a real person.
+- **Minion tags are a MAP, not a list.** Resource tags are flat — a thing is `:liquid` or is not —
+  but "how well can you see in the dark" has a number for an answer. Write `true` for a trait that
+  is simply present.
+- **Values add across layers and are then clamped; consumers multiply what they read.** Merge
+  adds, use multiplies. Getting this the other way round makes every piece of kit a rounding error.
+- **Health, fatigue, station and injury are state, not content.** They change during a match and
+  live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion recovers on
+  restore.
+
+The gauge-reading path (a diagnostic's `observer:`) is reserved and read by nothing — see
+`docs/simulation_architecture.md` §7.
 
 ---
 

@@ -1,22 +1,85 @@
-# Minion archetypes. Data rather than code, for the same reason substances are: rebalancing a
-# crew should be a diff, not a migration (docs/architecture.md §5).
+# The individuals a player can hire. **This is the noun that was wrong for a release.**
 #
-# `strength` is what a minion brings to a lever. The rate a control point actually travels at
-# is `stiffness × strength × health × (1 − fatigue)`, so an archetype sets the ceiling and the
-# minion's condition erodes it (docs/simulation_architecture.md §7).
+# This file used to hold `fireman` and `yardhand` — jobs, not people. What a player unlocks is
+# Jim, who is a human with a bad back and twenty years on a shovel, or Elowynne, who is an elf
+# and reads a gauge glass better than she shifts coal. The job is a crew slot the operation asks
+# for; who fills it is this file, and the same person can fill either.
 #
-# TODO: expedient — only `strength` is modelled, because only the actuation path exists.
-# The design also calls for intelligence (which drives the gauge-reading path via a
-# diagnostic's `observer:`), skills, and tags like `undead` / `covetous` / `licensed`.
-# A proper implementation needs those, plus what makes fatigue accrue and health decline —
-# nothing advances either today, so a minion never tires.
+# ## Layer two of four
+#
+# `content/archetypes/` is the baseline; everything here is an **offset** on the race named in
+# `archetype:`, and training and equipment offset it further. So two elves are not the same
+# worker, which is the whole reason this layer exists: Elowynne is quick and observant where
+# Galathas is unusually strong for an elf and clumsier with it.
+#
+# Omit a stat to take the race's figure unchanged. `stats:` may be omitted entirely.
+#
+# ## What goes here and what does not
+#
+#   name:       what a panel calls them. Required — an individual without one is an archetype.
+#   archetype:  their race, from content/archetypes/. Required, and checked at boot.
+#   stats:      offsets, added to the race's
+#   tags:       their own traits, added to the race's
+#   hireable:   false for somebody who exists but cannot be unlocked. Defaults true.
+#
+# **No health, no fatigue, no injury, no equipment.** Those are either match state, minted fresh
+# and dying with the match, or they are things a player owns — and ownership is not something
+# the simulation is allowed to know about. See docs/design_sketches/minions.md §2.
 
-fireman:
-  label: Fireman
-  strength: 1.0
-  tags: [ practised ]
+jim:
+  name: Jim Ashfield
+  archetype: human
+  stats:
+    strength: 0.15
+    dexterity: -0.1
+  tags:
+    practised: true
+    heat_hardened: 0.2
 
-yardhand:
-  label: Yardhand
-  strength: 0.7
-  tags: [ green ]
+elowynne:
+  name: Elowynne
+  archetype: elf
+  stats:
+    intelligence: 0.1
+    dexterity: 0.15
+  tags:
+    keen_eyed: 0.25
+
+# The counter-example, and the reason the individual layer exists at all: another elf, and not
+# remotely the same worker as Elowynne. Strong for an elf, and heavy-handed with it.
+galathas:
+  name: Galathas
+  archetype: elf
+  stats:
+    strength: 0.35
+    toughness: 0.15
+    dexterity: -0.25
+  tags:
+    clumsy: 0.2
+
+# --- the last resort --------------------------------------------------------------------
+#
+# **`hireable: false`, and that single field is the whole of what makes this different.** The
+# point of a last resort is that it cannot be taken away, so it is not a blueprint, cannot be
+# unlocked, cannot be trained and cannot be upgraded — it simply turns up, in any number, to
+# fill a crew slot nobody better is standing in. When a favourite is on the injury list, this
+# is who you get instead, and that is the sting.
+#
+# It lives here rather than as a special case in code so there is **one** way a minion's sheet
+# is resolved. The alternative — a constant the simulation had to fold differently — would have
+# been a second code path through the most safety-critical arithmetic in the feature.
+#
+# A kobold because the race is already the bottom of the market (see `races.yml`), and because
+# `clumsy` is not flavour: the Danger Check reads it, so a day-labourer is not merely useless,
+# they are markedly easier to hurt. Being forced to field one is meant to feel like a risk, not
+# just a tax.
+#
+# Names are drawn per instance — Grib, Nack, Ettle — so a panel full of them reads as a gang of
+# people rather than one entry repeated four times.
+kobold_temp:
+  name: Day-Labourer
+  archetype: kobold
+  hireable: false
+  tags:
+    green: true
+    unlicensed: true

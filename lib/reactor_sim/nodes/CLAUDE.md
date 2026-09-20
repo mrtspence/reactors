@@ -93,6 +93,16 @@ Three rules, each of which `Cylinder` broke first. Full detail and the measureme
   diagram at the *boiler* instead is not a fix — the regulator then cannot affect torque, and
   the `extractable_joules` bound in `Tick#transmit_torque` silently becomes the throttle
   (measured discarding 30–50% of declared work). **A conservation clamp is not a mechanism.**
+  With the chest fitted it is **dormant** — checked at throttle 10, 20, 60 and 100, the impulse
+  lands unscaled every time.
+- **`indicated_power_w` still reads ~5% high, and that is arithmetic rather than a clamp.** It is
+  `torque × ω` at the speed the shaft *ended the previous tick*, which is the top of an intra-tick
+  sawtooth: phase 4d slows the shaft before the cylinder pushes on it in 4e, and 4e hands it back.
+  At steady state the net is zero, so `ω_prev − ω_impulse = ΔL/I` and the gap is exactly
+  **`ΔL²/2I`** — half the kinetic energy of the impulse. Measured ratio: exactly ½ at four
+  throttle settings. Nothing is lost; `transmit_torque` bills the measured gain and conservation
+  closes to 0.01%. **Never use it as an efficiency denominator** — `work_joules` is the honest
+  figure, and `engine_power` already shows that one.
   Give the machine the part it is missing — a steam chest — and the loop closes on its own.
 
 ## Obstruction: a deposit in the way, not merely taking up room
@@ -115,22 +125,38 @@ volume and 100% of its clearance. Detail in
 
 ## A rupture is not a plug, and a hole does not narrow the pipe
 
-`Conduit#throughput_kg` used to return 0 for a broken conduit, which made a burst pipe a
-**better seal than the working one** — the line backed up to the source and everything
-downstream starved. `gas_conductance` did the same and was worse: at zero, `Arbiter.gas_coupling`
-drops the path out of the pressure-driven regime altogether, so one ruptured flue section
-deleted the draught, the chimney and the blower together — deliberately doing the thing
+Returning 0 from `Conduit#throughput_kg` for a broken conduit makes a burst pipe a **better seal
+than the working one** — the line backs up to the source and everything downstream starves. Doing
+it in `gas_conductance` is worse: at zero, `Arbiter.gas_coupling` drops the path out of the
+pressure-driven regime altogether, so one ruptured flue section deletes the draught, the chimney
+and the blower together — deliberately doing the thing
 [`../graph/CLAUDE.md`](../graph/CLAUDE.md) warns costs a day when it happens by accident.
 
-Both guards are gone, and **the replacement is not a leak fraction subtracted here either**.
-That was the first design and it is wrong twice: a hole does not reduce a pipe's bore, and a
-conduit holds nothing, so anything it declines to pass just stays upstream as back-pressure —
-a throttle, not a leak. What starves the far end is the **upstream holder being drained by a
-second path**, which is a `Breach` beside it, apportioned against the real one by the arbiter.
+Both guards are gone, replaced by **two effects that must not be confused with each other**:
 
-> The honest consequence: **a ruptured conduit with no breach wired next to it does nothing.**
-> Deliberate. It is strictly better than plugging, and it puts the spill somewhere it can be
-> sized and pointed rather than hidden in a subtraction.
+- **A `derates: { throughput: }` on the mode** — damage to the pipe. A split line is bent and
+  partly collapsed around the tear, so it delivers less onward even counting nothing that
+  escapes. An honest restriction.
+- **A `Breach` drawing on a holder** — the spill. It *has* to draw on a holder, because a
+  conduit holds nothing and so has no contents of its own to lose.
+
+**A throughput term cannot express a leak**, and that was the first design: material a conduit
+declines to pass does not go anywhere, it stays upstream as back-pressure. Nothing reaches
+`Atmosphere`, `mass_spilled` stays zero, and the loss is hidden inside a term where it can be
+neither sized nor pointed anywhere.
+
+### Which holder a conduit's rupture drains is declared
+
+The only candidates are the holders at either end, and the choice is real: **on the pressure
+side of every valve**, drain the upstream holder and the leak continues whatever the driver
+shuts; **past the restriction**, drain the downstream holder, which blows back out, and closing
+the valve upstream isolates it.
+
+`Breach` supports both with no additions, because **`senses:` and its inlet link are
+independent** — whose failure opens the hole is not the same question as what empties through
+it. The steam engine's `steam_pipe_breach` senses the **throttle** and drains the **boiler**: a
+locomotive regulator sits in the dome, on the boiler side of its own valve, so a split body
+empties the drum and the one control that would save you is on the wrong side of the hole.
 
 ## A conduit is still a real part
 
@@ -146,18 +172,62 @@ same commit.**
 
 | Node | Concerns | What it is |
 |---|---|---|
-| `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | Tank, vat, drum, pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke, and `damages:` for what it takes with it when it lets go. |
-| `Conduit` | Thermal, Wearing | Pipe or valve. **Transport** — holds nothing. Rate limit, lever, wall, failure. Optional `control_id`, `rangeability:` (valve trim). |
-| `Boiler` | (a `Vessel`) | A drum holding a liquid and its own vapour. Its vapour outlet is never quite dry; **swell** lifts the level when it is pulled hard, and priming is what happens when a high glass and a hard pull coincide. How badly it fails is decided by **flash evaporation**, not by pressure — see below. |
+| `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | Tank, vat, drum, pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke, and `damages:` for what it takes with it when it lets go. Reports `:fire_lit` / `:fire_out` for a vessel with an ignited reaction in it, and `:heater_engaged` on the rising edge of its heater lever. |
+| `Conduit` | Thermal, Wearing | Pipe or valve. **Transport** — holds nothing. Rate limit, lever, wall, failure. Optional `control_id`, `rangeability:` (valve trim). **`driven_by:` makes it cost torque**: a fan or pump is charged `(head_pa + ρ·g·lift_m)·Q ÷ efficiency` off the shaft it names, as a drag conductance the drive solve handles unchanged. `Tick#advect` gives it `carried_kg`/`carried_m3`, because a node resolved *through* is never a flow's endpoint and has no other way to know what it passed. |
+| `Motor` | Thermal, Holds, Pressurized, Rotating, Wearing | A small engine carrying **its own rotor** — `drives` returns its own id. For driving a fitting on a black start, when the main drivetrain is what you are trying to start. Burns its charge through ordinary `reactions:`. Torque from the **ignited fraction**, never `power ÷ ω`; breathes by **displacement**, never by thermal cycling. Both of those were built the wrong way first — see below. |
+| `Boiler` | (a `Vessel`) | A drum holding a liquid and its own vapour. Its vapour outlet is never quite dry; **swell** lifts the level when it is pulled hard, and priming is what happens when a high glass and a hard pull coincide. How badly it fails is decided by **flash evaporation**, not by pressure — see below. `working_pressure_pa:` is what the drum is *for* (nil to say nothing) and is the mark it reports `:steam_raised` at — never the shell's rating, which is ~2.4× too high to mean anything operationally, and never the safety valve's setting, which lives in a different slot. |
 | `Atmosphere` | Thermal, Holds | The outside world: unlimited source and sink, fixed pressure reference. **Two inlets** — `:exhaust` books `mass_vented`, `:spill` books `mass_spilled`, because a safety valve lifting and a boiler bursting must not be the same number. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
+| `Bearing` | Thermal, Holds, Wearing | A **friction interface** worth modelling — a journal, a piston in its bore, a rope on a pulley. `supports:` is the shaft it drags on, `duty:` supplies sliding speed and load, `loaded_by:` names what pushes through it. Not `Rotating`: the shaft turns, this is the stationary half, and it is a separate node precisely so it can be hot while the shaft is not. Its drag heats **itself** rather than the ledger, which is what lets it cook. `wiped` then `seized`, off temperature. Holds its own oil and **declares its draw even when it is full** — return `Intent.none` there and the path drives the flow, filling the housing instead of the charge. Wears two ways, and they are two things: Archard against boundary friction power (hours) and heat above the service limit (minutes). `mu_film:`/`mu_boundary:` let a fitting override the duty's curve, which is how a roller says it does not care about oil. |
 | `Load` | Rotating | Where useful work leaves the operation. |
-| `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at **supply** density. Working fluid is configuration. `drain_authority:` bleeds the diagram when the cocks are open; `material:` + `wall_thickness_m:` rate the barrel off its own bore. |
-| `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity. `senses_quantity:` defaults to `pressure_pa` and need not be it. **Three levers, three meanings:** `ease_control_id:` opens it further by hand (`max`), `control_id:` is a gag and can shut it (`×`), `setting_control_id:` is the adjusting screw and moves the setting itself (margin 100 → safe, 0 → `max_relief_pressure_pa`). Records `lift:` and `setting_pa:` in `apply` so gauges can read them. |
-| `FusiblePlug` | (a `Conduit`) | Senses a **state key** on another node and fails permanently open above a threshold. A fuse, not a valve — see below. |
+| `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at **supply** density. Working fluid is configuration. `drain_authority:` bleeds the diagram when the cocks are open; `material:` + `wall_thickness_m:` rate the barrel off its own bore. Fails two ways that behave differently: a **scored bore** still turns and pulls badly, a **blown head** does neither and is a hole. |
+| `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity. `senses_quantity:` defaults to `pressure_pa` and need not be it. **Three levers, three meanings:** `ease_control_id:` opens it further by hand (`max`), `control_id:` is a gag and can shut it (`×`), `setting_control_id:` is the adjusting screw and moves the setting itself (margin 100 → safe, 0 → `max_relief_pressure_pa`). Records `lift:` and `setting_pa:` in `apply` so gauges can read them, and reports `:blew_off` once per episode — see below. |
+| `FusiblePlug` | (a `Conduit`) + Fusible | Senses a **state key** on another node and **melts** — real alloy, real latent heat, opening as it runs and never coming back. The melting point is the material's, not a configured threshold. A fuse, not a valve — see below. |
 | `Breach` | (a `Conduit`) | A hole that is not there until it is. Senses another node's `failure` **mode** and opens by `opens_by[mode]` of full bore; a mode it does not name opens nothing, so one part can carry several breaches of escalating size. Always one-way. Where it spills is its outlet's link, not a setting. |
 
 Reach for these first. Write a new node only when the behaviour genuinely does not exist.
+
+## Two ways a prime mover gets built wrong, both measured
+
+> **Torque is not `power ÷ ω`.** It is the obvious derivation and it explodes at rest: with any
+> floor on ω, a full charge catching on tick one asks for **kilonewton-metres**. `Nodes::Motor`
+> did this first and the rotor hit 262 rad/s on 0.4 kg·m², then drained its own block from 700 K
+> to 334 K — **1.88 MJ of friction out of a 154 kJ burn**. Nothing was created, because
+> `transmit_torque` bounds the work against the charge; it was a heat engine eating itself, and
+> the books balanced throughout. Derive torque from a *state* — an ignited fraction, a pressure,
+> a diagram — and let `transmit_torque` bill it.
+
+> **A combustion chamber must breathe by displacement.** Exchange gas by thermal cycling alone
+> and it runs air-starved: **380 W** where ~3 kW was wanted, and no amount of chamber volume
+> helps, because with no pressure difference there is no flow to bring fresh air in. The firebox
+> only escapes this because a chimney pulls for it. Scavenge proportional to speed, as
+> `Cylinder#displacement_kg` does — which also gives the right behaviour for free, since an
+> engine then has to be turning before it will make power.
+
+> **A prime mover may carry its own rotor**, and `drives` then returns its own id.
+> `Tick#transmit_torque` handles that explicitly: written the naive way, `drives => spun` and
+> `id => charged` are the same key and the spin is silently dropped.
+
+## A transition on a noisy signal needs a time hold, not a deadband
+
+`ReliefValve` reports `:blew_off` once per *episode*, and the re-arm is **`REARM_SECONDS` of
+quiet**, not a band around the setting. That was the second design and the first one was
+measured wrong: on an ordinary high-pressure startup `cylinder_relief` announced itself **20
+times in 40 ticks**, every other tick from 1381 to 1420.
+
+The reason is worth keeping, because it generalises to every transition anyone adds here. That
+valve senses `compression_pressure_pa` — a per-stroke pressure reconstructed from crank
+geometry, which swings through its whole range tick to tick — so a 2% deadband around the
+setting re-armed on every stroke. **A deadband assumes the signal is noisy around a level; a
+reconstructed cyclical quantity is not.** A time hold does not care what the signal is doing,
+and it reports what an observer would say: the valve was blowing off *between* two moments. It
+is refreshed while the valve is open, so a boiler sitting on its safety valve for an hour is
+one event rather than fourteen thousand.
+
+`Nodes::Boiler`'s `:steam_raised` re-arms on a pressure band instead, and can afford to: drum
+pressure is a real lumped quantity that moves slowly. It also **re-arms rather than latching**,
+unlike the fusible plug — "the first time ever" is the delivery tier's question, and an interval
+predicate needs the interval to be re-openable after a bad spell.
 
 ## Irreversible is a different part from reversible, however alike the opening rule looks
 
@@ -203,10 +273,9 @@ on the part wins (a water-cooled wall really does survive what its bare metal wo
 the part's `material:` looked up in content, then infinity.
 
 > **Infinity is a silent off switch.** `Vessel#stress_per_second` and `Conduit#stress_per_second`
-> have fatigued on temperature since `Wearing` was written, and never once fired in any
-> operation, because every node in the repository shipped the default and the first branch
-> returned zero every time. A capability nothing exercises is indistinguishable from one that
-> does not work. If you add a structural material, rate it — `content_spec` now insists.
+> fatigue on temperature, and a part left on the default rating never fires either — the first
+> branch returns zero every time. A capability nothing exercises is indistinguishable from one
+> that does not work. If you add a structural material, rate it; `content_spec` insists.
 
 How *fast* a part fails once it is over stays per-part as `stress_rate`, exactly as
 `safety_factor` does on the flywheel: that is a property of the casting, not of the metal.

@@ -50,9 +50,9 @@ because the graph is configuration rather than state.
 
 Load-bearing, and each was a bug:
 
-- **An active sink is authoritative about its own intake.** This used to be
-  `max(push, draw)`, which meant a sink could not refuse — a valve shoving its contents at a
-  cylinder overrode the cylinder's limit and packed it to eight times its supply pressure.
+- **An active sink is authoritative about its own intake.** Under `max(push, draw)` a sink
+  cannot refuse — a valve shoving its contents at a cylinder overrides the cylinder's limit and
+  packs it to eight times its supply pressure.
 - **Gas cannot be limited by volume** — it expands and raises pressure instead. It is a **cap
   only**, never a block, so a chimney cannot deadlock waiting for a pressure difference.
   `Atmosphere` reports `gas_headroom_kg` as `Infinity` and is unaffected.
@@ -74,16 +74,36 @@ so the total is larger than the settled figure, deliberately. Full table in
 - **Liquid is bounded by the bore, gas by the conductance.** Unbounded, the entrainment term
   claimed a whole drum in one tick, and the only backstop scaled the claim uniformly — dragging
   the gas figure below what the solve settled.
-- **A path with no declared opinion still passes liquid.** Dropping it there is why the cylinder
-  relief valve passed water in exactly zero states: lifted it was pressure-driven with no
-  affinity, shut its throughput was zero. `spec/reactor_sim/entrainment_spec.rb` exists because
-  none of this was covered.
+- **A path with no declared opinion still passes liquid.** Dropping it there makes the cylinder
+  relief valve pass water in exactly zero states: lifted it is pressure-driven with no affinity,
+  shut its throughput is zero. `spec/reactor_sim/entrainment_spec.rb` covers this.
 
 ## `settle_heat` / `settle_drive` / `settle_gas`
 
 All three delegate to `Physics::Relaxation` — heat capacity ↔ moment of inertia ↔ `dn/dP`,
 temperature ↔ angular velocity ↔ pressure, same mathematics. See
 [`../physics/CLAUDE.md`](../physics/CLAUDE.md).
+
+**`settle_drive` also gathers `drags`** — every node's `drag_conductances`, summed **per shaft**
+via `drag_shaft`, as a coupling to a reservoir at rest. The declarer need not be the shaft and
+need not rotate at all: that is what a `Nodes::Bearing` is. A brake and a belt pulling on one
+shaft at once is a network, not two steps: applied after the solve instead, a stiff drag's
+splitting error dominates everything else and a fan-law mill sat at 8.5 rad/s against a true
+equilibrium of 19.6.
+
+> **A shaft that has let go is not dragged** — it has left the drivetrain and `Tick#stress` has
+> already taken its momentum. **A failed declarer is still asked**, because whether a broken part
+> still drags is the part's own answer: `Rotating` declines, a seized bearing drags harder, and
+> that is the only mechanism by which a seizure stops a shaft. `Tick#stress` zeroes momentum on
+> the failing node and a bearing does not rotate; `settle_drive` severs a link whose *end* failed
+> and a bearing is not an end. Both look like they would handle it.
+
+**A radiant thermal link's conductance is recomputed every tick.** `ThermalLink` may declare an
+`emissivity:` and `radiating_area_m2:` on top of its constant conductance; `settle_heat` then maps
+it to a `Coupling` — the same struct the gas solve uses to hand `Relaxation` a per-tick figure —
+so the solver knows nothing about radiation and a link with no surface passes through untouched.
+The factoring that makes `T⁴` a conductance is in
+[`../../../docs/reference/physics.md`](../../../docs/reference/physics.md#radiation-is-a-conductance-because-t--t_amb-factors).
 
 **It is one implicit solve over the whole network, not a law applied per coupling.** A
 pairwise closed form does not compose — three 600 K bodies feeding one small 300 K body drove
@@ -93,10 +113,10 @@ per-node bound that stood in for both is gone, along with `flow_bounds` and `nod
 they were papering over an explicit integrator running 400–600× past its stability limit, and
 the bound was itself wrong by a factor of two.
 
-> **Two vessels joined by a pipe used to swap contents and stay swapped forever.** 6 kg/1 kg
-> became 1 kg/6 kg on tick 1 and never moved again, at every conductance stiffer than
-> `dt < τ`. The engine survived only because every gas coupling in it has `Atmosphere` on one
-> end. `transport_spec` asserts equalisation at five conductances now.
+> **Get this wrong and two vessels joined by a pipe swap contents and stay swapped forever.**
+> 6 kg/1 kg becomes 1 kg/6 kg on tick 1 and never moves again, at every conductance stiffer than
+> `dt < τ`. A graph with `Atmosphere` on one end of every gas coupling hides it.
+> `transport_spec` asserts equalisation at five conductances.
 
 **Conductance is the whole restriction on a pressure-driven path.** `Port#max_kg_per_s`
 governs rate-driven paths and nothing else — applying both makes every throat permanently

@@ -19,5 +19,9 @@ class PanelComponent < ViewComponent::Base
 
   def instruments = @panel.fetch(:instruments)
   def controls = @panel.fetch(:controls)
+
+  # Everywhere a person can be posted, which is a longer list than the levers: the crew quarters
+  # is somewhere to stand with nothing to set.
+  def stations = @panel.fetch(:stations)
   attr_reader :minions
 end

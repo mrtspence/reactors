@@ -7,12 +7,13 @@ specific heat. Reference:
 
 | Concern | Config (as reader methods) | State it adds | Key methods |
 |---|---|---|---|
-| `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k` |
+| `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k`, `emissivity`, `radiating_area_m2` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k`, `radiative_conductance` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume`, `bulk_density_kg_m3` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating` |
 | `Pressurized` | needs `Holds` + `Thermal`; optional `material`, `shell_radius_m`, `wall_thickness_m`, `safety_factor`, `max_pressure_pa` | none — derived | `pressure_pa`, `gas_headroom_kg`, `rated_pressure_pa` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
-| `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque` |
+| `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque`, `drag_conductances` |
+| `Fusible` | `fusible_kg`; needs `Thermal` and a `material:` declaring `latent_heat_of_fusion_j_per_kg` | `fusible_remaining_kg` | `run_melt`, `melt_kg`, `melted_fraction`, `melted_out?`, `fusible_temperature_k` |
 
 A snapshot — `ls lib/reactor_sim/concerns/` is the truth. This table drifts on a **column**, not
 just a row: adding a config key or a state key to an existing concern makes it wrong just as
@@ -44,6 +45,24 @@ calls it; the engine calls it after advection, reactions and phase change. You r
 Every `Thermal` node in an operation needs an `ambient_conductance`, or the operation becomes
 a perfect heat accumulator.
 
+### Radiation, which is a conductance rather than a special case
+
+`emissivity` and `radiating_area_m2` add a radiant path alongside conduction. Both default to
+zero, so a node that has not been given a surface is **bit-identical** to one from before
+radiation existed — that is what let the feature land without touching anything.
+
+It works because `T⁴ − T_amb⁴` factors *exactly* into `(T² + T_amb²)(T + T_amb)·(T − T_amb)`, so
+`radiative_conductance` returns real W/K and radiation is summed with `ambient_conductance` before
+the existing closed form runs. An explicit `T⁴` would be the one integrator this library forbids.
+
+- **Emissivity is the part's, not the material's**, the same call `safety_factor` makes. What
+  separates oxidised iron from polished steel is a wire brush, not a different metal.
+- **`ThermalLink` takes the same two keys** for body-to-body exchange, and `settle_heat`
+  recomputes that conductance every tick from both end temperatures.
+- **`settle_ambient` guards on the TOTAL conductance**, not on `ambient_conductance` — guarding on
+  conduction alone skips everything that radiates and barely conducts, which is most hot things in
+  a machine.
+
 ## Pressurized: derived only
 
 Ideal gas over whatever volume the liquids are not occupying:
@@ -60,7 +79,10 @@ P    = Σ(gas moles) × R × T / free
   `gas_headroom_kg` supplies the pressure limit instead. These two **must agree** with
   `Arbiter#volume_of` — fixing one alone throttles every duct.
 
-Not modelled: pump head, hydrostatic pressure, flow-induced pressure drop.
+Not modelled: hydrostatic pressure, flow-induced pressure drop. **Pump and fan head are modelled
+and are no longer free** — a `Conduit` naming a shaft with `driven_by:` is billed
+`(head_pa + ρ·g·lift_m)·Q ÷ efficiency` as a drag conductance. Depth is therefore a torque bill
+rather than a pressure gradient.
 
 ### What the shell can stand comes from the shell
 
@@ -111,7 +133,14 @@ a number.
 
 `integrity` (0..1) is passed to `overload?` so a worn part fails sooner than a fresh one,
 keeping accumulated history meaningful. Events carry `cause: :fatigue` or `cause: :overload`.
-Override `failure_type` and `failure_detail(state, ctx)` to describe it.
+Override `failure_detail(state, ctx)` to describe it.
+
+> **There is no `failure_type` hook, and there must not be one.** Every part failure is
+> `type: :part_failed`; the part identifies itself through `node`, `mode` and `failure_detail`.
+> A per-part type derived from the node id makes a rename silently rename an event type, and no
+> list of types can exist at all; a per-class override is a worse copy of `mode:`, and any class
+> that forgets to override collapses two distinct failures into one type. One vocabulary, in
+> `failure_modes`. See `ReactorSim::Event::TYPES`.
 
 The rolled starting durability is hidden from the player — that is where the uncertainty
 lives, rather than in the system being arbitrary.
@@ -141,28 +170,53 @@ naming the mode stays a single decision. It emits an event only on a transition.
 
 ### A broken part keeps being evaluated, and can get worse
 
-`apply_wear` used to return early on a failed node. That was a footgun, not an optimisation:
-**an early, mild failure must never immunise a part against a catastrophic one.** A cracked
-pipe that goes on being fed should be able to tear open; a reactor that has lost a seal must
-still be able to melt down. Left as it was, the first failure a part suffered was the last
-thing that could ever happen to it — a *safe harbour* on exactly the machines where that is
-most wrong.
+`apply_wear` must not return early on a failed node, however much it looks like an optimisation:
+**an early, mild failure must never immunise a part against a catastrophic one.** A cracked pipe
+that goes on being fed should be able to tear open; a reactor that has lost a seal must still be
+able to melt down. Returning early makes the first failure a part suffers the last thing that can
+ever happen to it — a *safe harbour* on exactly the machines where that is most wrong.
 
 - **Fatigue cannot escalate; overload can.** Durability is spent once a part has failed, so
   `stress_per_second` has nothing left to consume. That is the right story anyway: a split drum
   that keeps being fired reaches bursting conditions; one that has been shut down does not.
-- **`escalate_to` only moves forward.** Otherwise a drum that had exploded would be
-  re-described as merely split the moment its own hole took the pressure away — the conditions
-  that destroyed it are gone precisely *because* it was destroyed.
+- **`escalate_to` only moves forward.** Otherwise a drum that has exploded is re-described as
+  merely split the moment its own hole takes the pressure away — the conditions that destroyed
+  it are gone precisely *because* it was destroyed.
 - A mode the table does not name sorts last, rather than being discarded quietly.
+
+**`Nodes::Cylinder` is the part that actually escalates**, and the shape is worth copying: its
+`overload?` is hydraulic lock, which is *condition*-driven rather than durability-driven, so it
+still fires on a part whose durability is long gone. A cylinder worn to `scored_bore` that then
+takes a slug of water blows its head off, and the event carries `escalated_from:`. A part whose
+only failure route is fatigue can never escalate, by construction.
+
+The **boiler** deliberately cannot, and that is physics rather than an omission: a split drum
+loses pressure through its own hole, so the severity that would name a worse mode is falling
+exactly when it would be re-read. The hole is the relief.
 
 ### What a mode actually does
 
-Two consumers so far, and they sit on opposite sides of the generic/specific line:
+Three consumers, and where each declaration lives is the line between what a class knows about
+itself and what only the machine knows:
 
-- **`Nodes::Breach`** reads the mode to size the hole a failed holder spills through.
+- **`Nodes::Breach`** reads the mode to size the hole a failed holder spills through. Sizes live
+  on the breach (`opens_by:`), not in the mode table, so **a mode a breach does not name opens
+  nothing** — which is how one part carries several holes of different sizes, and how a
+  cylinder's `scored_bore` correctly opens none at all (worn rings leak *past the piston*, inside
+  the machine).
+- **`derates:`** in the mode table, read by the node's own code via `derating(state, key)`. What
+  a derating means is the node's business. `0.0` is how a mode says "no longer does that thing at
+  all", in the same vocabulary rather than a second flag beside it.
 - **`failure_damages`** — `{ mode => { node_id => share } }` — is what the part takes with it,
   spent by `Tick#spread_damage` as a share of each bystander's *starting* durability.
+
+**`failure_hazards` is `failure_damages` pointed at people**, declared the same way and for the
+same reason, and spent in phase 6b immediately after `spread_damage`. It names **stations**, never
+minions: a station is fixed by the machine and a roster is the player's, so a part naming a minion
+would be naming something it cannot know. That also makes it a coarse notion of *place* with no
+geometry at all — the machine knows which levers sit beside which parts — and it upgrades cleanly
+when volumes arrive. A station's figure is a **weight**; `scales_with:` names a key in the failure
+event's own `detail:` so the size of the event comes from the part rather than from a constant.
 
 **`failure_damages` is deliberately not an entry in `failure_modes`**, and the reason is the
 rule that everything under `nodes/` is generic: `Nodes::Boiler` cannot name a `:cylinder`,
@@ -176,8 +230,10 @@ failing together and damaging each other give the same answer whatever order the
 in. Phase 6 obeys order-independence like everything else.
 
 Everything else a failure does is still generic (a part that has let go stops turning, leaves
-the drivetrain, drives nothing), so **a part with no breach and no casualties fails without
-visible consequence unless it spins.**
+the drivetrain, drives nothing), so **a part with no breach, no derating and no casualties fails
+without visible consequence unless it spins.** `failure_spec` walks every catalogued machine and
+also checks the inverse — that no breach is wired to a mode its part can never enter, which
+would leave a hole inert and indistinguishable from a part meant to fail sealed.
 
 > **The mode is a Symbol held as a VALUE, so JSON hands it back as a String** — the fifth
 > instance of that trap here. `Operation#restore` normalises it. The failure is *partial*, which
@@ -186,13 +242,70 @@ visible consequence unless it spins.**
 > where `:explosion` and `"explosion"` are the same string. Only an identity assertion finds it;
 > `spec/reactor_sim/failure_spec.rb` has one.
 
+## Fusible: a part made of something with a melting point
+
+Energy that would take the part past its melting point melts its substance instead, and the melt
+runs out carrying that energy — the same trick `Resources::Saturation` uses for the boiling
+plateau. `Nodes::Bearing` loses its white metal; `Nodes::FusiblePlug` **is** this concern rather
+than a threshold latch, so a plug's melting point is its alloy's rather than a configured number
+that could disagree with it.
+
+Three rules, each of which is a bug if broken:
+
+- **Latent heat only, and mass is NOT booked.** A part's substance is its `heat_capacity`, and
+  structure mass has never been part of `Operation#total_mass` — only parcels are. Reporting
+  `mass_consumed` for melted metal declares mass leaving that was never counted as present, and
+  every conservation spec fails with the ledger blaming the wrong thing. The energy *is* tracked,
+  so that is what leaves, through `joules_discarded`.
+- **The melt is bounded by the energy the part actually holds.** A part melted by somebody
+  else's heat — a plug reads the crown sheet, not itself — would otherwise spend joules it does
+  not have and go below absolute zero.
+- **No latent heat declared means it does not melt**, because `Content` returns `Float::INFINITY`.
+  Zero would mean the opposite and vaporise a part's whole substance in one tick.
+
+> **It does not cap a runaway temperature, and the bearings sketch expected it to.** A phase change
+> caps a temperature only when heat arrives *slower* than the latent heat can absorb it. That is
+> true of a plug warmed through a crown sheet and false of a bearing absorbing a flywheel: 6 kg of
+> babbitt took 31 K off the spike of a seizure and nothing off the 1652 K equilibrium. What bounds
+> that is radiation, which is a change to `settle_ambient`.
+
 ## Rotating
 
 Stores `angular_momentum`; `omega`, `rpm`, `kinetic_joules` and `rim_speed` all derive.
-`rim_speed` (ω × radius) is what actually tears a spinning mass apart. `friction_loss` relaxes
-toward rest in closed form, so a wheel coasts to a stop and never through it into running
-backwards.
+`rim_speed` (ω × radius) is what actually tears a spinning mass apart.
 
 Coupling is a `DriveLink`, settled by the same relaxation as heat. `stiffness` is how hard the
 ends are held to a common speed — a keyed shaft is stiff, a leather belt is not, and the
 difference is one number rather than one class.
+
+### Drag is declared, never applied
+
+`drag_conductances(state, ctx)` returns what pulls this body toward rest, in N·m·s/rad, keyed by
+where the energy it removes belongs — `:friction` for windage, `:work` for a load's brake, and **a
+node id to heat that node**, which is how a bearing cooks itself. `Arbiter.settle_drive` gathers
+them and `Relaxation.settle` puts them on the diagonal, so a drag is solved **inside** the
+drivetrain network rather than after it.
+
+> **Whether a broken part still drags is the part's own answer, not the arbiter's.** `drive_drags`
+> skips a drag whose *shaft* has failed — that body has left the drivetrain and `Tick#stress` has
+> taken its momentum — but it asks every declarer regardless of the declarer's own state.
+> `Rotating` declines for itself when broken; `Nodes::Bearing` does the opposite and drags
+> **harder**, which is the only mechanism by which a seizure stops anything. Filtering failed
+> declarers centrally reads as tidy and silently disables that.
+
+> **Applying a drag after the coupling is operator splitting, and it dominates once the drag is
+> stiff.** Each half can be integrated exactly and the composition is still first order in `dt`:
+> a fan-law mill whose brake time constant is 0.18 s against a 250 ms tick settled at 8.5 rad/s
+> against a true equilibrium of 19.6, and the coupling above it then slipped 65% and burned 39%
+> of shaft power. Halving `dt` halved the gap, which is the signature. A nonlinear brake is
+> linearised as `τ(ω)/ω` at the tick's speed — a far smaller error than the split it replaces —
+> and capped at `I/dt`, which **halves a body per tick and no more**. That cap bounds how far the
+> linearisation is trusted; it is not a stop, and a drag meaning "this has locked" declares a
+> large multiple of it.
+
+**Kinetic energy is quadratic, so no intermediate state between two settled ticks means
+anything.** `Tick#drive` measures the total energy lost and *estimates* only the split, at the
+speeds the network settled to: a drag did `momentum × ω`, a coupling dissipated
+`transferred × Δω`. Measuring the halves separately instead charges each for a state the machine
+was never in — it inflated a mill's output past its own engine's and drove `joules_to_friction`
+negative while the totals still balanced.

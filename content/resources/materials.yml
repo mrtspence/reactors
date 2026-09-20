@@ -79,6 +79,11 @@ babbitt:
   tensile_strength_pa: 70.0e6
   # It melts at about this temperature, and that is the point of it.
   max_temperature_k: 520
+  # **What it costs to melt a kilogram of it**, and it is what stops a seized bearing's
+  # temperature running away: energy that would have taken the metal past its melting point goes
+  # into melting it instead, and the melt runs out of the housing carrying that energy with it.
+  # Tin–antimony alloys sit near this figure.
+  latent_heat_of_fusion_j_per_kg: 60_000
 
 # **The fusible plug**, and it is a material rather than a part because that is what it is: a
 # soft-metal bung screwed through the crown sheet, chosen to melt before the plate around it
@@ -92,3 +97,6 @@ fusible_alloy:
   specific_heat_j_per_kg_k: 200
   tensile_strength_pa: 30.0e6
   max_temperature_k: 620
+  # A plug does not trip, it **melts** — so this is what it costs to run one out, and it is why a
+  # plug takes a moment to go rather than switching. Lead–tin–bismuth alloys sit near this.
+  latent_heat_of_fusion_j_per_kg: 45_000

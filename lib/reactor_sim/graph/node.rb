@@ -3,19 +3,19 @@
 module ReactorSim
   # Anything in an operation's graph. Mechanisms and conduits are both nodes.
   #
-  # A node is **configuration and behaviour only** — it holds no mutable state. All state
-  # lives in the Operation's frozen hash and is passed in. A node physically cannot write
-  # to the tick it is reading from, which is what makes the double buffer enforceable
-  # rather than merely intended, and what keeps evaluation order irrelevant.
+  # A node is **configuration and behaviour only** — it holds no mutable state. All state lives
+  # in the Operation's frozen hash and is passed in, so a node physically cannot write to the
+  # tick it is reading from. That is what makes order-independence enforceable rather than merely
+  # intended.
   #
-  # The authoring surface is deliberately two methods:
+  # The authoring surface is two methods:
   #
   #   plan(state, ctx)         -> Intent   what I want to draw and push
   #   apply(state, ctx, grant) -> state    what I actually got, and what it does to me
   #
-  # Heat transfer, phase change, reactions, wear, failure and observation are all driven by
-  # the concerns a node includes and by engine machinery. A new mechanism should be a
-  # little config and those two methods — not a re-implementation of physics.
+  # Heat transfer, phase change, reactions, wear, failure and observation are driven by the
+  # concerns a node includes and by engine machinery. A new mechanism is a little config and
+  # those two methods, never a re-implementation of physics.
   class Node
     class << self
       # Concerns register themselves on include so `initial_state` can gather their state
@@ -61,9 +61,9 @@ module ReactorSim
     # resource) to a multiplier: below 1.0 holds a substance back, above 1.0 carries more of it
     # than its share. `Arbiter` multiplies these along every port on a path.
     #
-    # **This changes the mix and never the total.** Throughput belongs to rates and
-    # conductances; two numbers describing one restriction is a mistake this engine has already
-    # made twice. See `docs/reference/settlement.md`.
+    # **This changes the mix and never the total.** Throughput belongs to rates and conductances;
+    # two numbers describing one restriction is always a mistake. See
+    # `docs/reference/settlement.md`.
     #
     # Per PORT, not per node, because a part's outlets have to be able to disagree — that is
     # what makes a sorter expressible at all.

@@ -12,8 +12,9 @@ require "rails_helper"
 # See `docs/design_sketches/blueprints.md` §1 and §5.
 RSpec.describe Blueprint do
   describe "the catalogue" do
-    it "covers all four kinds" do
-      expect(described_class::KINDS).to contain_exactly(:operation, :chassis, :part, :minion)
+    it "covers all six kinds" do
+      expect(described_class::KINDS)
+        .to contain_exactly(:operation, :chassis, :part, :minion, :equipment, :training)
       described_class::KINDS.each do |kind|
         expect(described_class.of_kind(kind)).not_to be_empty, "no #{kind} blueprints at all"
       end
@@ -43,9 +44,65 @@ RSpec.describe Blueprint do
       expect(ReactorSim::Operations.known).to include(:spec_only_rig)
     end
 
-    it "has one minion blueprint per content archetype" do
+    # **Per individual, not per archetype.** This said "archetype" for a release and enumerated
+    # `fireman` and `yardhand`, which are jobs. What a player unlocks is a person.
+    it "has one minion blueprint per hireable individual in the roster" do
       expect(described_class.of_kind(:minion).map(&:blueprint_id))
-        .to match_array(ReactorSim::Content.default.minions.keys.map(&:to_s))
+        .to match_array(ReactorSim::Content.default.hireable.keys.map(&:to_s))
+    end
+
+    # **Equipment and training are owned per minion**, so the catalogue is the cross product and
+    # the id is scoped — exactly as a chassis id is scoped to its operation. Jim's apron and
+    # Elowynne's apron are two unlocks, and buying one does not clothe the other.
+    # **The last resort must never be for sale**, which is the whole of what makes it a last
+    # resort: it turns up when nobody better will, and it cannot be taken away. It is an ordinary
+    # individual in content — one resolution path, not a special case in the engine — and
+    # `hireable: false` is the single field that keeps it out of the shop.
+    it "does not offer the standin, nor kit or courses for it" do
+      standin = ReactorSim::Content.default.minions.keys -
+                ReactorSim::Content.default.hireable.keys
+
+      expect(standin).not_to be_empty, "no standin in the roster at all"
+      standin.each do |id|
+        expect(described_class.key?(:minion, id)).to be(false)
+        expect(described_class.key?(:equipment, "#{id}/leather_apron")).to be(false)
+        expect(described_class.key?(:training, "#{id}/hot_work_ticket")).to be(false)
+      end
+    end
+
+    it "scopes equipment to a minion, one blueprint per pairing" do
+      roster = ReactorSim::Content.default.hireable.keys
+      expected = roster.flat_map { |m| ReactorSim::Equipment.known.map { |i| "#{m}/#{i}" } }
+
+      expect(described_class.of_kind(:equipment).map(&:blueprint_id)).to match_array(expected)
+    end
+
+    it "scopes training the same way" do
+      roster = ReactorSim::Content.default.hireable.keys
+      expected = roster.flat_map { |m| ReactorSim::Training.known.map { |t| "#{m}/#{t}" } }
+
+      expect(described_class.of_kind(:training).map(&:blueprint_id)).to match_array(expected)
+    end
+
+    # **The price is the item's, not the pairing's.** Pricing every combination would put 39
+    # identical lines in `config/blueprints.yml` today and need a fresh one whenever anybody
+    # hires a minion — the inventory list that drifts, which is the shape `docs/CLAUDE.md` names
+    # as the thing to avoid. `priced_as:` is what keeps one entry per item.
+    it "charges every minion the same for the same item" do
+      bills = ReactorSim::Content.default.hireable.keys.map do |minion|
+        described_class.fetch(:equipment, "#{minion}/stokers_shovel").materials
+      end
+
+      expect(bills.uniq.length).to eq(1)
+      expect(bills.first).not_to be_empty
+    end
+
+    it "carries the same gate to every minion's copy of a gated course" do
+      gates = ReactorSim::Content.default.hireable.keys.map do |minion|
+        described_class.fetch(:training, "#{minion}/hot_work_ticket").requires_achievement
+      end
+
+      expect(gates).to all(eq(:first_full_head_of_steam))
     end
 
     # Labels are the part's own, so the outfitting screen and the unlock list cannot disagree
@@ -160,15 +217,16 @@ RSpec.describe Blueprint do
     describe "obtainability" do
       let(:gated) { described_class.fetch(:part, :ramsbottom_safety_valve) }
 
-      it "is open while the achievement stub reports everything earned" do
+      # **These no longer stub anything, and that is the point.** `Achievement.earned?` used to
+      # return true unconditionally, so the only way to prove the gate was wired was to make the
+      # stub say no. It reads `awards` now, so the gate can be opened the way a player opens it.
+      it "opens once the prerequisite has actually been earned" do
+        Award.grant(owner_id: DevPlayer::ID, achievement_id: gated.requires_achievement)
+
         expect(gated).to be_obtainable_by(DevPlayer::ID)
       end
 
-      # The stub always says yes, so the only way to prove the gate is wired is to make it say
-      # no. Without this the check would be indistinguishable from a method that returns true.
       it "closes when the prerequisite is unmet" do
-        allow(Achievement).to receive(:earned?).and_return(false)
-
         expect(gated).not_to be_obtainable_by(DevPlayer::ID)
         expect(described_class.fetch(:part, :plain_chimney)).to be_obtainable_by(DevPlayer::ID)
       end

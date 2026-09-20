@@ -1,0 +1,145 @@
+<%# The pre-match crew screen. `loadouts/edit` for people, and deliberately the same shape:
+    one Turbo frame around everything selection-dependent, one form, live preview on change.
+
+    The Stimulus controller sits on the FRAME rather than the form, for the reason the
+    outfitting screen records: a controller on the form would be torn down and rebuilt on every
+    preview, where one here survives and simply re-scans. %>
+<div class="mx-auto max-w-3xl p-4 text-slate-200">
+  <header class="mb-4">
+    <h1 class="text-lg font-semibold">Crew</h1>
+    <p class="text-sm text-slate-400">
+      Who stands where, and what they have with them. An empty post is not an empty post —
+      the labour exchange will send somebody, and you will not enjoy it.
+    </p>
+  </header>
+
+  <%= turbo_frame_tag "crewing",
+                      data: { controller: "outfit",
+                              outfit_draft_url_value: crew_draft_path(
+                                match_id: params[:match_id],
+                                operation_id: params[:operation_id]
+                              ) } do %>
+    <% if @crewing.unavailable.any? %>
+      <%# Posting somebody who is on the injury list is refused rather than silently swapped.
+          Substitution happens at BUILD for a post left empty, which is a different statement
+          and should feel different. %>
+      <section class="mb-4 rounded-lg bg-rose-950/40 ring-1 ring-rose-800 p-3">
+        <h2 class="text-xs uppercase tracking-wide text-rose-300 mb-1">Not fit for work</h2>
+        <ul class="text-sm text-rose-100 flex flex-col gap-1">
+          <% @crewing.unavailable.each do |person| %>
+            <li>
+              <%= person.name %> — out for
+              <%= pluralize(person.unavailable_for, "more match") %>.
+            </li>
+          <% end %>
+        </ul>
+      </section>
+    <% end %>
+
+    <%# The global token rather than a per-form one: the preview button retargets the action,
+        and a per-form token 422s when it does. %>
+    <%= form_with url: crew_path(match_id: params[:match_id],
+                                 operation_id: params[:operation_id]),
+                  method: :patch, data: { outfit_target: "form" },
+                  authenticity_token: form_authenticity_token do %>
+      <div class="flex flex-col gap-3">
+        <%# Seats, not jobs. Which station somebody works is decided during the match — everybody
+            starts in the quarters and is sent somewhere — so there is deliberately nothing here
+            to set it with. %>
+        <% @crewing.seats.each_with_index do |role, index| %>
+          <% posting = @crewing.posting(role) %>
+          <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3">
+            <header class="flex items-baseline justify-between mb-2">
+              <h2 class="text-sm font-medium">Seat <%= index + 1 %></h2>
+              <span class="text-[11px] uppercase tracking-wide text-slate-500">
+                starts in the quarters
+              </span>
+            </header>
+
+            <label class="block text-[11px] uppercase tracking-wide text-slate-400 mb-1"
+                   for="crew_<%= role %>_minion">Who</label>
+            <select name="crew[<%= role %>][minion]" id="crew_<%= role %>_minion"
+                    class="w-full bg-slate-900 text-slate-200 text-sm rounded px-2 py-1 ring-1 ring-slate-700 mb-3"
+                    data-action="change->outfit#preview">
+              <%# Always offered, and always first: leaving a post empty is a real choice with a
+                  real consequence, not an oversight. %>
+              <option value="" <%= "selected" if posting[:minion].nil? %>>
+                — whoever turns up —
+              </option>
+              <% @crewing.candidates(role).each do |person| %>
+                <%# How long somebody is out for belongs HERE, where the choice is being made,
+                    rather than only in the panel above — that panel fires when an unavailable
+                    person has been posted, which is one step too late to be useful. %>
+                <option value="<%= person.id %>"
+                        <%= "selected" if posting[:minion]&.to_s == person.id %>>
+                  <%= person.name %> (<%= person.archetype %>)<%=
+                    unless person.available?
+                      " — out for #{pluralize(person.unavailable_for, 'more match')}"
+                    end %>
+                </option>
+              <% end %>
+            </select>
+
+            <% if posting[:minion] %>
+              <div class="grid grid-cols-3 gap-2">
+                <% ReactorSim::Equipment::SLOTS.each do |slot| %>
+                  <div>
+                    <label class="block text-[11px] uppercase tracking-wide text-slate-400 mb-1"
+                           for="crew_<%= role %>_<%= slot %>"><%= slot %></label>
+                    <select name="crew[<%= role %>][<%= slot %>]"
+                            id="crew_<%= role %>_<%= slot %>"
+                            class="w-full bg-slate-900 text-slate-200 text-xs rounded px-2 py-1 ring-1 ring-slate-700"
+                            data-action="change->outfit#preview">
+                      <option value="">— nothing —</option>
+                      <% @crewing.equipment_for(role, slot).each do |item| %>
+                        <option value="<%= item.id %>"
+                                <%= "selected" if posting[slot]&.to_s == item.id.to_s %>>
+                          <%= item.label %>
+                        </option>
+                      <% end %>
+                    </select>
+                  </div>
+                <% end %>
+              </div>
+
+              <% courses = @crewing.training_for(role) %>
+              <% if courses.any? %>
+                <fieldset class="mt-3">
+                  <legend class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">
+                    Training
+                  </legend>
+                  <%# Checkboxes rather than a select: training is permanent and cumulative, so
+                      somebody holds all of theirs at once. Kit is one-per-slot; courses are not. %>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1">
+                    <% courses.each do |course| %>
+                      <label class="flex items-center gap-1.5 text-xs text-slate-300">
+                        <input type="checkbox" name="crew[<%= role %>][training][]"
+                               value="<%= course.id %>"
+                               <%= "checked" if Array(posting[:training]).map(&:to_s).include?(course.id.to_s) %>
+                               data-action="change->outfit#preview">
+                        <%= course.label %>
+                      </label>
+                    <% end %>
+                  </div>
+                </fieldset>
+              <% end %>
+            <% end %>
+          </section>
+        <% end %>
+      </div>
+
+      <div class="sticky bottom-0 mt-4 flex items-center justify-between gap-3
+                  bg-slate-900/90 backdrop-blur py-3">
+        <%= link_to "Back to the footplate",
+                    console_path(match_id: params[:match_id], operation_id: params[:operation_id]),
+                    class: "text-sm text-slate-400 hover:text-slate-200",
+                    data: { turbo_frame: "_top" } %>
+        <%# `_top` breaks the redirect out of the frame — without it the console renders inside
+            this one and the page appears to do nothing. %>
+        <%= submit_tag "Post the crew",
+                       class: "rounded bg-emerald-700 hover:bg-emerald-600 px-4 py-1.5 text-sm font-medium",
+                       data: { turbo_frame: "_top" } %>
+      </div>
+    <% end %>
+  <% end %>
+</div>

@@ -27,6 +27,7 @@ module ReactorSim
         Registry.new(
           resources: read_all(File.join(dir, "resources")),
           reactions: read_all(File.join(dir, "reactions")),
+          archetypes: read_all(File.join(dir, "archetypes")),
           minions: read_all(File.join(dir, "minions"))
         ).freeze
       end
@@ -34,10 +35,15 @@ module ReactorSim
       # Test seam: build a registry from literals with no filesystem involved. Every keyword
       # defaults, so a spec asks for the one table it cares about and gets empty ones for the
       # rest — which is what keeps an unrelated substance from boiling mid-test.
-      def build(resources: {}, reactions: {}, minions: {})
+      def build(resources: {}, reactions: {}, archetypes: {}, minions: {})
         Registry.new(resources: deep_sym(resources), reactions: deep_sym(reactions),
-                     minions: deep_sym(minions)).freeze
+                     archetypes: deep_sym(archetypes), minions: deep_sym(minions)).freeze
       end
+
+      # Public because `Registry#merging` needs it — a caller handing in literals should get the
+      # same key treatment a YAML file gets, or a fixture written with string keys would be a
+      # different shape from every other entry in the table.
+      def deep_symbolize(obj) = deep_sym(obj)
 
       private
 
@@ -62,19 +68,30 @@ module ReactorSim
     # Frozen lookup tables. Validation is deliberately eager and loud: a typo in a content
     # file is otherwise a miserable class of bug that surfaces mid-match as a nil.
     class Registry
-      REQUIRED_RESOURCE_KEYS = %i[specific_heat_j_per_kg_k density_kg_per_m3].freeze
-      REQUIRED_REACTION_KEYS = %i[consumes produces rate_per_s enthalpy_j_per_unit].freeze
-      REQUIRED_MINION_KEYS   = %i[label strength].freeze
+      REQUIRED_RESOURCE_KEYS  = %i[specific_heat_j_per_kg_k density_kg_per_m3].freeze
+      REQUIRED_REACTION_KEYS  = %i[consumes produces rate_per_s enthalpy_j_per_unit].freeze
+      # An individual is a name and a race. Everything else is an offset and may be omitted.
+      REQUIRED_MINION_KEYS    = %i[name archetype].freeze
 
-      attr_reader :resources, :reactions, :minions
+      # An archetype declares all five, because it is the baseline every other layer offsets and
+      # a missing one would surface mid-match as a nil inside an arithmetic expression. The list
+      # itself lives in `Sheet`, with the folding rules it belongs to.
+      REQUIRED_ARCHETYPE_KEYS = ([ :label ] + Sheet::STATS).freeze
 
-      def initialize(resources:, reactions:, minions: {})
+      attr_reader :resources, :reactions, :archetypes, :minions
+
+      def initialize(resources:, reactions:, archetypes: {}, minions: {})
         @resources = resources.freeze
         @reactions = reactions.freeze
+        @archetypes = archetypes.freeze
         @minions = minions.freeze
         @phase_pairs = index_phase_pairs.freeze
         @tags = @resources.to_h { |id, spec| [ id, spec.fetch(:tags, []).map(&:to_sym).freeze ] }.freeze
         validate!
+        # Resolved AFTER validation, because resolving reaches for an archetype by name and a
+        # minion naming one that does not exist should say so rather than raise a KeyError from
+        # inside the arithmetic.
+        @sheets = @minions.keys.to_h { |id| [ id, build_sheet(id) ] }.freeze
       end
 
       def resource(id)
@@ -85,8 +102,44 @@ module ReactorSim
         @reactions.fetch(id.to_sym) { raise Error, "unknown reaction: #{id.inspect}" }
       end
 
-      def minion_archetype(id)
-        @minions.fetch(id.to_sym) { raise Error, "unknown minion archetype: #{id.inspect}" }
+      def archetype(id)
+        @archetypes.fetch(id.to_sym) { raise Error, "unknown archetype: #{id.inspect}" }
+      end
+
+      def minion(id)
+        @minions.fetch(id.to_sym) { raise Error, "unknown minion: #{id.inspect}" }
+      end
+
+      # Everybody a player could come to own. The last-resort standin exists and is excluded,
+      # because it cannot be unlocked — that is the whole of what makes it a last resort. The
+      # delivery tier derives its catalogue from this rather than from `minions`, so a
+      # non-hireable individual never appears as something to buy.
+      def hireable = @minions.reject { |_, spec| spec[:hireable] == false }
+
+      # An individual's stats and tags with their race already folded in — layers one and two of
+      # the four in `content/archetypes/races.yml`. Training and equipment are layers three and
+      # four and are applied at build by the delivery tier, because they are things a player
+      # OWNS and ownership is not something this library is allowed to know about.
+      #
+      # Precomputed at construction for the same reason resource tags are: this is read while
+      # building an operation and there is no reason to fold the same three hashes every time.
+      def sheet(id)
+        @sheets.fetch(id.to_sym) { raise Error, "unknown minion: #{id.inspect}" }
+      end
+
+      # This registry plus a few more entries, as a new frozen registry.
+      #
+      # **Exists for test fixtures, and the reason is worth stating.** A spec that runs a machine
+      # has to say who is working it, and pinning that to a real individual — Jim — makes every
+      # balance change to Jim's stats break specs that are not about Jim. Fixtures with flat,
+      # deliberately boring numbers keep a reference machine a reference machine.
+      #
+      # Resources and reactions are not extendable here on purpose: a spec wanting different
+      # physics wants `Content.build`, which starts from nothing and says so.
+      def merging(archetypes: {}, minions: {})
+        self.class.new(resources: @resources, reactions: @reactions,
+                       archetypes: @archetypes.merge(Content.deep_symbolize(archetypes)),
+                       minions: @minions.merge(Content.deep_symbolize(minions))).freeze
       end
 
       # Precomputed. This is called once per parcel per port per link per tick, and the
@@ -131,6 +184,17 @@ module ReactorSim
       # it; `content_spec` asserts that everything tagged `:structural` carries one.
       def max_temperature_k(id)
         value = resource(id)[:max_temperature_k]
+        value.nil? ? Float::INFINITY : value.to_f
+      end
+
+      # What it costs to melt a kilogram of this, once it is already at its melting point.
+      #
+      # **Infinity means "does not melt in this model"**, not "melts for free" — a part made of
+      # something with no figure declared simply keeps heating, which is the behaviour every
+      # material had before any of them declared one. Zero would mean the opposite and would
+      # vaporise a part's whole substance in a single tick.
+      def latent_heat_of_fusion_j_per_kg(id)
+        value = resource(id)[:latent_heat_of_fusion_j_per_kg]
         value.nil? ? Float::INFINITY : value.to_f
       end
 
@@ -184,10 +248,39 @@ module ReactorSim
           raise Error, "reaction #{id}: mass not conserved — consumes #{consumed}, produces #{produced}"
         end
 
+        @archetypes.each do |id, spec|
+          missing = REQUIRED_ARCHETYPE_KEYS.reject { |k| spec.key?(k) }
+          raise Error, "archetype #{id}: missing #{missing.join(', ')}" if missing.any?
+        end
+
         @minions.each do |id, spec|
           missing = REQUIRED_MINION_KEYS.reject { |k| spec.key?(k) }
           raise Error, "minion #{id}: missing #{missing.join(', ')}" if missing.any?
+
+          # An individual naming a race that does not exist is a person with no stats at all.
+          # Caught here rather than at the moment somebody tries to work a lever with them.
+          archetype = spec.fetch(:archetype).to_sym
+          next if @archetypes.key?(archetype)
+
+          raise Error, "minion #{id}: unknown archetype #{archetype.inspect}"
         end
+      end
+
+      # Layers one and two: a race's baseline, offset by the individual's own sheet.
+      #
+      # **Deliberately NOT settled here.** Training and equipment are layers three and four and
+      # are folded at build by `Crew`, so clamping now would make the order of the layers matter
+      # — a penalty floored at zero before a bonus landed would give a different worker from the
+      # same kit in a different order. `Sheet.settle` runs once, after all four.
+      def build_sheet(id)
+        spec = @minions.fetch(id)
+        base = archetype(spec.fetch(:archetype))
+        baseline = Sheet::STATS.to_h { |stat| [ stat, base.fetch(stat).to_f ] }
+
+        { name: spec.fetch(:name),
+          archetype: spec.fetch(:archetype).to_sym,
+          stats: Sheet.add_stats(baseline, spec.fetch(:stats, {})).freeze,
+          tags: Sheet.add_tags(base.fetch(:tags, {}), spec.fetch(:tags, {})).freeze }.freeze
       end
     end
   end

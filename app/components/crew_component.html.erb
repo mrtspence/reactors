@@ -3,12 +3,30 @@
   <ul class="flex flex-col gap-2">
     <% minions.each do |minion| %>
       <li class="flex items-center gap-2 text-sm" data-minion-id="<%= minion.id %>">
-        <span class="text-slate-200 grow"><%= minion.name %></span>
+        <span class="flex flex-col grow min-w-0">
+          <span class="text-slate-200 truncate"><%= minion.name %></span>
+          <span class="text-[10px] uppercase tracking-wide text-slate-500">
+            <%= minion.id.to_s.tr("_", " ") %>
+          </span>
+        </span>
+        <%# Filled in from the projection, which is the only thing that knows. Empty until the
+            first view arrives, rather than pre-rendering a guess that would be wrong. %>
+        <span class="flex flex-col items-end gap-1 shrink-0">
+          <span class="text-[10px] uppercase tracking-wide text-rose-400 hidden"
+                data-minion-injury></span>
+          <%# Fatigue is a number rather than prose, unlike condition: it is the reading a
+              player rotates the crew on, and a worker flagging is not something a gauge
+              mediates — you can see it. %>
+          <span class="block h-1 w-10 rounded-full bg-slate-700 overflow-hidden" title="Fatigue">
+            <span class="block h-full w-0 bg-slate-400 transition-all duration-300"
+                  data-minion-fatigue></span>
+          </span>
+        </span>
         <select class="bg-slate-900 text-slate-200 text-xs rounded px-1 py-0.5 ring-1 ring-slate-700"
                 data-minion-station data-action="change->console#assign">
           <option value="">— stood down —</option>
-          <% controls.each do |control| %>
-            <option value="<%= control.fetch(:id) %>"><%= control.fetch(:label) %></option>
+          <% stations.each do |station| %>
+            <option value="<%= station.fetch(:id) %>"><%= station.fetch(:label) %></option>
           <% end %>
         </select>
       </li>

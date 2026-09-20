@@ -14,8 +14,7 @@ RSpec.describe ReactorSim::Minion do
   def rig(health: 1.0, fatigue: 0.0, strength: 1.0, stiffness: 20.0, station: :valve)
     content = ReactorSim::Content.build(
       resources: { water: { tags: [ :liquid ], specific_heat_j_per_kg_k: 4181,
-                            density_kg_per_m3: 997 } },
-      minions: { hand: { label: "Hand", strength: strength } }
+                            density_kg_per_m3: 997 } }
     )
 
     op = ReactorSim::Operation.new(
@@ -24,7 +23,12 @@ RSpec.describe ReactorSim::Minion do
                                               max_kg_per_s: 1.0) ],
       control_points: [ ReactorSim::ControlPoint.new(id: :valve, node: :pipe,
                                                      stiffness: stiffness) ],
-      minions: [ described_class.new(id: :worker, archetype: :hand, station: station) ]
+      # **Stats arrive FOLDED.** A `Minion` used to hold an archetype id and reach into content
+      # for `strength` on every call; all four layers are resolved at build now, by `Crew`, which
+      # is the only thing that knows a player owns anything. Nothing on the tick path looks a
+      # stat up, so this rig hands one over directly.
+      minions: [ described_class.new(id: :worker, name: "Hand", station: station,
+                                     stats: { strength: strength }) ]
     )
 
     # Reach past the command path to set condition directly — nothing advances health or
@@ -136,9 +140,9 @@ RSpec.describe ReactorSim::Minion do
         id: "m", seed: 42, operations: [ { id: "eng", type: :steam_engine } ]
       )
       restored = ReactorSim::Match.from_h(JSON.parse(JSON.generate(match.to_h)))
-      station = restored.operation(:eng).state.fetch(:minions).fetch(:fireman).fetch(:station)
+      station = restored.operation(:eng).state.fetch(:minions).fetch(:crew_1).fetch(:station)
 
-      expect(station).to be(:stoking)
+      expect(station).to be(:quarters)
     end
 
     it "survives a round trip with the crew intact" do
@@ -146,11 +150,11 @@ RSpec.describe ReactorSim::Minion do
         id: "m", seed: 42, operations: [ { id: "eng", type: :steam_engine } ]
       )
       match.apply([ { type: "assign_minion", operation_id: "eng",
-                      minion_id: "yardhand", control_point_id: "feed" } ])
+                      minion_id: "crew_2", control_point_id: "feed" } ])
       restored = ReactorSim::Match.from_h(JSON.parse(JSON.generate(match.to_h)))
 
       expect(restored.digest).to eq(match.digest)
-      expect(restored.operation(:eng).state.fetch(:minions).fetch(:yardhand).fetch(:station))
+      expect(restored.operation(:eng).state.fetch(:minions).fetch(:crew_2).fetch(:station))
         .to be(:feed)
     end
   end

@@ -2,10 +2,14 @@
 
 # The one player this prototype has, and the owner of every unlock.
 #
-# TODO: expedient — there is exactly one hardcoded player, exactly as there is exactly one
-# hardcoded match. No accounts, no sessions, no authentication. A proper implementation has an
-# owner per session and this module becomes `current_player`. The shape is chosen so that is the
-# only change: nothing outside here knows the id is a constant.
+# TODO: expedient — there is exactly one hardcoded player. No accounts, no sessions, no
+# authentication. A proper implementation has an owner per session, and
+# `ApplicationController#current_player` — which is the only thing that reads this — becomes that
+# lookup. **Authorisation is already real**: `Operation#operable_by?` refuses anybody who is not
+# the owner, so what is missing is authentication rather than the rule it feeds.
+#
+# The shape is chosen so the session lookup is the only change: nothing outside here knows the id
+# is a constant.
 #
 # **Everything is granted at stage 5a and that is the acceptance criterion, not an oversight.**
 # The machinery is real — real rows, real validation, real revocation — and the dev player simply

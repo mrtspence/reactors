@@ -2,39 +2,36 @@
 
 module ReactorSim
   module Nodes
-    # Where a gas pressure difference becomes shaft torque.
+    # Where a gas pressure difference becomes shaft torque. Generic: the working fluid is
+    # configuration, and the cylinder cares only that the inlet side is at higher pressure than
+    # whatever it exhausts into.
     #
-    # Generic: nothing here knows what the working fluid is. Steam, compressed air, hot flue
-    # gas — the cylinder cares only that something on the inlet side is at higher pressure
-    # than whatever it exhausts into.
+    # **Torque, not power**, from the pressure difference across the piston:
     #
-    # ## Torque, not power
+    #     torque = ΔP × piston_area × crank_radius
     #
-    # Work is computed as a TORQUE from the pressure difference across the piston:
+    # **Indicated, with nothing taken off for friction.** There was a `0.85` here and it did not
+    # do what it looked like: `Tick#transmit_torque` bills a driver for the kinetic energy the
+    # shaft *measurably gained*, so derating the torque never removed the other 15% from the
+    # charge — it was energy nobody claimed rather than energy that went anywhere. Rubbing is
+    # modelled where it happens now, by a `Nodes::Bearing` with `duty: :slide` carrying the
+    # rings, crosshead and gland, so the loss is real, lands as heat, and wears the part out.
     #
-    #     torque = ΔP × piston_area × crank_radius × efficiency
+    # independent of speed. Deriving torque from a power figure means dividing by ω, which is
+    # infinite at rest, so the machine could not be started from standstill. This way a stalled
+    # cylinder has full torque and `power = torque × ω` comes out as zero.
     #
-    # which is independent of how fast it is turning. That matters enormously. Deriving
-    # torque from a power figure means dividing by ω, which is infinite at rest — and a
-    # machine that cannot be started from standstill is not much use. This way a stalled
-    # cylinder has full torque and `power = torque × ω` correctly comes out as zero.
-    #
-    # ## Self-starting and self-limiting, with no special cases
+    # **Self-starting and self-limiting**, with no special cases:
     #
     #     at rest    inlet open → charge builds → pressure rises → torque → it turns
     #     spinning   exhaust flow ∝ ω → charge drops → pressure falls → torque falls → settles
     #
-    # It finds its own operating point because turning faster means breathing harder. That
-    # is also where the danger lives: shed the load and ω climbs, which admits more working
-    # fluid, which pushes ω higher still. Nothing stands between that loop and a burst
-    # rotating mass except a governor and an operator.
+    # It finds its own operating point because turning faster means breathing harder. That is
+    # also where the danger lives: shed the load and ω climbs, admitting more fluid, pushing ω
+    # higher still. Only a governor and an operator stand between that loop and a burst wheel.
     #
-    # ## What it exhausts into decides what kind of machine it is
-    #
-    # Wired to exhaust into a condenser held near vacuum, it is driven by the difference
-    # between its supply and that vacuum. Wired to exhaust into the open air, it is driven
-    # by however far its supply exceeds ambient. Same node, same formula, different graph —
-    # which is what lets one definition cover machines that look nothing alike.
+    # **What it exhausts into decides what kind of machine it is** — a condenser near vacuum, or
+    # the open air. Same node, same formula, different graph.
     class Cylinder < Node
       include Concerns::Thermal
       include Concerns::Holds
@@ -59,7 +56,7 @@ module ReactorSim
       MIN_ENTRAINMENT = 0.02
 
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
-                  :bore_m, :stroke_m, :crank_radius_m, :efficiency, :drives,
+                  :bore_m, :stroke_m, :crank_radius_m, :drives,
                   :cutoff_control_id, :clearance_fraction, :max_pressure_pa, :stress_rate,
                   :drain_control_id, :drain_authority,
                   :material, :wall_thickness_m, :safety_factor,
@@ -67,7 +64,7 @@ module ReactorSim
                   :compression_fraction
 
       def initialize(id:, label: nil, bore_m:, stroke_m:, drives:, exhausts_to:, supplied_by:,
-                     crank_radius_m: nil, efficiency: 0.85, clearance_fraction: 0.08,
+                     crank_radius_m: nil, clearance_fraction: 0.08,
                      heat_capacity: 6.0e4, ambient_conductance: 25.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, cutoff_control_id: nil,
                      drain_control_id: nil, drain_authority: 0.25,
@@ -81,7 +78,6 @@ module ReactorSim
         @stroke_m = stroke_m.to_f
         # Half the stroke, unless the crank is geared otherwise.
         @crank_radius_m = (crank_radius_m || (@stroke_m / 2.0)).to_f
-        @efficiency = efficiency.to_f
         @clearance_fraction = clearance_fraction.to_f
         # Swept volume plus the clearance the piston never sweeps.
         @swept_m3 = Math::PI * ((@bore_m / 2.0)**2) * @stroke_m
@@ -105,7 +101,12 @@ module ReactorSim
             # Separate from the drain because they are different devices with different jobs:
             # the cocks are a lever a driver works, this is a spring that acts whether anyone is
             # watching or not. One port each, because a port carries one path.
-            Port.new(id: :relief, direction: :outlet, max_kg_per_s: relief_kg_per_s)
+            Port.new(id: :relief, direction: :outlet, max_kg_per_s: relief_kg_per_s),
+            # Where the front of the cylinder goes when the head lets go. Nothing crosses it
+            # while the barrel is sound — a `Nodes::Breach` on the far side is shut until the
+            # failure mode opens it — and it is rated well above anything the working machine
+            # uses so the hole is the restriction rather than this port.
+            Port.new(id: :breach_out, direction: :outlet, max_kg_per_s: 50.0)
           ]
         )
         @drives = drives.to_sym
@@ -170,23 +171,16 @@ module ReactorSim
 
       # Admit working fluid through the inlet, and sweep out what the return stroke displaces.
       #
-      # **Admission is positive displacement at the density the SUPPLY is at.** Per revolution
-      # the engine swallows `(cutoff + clearance) × swept_volume`, so notching up takes
-      # proportionally less steam. Two separate things were wrong here and each was enough on
-      # its own to make cut-off inert:
+      # **Admission is positive displacement at the density the SUPPLY is at**, never the charge
+      # already held — that is a collapsing feedback loop, since less held means less demanded.
+      # Per revolution the engine swallows `cutoff × swept_volume`, so notching up takes
+      # proportionally less steam.
       #
-      #   * It used the density of the charge **already held**, which is a collapsing feedback
-      #     loop — less held means less demanded means less held. Measured at consistently half
-      #     the supply density, because the charge has already expanded and partly exhausted.
-      #   * It drew `max(displacement, headroom)`, where headroom is "enough to bring my whole
-      #     free volume up to supply pressure". **That term contains no cut-off at all** —
-      #     measured flat at 0.219 to 0.227 kg per tick from full gear down to 25% — so it won
-      #     the `max` every time and the displacement never reached the demand. Steam
-      #     consumption was constant to three significant figures while power fell 140-fold:
-      #     notching up cost everything and saved nothing, which is the exact inverse of the
-      #     machine.
+      # `admission` is what the rings still hold: a sound cylinder is 1.0, a scored one swallows
+      # a full charge and wastes part of it past the piston, a blown head is 0.0.
       def plan(state, ctx)
-        return Intent.none if broken?(state)
+        works = derating(state, :admission)
+        return Intent.none unless works.positive?
 
         Intent.new(
           draws: { inlet: [ port(:inlet).capacity_kg(ctx.dt), admission_kg(state, ctx) ].min },
@@ -195,39 +189,28 @@ module ReactorSim
       end
 
       # What the engine swallows this tick: the stroke's displacement, or — standing — just
-      # enough to fill the clearance space to chest pressure.
-      #
-      # The standing term is not a starting hack. A stopped engine with the regulator open
-      # genuinely does fill its clearance space and no further, because nothing is sweeping;
-      # it is the *displacement* that goes to zero at rest, not the admission. It matters that
-      # this is small rather than a whole cylinder full: torque no longer comes from the held
-      # charge (see `apply`), so a stopped cylinder does not have to be pumped up to supply
-      # pressure before it will turn.
+      # enough to fill the clearance space to chest pressure. It is the *displacement* that goes
+      # to zero at rest, not the admission. Keeping the standing term small matters because
+      # torque does not come from the held charge (see `apply`), so a stopped cylinder need not
+      # be pumped up to supply pressure before it will turn.
       def admission_kg(state, ctx)
         [ displacement_kg(ctx), clearance_fill_kg(state, ctx), blow_through_kg(ctx) ].max
       end
 
-      # ## Steam blowing through a standing engine, which is what the cocks are actually for
+      # Steam blowing through a standing engine, which is what the cocks are for. A stopped
+      # cylinder with the regulator open is not sealed: the valve is wherever the crank left it,
+      # the ports are open, and steam blows straight through. Without it a standing cylinder only
+      # tops up its clearance, which stops as soon as pressure equalises, so the cocks have
+      # nothing to drain.
       #
-      # A stopped cylinder with the regulator open is not sealed. The valve is wherever the
-      # crank left it, the ports are open, and steam blows straight through — into the cylinder
-      # and out of the exhaust or the cocks. It is the noise a stationary locomotive makes.
+      # **Gone by `standing_omega`, about 9.5 rpm, and it has to be that low.** This is a
+      # standstill phenomenon: the moment the crank turns, the valve gear opens and closes on
+      # schedule and there is no steady path through. Fading it over `entrainment_omega` instead
+      # leaves it 31% active at 66 rpm — across the whole normal operating range — and the engine
+      # dies there.
       #
-      # **Without it a standing cylinder admits only a static clearance top-up**, which stops
-      # the moment the pressure equalises, so almost nothing arrives and the cocks have nothing
-      # to drain. Measured: a standing engine reached 0.374 kg of water in nine thousand ticks
-      # and was plainly asymptoting — against the 14.0 kg its clearance holds.
-      #
-      # **Gone by `standing_omega`, which is about 9.5 rpm and has to be that low.** This is a
-      # standstill phenomenon, not a low-speed one: the moment the crank turns, the valve gear
-      # opens and closes on schedule and there is no steady path through. Fading it over
-      # `entrainment_omega` instead left it 31% active at 66 rpm — across the whole normal
-      # operating range — and the engine reached 66 rpm and then died in every configuration
-      # tested. A leak that only exists at rest must stop existing almost immediately.
-      #
-      # Deliberately a *rate* rather than a pressure-driven flow: the cylinder is the one part
-      # that already sizes its own intake, and giving it a conductance as well would be two
-      # numbers for one restriction again.
+      # A *rate* rather than a pressure-driven flow: the cylinder already sizes its own intake,
+      # and a conductance as well would be two numbers for one restriction.
       def blow_through_kg(ctx)
         return 0.0 if @standing_kg_per_s <= 0.0 || @standing_omega <= 0.0
 
@@ -240,17 +223,11 @@ module ReactorSim
       # Mass swallowed per tick by the stroke itself: `cutoff × swept volume` per revolution at
       # admission density.
       #
-      # **The clearance volume is deliberately NOT in this term**, and the textbook `(ρ + c)`
-      # would be wrong here. That form is the gross fill, and it is paired with a credit for the
-      # residue the compression stroke recompresses — real valve gear shuts the exhaust early
-      # precisely so the clearance charge is *kept* rather than re-bought every stroke. This
-      # model keeps it directly: `exhaust_demand_kg` holds `retained_kg` back, so the
-      # residue never leaves and charging admission for it again would bill the engine twice.
-      #
-      # It is not a rounding error at the interesting end of the range. Billed twice, steam
-      # consumption goes as `ρ + 0.08`, and at 15% cut-off that is a **53% surcharge** on the
-      # setting where economy is supposed to be won — enough on its own to invert the efficiency
-      # curve the cut-off lever exists to produce.
+      # **The clearance volume is deliberately not in this term.** The textbook `(ρ + c)` is a
+      # gross fill paired with a credit for the residue the compression stroke recompresses.
+      # This model keeps that residue directly — `exhaust_demand_kg` holds `retained_kg` back —
+      # so charging admission for it again bills the engine twice. At 15% cut-off that is a 53%
+      # surcharge, on exactly the setting where economy is supposed to be won.
       def displacement_kg(ctx)
         omega = ctx.node_omega(@drives) || 0.0
         return 0.0 if omega <= 0.0
@@ -278,16 +255,14 @@ module ReactorSim
       # term does not depend on what is held.
       #
       # **The revolution cap is what makes the held inventory mean anything.** A cylinder
-      # completes one exhaust stroke per revolution, so at 0.6 revolutions per tick it can only
-      # sweep 0.6 of a cylinder-full; without the cap a barely-turning engine empties itself
-      # completely every tick. The two rules settle at different inventories and only one of
-      # them is a cylinder:
+      # completes one exhaust stroke per revolution, so at 0.6 revolutions per tick it sweeps
+      # 0.6 of a cylinder-full; uncapped, a barely-turning engine empties itself every tick:
       #
       #     uncapped   contents → clearance + one TICK's admission     (< one stroke at 0.6 rev)
       #     capped     contents → clearance + one REVOLUTION's charge  (exactly one stroke)
       #
-      # It also matters to the blastpipe, which breathes on `exhaust_kg`: uncapped, a slow
-      # engine hands the chimney one large slug and then nothing.
+      # It also matters to the blastpipe, which breathes on `exhaust_kg`: uncapped, a slow engine
+      # hands the chimney one large slug and then nothing.
       #
       # Zero when stopped, which is correct and is the reason a standing engine fills with its
       # own condensate. That is what drain cocks are for.
@@ -307,20 +282,13 @@ module ReactorSim
       end
 
       # **What the piston cannot sweep out: whatever occupies the clearance volume at the top of
-      # the stroke.** Liquid takes that space first, because it is dense and it collects exactly
+      # the stroke.** Liquid takes that space first, because it is dense and collects exactly
       # where the piston cannot reach; gas fills whatever is left.
       #
-      # This used to be `clearance_volume × supply_density` — the clearance priced as a **gas
-      # mass**, about 0.029 kg — and everything above that figure was pushed out. So the model
-      # would happily expel 14 kg of water from a space that can only hold 0.029 kg of steam,
-      # and water could never accumulate however much of it arrived. Measured on a calm boiler:
-      # **10.98 kg of water condensed inside the cylinder over 100 seconds and 10.98 kg left by
-      # the exhaust**, with 0.0003 kg net retained. The exhaust was never the bottleneck; the
-      # retention figure was simply too small to hold anything back.
-      #
-      # It is the same mass-for-volume confusion as pricing a tank's level by `contents_volume`
-      # or setting an affinity without regard to the mass ratio it works against. **A clearance
-      # is a volume. Whatever is in it is whatever fits.**
+      # **A clearance is a volume — whatever is in it is whatever fits.** Pricing it as a gas
+      # mass instead (`clearance_volume × supply_density`, about 0.029 kg) lets the model expel
+      # 14 kg of water from a space that holds 0.029 kg of steam, so water can never accumulate
+      # however much arrives.
       def retained_kg(state, ctx)
         clearance = obstruction_volume_m3
         liquid_m3 = obstructing_volume_m3(state, ctx.content)
@@ -346,22 +314,17 @@ module ReactorSim
           (Units::GAS_CONSTANT * temperature)
       end
 
-      # **Mean density of everything the supply is holding, which is what the piston swallows.**
+      # **Mean density of everything the supply holds, which is what the piston swallows.** A
+      # positive-displacement machine takes a *volume* and gets whatever is in it; the working
+      # fluid's gas density asks for the mass that volume would hold **if the supply were dry**.
       #
-      # A positive-displacement machine takes a *volume* and gets whatever is in it. Sizing the
-      # intake at the working fluid's gas density instead asks for the mass that volume would
-      # hold **if the supply were dry**, and that is the fourth mass-for-volume confusion in this
-      # codebase — after `contents_volume` read as a level, an affinity set against a mass ratio,
-      # and a clearance priced as 0.029 kg of steam.
+      # At 170 rpm and 40% cut-off the piston sweeps 0.0496 m³ per tick — 49.6 kg if the stream
+      # is water, against 0.126 kg on the gas figure. On that figure a chest full of primed water
+      # hands the cylinder a few hundred grams of it and hydraulic lock at speed is arithmetically
+      # unreachable, because the piston never asks for a slug.
       #
-      # It is not a small error at the end that matters. At 170 rpm and 40% cut-off the piston
-      # sweeps 0.0496 m³ per tick, which is **49.6 kg if the stream is water**; the gas figure
-      # asks for 0.126 kg. So a chest full of primed water handed the cylinder a few hundred
-      # grams of it, and hydraulic lock at speed was arithmetically unreachable however hard the
-      # boiler primed — the piston could not swallow a slug because it was never asking for one.
-      #
-      # Dry, the two densities agree and nothing about normal running changes. Falls back to the
-      # gas figure when the supply is not a holder with a volume.
+      # Dry, the two densities agree. Falls back to the gas figure when the supply is not a
+      # holder with a volume.
       def supply_bulk_density(ctx)
         ctx.node_reading(@supplied_by, :bulk_density_kg_m3) || supply_gas_density(ctx)
       end
@@ -396,50 +359,39 @@ module ReactorSim
         # driver whose torque is nil or whose shaft has come apart — and a gauge reading a stale
         # figure would show a wrecked engine still making power.
         state = state.merge(shaft_power_w: 0.0)
-        return state.merge(torque: 0.0, indicated_power_w: 0.0) if broken?(state)
+        # A blown head does no work; a scored bore does some of it. The same `admission` figure
+        # that rations what the cylinder draws also scales what it can push with, because they
+        # are one fact about the rings — steam that blows past the piston is neither swallowed
+        # usefully nor turned into torque.
+        works = derating(state, :admission)
+        return state.merge(torque: 0.0, indicated_power_w: 0.0) unless works.positive?
 
         # **The diagram's admission pressure is what the SUPPLY is at, not what this node
-        # holds.** A lumped charge that has already expanded and is halfway through being
-        # exhausted sits near the *release* condition — measured at roughly 30% of boiler
-        # pressure, and tracking it at under half rate. Worse, it is a function of the free
-        # volume, so as the cylinder flooded with its own condensate the pressure ROSE and the
-        # engine made more power the closer it came to hydraulic lock: 175 kW at a liquid
-        # fraction of 1.455. The model was rewarding the failure it should punish.
+        # holds.** A cylinder has no single pressure — admission, cut-off, release, back and
+        # compression differ by more than an order of magnitude inside one revolution — so a
+        # lumped charge reports the least useful of the five, near the *release* condition. It is
+        # also a function of free volume, so a cylinder flooding with condensate would read a
+        # RISING pressure and make more power the closer it came to hydraulic lock.
         #
-        # A cylinder has no single pressure — admission, cut-off, release, back and compression
-        # differ by more than an order of magnitude inside one revolution — so asking a
-        # lumped-body node for "the" pressure was always going to return the least useful of
-        # the five.
-        #
-        # **Point `supplied_by:` at a steam chest, not at the boiler.** Both are "the supply",
-        # and only one of them closes the loop. Reading the boiler leaves the regulator unable
-        # to affect torque at all — it rations how much steam arrives but says nothing about the
-        # pressure it arrives at — and the only thing then standing between this diagram and
-        # inventing energy is the `extractable_joules` bound in `Tick#transmit_torque`.
-        # Measured, that bound was discarding **30 to 50% of the declared work** and its scale
-        # factor *was* the throttle mechanism: 0.496 at throttle 20, 0.596 at 40, 0.698 at 60,
-        # with declared torque nearly flat across the range. A conservation clamp is not a
-        # substitute for a mechanism, and it fails silently when it is used as one.
-        #
-        # A chest between regulator and valve fixes it structurally rather than with a bound:
-        # swallow faster than the throttle can pass and the chest depletes, so the admission
-        # density falls and P₁ falls with it.
+        # **Point `supplied_by:` at a steam chest, not at the boiler.** Both are "the supply" and
+        # only one closes the loop: reading the boiler leaves the regulator unable to affect
+        # torque, because it rations how much steam arrives but says nothing about the pressure
+        # it arrives at. A chest fixes it structurally — swallow faster than the throttle can
+        # pass and the chest depletes, so admission density and P₁ fall with it.
         omega = ctx.node_omega(@drives) || 0.0
 
-        # **A locked cylinder does not drive, it resists.** With the clearance space full of
-        # water the piston cannot reach the top of its stroke, so the charge stops being a
-        # source of work and becomes something the crank has to push against. Expressed as a
-        # negative torque rather than as a special case in the tick: `transmit_torque` then
-        # decelerates the shaft, measures the kinetic energy it lost, and hands it back to this
-        # node as heat — which is what crushing water against a cylinder end actually does, and
-        # it balances the books without a rule of its own.
+        # **A locked cylinder does not drive, it resists.** With the clearance full of water the
+        # piston cannot reach the top of its stroke, so the charge becomes something the crank
+        # pushes against. Expressed as negative torque rather than a special case in the tick:
+        # `transmit_torque` decelerates the shaft, measures the kinetic energy lost and returns
+        # it here as heat, which is what crushing water against a cylinder end does — and it
+        # balances the books without a rule of its own.
         #
-        # When the driveline has less energy stored than the charge costs to compress, this is
-        # the whole story and the engine simply stalls; when it has more, `overload?` has already
-        # destroyed the cylinder on the same tick.
+        # With less stored driveline energy than the charge costs to compress the engine stalls;
+        # with more, `overload?` has already destroyed the cylinder on the same tick.
         if locked?(state, ctx.content)
           resisting = compression_pressure_pa(state, ctx.content) *
-                      piston_area_m2 * @crank_radius_m * @efficiency
+                      piston_area_m2 * @crank_radius_m
           return state.merge(torque: -resisting, indicated_power_w: 0.0)
         end
 
@@ -447,41 +399,27 @@ module ReactorSim
         exhaust_pressure = ctx.node_pressure(@exhausts_to) || Units::STANDARD_PRESSURE_PA
         admission = admission_pressure_pa(supply_pressure, exhaust_pressure, ctx)
         mep = mean_effective_pressure(admission, exhaust_pressure, cutoff_fraction(ctx))
-        torque = mep * piston_area_m2 * @crank_radius_m * @efficiency
+        torque = mep * piston_area_m2 * @crank_radius_m * works
 
         state.merge(torque: torque, indicated_power_w: torque * omega)
       end
 
-      # ## An open drain cock is a hole in the working space, and the diagram has to feel it
+      # **An open drain cock is a hole in the working space, and the diagram has to feel it.**
+      # The mass budget is the wrong place to look: the cylinder holds so little gas that the
+      # smallest cock takes all of it, so `drain_kg_per_s` is inert across an order of magnitude.
       #
-      # **Without this the cocks had no effect on output at all.** They drained condensate and
-      # cooled the cylinder a little, and that was the whole of it — measured, leaving them wide
-      # open cost 4 to 7% of the power, and at low throttle it *gained* 1%. The steam chest made
-      # it worse rather than better: once the cylinder could refill from a 25 kg/s inlet the chest
-      # stopped depleting (543 → 545 kPa with the cocks fully open), so the indirect route the
-      # old notes described — cocks drain mass, chest falls, P₁ falls — had quietly closed.
-      # `drain_kg_per_s` is inert too: 0.25, 0.5, 1.0, 2.0 and 4.0 give **byte-identical** results,
-      # because the cylinder holds so little gas that the smallest cock can already take all of it.
-      #
-      # So the mass budget is the wrong place to look for this. What an open cock physically does
-      # is **short-circuit the working space to atmosphere while the piston is trying to push
-      # against it.** During admission the space is fed through the valve and vented through the
-      # cock at the same time, which is a pressure divider:
+      # What an open cock does is short-circuit the working space to atmosphere while the piston
+      # pushes against it. During admission the space is fed through the valve and vented through
+      # the cock at once, which is a pressure divider:
       #
       #     P_eff = (A·P_supply + B·P_back) / (A + B)
       #
       # Writing `b = B/(A+B)` for the cock's authority wide open, that is
-      # `P_supply − b·(P_supply − P_back)`. Two properties make it the right shape:
-      #
-      #   * **Shut, it is exactly `P_supply`** — `b = 0` changes nothing, so an engine with its
-      #     cocks closed is bit-identical to one that never had any.
-      #   * **The loss is proportional to the pressure difference**, so it is largest exactly when
-      #     the engine is working hardest. That was the complaint from play: dumping your most
-      #     energetic steam should be costliest, and instead it was free above 500 kW.
-      #
-      # This is the same correction the regulator needed — *a restriction, not a ration.* A cock
-      # is an orifice, and what matters about an orifice is the pressure it destroys, not a rate
-      # cap somebody wrote next to it.
+      # `P_supply − b·(P_supply − P_back)`. Two properties make it the right shape: shut, it is
+      # exactly `P_supply`, so an engine with its cocks closed is bit-identical to one that never
+      # had any; and the loss is proportional to the pressure difference, so it is largest when
+      # the engine is working hardest. *A restriction, not a ration* — what matters about an
+      # orifice is the pressure it destroys.
       def admission_pressure_pa(supply_pa, back_pa, ctx)
         bleed = drain_open_fraction(ctx) * @drain_authority
         return supply_pa if bleed <= 0.0 || supply_pa <= back_pa
@@ -497,25 +435,18 @@ module ReactorSim
         (ctx.controls.fetch(@drain_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
       end
 
-      # ## The indicator diagram, which is what a steam engine actually is
-      #
-      # Torque used to be `(P_charge − P_back) × A × r × η`: the pressure difference applied
-      # flat across the whole stroke. That is the diagram for an engine running at **full
-      # admission** and nothing else, and it is why `cutoff` was a second, worse throttle —
-      # it scaled the *rate* steam arrived at, so it bought less steam and less power in equal
-      # measure, and above 24% of its travel it did not bind at all.
-      #
-      # Working expansively is the entire point of the machine. Steam admitted for a fraction
-      # `ρ` of the stroke goes on pushing as it expands, so the work per cycle is
+      # **The indicator diagram, which is what a steam engine is.** Working expansively is the
+      # point of the machine: steam admitted for a fraction `ρ` of the stroke goes on pushing as
+      # it expands, so the work per cycle is
       #
       #     admission   P₁ · ρ
       #     expansion   P₁ · ρ · (1 − ρ^(n−1)) / (n − 1)        ( → ρ·ln(1/ρ) as n → 1 )
       #     exhaust     − P₂
       #
-      # all per unit of swept volume, which sums to the mean effective pressure. At ρ = 1 the
-      # expansion term vanishes and this is exactly the old formula, so nothing that was right
-      # about full-gear running changed. At ρ = 0.25 with n = 1.135 it is 0.566·P₁ − P₂ —
-      # **57% of the power on 25% of the steam**, which is the trade a driver notches up for.
+      # per unit of swept volume, summing to the mean effective pressure. At ρ = 1 the expansion
+      # term vanishes and this reduces to a flat `(P₁ − P₂)` across the stroke. At ρ = 0.25 with
+      # n = 1.135 it is 0.566·P₁ − P₂ — **57% of the power on 25% of the steam**, which is the
+      # trade a driver notches up for, and why cut-off is not simply a second throttle.
       def mean_effective_pressure(supply_pa, back_pa, cutoff)
         return 0.0 if supply_pa <= back_pa
 
@@ -572,29 +503,20 @@ module ReactorSim
       # one that destroys it in a single revolution.
       def obstruction_tags = OBSTRUCTION_TAGS
 
-      # ## The pressure the charge reaches at top dead centre
+      # **The pressure the charge reaches at top dead centre** — the quantity hydraulic lock
+      # turns on, and the reason a relief valve can catch it. `pressure_pa` reports the charge
+      # spread over the *whole* cylinder, so enough water to destroy the engine moves it by about
+      # 7%: the pressure that matters is one a lumped body never experiences.
       #
-      # The derived quantity hydraulic lock actually turns on, and the reason a relief valve
-      # can now catch it. `pressure_pa` reports the charge spread over the **whole** cylinder,
-      # so filling the clearance with enough water to destroy the engine moves it by about 7%
-      # — the pressure that matters is one a lumped body never experiences.
-      #
-      # Reconstructed rather than traced, exactly as `mean_effective_pressure` reconstructs the
-      # area of a diagram this model never draws. At exhaust closure the residue occupies
-      # `clearance + compression_fraction × swept`; by top dead centre the piston has squeezed
-      # it into whatever the water has left of the clearance:
+      # Reconstructed, as `mean_effective_pressure` reconstructs a diagram this model never
+      # draws. At exhaust closure the residue occupies `clearance + compression_fraction ×
+      # swept`; by top dead centre the piston has squeezed it into what the water left:
       #
       #     P_tdc = P · (V_closure / (V_clearance − V_liquid))ⁿ
       #
-      # Floored the same way `Pressurized#free_volume` is, so it is steep but finite — which is
-      # what a real liquid's bulk modulus does, since the cylinder is not perfectly rigid and
-      # the water is not perfectly incompressible.
-      #
-      # **It rises long before it locks, and that is the point.** Reciprocating-compressor
-      # practice reports four to five times normal pressure on a *moderate* amount of liquid,
-      # and a slug bending a rod in one revolution. Half a clearance of water here is 2.2× the
-      # dry compression; nine tenths is 13.6×. So a cylinder run wet fatigues, over-pressure
-      # trips a relief valve, and only the last of it is sudden.
+      # **It rises long before it locks, and that is the point.** Half a clearance of water is
+      # 2.2× the dry compression, nine tenths is 13.6×, so a wet cylinder fatigues and trips a
+      # relief valve before anything is sudden.
       def compression_pressure_pa(state, content)
         pressure_pa(state, content) *
           ((compression_closure_m3 / compression_space_m3(state, content))**@expansion_index)
@@ -625,20 +547,14 @@ module ReactorSim
       # True once the clearance space is full: the piston cannot complete its stroke.
       def locked?(state, content) = occupancy(state, content) >= 1.0
 
-      # ## What leaves with the steam, and what leaves through the cocks
-      #
       # **A fast engine blows its own condensate clear; a slow one collects it.** Entrainment is
-      # the exhaust stroke dragging droplets out with the steam, and it is a function of how
-      # violent that stroke is — which is why a real driver opens the cocks when starting and
-      # shuts them once the engine is away, and why hydraulic lock belongs to standing rather
-      # than to running.
+      # the exhaust stroke dragging droplets out with the steam, scaling with how violent that
+      # stroke is — which is why a driver opens the cocks when starting and shuts them once the
+      # engine is away, and why hydraulic lock belongs to standing rather than running.
       #
-      # Before this existed the choice was between the two settings a port tag can express, and
-      # **both were wrong**: `accepts: [:gas]` on the chimney stranded condensate completely and
-      # flooded the cylinder to 21.9 kg, while making it permissive carries water away
-      # *proportionally by mass* — preferentially, since the stroke sweeps a volume and water is
-      # a thousand times denser than the steam carrying it.
-      #
+      # A port tag alone cannot express this: gas-only strands condensate entirely, and
+      # permissive carries water away *proportionally by mass*, which is preferential, since the
+      # stroke sweeps a volume and water is a thousand times denser than the steam carrying it.
       # The cocks pull the other way on the same tag, which is the point of them.
       def transport_affinity(port_id, _state, ctx)
         case port_id
@@ -697,28 +613,23 @@ module ReactorSim
 
       # Hydraulic lock, and **what it costs depends on what the driveline had stored.**
       #
-      #     stopped / light        it stalls — see `apply`. Recoverable, and it should be
+      #     stopped / light        it stalls — see `apply`. Recoverable, and should be
       #     heavy wheel at speed   a rod bends, a cover goes: destroyed in a single revolution
       #
-      # **Derived, not declared.** This used to be `omega > lock_omega`, and that grading was
-      # structurally unreachable on a real engine: filling the clearance needs a standing
-      # cylinder, destruction needed a turning one, and a locked cylinder makes negative torque
-      # so it can never accelerate out of one regime into the other. The two conditions could not
-      # both hold, and the destruction branch had never once fired.
-      #
-      # A speed threshold was the wrong question anyway. What decides whether the piston reaches
-      # top dead centre is whether the rotating mass carries enough **energy** to compress the
-      # trapped charge — which is why a heavy flywheel is the danger and a light one merely
-      # stops, and why the same slug that wrecks an engine at speed is survivable at a crawl.
-      # A 3 200 kg wheel at 170 rpm holds 570 kJ; the same wheel at 10 rpm holds 2 kJ.
+      # **Derived from stored energy, not from a speed threshold.** What decides whether the
+      # piston reaches top dead centre is whether the rotating mass carries enough energy to
+      # compress the trapped charge, which is why a heavy flywheel is the danger and a light one
+      # merely stops. A 3 200 kg wheel at 170 rpm holds 570 kJ; at 10 rpm it holds 2 kJ. A speed
+      # threshold is also unreachable in practice: filling the clearance needs a standing
+      # cylinder, and a locked one makes negative torque, so it can never accelerate into the
+      # regime that would destroy it.
       #
       # Reads the node named by `drives:`, so a load coupled through a `DriveLink` is **not**
-      # counted. Right for this engine, where the flywheel is the mass that matters; wrong for a
-      # geared train, where the driven inertia would have to be summed across the drive network.
+      # counted — right where the flywheel is the mass that matters, wrong for a geared train,
+      # where driven inertia would have to be summed across the drive network.
       #
-      # An overload rather than fatigue: this is not a part wearing out, it is a geometric
-      # impossibility that resolves in one stroke. Scaled by `integrity` like every other
-      # overload, so a tired cylinder gives way sooner.
+      # An overload rather than fatigue: a geometric impossibility that resolves in one stroke.
+      # Scaled by `integrity`, so a tired cylinder gives way sooner.
       def overload?(state, ctx, integrity)
         return false unless occupancy(state, ctx.content) >= integrity
 
@@ -726,18 +637,23 @@ module ReactorSim
         stored > compression_work_joules(state, ctx.content)
       end
 
-      # Ascending severity. The two are genuinely different machines afterwards: a scored bore
-      # still runs and runs badly, a blown head does not run at all and is a hole in the engine.
-      def failure_modes = { scored_bore: {}, blown_head: {} }
+      # Ascending severity, and **the two are genuinely different machines afterwards**, which is
+      # why `failure` carries a mode rather than a boolean.
+      #
+      # A **scored bore** is a worn-out engine, not a dead one: the rings no longer seal, so part
+      # of every charge blows past the piston. It still turns and still pulls, badly, and a
+      # driver can nurse it home. A **blown head** is a hole where the front of the cylinder was;
+      # `admission: 0.0` is how a mode says "this part no longer does that thing at all".
+      def failure_modes
+        { scored_bore: { derates: { admission: 0.55 } },
+          blown_head:  { derates: { admission: 0.0 } } }
+      end
 
-      # **The cause separates these cleanly, which is not usually true** — see `Nodes::Boiler`,
-      # where it is not. Here it is, because the two routes into failure are physically
-      # different events rather than two severities of one: fatigue is a barrel worn out by
-      # being run hot and wet over hours, and the only overload this part has is hydraulic
-      # lock, which bends and breaks things in a single stroke.
+      # **The cause separates these cleanly**, which is not usually true (see `Nodes::Boiler`).
+      # Here the two routes are physically different events rather than two severities of one:
+      # fatigue is a barrel worn out hot and wet over hours, and the only overload this part has
+      # is hydraulic lock, which breaks things in a single stroke.
       def failure_mode(_state, _ctx, cause) = cause == :overload ? :blown_head : :scored_bore
-
-      def failure_type = :cylinder_failure
 
       def failure_detail(state, ctx)
         { occupancy: occupancy(state, ctx.content).round(3) }

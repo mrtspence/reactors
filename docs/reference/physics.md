@@ -92,6 +92,39 @@ Heat transfer between nodes is an implicit solve over the whole thermal network;
 ambient stays closed form, because a fixed-potential reservoir cannot be overshot. See
 [`settlement.md`](settlement.md#heat-and-rotation-settle_heat-settle_drive).
 
+### Radiation is a conductance, because `T⁴ − T_amb⁴` factors
+
+```
+T⁴ − T_amb⁴  ≡  (T² + T_amb²)(T + T_amb) · (T − T_amb)
+                └──────── h_rad ────────┘
+
+h_rad = ε · σ · A · (T² + T_amb²)(T + T_amb)        W/K
+```
+
+**That is an identity, not a linearisation of one.** So radiation is an ordinary term in the
+machinery that already exists — added to `ambient_conductance` for loss to the environment, and
+added to a `ThermalLink`'s conductance for body-to-body exchange — and inherits backward Euler's
+unconditional stability. An explicit `T⁴` term would be precisely the integrator this file
+forbids: `time_scale` 40 means `dt = 10 s`.
+
+`h_rad` is evaluated at the **start-of-tick** temperature, which is first order like everything
+else here and errs in the safe direction: a cooling body's true coefficient falls as it cools, so
+this one under-states the loss and cannot overshoot past the sink.
+
+Both halves are **opt-in** — `emissivity` and `radiating_area_m2` default to zero — so a node
+that has not been given a surface is bit-identical to one from before radiation existed.
+
+> **Emissivity belongs to the part, not the material**, the same call `safety_factor` makes.
+> Oxidised iron runs near 0.8 and polished steel near 0.1, and what separates them is a wire
+> brush rather than a different metal.
+
+> **This is what makes a bright fire worth more than a merely hot one.** Measured on the steam
+> engine's firebox→water-legs link: raising the firebox from 860 K to 1083 K multiplies the
+> convective transfer by **1.51** — exactly the ratio of the temperature differences, as a linear
+> term must — and the radiant transfer by **2.60**, which is exactly
+> `(1083⁴ − 432⁴)/(860⁴ − 428⁴)`. A flat conductance cannot say that, and the damper and blower
+> now change how much heat *reaches the water* rather than only how much fuel is burnt.
+
 ---
 
 ## Pressure
@@ -122,6 +155,26 @@ entirely. See [`settlement.md`](settlement.md#heat-and-rotation-settle_heat-sett
 Not modelled: hydrostatic pressure, flow-induced pressure drop. Pump and fan head exist as a
 conduit's `head_pa`; a chimney earns its own from buoyancy.
 
+**A head is not free any more.** A conduit naming a shaft with `driven_by:` is charged for the
+hydraulic power it delivered:
+
+```
+P_hydraulic = (head_pa + ρ·g·lift_m) · Q          # Q volumetric, from what the wall passed
+P_shaft     = P_hydraulic / efficiency
+c           = P_shaft / ω²                        # a drag conductance, not a torque
+```
+
+`head_pa` is what the fitting *supplies* and `lift_m` is static head it must *overcome*; they sit
+in one term because they are the same physics with opposite signs. Declared as a **conductance**
+so it lands on the diagonal of the backward-Euler drive solve and stays unconditionally stable —
+and it is the right shape, since a centrifugal machine's head goes as ω² and flow as ω, making
+`P ∝ ω³` and `c` linear in ω. Hydrostatic pressure is still not a modelled *quantity*: depth is
+charged as torque, not expressed as a gradient.
+
+> A real centrifugal machine still churns against a closed valve — perhaps half its rated power.
+> This charges it nothing, which understates a throttled pump and is the deliberate trade: the
+> game question is whether the shaft can carry the load, not where the pump curve's knee sits.
+
 ---
 
 ## Rotation
@@ -135,12 +188,28 @@ kinetic_joules(state) # L² / 2I
 rim_speed(state)      # ω × radius — what actually tears a spinning mass apart
 ```
 
-`friction_loss` relaxes toward rest in closed form, so a wheel coasts to a stop and never
-through it into running backwards.
-
 Coupling is `DriveLink(a:, b:, stiffness:, max_torque:)`, settled by the same network solve as
 heat and gas. `stiffness` is how hard the two ends are held to a common speed — a keyed shaft
 is stiff, a leather belt is not, and the difference is one number rather than one class.
+
+**Drag rides in the same solve.** `drag_conductances(state, ctx)` declares what pulls a body
+toward rest, in N·m·s/rad, keyed by where the energy belongs — `:friction` for bearings and
+windage, `:work` for a load's brake. `Relaxation.settle` takes them as `drags:` and puts them on
+the diagonal, because a reservoir at potential zero adds conductance and no right-hand side.
+
+> **A drag applied after the coupling is operator splitting, and it dominates once the drag is
+> stiff.** Integrating each half exactly still leaves a composition that is first order in `dt`.
+> Measured: a fan-law mill whose brake time constant is 0.18 s against a 250 ms tick settled at
+> **8.5 rad/s against a true equilibrium of 19.6**, the coupling above it slipped 65%, and 39% of
+> shaft power went to friction. Halving `dt` halved the gap, which is the signature of a split
+> rather than a bad law. In the solve, the same engine runs at **85% mechanical efficiency**.
+>
+> A nonlinear brake is linearised as `τ(ω)/ω` at the tick's speed, capped at `I/dt`. That cap
+> **halves a body's speed in one tick and no more** — `(I/dt + c)·ω′ = (I/dt)·ω` — so it bounds
+> how far the linearisation is trusted rather than stopping anything; backward Euler is stable at
+> any conductance and cannot reverse a shaft. It only ever binds for constant torque. A drag that
+> genuinely means "this has stopped turning" declares a large multiple of it instead, which is how
+> `Nodes::Bearing` expresses seizure.
 
 ---
 
@@ -163,9 +232,9 @@ dial to turn if a large operation needs to be cheaper.
 The split is decided by **total enthalpy**, not temperature — which is what makes the
 two-phase plateau work, where adding energy boils more water without the temperature moving.
 
-Phase pairs are indexed **from both sides** (`content.phase_pair(:steam)` works). A condenser
-holding nothing but vapour has no liquid parcel to discover the pair from, and used to never
-condense at all.
+Phase pairs are indexed **from both sides** (`content.phase_pair(:steam)` works). Indexed one way
+only, a condenser holding nothing but vapour has no liquid parcel to discover the pair from and
+never condenses at all.
 
 ---
 
@@ -189,11 +258,11 @@ so choking a damper throttles a fire through exactly the same code path an empty
 many kilograms of its fuel are alight** — `state[:ignition][reaction_id] = { kg:, oxidiser_kg: }`.
 Only that lit mass reacts.
 
-Combustion used to be gated on the node's bulk temperature, which a lumped-temperature node
-cannot represent honestly: a match does not raise a firebox to 700 K, it raises a few grams.
-As a bulk threshold the fire was all-or-nothing — above the line the whole grate burned, below
-it nothing did and nothing ever could again, so the only winning move was to leave the igniter
-on permanently, turning a match into a throttle.
+Gating combustion on a node's bulk temperature is something a lumped-temperature node cannot do
+honestly: a match does not raise a firebox to 700 K, it raises a few grams. As a bulk threshold
+the fire is all-or-nothing — above the line the whole grate burns, below it nothing does and
+nothing ever can again, so the only winning move is to leave the igniter on permanently, turning
+a match into a throttle.
 
 Four rules, each of which was got wrong first:
 

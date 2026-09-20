@@ -57,7 +57,7 @@ no longer exists. Read them for why a decision was made, never as a description 
 ## Commands
 
 ```sh
-bundle exec rspec                          # full suite (~35 min, dominated by steam engine runs)
+bundle exec rspec                          # full suite (~50 min, dominated by steam engine runs)
 bundle exec rspec --dry-run                # count the examples a full run should reach
 bundle exec rspec spec/reactor_sim/conservation_spec.rb   # one file
 bin/rubocop                                # style + the bug-catching cops
@@ -99,13 +99,22 @@ So: before you call a piece of work done, check this table and update what your 
 | An invariant, or how one is enforced | [`docs/reference/invariants.md`](docs/reference/invariants.md) — **and say so loudly** |
 | Anything on the "What to do next" list | [`docs/current_progress.md`](docs/current_progress.md) |
 
-Two more habits that keep the set honest:
-
-- **A bug worth a rule gets written down where the rule lives.** If you fix something subtle,
-  add the *why* — the failure it produced — not just the *what*. That is what makes these docs
-  worth reading twice, and it is the existing convention throughout.
 - **If you notice a doc is already wrong, fix it then**, even if your change did not cause it.
   Drift is cheap to fix on sight and expensive to fix in a batch.
+
+## Comments and docs are minimal and present-tense
+
+**Write for someone reading this code today, who does not care what it used to be.**
+
+- **Comments are brief and explain only a non-obvious *why*.** If the code needs a paragraph to
+  be understood, fix the code. Most lines need no comment at all.
+- **No history anywhere outside `docs/design_sketches/`.** Not in comments, not in `docs/`, not
+  in these `CLAUDE.md` files. No "this used to be", no "renamed from", no "written when X still
+  existed", no recounting the bug that motivated a rule. State the rule.
+- **No dialectic.** Do not argue with a rejected alternative, stage a question and answer it, or
+  address the reader's supposed instinct. Say what is true, once.
+- **`docs/design_sketches/` is the exception** and may stay verbose — it is the home for
+  reasoning, alternatives and back-and-forth. Link to it instead of reproducing it.
 
 ### Inventory lists vs contract rules
 
@@ -125,8 +134,6 @@ Do not add a new inventory list without a derivation command next to it.
 - **Design before implementation.** Non-trivial features get a design doc reviewed and
   iterated before code. `docs/design_sketches/` is input to that, not a description of what
   exists.
-- **Comments explain why, not what.** This codebase's comments record the bug that produced
-  the rule. Match that: if you fix something subtle, write down what it was.
 - **Conservation specs catch real physics bugs.** Write them early, not last.
 - `docs/current_progress.md` §"Traps that have already cost time" is a list of bugs a fresh
   reader repeats. Read it once.

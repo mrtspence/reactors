@@ -10,8 +10,15 @@ RSpec.describe "commands", type: :request do
   let(:producer) { instance_double(CommandProducer, produce: true) }
 
   before { allow(CommandProducer).to receive(:instance).and_return(producer) }
+  # An operation has to exist to be owned — `require_operator!` finds the row and asks it.
+  before { DevMatch.provision! }
 
-  def post_command(params) = post("/matches/#{DevMatch::ID}/commands", params: params)
+  # **Nested under the operation**, because a command names the machine it is for and a match
+  # holds several. It was match-level while `CommandsController` wrote a constant into every
+  # payload, which is exactly what stopped a second console driving a second engine.
+  def post_command(operation_id: DevMatch::PRIMARY, **params)
+    post("/matches/#{DevMatch::ID}/operations/#{operation_id}/commands", params: params)
+  end
 
   it "accepts a well-formed lever move and answers 202 without waiting for the broker" do
     post_command(type: "set_control", control_point_id: "throttle_open", value: "60")
@@ -24,13 +31,27 @@ RSpec.describe "commands", type: :request do
     )
   end
 
+  # **The operation comes from the ROUTE, never from the body.** It used to come from a constant,
+  # which was safe and also why a second console could not drive a second engine; now it is the
+  # row `require_operator!` already found and approved.
   it "stamps the operation id itself rather than trusting the client with it" do
-    post_command(type: "set_control", control_point_id: "feed", value: 10,
-                 operation_id: "somebody_elses_engine")
+    post("/matches/#{DevMatch::ID}/operations/#{DevMatch::PRIMARY}/commands",
+         params: { type: "set_control", control_point_id: "feed", value: 10,
+                   operation_id: "somebody_elses_engine" })
 
     expect(producer).to have_received(:produce).with(
       match_id: DevMatch::ID,
-      command: hash_including("operation_id" => DevMatch::OPERATION_ID.to_s)
+      command: hash_including("operation_id" => DevMatch::PRIMARY.to_s)
+    )
+  end
+
+  # The other half of the same claim: address a different machine and the command follows.
+  it "addresses the operation the route names" do
+    post_command(operation_id: :engine_b, type: "set_control",
+                 control_point_id: "feed", value: 10)
+
+    expect(producer).to have_received(:produce).with(
+      match_id: DevMatch::ID, command: hash_including("operation_id" => "engine_b")
     )
   end
 
@@ -81,18 +102,18 @@ RSpec.describe "commands", type: :request do
 
   describe "minion assignment" do
     it "accepts a posting" do
-      post_command(type: "assign_minion", minion_id: "fireman", control_point_id: "stoking")
+      post_command(type: "assign_minion", minion_id: "crew_1", control_point_id: "stoking")
 
       expect(response).to have_http_status(:accepted)
       expect(producer).to have_received(:produce).with(
         match_id: DevMatch::ID,
-        command: hash_including("type" => "assign_minion", "minion_id" => "fireman",
+        command: hash_including("type" => "assign_minion", "minion_id" => "crew_1",
                                 "control_point_id" => "stoking")
       )
     end
 
     it "accepts standing a minion down, which is a nil station" do
-      post_command(type: "assign_minion", minion_id: "fireman")
+      post_command(type: "assign_minion", minion_id: "crew_1")
 
       expect(response).to have_http_status(:accepted)
       expect(producer).to have_received(:produce).with(
@@ -106,8 +127,12 @@ RSpec.describe "commands", type: :request do
       post "/matches/#{DevMatch::ID}/reset"
 
       expect(response).to have_http_status(:accepted)
+      # **Keyed by operation**, because a reset rebuilds every machine in the match and each
+      # carries its own chassis, loadout and crew.
       expect(producer).to have_received(:produce).with(
-        match_id: DevMatch::ID, command: { "type" => "reset_match" }
+        match_id: DevMatch::ID,
+        command: hash_including("type" => "reset_match",
+                                "operations" => hash_including(DevMatch::PRIMARY.to_s))
       )
     end
   end
@@ -117,7 +142,7 @@ RSpec.describe "commands", type: :request do
       get "/"
 
       expect(response).to redirect_to(
-        "/matches/#{DevMatch::ID}/operations/#{DevMatch::OPERATION_ID}"
+        "/matches/#{DevMatch::ID}/operations/#{DevMatch::PRIMARY}"
       )
     end
   end

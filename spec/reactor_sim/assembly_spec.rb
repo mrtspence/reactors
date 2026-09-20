@@ -426,20 +426,24 @@ RSpec.describe ReactorSim::Assembly do
     # assembles and still passes every route check, and that each one says something before the
     # player finds out the hard way.
     #
-    # `boiler_gauge` is the eighth and the odd one out: every other entry is machinery, and it is
-    # an **instrument**. Leaving it off costs no power and breaks nothing — it takes away the only
-    # honest warning the engine gives, which is the same bargain the safety devices offer applied
-    # to what the driver can see rather than to what can break.
+    # `boiler_gauge` and `water_glass` are the odd ones out: every other entry is machinery, and
+    # these two are **instruments**. Leaving either off costs no power and breaks nothing — it
+    # takes away a warning, which is the same bargain the safety devices offer applied to what
+    # the driver can see rather than to what can break.
+    #
+    # The water gauge is the sharper of the two, because the crown sheet is what actually
+    # destroys this boiler and the glass is the only notice of it. Run without one and the
+    # fusible plug is the whole of your warning system, which means you find out afterwards.
     #
     # The list is deliberately written out rather than derived from the slots, because a slot
     # silently becoming optional — or silently ceasing to be — is exactly the kind of change
     # that should fail a spec rather than pass one.
     describe "what can be left out" do
       OPTIONAL = { ash_pan: :omit, blower: :bypass, boiler_tubes: :bypass,
-                   boiler_gauge: :omit, drain_cocks: :omit, safety_valve: :omit,
-                   fusible_plug: :omit, cylinder_relief: :omit }.freeze
+                   boiler_gauge: :omit, water_glass: :omit, drain_cocks: :omit,
+                   safety_valve: :omit, fusible_plug: :omit, cylinder_relief: :omit }.freeze
 
-      it "is exactly these eight, with these behaviours" do
+      it "is exactly these nine, with these behaviours" do
         declared = SteamEngine.slots(spec).reject(&:required?)
                               .to_h { |s| [ s.id, s.when_empty ] }
 
@@ -555,10 +559,25 @@ RSpec.describe ReactorSim::Assembly do
         expect(real.fragment.nodes.map(&:id)).to include(:blower_fan)
       end
 
-      # It is deliberately half-built: the shape is right, the cost is not modelled. The
-      # outfitting screen has to be able to say so rather than presenting it as finished.
-      it "is flagged as work in progress" do
-        expect(ReactorSim::Parts.fetch(:stock_blower).wip).to be(true)
+      # **The `wip` flag existed because the blower was free**, and it is not any more: the
+      # bellows costs a person on the handles and the donkey costs fuel oil out of its own tank.
+      # Neither is half-built, so neither may claim to be.
+      it "is no longer flagged as work in progress, because it is no longer free" do
+        expect(ReactorSim::Parts.fetch(:hand_bellows).wip).to be(false)
+        expect(ReactorSim::Parts.fetch(:donkey_blower).wip).to be(false)
+      end
+
+      # The two ways to pay, and the whole of the blower slot's decision.
+      it "offers a blower paid for in crew time and one paid for in fuel" do
+        bellows = ReactorSim::Parts.fetch(:hand_bellows)
+        donkey = ReactorSim::Parts.fetch(:donkey_blower)
+
+        expect(bellows.kind).to be(donkey.kind)
+        # The bellows is somebody's work; the donkey is a machine with a tank.
+        expect(real(loadout: { blower: :hand_bellows }).fragment.control_points
+                 .find { |c| c.id == :blower }).to be_effort
+        expect(real(loadout: { blower: :donkey_blower }).fragment.nodes.map(&:id))
+          .to include(:donkey, :donkey_tank)
       end
     end
 

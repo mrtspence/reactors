@@ -19,9 +19,15 @@ class ViewBroadcaster
   end
 
   # `operation` is nil when the runner wants a full view for every operation — a resync.
-  def publish(match, operation, full: false)
+  #
+  # `run_id` names the build of the match these values came from, and `supersedes` names the
+  # build this one replaced. Both go on the wire so a client can tell one runner's views from
+  # another's; see the envelope below.
+  def publish(match, operation, full: false, run_id: nil, supersedes: nil)
     operations = operation ? [ operation ] : match.operations
-    operations.each { |op| publish_one(match, op, full: full) }
+    operations.each do |op|
+      publish_one(match, op, full: full, run_id: run_id, supersedes: supersedes)
+    end
   rescue StandardError => e
     # Telemetry must never be able to stop a match. A dropped view self-heals on the next tick,
     # and failing here would cost the simulation itself.
@@ -40,7 +46,7 @@ class ViewBroadcaster
 
   private
 
-  def publish_one(match, operation, full:)
+  def publish_one(match, operation, full:, run_id: nil, supersedes: nil)
     key = "#{match.id}:#{operation.id}"
     view = match.project(operation_id: operation.id)
     previous = @previous[key]
@@ -57,7 +63,7 @@ class ViewBroadcaster
 
     ActionCable.server.broadcast(
       StreamNames.operation(match_id: match.id, operation_id: operation.id),
-      payload(view, previous, key, full: send_full)
+      payload(view, previous, key, full: send_full, run_id: run_id, supersedes: supersedes)
     )
 
     @previous[key] = view
@@ -74,10 +80,17 @@ class ViewBroadcaster
   # `prev_tick` is what the client compares against — NOT `tick - 1`. Because unchanged ticks
   # are skipped, gaps in the tick sequence are normal, and a client treating a gap as a lost
   # message would resync several times a minute for no reason.
-  def payload(view, previous, key, full:)
+  #
+  # `run_id` is what makes a stream carrying two runners diagnosable. Nothing stops a second
+  # `bin/match_runner` broadcasting here, and it holds its own match at its own tick with its own
+  # levers, so tick alone cannot tell its views from the real one's. `supersedes` separates the
+  # legitimate change of run — a reset — from a stranger.
+  def payload(view, previous, key, full:, run_id: nil, supersedes: nil)
     { kind: full ? "full" : "delta",
       tick: view.tick,
       prev_tick: full ? nil : @last_sent_tick[key],
+      run_id: run_id,
+      supersedes: supersedes,
       view: full ? view.to_h : view.delta_from(previous) }
   end
 end

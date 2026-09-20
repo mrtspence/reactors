@@ -4,14 +4,12 @@ module ReactorSim
   module Concerns
     # A node whose contents exert pressure.
     #
-    # Derived only — there is no pressure in state, ever. A stored pressure drifts away
-    # from the contents and temperature that cause it and nothing tells you; a derived one
-    # cannot.
+    # **Derived only — there is no pressure in state, ever.** A stored pressure drifts away from
+    # the contents and temperature that cause it and nothing tells you.
     #
-    # The model is deliberately simple (docs/simulation_architecture.md §13): ideal gas
-    # over whatever volume the liquids are not occupying. No pump head, no hydrostatic
-    # term, no flow-induced drop. Because it is encapsulated here, each of those is an
-    # additive change rather than a rework.
+    # Deliberately simple: ideal gas over whatever volume the liquids are not occupying. No pump
+    # head, no hydrostatic term, no flow-induced drop — each of which is an additive change here
+    # rather than a rework.
     module Pressurized
       # Below this the node is effectively liquid-full and the ideal gas law would run away
       # to infinity. Clamping is a lie, but a bounded and monotonic one: pressure still
@@ -21,13 +19,12 @@ module ReactorSim
 
       # How much more of a gas this node could take before reaching `target_pa`.
       #
-      # Volume alone cannot limit a gas — it expands to fill whatever it is in — so without
-      # this a small vessel will happily accept far more gas in one tick than the thing
-      # feeding it could ever push, and end up at a HIGHER pressure than its own supply.
-      # One node did exactly that: it drew eighteen kilograms of gas into a fifth of a cubic
-      # metre and reached eight times the pressure of the thing supplying it.
+      # **Volume alone cannot limit a gas** — it expands to fill whatever it is in — so without
+      # this a small vessel accepts far more gas in one tick than the thing feeding it could
+      # push, and ends up at a *higher* pressure than its own supply: eighteen kilograms into a
+      # fifth of a cubic metre, at eight times the supply pressure.
       #
-      # Infinity means "unlimited" and is the right answer for the open air.
+      # Infinity means unlimited, which is the right answer for the open air.
       def gas_headroom_kg(state, target_pa, content, resource)
         return Float::INFINITY unless content.tags(resource).include?(:gas)
 
@@ -49,14 +46,11 @@ module ReactorSim
       # temperature. This is the **capacity** term for mass transport, exactly as heat capacity
       # is for heat: `P = nRT/V_free`, so `dn/dP = V_free/(R·T)`.
       #
-      # Deliberately in MOLES rather than kilograms. Pressure is a function of moles — Dalton's
-      # law — so a molar capacity is exact for any mixture, where the kg form `V_free·M/(R·T)`
-      # needs a mean molar mass and is wrong by the spread of the composition. Measured at about
-      # 0.8% on a firebox holding air, flue gas and CO₂ together, which is small but is an error
-      # with no reason to exist.
-      #
-      # `Arbiter.settle_gas` converts the resulting mole transfer back to kg using the source's
-      # own composition, which is exact for the same reason.
+      # **In MOLES rather than kilograms.** Pressure is a function of moles (Dalton's law), so a
+      # molar capacity is exact for any mixture, where the kg form `V_free·M/(R·T)` needs a mean
+      # molar mass and is wrong by the spread of the composition — about 0.8% on a firebox
+      # holding air, flue gas and CO₂ together. `Arbiter.settle_gas` converts the mole transfer
+      # back to kg using the source's own composition, exact for the same reason.
       def mole_capacity_per_pa(state, content)
         temperature = temperature_k(state, content)
         return 0.0 if temperature <= 0.0
@@ -64,14 +58,10 @@ module ReactorSim
         free_volume(state, content) / (Units::GAS_CONSTANT * temperature)
       end
 
-      # An empty vessel is a VACUUM, not a vessel full of air.
-      #
-      # Reporting one atmosphere for an empty node quietly broke two things at once: a
-      # source below atmospheric could never fill a receiver, because the receiver claimed
-      # to be at 101 kPa while holding nothing at all; and nothing could present a vacuum,
-      # which some machinery works against directly.
-      #
-      # If a node should contain air, it should be given air.
+      # **An empty vessel is a VACUUM, not a vessel full of air.** Reporting one atmosphere for an
+      # empty node breaks two things at once: a source below atmospheric can never fill a
+      # receiver that claims 101 kPa while holding nothing, and nothing can present a vacuum,
+      # which some machinery works against directly. If a node should contain air, give it air.
       def pressure_pa(state, content)
         held = parcels(state)
         return 0.0 if held.empty?
@@ -88,29 +78,25 @@ module ReactorSim
         moles * Units::GAS_CONSTANT * temperature_k(state, content) / free
       end
 
-      # ## What the shell can stand, derived from the shell
+      # **What the shell can stand, derived from the shell.** Hoop stress in a thin cylindrical
+      # shell is `σ = p·r / t`, so the pressure that tears it open is `σ_plate · t / r`. Every
+      # term is a property of the part or of the metal: **a vessel's strength is not a number
+      # somebody picks, it is what it is built from and how thick it is.** Same shape as
+      # `Flywheel#burst_speed_m_s`.
       #
-      # Hoop stress in a thin cylindrical shell is `σ = p·r / t`, so the pressure that tears it
-      # open is `σ_plate · t / r`. Every term is a property of the part or of the metal, which is
-      # the point: **a vessel's strength is not a number somebody picks, it is what it is built
-      # from and how thick it is.** Exactly the shape `Flywheel#burst_speed_m_s` already has, and
-      # for the same reason — there it is `√(σ/ρ)·safety_factor`, here it is `σ·t/r·safety_factor`.
-      #
-      # > **It used to be `relief_pa × 1.5` on the steam engine, and that is circular.** The
-      # > pressure a boiler can survive cannot depend on where somebody set its safety valve; it
-      # > depends on the plate. Worse, it made the two impossible to separate — raising the valve
-      # > setting dragged the damage threshold up in lockstep, so the gap between "blowing off" and
-      # > "bursting" could never be narrowed or widened deliberately. They are now independent:
-      # > the shell says what it can take, and the valve setting is a decision made against it.
+      # > **Never derive it from the safety valve's setting.** What a boiler survives depends on
+      # > the plate, not on where somebody set a valve — and coupling them means raising the
+      # > setting drags the damage threshold up in lockstep, so the gap between blowing off and
+      # > bursting can never be deliberately widened or narrowed.
       #
       # `safety_factor` is the part's own, not the metal's, for the same reason it is on the
       # flywheel: how far below the ideal figure a real vessel fails depends on its seams. A
       # riveted wrought-iron boiler is the worst case — joint efficiency around 70%, and grooving
       # and corrosion along the seam worse still — so a quarter of the plate figure is realistic
-      # and is not pessimism.
+      # rather than pessimistic.
       #
-      # An explicit `max_pressure_pa:` still wins, so a part can be special or simply not model
-      # this. Infinity when there is no geometry to work from.
+      # An explicit `max_pressure_pa:` wins, so a part can be special or simply not model this.
+      # Infinity when there is no geometry to work from.
       def rated_pressure_pa(content)
         declared = max_pressure_pa
         return declared if declared.finite?

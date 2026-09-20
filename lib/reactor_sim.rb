@@ -69,7 +69,15 @@ require "json"
 
 require_relative "reactor_sim/physics/units"
 require_relative "reactor_sim/rng"
+# The arithmetic a minion's four layers fold through. Before `content`, because the registry
+# folds the first two with it.
+require_relative "reactor_sim/sheet"
+# The escalation rule a failing part and a hurt person share. Before `concerns/`, which uses it.
+require_relative "reactor_sim/severity"
 require_relative "reactor_sim/content"
+# A leaf, required this early only because `Concerns::Wearing` emits one and concerns load
+# before nodes. Conceptually it belongs with the outputs, beside `diagnostics/player_view`.
+require_relative "reactor_sim/event"
 require_relative "reactor_sim/physics/parcel"
 require_relative "reactor_sim/physics/resources"
 require_relative "reactor_sim/physics/resources/saturation"
@@ -88,6 +96,7 @@ require_relative "reactor_sim/concerns/thermal"
 require_relative "reactor_sim/concerns/holds"
 require_relative "reactor_sim/concerns/obstructs"
 require_relative "reactor_sim/concerns/wearing"
+require_relative "reactor_sim/concerns/fusible"
 require_relative "reactor_sim/concerns/pressurized"
 require_relative "reactor_sim/concerns/rotating"
 
@@ -97,13 +106,30 @@ require_relative "reactor_sim/nodes/vessel"
 require_relative "reactor_sim/nodes/boiler"
 require_relative "reactor_sim/nodes/flywheel"
 require_relative "reactor_sim/nodes/load"
+require_relative "reactor_sim/nodes/bearing"
+# A small engine carrying its own rotor, so a fitting can be driven by something other than the
+# main drivetrain — which is what a blower on a black start needs.
+require_relative "reactor_sim/nodes/motor"
 require_relative "reactor_sim/nodes/atmosphere"
 require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 require_relative "reactor_sim/nodes/fusible_plug"
 require_relative "reactor_sim/nodes/breach"
 
+# How work tires the person doing it. Before `control_point`, which reads its BASE_RECOVERY to
+# default a station that declares none.
+require_relative "reactor_sim/fatigue"
 require_relative "reactor_sim/control_point"
+# Equipment and training are what a minion carries and what they have learnt — layers three and
+# four of the sheet whose first two live in `content/`. `kit.rb` is the catalogue and must load
+# after both registries it fills.
+require_relative "reactor_sim/equipment"
+require_relative "reactor_sim/training"
+require_relative "reactor_sim/kit"
+# Resolves a roster posting into a folded sheet, so it loads after both registries it reads.
+require_relative "reactor_sim/crew"
+# `Wearing` for people. Before `minion`, which rolls its hidden resilience at initial_state.
+require_relative "reactor_sim/injury"
 require_relative "reactor_sim/minion"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"

@@ -182,10 +182,16 @@ RSpec.describe "transport" do
     # `Arbiter.gas_coupling` drops the path out of the pressure-driven regime altogether, so a
     # ruptured flue section deleted the draught rather than merely restricting it.
     #
-    # Both guards are gone. A hole does not reduce a pipe's bore; what starves the far end is
-    # the upstream holder being drained by a second path, which is a `Nodes::Breach` beside it.
+    # Both guards are gone. What a broken conduit does now is **deliver less, not nothing** —
+    # a split line is bent and partly collapsed around the tear, which is an honest restriction.
+    #
+    # **The derating is damage to the pipe and emphatically not the leak.** What escapes goes
+    # through a `Nodes::Breach` drawing on a *holder*, because a conduit holds nothing and so
+    # has no contents of its own to lose; material this pipe declines to pass simply stays
+    # upstream as back-pressure. Expressing a spill as a throughput term is a throttle wearing
+    # a leak's name — nothing reaches `Atmosphere` and `mass_spilled` stays zero.
     # See docs/design_sketches/failure_model.md §7.
-    it "keeps passing what it always passed once it has broken" do
+    it "delivers less once it has broken, but is not a plug" do
       sound = flow_rig
       5.times { |i| sound.step!(tick: i + 1) }
       undamaged = sound.telemetry.fetch(:middle)[:kg].to_f
@@ -196,9 +202,14 @@ RSpec.describe "transport" do
         :@state, op.state.merge(nodes: nodes.merge(feed: nodes.fetch(:feed).merge(failure: :rupture)))
       )
       5.times { |i| op.step!(tick: i + 1) }
+      damaged = op.telemetry.fetch(:middle)[:kg].to_f
 
-      expect(op.telemetry.fetch(:middle)[:kg].to_f).to be_within(1e-9).of(undamaged)
       expect(undamaged).to be > 0.0
+      expect(damaged).to be < undamaged
+      expect(damaged).to be > undamaged / 2.0
+      # Nothing was lost to the outside: with no breach wired beside it, the shortfall is
+      # back-pressure and the material is still in the source.
+      expect(op.ledger.fetch(:mass_spilled)).to be_within(1e-9).of(0.0)
     end
   end
 
