@@ -9,7 +9,15 @@ delegates to it and installs the result atomically.
 
 `dt` is **simulated** seconds — `ReactorSim::DT (0.25) × operation.time_scale`. Wall-clock is
 always 4 Hz; `time_scale` is how fast the world runs relative to that, per operation. A steam
-engine uses 1.0; a mine would use much more.
+engine uses 1.0; an operation running alone may use much more.
+
+> **Coupled operations must share a `time_scale`**, and `Match#validate_couplings!` refuses to
+> build a match where they do not. Work crossing between operations is energy, and energy per
+> *tick* means nothing unless both sides agree what a tick is worth: at 40× an operation lives 10
+> simulated seconds per tick against 0.25 at 1.0, so it would need forty times the joules to run
+> the same machines and would be starved in exactly that proportion — while the supplier's own
+> instruments read correct throughout. Scaling the transfer to compensate would mint energy. Two
+> operations joined by a shaft are in the same world at the same time.
 
 ---
 
@@ -29,8 +37,9 @@ engine uses 1.0; a mine would use much more.
 | 5 | `react` | Ignition spreads, then chemistry (scaled by the node's `reaction_throttle`), then phase change — local to each node | no |
 | — | `record_injections` | Everything injected or extracted goes on the ledger | no |
 | 6 | `stress` | Durability, overload, failure events | no |
-| 6b | `endanger` | What a failure does to the **people** near it: a Danger Check per minion, against the station they are standing at | no |
-| 6c | `tire` | What the **work** does to the people doing it: fatigue accrues on `intent ÷ capability`, recovery nets against it | no |
+| 6b | `endanger` | What a failure does to the **people** near it: a Danger Check per minion, against both the **place** they are standing in and the station they are posted to. Severity adds where both reach them | no |
+| 6c | `tire` | What the **work** does to the people doing it, and what the **air** does to them: fatigue accrues on `intent ÷ capability`, recovery and suffocation net against it. Pinned at the ceiling in bad air is the collapse, and the clock from there to a mortal injury runs here | no |
+| 6d | `travel` | Where the people have got to: each minion walks toward the place their `posting` is worked, at their own `pace`, by the **quickest passage that is actually running**. A no-op in an operation that declares no passages | no |
 | 7 | `observe` | Instruments sample; their filters advance | **yes** |
 | 8 | publish | Freeze the new state, return this tick's events | no |
 
@@ -51,6 +60,17 @@ writes `minions`, and a second writer would need a merge rule between them; and 
 out in 6b has `station: nil` on **this** tick and must stop working on this tick, not the next.
 The TODO's premise — that accrual would sit alongside the actuation entropy it draws — was simply
 wrong, because it draws none.
+
+**Phase 6d runs last of the four and reads no controls at all.** Who is standing where is built in
+phase 0 from the *previous* tick (`station_index`, `control_values`), so a minion who arrives in 6d
+takes up their post on the **next** tick — the same one-hop delay everything else in the engine
+has, and what keeps arrival from depending on phase order. It runs after `tire` so a minion carried
+out in 6b has already had their posting cancelled and does not get up and resume the walk.
+
+> **Geometry is opt-in, and that is what kept this from touching anything.** An operation that
+> declares no `passages:` has an empty `Layout`, `travel` returns immediately, and `assign_minion`
+> sets `station` the moment the command lands exactly as it always did. The steam engine did not
+> acquire a walk to the firehole.
 
 > **Fatigue is a runaway, and it has a closed form.** `capability` contains `(1 - fatigue)`, so
 > tiring raises the load, which tires faster. Integrating `(1-f)²df = K dt` gives

@@ -6,7 +6,7 @@ disk, and only once, never during a tick.
 
 ```
 content/
-  resources/    water.yml, combustion.yml, materials.yml
+  resources/    water.yml, combustion.yml, damps.yml, materials.yml
   reactions/    combustion.yml
   archetypes/   races.yml     — kinds of person
   minions/      crew.yml      — the people themselves
@@ -46,8 +46,22 @@ than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-In use at the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`,
-`lubricant`, `metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+In use at the time of writing: `bearing`, `breathable`, `coolant`, `damp`, `dust`, `exhaust`,
+`fuel`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`, `oxidiser`, `solid`,
+`structural`, `waste`, `working_fluid`.
+
+**A tag does one of three jobs and the word does not say which**, so say it when you add one:
+
+| Job | Examples | Read by |
+|---|---|---|
+| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust` | `Port#accepts?` |
+| Reaction — what a substance can do in one | `fuel`, `oxidiser`, `inert` | reactions, ignition, a node's `reaction_throttle` |
+| Physiology — what it does to a person | `breathable` | `Breath` |
+
+`:gas` is the structural one: it decides whether something is limited by volume or by pressure,
+whether it occupies room, and whether it can be routed through a gas-only port. `breathable` is
+on `air` and on nothing else, because **everything that is not air asphyxiates by displacing
+it** — so a gas nobody thought about is dangerous by omission rather than safe by omission.
 
 A tag is a vocabulary shared between the content files and every port that filters on one, so
 **introducing a tag means updating this list in the same commit**. An undocumented tag is a
@@ -134,6 +148,46 @@ One unit of extent consumes the whole `consumes` set — for coal, 1 kg of coal 
 air. **It must also absorb any formation-enthalpy difference between the two sides.** The
 stoichiometry itself conserves enthalpy exactly (products inherit what the reactants had,
 split by mass), so this is the only place a reaction may change the system's energy.
+
+### Pathways: when running short changes the *product*, not the rate
+
+By default, being short of a reagent makes a reaction slower and nothing else. Declare
+`limited_by:` and an ordered `alternatives:` list and it instead changes what the reaction
+makes — a fire with half the air it wants burns all its fuel anyway and produces carbon
+monoxide doing it.
+
+```yaml
+coal_combustion:
+  consumes: { coal: 1.0, air: 11.0 }
+  produces: { flue_gas: 11.9, ash: 0.1 }
+  enthalpy_j_per_unit: -30000000
+  rate_per_s: 1.5
+  limited_by: air                 # whose supply picks the pathway
+  alternatives:                   # ordered, most of it first
+    - consumes: { coal: 1.0, air: 5.5 }
+      produces: { flue_gas: 5.4, whitedamp: 1.0, ash: 0.1 }
+      enthalpy_j_per_unit: -9000000
+```
+
+The rules, all enforced at boot:
+
+- **Every pathway balances mass**, exactly as the top-level pair must.
+- **Every pathway consumes the same quantity of everything but `limited_by:`.** They are
+  alternative fates for *the same kilogram of coal*; if the coal term varied, their extents
+  would not be comparable and splitting one between them would mean nothing.
+- **Ordered most-of-`limited_by`-first.** The cascade reads them in order.
+- Each needs its own `enthalpy_j_per_unit` — incomplete combustion releases far less heat, and
+  that difference is the whole trade. `rate_per_s`, `min_temperature_k` and `ignition:` are
+  shared: a fire is one fire whatever it is making.
+
+**The split is exact and has no dial.** With `a₁` and `a₂` per unit and `A` available,
+`x·a₁ + (E−x)·a₂ = A` has one answer. Nothing to balance.
+
+> **A pathway may name a reagent the preferred one does not** — water gas is carbon and *steam*
+> rather than carbon and less air — and its own supply then caps it. **This is a seam and it
+> ships under-tested**: nothing in the game uses it, so `pathway_spec` is the only coverage. If
+> you are the first to build on it, treat a surprise as a gap in
+> [`reaction-pathways.md`](../design_sketches/reaction-pathways.md), not a bug in your content.
 
 ### `rate_per_s` must suit the timestep — and it means something different once a reaction ignites
 
@@ -241,6 +295,11 @@ Rules worth knowing before you add one:
 - **Health, fatigue, station and injury are state, not content.** They change during a match and
   live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion recovers on
   restore.
+- **A tag that gets used up is a rating here and a remainder in state**, and it needs both. A
+  respirator declares `respirator:` (how well it filters) and `respirator_air:` (how many
+  **ticks** it holds); `Minion#initial_state` seeds `apparatus` from the second and phase 6c
+  spends it. **A set with no air is no protection at all** — `respirator` alone is inert — so
+  the two are written together or the kit does nothing.
 
 The gauge-reading path (a diagnostic's `observer:`) is reserved and read by nothing — see
 `docs/simulation_architecture.md` §7.

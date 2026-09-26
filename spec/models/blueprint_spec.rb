@@ -118,9 +118,19 @@ RSpec.describe Blueprint do
   # other. Same class of bug the simulation avoids by keeping ids in one flat namespace and
   # refusing duplicates outright.
   describe "chassis scoping" do
+    # **Asserted as the rule rather than as a list**, because a list of frames is an inventory
+    # and drifts the moment somebody registers a machine: this named only the steam engine's two
+    # and failed the day the mine landed, for no reason connected to what it is guarding.
     it "scopes a chassis id to the operation it is a frame for" do
-      expect(described_class.of_kind(:chassis).map(&:blueprint_id))
-        .to contain_exactly("steam_engine/atmospheric", "steam_engine/high_pressure")
+      ids = described_class.of_kind(:chassis).map(&:blueprint_id)
+
+      expect(ids).not_to be_empty
+      ids.each do |id|
+        operation, frame = id.split("/", 2)
+        expect(frame).to be_present, "#{id} is not scoped to an operation"
+        expect(ReactorSim::Operations.catalogued.map(&:to_s)).to include(operation)
+        expect(ReactorSim::Operations.chassis_for(operation.to_sym).map(&:to_s)).to include(frame)
+      end
     end
 
     it "builds the same id the registry enumerates" do

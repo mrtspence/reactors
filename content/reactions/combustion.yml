@@ -109,3 +109,78 @@ oil_combustion:
     # do not.
     spread_per_s: 1.60
     quench_per_s: 1.20
+
+# **Firedamp, and it is not a fire — it is an explosion.**
+#
+# Everything above is a reaction you keep going on purpose. This one is the same machinery
+# pointed the other way: you spend the whole match making sure it never starts, and the
+# parameters are chosen so that if it does, it is already too late.
+#
+# 55.5 MJ/kg — nearly twice coal by weight — and it consumes 17.2 kg of air per kilogram, which
+# is why a gassy working also becomes an airless one. The heat is not the point; the volume is.
+firedamp_combustion:
+  consumes: { firedamp: 1.0, air: 17.2 }
+  produces: { flue_gas: 18.2 }
+  enthalpy_j_per_unit: -55500000
+  # An order of magnitude faster than any fuel bed. A gas explosion is not a fire spreading
+  # across a grate — it is a flame front crossing a district faster than anybody in it can
+  # move, and `rate_per_s` is the only place that difference lives.
+  rate_per_s: 18.0
+  # Methane's autoignition is ~810 K, but what sets a firedamp explosion off is never the bulk
+  # temperature of a roadway — it is a naked light, a shot, or a spark off a signal wire. That
+  # is what the `ignition:` block below represents, and it is why this figure is low enough for
+  # a flame already present to carry: above it the front gains ground, below it the mixture
+  # will not carry one at all.
+  min_temperature_k: 600
+  ignition:
+    # **Almost pure spread and almost no quench**, which is the opposite of every fuel above.
+    # A coal fire is forgiving because it is slow in both directions; firedamp is unforgiving
+    # because once a flame is in it there is nothing left to do. The asymmetry IS the hazard.
+    spread_per_s: 9.00
+    quench_per_s: 0.20
+  # **A gas explosion in a working with the air already used up does not go out — it goes
+  # wrong.** Methane burnt with three-quarters of the oxygen it wants makes carbon monoxide
+  # instead of carbon dioxide, which is why the survivors of a firedamp ignition in a badly
+  # ventilated district were so often killed by what came after rather than by the blast.
+  limited_by: air
+  alternatives:
+    # CH4 + 1.5 O2 rather than 2 O2, so three-quarters of the air and 1.75 kg of CO per
+    # kilogram of gas. Leaves about two-thirds of the heat behind: what is not released is the
+    # 10.1 MJ per kilogram of CO that a complete burn would have got by taking the second
+    # oxygen.
+    - consumes: { firedamp: 1.0, air: 12.9 }
+      produces: { flue_gas: 12.15, whitedamp: 1.75 }
+      enthalpy_j_per_unit: -37800000
+
+# **The one that kills everybody.**
+#
+# Firedamp is dangerous; coal dust is what makes a firedamp ignition a disaster. The gas burns
+# in whatever volume held it, and that is bad enough — the dust is lying along every roadway in
+# the mine, gets raised by the blast ahead of the flame, and carries the fire the whole length
+# of the workings. Courrières, 1906: 1,099 dead. Senghenydd, 1913: 439.
+#
+# Less energetic than methane per kilogram and there is **far more of it**, which is why the
+# figures here are a lower enthalpy and a comparable rate.
+coal_dust_combustion:
+  consumes: { coal_dust: 1.0, air: 9.0 }
+  produces: { flue_gas: 9.9, ash: 0.1 }
+  enthalpy_j_per_unit: -24000000
+  rate_per_s: 14.0
+  # Lower than firedamp's: a dust cloud is easier to light than the gas is, which is precisely
+  # why an ignition that starts in gas does not stay there.
+  min_temperature_k: 480
+  ignition:
+    # Spreads nearly as hard as firedamp and lets go almost as reluctantly. A dust explosion
+    # does not go out, it runs out of roadway.
+    spread_per_s: 7.50
+    quench_per_s: 0.30
+  # **And this is the one that made the rescue parties turn back.** A dust explosion consumes
+  # the air of the whole length it runs, so most of it burns in air it has already spent —
+  # carbon to CO rather than CO2, which is nine kilojoules a gram instead of thirty-three.
+  limited_by: air
+  alternatives:
+    # Carbon taking one oxygen instead of two: a little over half the air, 2.3 kg of CO per
+    # kilogram of dust, and barely a quarter of the heat.
+    - consumes: { coal_dust: 1.0, air: 5.0 }
+      produces: { flue_gas: 3.6, whitedamp: 2.3, ash: 0.1 }
+      enthalpy_j_per_unit: -6700000

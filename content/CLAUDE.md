@@ -26,8 +26,44 @@ snapshot rather than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-At the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`, `lubricant`,
-`metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+At the time of writing: `bearing`, `breathable`, `coolant`, `damp`, `dust`, `exhaust`, `fuel`,
+`gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`, `oxidiser`, `solid`, `structural`,
+`waste`, `working_fluid`. (`inert` is descriptive — it marks what cannot burn, and nothing reads
+it: a reaction names its reagents, so being left out of one is what makes a substance inert.)
+
+**A tag does one of three jobs, and which one is not obvious from the word.** Most govern
+*transport*, because ports filter on them. A few govern *reactions* (`oxidiser`, `fuel`). One
+governs *physiology*: `breathable`. Say which when you add one.
+
+> **`dust` is neither `gas` nor `solid`, and that is what makes it work.** Tags govern
+> *transport*, never what can react — so coal dust tagged this way burns perfectly well in a
+> district's air while no conduit in the mine will carry it. Tagged `solid` it would ride out on
+> the tubs with the coal and never be there to burn; tagged `gas` the fan would sweep it away,
+> and **settled dust is the entire hazard** — it lies on the ledges for months, ventilation does
+> not touch it, and a pit ventilated to the standard of the day could still be destroyed by what
+> was lying in its roadways. A resource whose whole character is "it stays put" needs a tag
+> nothing transports.
+
+> **`breathable` is on `air` and on nothing else, ever.** Everything else asphyxiates by taking
+> up the room air was in, so a gas nobody thought about is dangerous by omission rather than
+> safe by omission — the only direction a hazard tag may fail in. **Afterdamp needed no content
+> at all because of this**: `flue_gas` is already what firedamp and coal dust leave behind, and
+> the moment air was the only breathable thing, a district that had burnt was a district nobody
+> could breathe in. A gas that poisons air it has barely diluted — whitedamp, stinkdamp — is the
+> other category and declares `toxic_fraction:` instead.
+
+> **`damp` is a mine's word, not a chemist's** — whatever comes out of the strata that is not
+> air, named for what it does rather than what it is. Kept because it is the vocabulary the
+> instruments are written in: a deputy does not read 4.2% methane, he sees a cap on the flame.
+> `content/resources/damps.yml` holds firedamp and blackdamp; whitedamp wants a home there and
+> is not built, because it needs incomplete combustion first. **Afterdamp does not need one** —
+> it is `flue_gas` in a place with people in it.
+>
+> **Blackdamp is firedamp's opposite and is modelled by where it is wired, not by its density.**
+> It does not burn, there is nothing to smell, and it kills by being there instead of air.
+> Buoyancy is not modelled, so "heavier than air, lies in the dips" is expressed by venting it
+> into the *lowest* volume — the pit bottom — rather than by letting a parcel sink. A hazard
+> whose whole character is where it collects can be placed rather than simulated.
 
 **Adding a tag means updating this list and
 [`docs/guides/add-content.md`](../docs/guides/add-content.md) in the same commit.** A tag is a

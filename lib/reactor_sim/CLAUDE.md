@@ -77,6 +77,53 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > points with `effort:`. When there are more of those than seats, something is always
 > unattended, which is the point.
 
+> **`aided_by:` adds and `gated_by:` multiplies, and the difference is a design decision rather
+> than an arithmetic one.** A shovel makes shovelling better and its absence makes it merely
+> unaided. A pick and a lamp are not like that: an ogre with no pick gets no coal out of a seam
+> however strong they are, and nobody gets any in the dark. So hewing declares
+> `gated_by: %i[mining_effectiveness darkvision]`, a missing tag is a **zero**, and a crude kit
+> is a punishing 0.25 × 0.1 against a proper one's 0.8 × 0.75. That spread is the whole reason
+> equipment is worth buying.
+
+> **`posting` is where somebody has been SENT; `station` is what they are actually working.**
+> `assign_minion` writes the first and names a destination, never a step — which is what lets it
+> ride an at-least-once log with no dedup table. The walk happens inside the tick, in phase 6d,
+> and the two fields differ only for as long as it takes. An operation that declares no
+> `passages:` has no geometry, so they are always equal and none of this costs anything.
+>
+> `graph/passage.rb` carries both halves: `Passage` is the fourth kind of edge (a way **people**
+> use, beside material, heat and momentum) and `Layout` is where everything is. **Both are
+> build-time only** — routing tables are computed once per distinct capability set, never
+> searched in a tick, which is the same discipline `Path.resolve` follows.
+
+> **`air` is the only substance tagged `breathable`, and every other gas asphyxiates by taking
+> up the room it was in.** That is the whole of `breath.rb`, and it is why afterdamp needed no
+> content at all: firedamp combustion consumes 17.2 kg of air per kilogram of gas and hands back
+> `flue_gas`, so a district that has just burnt is a district nobody can breathe in. A new gas
+> nobody thought about is therefore dangerous by omission rather than safe by omission, which is
+> the only direction a hazard tag may fail in.
+>
+> Measured by **volume**, never by mass — firedamp is 0.668 kg/m³ against air's 1.225, and it is
+> displacement that suffocates. Bad air drains `fatigue` rather than a pool of its own, so
+> somebody works worse before they drop and recovers by walking out; `endurance` is already its
+> divisor, **clamped by `Breath::RESERVE`** so the tireless reference crew is not immune.
+>
+> **Apparatus runs out, and a set with no air left is no protection at all** — no taper, because
+> there is no half a breath. `respirator:` is how well it filters, `respirator_air:` is how many
+> ticks it holds, and the two go together: `respirator` alone is inert. It is spent every tick
+> the air is foul, whether or not that tick needed it, and walking out is the only way to stop.
+> That is what makes a rescue a race rather than a decision.
+
+> **A hazard belongs to a place, not to a job.** `place.rb` declares the spaces, and a node
+> belongs to one: a node's `endangers:` may key by `places:`, by `stations:` or by both, and
+> phase 6b looks a minion up in each. The station key says somebody was hurt *because of the work
+> they were doing*, which is false of nearly everything — a boiler letting go hurts whoever is in
+> the engine room, including the visitor with no job and the man just stood down from his post,
+> and misses the fireman who left two minutes ago. Prefer `places:` for anything that fills a
+> room; keep `stations:` for the genuinely hands-on, and for an operation with no geometry, which
+> has only stations to name. Both keys are walked by `injury_spec`, because a declaration in the
+> namespace nobody looks up is a hazard that silently hurts nobody.
+
 `injury.rb` is `Concerns::Wearing` for people, and the copied shape is deliberate while the
 vocabulary is not: a part has `durability` and a `failure`, a person has `resilience` and an
 `injury`. What they genuinely share is `Severity.escalate`, extracted so the one rule that must
@@ -140,7 +187,8 @@ you rearrange:
 ## Serialisation traps
 
 - **Symbols as *values* do not survive JSON.** `deep_symbolize` converts keys only. Resource
-  ids inside parcels, flags inside instrument state, a minion's `station`, a loadout's part
+  ids inside parcels, flags inside instrument state, a minion's `station`, **`posting` and
+  `place`** beside it, a loadout's part
   ids, **a node's `failure` mode**, **every field of an `Event`**, and now **every id in a
   roster** (who is filling a job, what they have been trained in, what is in each of their three
   equipment slots) all broke this way. `Crew.normalise` handles the roster, at the single point

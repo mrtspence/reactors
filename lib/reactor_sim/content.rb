@@ -70,6 +70,9 @@ module ReactorSim
     class Registry
       REQUIRED_RESOURCE_KEYS  = %i[specific_heat_j_per_kg_k density_kg_per_m3].freeze
       REQUIRED_REACTION_KEYS  = %i[consumes produces rate_per_s enthalpy_j_per_unit].freeze
+      # An alternative pathway is a whole reaction bar the rate, which it shares with the
+      # preferred one — a fire is one fire whatever it is making.
+      REQUIRED_PATHWAY_KEYS   = %i[consumes produces enthalpy_j_per_unit].freeze
       # An individual is a name and a race. Everything else is an offset and may be omitted.
       REQUIRED_MINION_KEYS    = %i[name archetype].freeze
 
@@ -234,19 +237,10 @@ module ReactorSim
           missing = REQUIRED_REACTION_KEYS.reject { |k| spec.key?(k) }
           raise Error, "reaction #{id}: missing #{missing.join(', ')}" if missing.any?
 
-          (spec.fetch(:consumes).keys + spec.fetch(:produces).keys).each do |r|
-            raise Error, "reaction #{id}: unknown resource #{r}" unless @resources.key?(r)
-          end
-
-          # An unbalanced reaction creates or destroys matter every time it fires, which
-          # would break the conservation spec from inside the content files — somewhere
-          # nobody would think to look. Cheaper to reject it at boot.
-          consumed = spec.fetch(:consumes).values.sum(&:to_f)
-          produced = spec.fetch(:produces).values.sum(&:to_f)
-          next if (consumed - produced).abs <= 1e-9
-
-          raise Error, "reaction #{id}: mass not conserved — consumes #{consumed}, produces #{produced}"
+          validate_stoichiometry!(id, spec)
+          validate_pathways!(id, spec)
         end
+
 
         @archetypes.each do |id, spec|
           missing = REQUIRED_ARCHETYPE_KEYS.reject { |k| spec.key?(k) }
@@ -263,6 +257,85 @@ module ReactorSim
           next if @archetypes.key?(archetype)
 
           raise Error, "minion #{id}: unknown archetype #{archetype.inspect}"
+        end
+      end
+
+      # An unbalanced reaction creates or destroys matter every time it fires, which would break
+      # the conservation spec from inside the content files — somewhere nobody would think to
+      # look. Cheaper to reject it at boot. Runs once per pathway, because an alternative is a
+      # whole reaction and has to balance on its own.
+      def validate_stoichiometry!(id, spec, label = nil)
+        where = [ "reaction #{id}", label ].compact.join(" ")
+
+        (spec.fetch(:consumes).keys + spec.fetch(:produces).keys).each do |r|
+          raise Error, "#{where}: unknown resource #{r}" unless @resources.key?(r)
+        end
+
+        consumed = spec.fetch(:consumes).values.sum(&:to_f)
+        produced = spec.fetch(:produces).values.sum(&:to_f)
+        return if (consumed - produced).abs <= 1e-9
+
+        raise Error, "#{where}: mass not conserved — consumes #{consumed}, produces #{produced}"
+      end
+
+      # **Alternatives are other fates for the same kilogram of fuel**, and this is what makes
+      # that true rather than merely intended. Every pathway must consume the same quantity of
+      # everything the preferred one does, except the reagent whose scarcity picks between them
+      # — otherwise their extents are not commensurable and splitting one between them is
+      # arithmetic about nothing.
+      #
+      # A pathway may still name reagents the preferred one does not; see
+      # `Resources::Reaction.extra_reagent_cap`, which is a seam.
+      def validate_pathways!(id, spec)
+        alternatives = Array(spec[:alternatives])
+        return if alternatives.empty?
+
+        gate = spec[:limited_by]&.to_sym
+        raise Error, "reaction #{id}: alternatives need limited_by" if gate.nil?
+
+        anchors = spec.fetch(:consumes).reject { |resource, _| resource == gate }
+        unless spec.fetch(:consumes).key?(gate)
+          raise Error, "reaction #{id}: limited_by #{gate}, which it does not consume"
+        end
+        if anchors.empty?
+          raise Error, "reaction #{id}: consumes nothing but #{gate}, so nothing sets its extent"
+        end
+
+        validate_alternatives!(id, spec, alternatives, gate, anchors)
+      end
+
+      def validate_alternatives!(id, spec, alternatives, gate, anchors)
+        # Ordered most-of-the-gated-reagent first, because the cascade spends supply on the
+        # cleanest pathway that can still afford the rest and reads them in order. Declaring
+        # them the other way round would quietly never reach the cheap one.
+        appetite = spec.fetch(:consumes)[gate].to_f
+
+        alternatives.each_with_index do |pathway, i|
+          label = "alternative #{i + 1}"
+          missing = REQUIRED_PATHWAY_KEYS.reject { |k| pathway.key?(k) }
+          raise Error, "reaction #{id} #{label}: missing #{missing.join(', ')}" if missing.any?
+
+          validate_stoichiometry!(id, pathway, label)
+          validate_anchors!(id, label, pathway, anchors)
+
+          wants = pathway.fetch(:consumes)[gate].to_f
+          if wants > appetite
+            raise Error, "reaction #{id} #{label}: wants #{wants} #{gate} where the pathway " \
+                         "before it wants #{appetite} — alternatives run most-first"
+          end
+
+          appetite = wants
+        end
+      end
+
+      def validate_anchors!(id, label, pathway, anchors)
+        anchors.each do |resource, ratio|
+          got = pathway.fetch(:consumes)[resource].to_f
+          next if (got - ratio).abs <= 1e-9
+
+          raise Error, "reaction #{id} #{label}: consumes #{got} #{resource} where the " \
+                       "preferred pathway consumes #{ratio} — every pathway is a different " \
+                       "fate for the same #{resource}, so only limited_by may vary"
         end
       end
 

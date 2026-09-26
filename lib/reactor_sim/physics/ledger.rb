@@ -34,6 +34,11 @@ module ReactorSim
         # burst speed holds megajoules and they have to land somewhere on the books.
         joules_to_friction: 0.0,
         joules_to_work: 0.0,      # useful shaft work delivered out of the operation
+        # Shaft work arriving FROM another operation, which is the entry side of somebody else's
+        # `joules_to_work`. The only line here whose counterpart is on a different operation's
+        # books, so the two cancel in a match-level balance and each operation still closes on
+        # its own. A mine buying power from an engine is the case this exists for.
+        joules_imported: 0.0,
         joules_advected_out: 0.0, # energy carried out with departing mass
         mass_added: 0.0,          # feedstock arriving from outside the operation
         mass_vented: 0.0,         # deliberate discharge through a relief path
@@ -69,7 +74,11 @@ module ReactorSim
         ledger.fetch(:joules_to_friction) + ledger.fetch(:joules_to_work)
     end
     def mass_in(ledger)    = ledger.fetch(:mass_added)
-    def joules_in(ledger)  = ledger.fetch(:joules_added) + ledger.fetch(:joules_from_reactions)
+
+    def joules_in(ledger)
+      ledger.fetch(:joules_added) + ledger.fetch(:joules_from_reactions) +
+        ledger.fetch(:joules_imported)
+    end
 
     # What the conservation specs assert is constant. A burner adds energy and a feed adds
     # mass; both are declared, so "nothing appears or disappears without being written

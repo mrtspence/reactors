@@ -13,7 +13,8 @@ module ReactorSim
   # and links `Operation` takes. No fragment, part or slot is reachable from `Tick`, `Arbiter` or
   # any node — see `operations/CLAUDE.md`.
   class Fragment
-    attr_reader :nodes, :links, :thermal_links, :drive_links, :control_points, :diagnostics
+    attr_reader :nodes, :links, :thermal_links, :drive_links, :passages, :places,
+                :control_points, :diagnostics
 
     # `diagnostics:` is for parts that **are** instruments, and only those. Every other part names
     # its gauges by id (`Part#instruments`) and the operation's panel holds the definitions,
@@ -24,12 +25,21 @@ module ReactorSim
     #
     # The definitions still live in the panel — an instrument part's builder calls a panel helper
     # and passes it figures — so the commentary stays put and only the numbers move.
-    def initialize(nodes: [], links: [], thermal_links: [], drive_links: [],
-                   control_points: [], diagnostics: [])
+    # `passages:` is the fourth kind of edge — ways **people** use — and a part contributes them
+    # exactly as it contributes links. A cage is a fitting that adds a way through the shaft, so
+    # fitting one is what makes the shaft ridable; without it there is only the ladderway the
+    # chassis supplies.
+    # `places:` are the spaces those passages join and those nodes sit in. A part rarely declares
+    # one — the rooms belong to the chassis, because they are the building — but a fitting that
+    # opens somewhere new has nowhere else to say so.
+    def initialize(nodes: [], links: [], thermal_links: [], drive_links: [], passages: [],
+                   places: [], control_points: [], diagnostics: [])
       @nodes = nodes.freeze
       @links = links.freeze
       @thermal_links = thermal_links.freeze
       @drive_links = drive_links.freeze
+      @passages = passages.freeze
+      @places = places.freeze
       @control_points = control_points.freeze
       @diagnostics = diagnostics.freeze
       freeze
@@ -46,6 +56,8 @@ module ReactorSim
         links: @links + other.links,
         thermal_links: @thermal_links + other.thermal_links,
         drive_links: @drive_links + other.drive_links,
+        passages: @passages + other.passages,
+        places: @places + other.places,
         control_points: @control_points + other.control_points,
         diagnostics: @diagnostics + other.diagnostics
       )

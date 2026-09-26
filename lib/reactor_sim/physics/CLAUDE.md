@@ -151,7 +151,28 @@ and the transient is the game.
   firing.
 - `enthalpy_j_per_unit` is the **only** place a reaction may change system energy, and it
   must absorb the formation-enthalpy difference between the two sides.
-- Air starvation needs no special case — `limit` is whichever reagent runs out first.
+- Air starvation needs no special case to make a reaction *slower* — `limit` is whichever
+  reagent runs out first.
+
+### Pathways: when starvation changes the product rather than the rate
+
+A reaction may declare `limited_by:` and an ordered list of `alternatives:`. Then running short
+of that one reagent does not slow the reaction down, it **changes what it makes**: a fire with
+half the air it wants burns all its fuel anyway and produces carbon monoxide doing it. Most of
+industrial chemistry is this — coking, producer gas, a blast furnace run reducing.
+
+- **The split needs no tuning.** With `a₁` and `a₂` of the gated reagent per unit and `A`
+  available, `x·a₁ + (E−x)·a₂ = A` has one answer. Constants here would need re-tuning per fuel
+  and per furnace.
+- **A reaction with no `alternatives:` never enters any of it** and computes exactly as before.
+  That is what protects `rate_per_s`, which sits on a measured plateau for every shipped fuel.
+- **Pathways are alternative fates for the same kilogram of fuel**, enforced at boot: every
+  pathway consumes the same quantity of everything but `limited_by:`. Otherwise their extents
+  are not commensurable and splitting one between them is arithmetic about nothing.
+- A pathway may add a reagent the preferred one does not use (water gas is carbon and *steam*).
+  **That is a seam and it ships under-tested** — `pathway_spec` is its only coverage.
+
+See [`reaction-pathways.md`](../../../docs/design_sketches/reaction-pathways.md).
 
 ## The ledger
 

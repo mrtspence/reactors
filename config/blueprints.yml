@@ -38,6 +38,12 @@ operation:
   # measured against, and that tier is still to be designed.
   steam_engine:
     materials: {}
+  # The second operation. Not free: a mine is a hole somebody paid to sink, and it is the first
+  # thing a player buys with what the engine earned.
+  mine:
+    materials:
+      wrought_iron: 3200
+      cast_iron: 1800
 
 chassis:
   # The frame itself: bedplate, framing, the housing everything else bolts to. Watt's is the
@@ -50,6 +56,12 @@ chassis:
     materials:
       cast_iron: 4200
       wrought_iron: 1800
+  # Two shafts, because after Hartley one is not lawful and not survivable. The cost is the
+  # second shaft — the frame of a colliery is the hole itself.
+  mine/two_shaft:
+    materials:
+      wrought_iron: 5400
+      steel: 900
 
 # **You unlock the person.** This said the opposite for a release — "you unlock the template,
 # never the person" — and it was wrong along with everything else that enumerated `fireman` and
@@ -83,6 +95,18 @@ equipment:
     materials: { steel: 1, bronze: 1 }
   crude_miners_tools:
     materials: { steel: 2, wrought_iron: 2 }
+  # The step that turns hewing from hopeless into a job. Steel rather than a shaped stone, and
+  # a lamp that shows you the face.
+  miners_tools:
+    materials: { steel: 9, wrought_iron: 3, bronze: 1 }
+  # Gauze, and the reason it costs more than the oil lamp it replaces is that it is the only
+  # one that will not fire the district.
+  davy_lamp:
+    materials: { wrought_iron: 2, bronze: 3 }
+  # Dear, and it should be: a cylinder that will hold pressure is the expensive part, and this
+  # is the only kit in the game that buys a minute of somewhere they could not otherwise stand.
+  rescue_apparatus:
+    materials: { steel: 14, bronze: 6, wrought_iron: 4 }
   leather_apron:
     materials: {}
   fettlers_gloves:
@@ -334,3 +358,62 @@ part:
       cast_iron: 1100
       steel: 180
       babbitt: 22
+
+  # --- the mine ---------------------------------------------------------------------------
+  # Priced against the engine's fittings rather than against each other: a colliery's plant is
+  # heavier than a locomotive's because everything has to hold a shaft open against the ground.
+  hand_picks:
+    materials:
+      steel: 40           # a rack of picks and wedges, and little else
+  coal_cutter:
+    materials:
+      steel: 1400
+      cast_iron: 900
+      babbitt: 22
+  steam_whim:
+    materials:
+      cast_iron: 1600
+      wrought_iron: 900
+      babbitt: 20
+  cage_winder:
+    materials:
+      cast_iron: 2400
+      steel: 2200         # wire rope, which is what makes a cage possible at all
+      babbitt: 34
+  # Man riding. A man engine is mostly pitch pine — a rod the depth of the shaft — where a cage
+  # is steel rope and guides, which is why the cheaper one is the one made of trees.
+  man_engine:
+    materials:
+      wrought_iron: 700
+      cast_iron: 900
+      babbitt: 18
+  cage_gear:
+    materials:
+      steel: 1900
+      cast_iron: 1100
+      babbitt: 26
+  waddle_fan:
+    materials:
+      wrought_iron: 1500
+      cast_iron: 400
+  guibal_fan:
+    materials:
+      cast_iron: 3800     # the spiral casing, which is most of why it is better
+      wrought_iron: 2100
+      babbitt: 26
+  sinking_set:
+    materials:
+      cast_iron: 900
+      bronze: 60          # bucket and clack seats, because pit water eats iron
+  cornish_set:
+    materials:
+      cast_iron: 4200
+      wrought_iron: 1400
+      bronze: 140
+  lamp_cabin:
+    materials:
+      wrought_iron: 240
+  pit_head_baths:
+    materials:
+      wrought_iron: 900
+      cast_iron: 500

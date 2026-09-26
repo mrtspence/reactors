@@ -98,6 +98,18 @@ module ReactorSim
       [ apply_mode(state, worsened), worsened ]
     end
 
+    # **Harm that is not a blow**, and so has no bite to resist. Nothing about being tough helps
+    # you breathe, so routing suffocation through `check` would let `resistance` argue with a
+    # thing it has no say in. The escalation rule is still the shared one, which is what keeps a
+    # minion from being announced as collapsed twice, or as severely hurt after being mortally
+    # so. Returns `[next_state, mode_or_nil]`, a mode only on a transition, exactly as `check`.
+    def succumb(state, mode)
+      worsened = Severity.escalate(state.fetch(:injury), mode, ORDER)
+      return [ state, nil ] if worsened.nil? || worsened == state.fetch(:injury)
+
+      [ apply_mode(state, worsened), worsened ]
+    end
+
     def tier(bite, remaining, started)
       return :mortal if bite >= MORTAL_BITE
       return :severe if remaining <= 0.0
@@ -109,9 +121,13 @@ module ReactorSim
     # Being carried out clears the station, which is the whole mechanical consequence of a severe
     # injury: whatever that lever needed doing stops being done, and somebody else has to be
     # moved onto it.
+    #
+    # **It clears the posting too, or they get up and walk there again.** Where there is geometry
+    # a posting is a standing order that the travel phase keeps acting on, so leaving it set
+    # would have a stretchered minion resume their journey on the next tick.
     def apply_mode(state, mode)
       state = state.merge(injury: mode)
-      MODES.dig(mode, :stood_down) ? state.merge(station: nil) : state
+      MODES.dig(mode, :stood_down) ? state.merge(station: nil, posting: nil) : state
     end
 
     # What this injury leaves of a stat, 0..1. Returns 1.0 for an unhurt minion, so callers can

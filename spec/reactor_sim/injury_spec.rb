@@ -316,10 +316,14 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     end
   end
 
-  # Mirrors `failure_spec`'s inverse check: a hazard wired to a station that does not exist is
-  # inert and indistinguishable from a part meant to fail harmlessly.
+  # Mirrors `failure_spec`'s inverse check: a hazard wired to a station or a place that does not
+  # exist is inert and indistinguishable from a part meant to fail harmlessly.
+  #
+  # **Both keys are walked, and that is the point.** A node may endanger stations, places or
+  # both, so a machine moved from one key to the other has two ways to lose a hazard without
+  # anything failing — a typo'd place, or a declaration left in the namespace nobody looks up.
   describe "what every catalogued machine declares" do
-    it "endangers only stations the machine actually has, for modes its parts can enter" do
+    it "endangers only stations and places the machine actually has, for modes it can enter" do
       ReactorSim::Operations.catalogued.each do |type|
         ReactorSim::Operations.chassis_for(type).each do |frame|
           op = ReactorSim::Match
@@ -337,6 +341,16 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
                 expect(op.control_points).to have_key(station),
                                              "#{node.id} endangers #{station}, which does not exist"
               end
+
+              (declared[:places] || {}).each_key do |place|
+                expect(op.layout.declared?(place)).to be(true),
+                                                      "#{node.id} endangers #{place}, " \
+                                                      "which is not a declared place"
+              end
+
+              expect(declared.values_at(:stations, :places).compact).not_to be_empty,
+                                                                           "#{node.id} endangers " \
+                                                                           "nobody on #{mode}"
 
               # A part that declares a scale and then never reports the figure falls back to
               # flat — which is safe, and silent. This is the check that stops it being silent.

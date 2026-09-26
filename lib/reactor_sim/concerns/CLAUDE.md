@@ -112,7 +112,13 @@ Getting the denominator wrong makes the hazard invisible rather than merely mis-
 
 This concern gives you `occupancy` and stops. **What it means is the node's business**, because
 it genuinely differs — a cylinder derives a compression pressure from it, a bed throttles its
-reactions, and a vessel does nothing at all. `obstruction_tags` is part of the mechanism too:
+reactions, and a vessel does nothing at all.
+
+> **`reaction_throttle` takes the reaction id**, because a node can host two that are choked by
+> different things. A firebox throttles everything on its grate alike and ignores the argument;
+> a mine's district is inerted against its coal dust and *not* against its gas. Throttling both
+> alike left a dusted district sitting at ambient through a naked light in 12% firedamp — stone
+> dusting quietly cancelling the entire gas hazard, which is neither the history nor the design. `obstruction_tags` is part of the mechanism too:
 tag `:solid` on a firebox and the *fuel* becomes an obstruction alongside the ash.
 
 Needs `Holds`, and that is a real constraint: **a conduit cannot foul**, because it holds

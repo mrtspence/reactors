@@ -11,7 +11,7 @@ module ReactorSim
   # application would make replay diverge.
   class ControlPoint
     attr_reader :id, :label, :node, :min, :max, :default, :unit, :stiffness, :effort, :aided_by,
-                :exertion, :recovery
+                :exertion, :recovery, :place, :gated_by
 
     # **A valve is not a job, and that distinction is what makes a crew matter.** Most controls
     # are valves: a regulator goes where you put it and who put it there is irrelevant. A few are
@@ -44,12 +44,16 @@ module ReactorSim
     # than what they are doing. An effort station recovers nothing, because you are still at the
     # fire; a valve is somewhere to stand down to. Both apply every tick and net out, which is
     # what keeps light work sustainable without a special case at zero demand.
+    # `place:` is **where this lever stands** — a place id in the operation's `Layout` — and is
+    # what makes manning it cost a walk. Nil means it can be worked from anywhere, which is every
+    # control in an operation that declares no passages at all.
     def initialize(id:, label: nil, node: nil, min: 0.0, max: 100.0, default: 0.0,
                    unit: "%", stiffness: Float::INFINITY, effort: nil, aided_by: nil,
-                   exertion: 0.0, recovery: nil)
+                   exertion: 0.0, recovery: nil, place: nil, gated_by: nil)
       @id = id.to_sym
       @label = label || @id.to_s.tr("_", " ").capitalize
       @node = node&.to_sym
+      @place = place&.to_sym
       @min = min.to_f
       @max = max.to_f
       @default = default.to_f
@@ -57,6 +61,9 @@ module ReactorSim
       @stiffness = stiffness
       @effort = effort&.to_h { |stat, weight| [ stat.to_sym, weight.to_f ] }&.freeze
       @aided_by = aided_by&.to_sym
+      # Tags without which this job cannot be done at all — multiplied, so a missing one is a
+      # zero rather than a penalty. See `Minion#capability`.
+      @gated_by = gated_by&.map(&:to_sym)&.freeze
       @exertion = exertion.to_f
       @recovery = (recovery || (effort ? 0.0 : Fatigue::BASE_RECOVERY)).to_f
       validate_effort!

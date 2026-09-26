@@ -43,6 +43,7 @@ Diagnostic.new(
 | `Derived.new(node, quantity)` | Something the node computes |
 | `Level.new(node)` | How full, 0–100 |
 | `Contents.new(node, resource)` | kg of one substance inside a mixture |
+| `Fraction.new(node, resource)` | **percentage** of a node's contents that is one substance. Wherever the total can move, kilograms mean different things at different times — a district holding 30 kg of firedamp is comfortable with the fan on and lethal with it off, because the air went with the fan. A concentration means one thing in both cases, and for a damp it is what a flame responds to. Empty contents read 0, not unavailable |
 | `Durability.new(node)` | Remaining durability, absolute |
 | `Broken.new(node)` | 1.0 / 0.0 — feeds a lamp |
 | `Aggregate.new([sources], operation: :sum \| :max \| :min)` | One number across many nodes |

@@ -42,6 +42,15 @@ module ReactorSim
                        stats: { strength: 0.05 },
                        tags: { mining_effectiveness: 0.25, darkvision: 0.1, open_flame: true })
 
+    # **The gate is multiplied, so a crude kit is 0.25 × 0.1 and genuinely hopeless.** That is
+    # the design — a hewer with a stone pick and a candle is not a slightly worse hewer — but it
+    # needs somewhere to go, and this is it: a proper pick wins four times the coal and the
+    # light stops being the thing holding you back.
+    Equipment.register(:miners_tools, slot: :tool, label: "Miner's Tools",
+                       description: "A steel pick, wedges, and a lamp worth the name.",
+                       stats: { strength: 0.1 },
+                       tags: { mining_effectiveness: 0.8, darkvision: 0.5, open_flame: true })
+
     # --- gear ----------------------------------------------------------------
     #
     # What they wear.
@@ -88,6 +97,23 @@ module ReactorSim
     Equipment.register(:hand_lamp, slot: :utility, label: "Hand Lamp",
                        description: "An oil lamp on a bail. Better light, same open flame.",
                        tags: { darkvision: 0.35, open_flame: true })
+
+    # **The one that does not carry `open_flame`**, which is the entire point of it and the
+    # reason it was invented. A gauze lamp gives less light than the oil lamp it replaces and
+    # gives it without setting the district off — and it is what makes the flame cap readable,
+    # because the cap is the thing burning inside the gauze.
+    Equipment.register(:davy_lamp, slot: :utility, label: "Davy Lamp",
+                       description: "Flame in a wire gauze. Dimmer, and it will not fire the gas.",
+                       tags: { darkvision: 0.25, firedamp_resistance: 0.2 })
+
+    # **The only thing that lets anybody walk INTO bad air**, and the reason a rescue is a race
+    # rather than a decision. `respirator_air` is the whole cost of it: forty minutes on the
+    # clock, spent every tick the air is foul whether or not it was needed that tick, and worth
+    # nothing at all once it is gone.
+    Equipment.register(:rescue_apparatus, slot: :utility, label: "Rescue Apparatus",
+                       description: "Compressed air on a harness. Forty minutes, then nothing.",
+                       stats: { strength: -0.1, dexterity: -0.15 },
+                       tags: { respirator: 0.85, respirator_air: 9_600 })
 
     # --- training ------------------------------------------------------------
     #

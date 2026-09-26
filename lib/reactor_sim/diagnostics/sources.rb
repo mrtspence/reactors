@@ -133,6 +133,36 @@ module ReactorSim
       end
     end
 
+    # What **fraction** of a node's contents is one substance, as a percentage.
+    #
+    # `Contents` in kilograms is the wrong reading wherever the total can move: a district
+    # holding 30 kg of firedamp is comfortable with the fan running and lethal without it,
+    # because the air went with the fan. Concentration is the quantity that means one thing in
+    # both cases — and it is the quantity every damp is described in, because it is what a
+    # flame responds to.
+    #
+    # Zero contents reads as zero rather than as unavailable: a node that holds nothing has
+    # none of anything, which is a true answer rather than a missing one.
+    class Fraction < Base
+      def initialize(node, resource)
+        super()
+        @node = node.to_sym
+        @resource = resource.to_sym
+        freeze
+      end
+
+      def sample(_nodes, states, _content)
+        state = states[@node] or return Reading.missing
+
+        parcels = state.fetch(:parcels, [])
+        total = parcels.sum { |p| p.fetch(:kg) }
+        return Reading.of(0.0) unless total.positive?
+
+        parcel = parcels.find { |p| p.fetch(:resource) == @resource }
+        Reading.of((parcel ? parcel.fetch(:kg) : 0.0) / total * 100.0)
+      end
+    end
+
     # Remaining integrity, as an absolute quantity. Never shown as a number — it is banded
     # and put into prose by the filter chain, so the player gets "showing some cracks"
     # rather than a health bar (docs/simulation_architecture.md §7).

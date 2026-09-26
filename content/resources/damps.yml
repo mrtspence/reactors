@@ -1,0 +1,101 @@
+# The damps: what a mine gives off, and what it does to the people in it.
+#
+# **The word is a mine's own, not a chemist's.** A damp is whatever comes out of the strata that
+# is not air, named by what it does rather than what it is, and the vocabulary is deliberately
+# kept because it is the vocabulary the instruments are written in — a deputy does not measure
+# 4.2% methane, he sees a cap on the flame.
+#
+# **Afterdamp needs no entry at all**: it is `flue_gas` in a place with people in it.
+
+# Methane. Lighter than air, which is why it collects in the roof and in rising headings rather
+# than mixing away — that buoyancy is not modelled yet, so for now it is simply present in the
+# volume it was released into.
+#
+# Explosive between roughly 5% and 15% in air. Below the lower limit it will not carry a flame at
+# all; well above the upper it is too rich to burn until it is diluted, which is what makes
+# clearing a gassy working more dangerous than leaving it. The model here is one-sided: it
+# carries the reaction above the lower limit and does not represent the rich end.
+firedamp:
+  tags: [gas, fuel, damp]
+  specific_heat_j_per_kg_k: 2220
+  # At 20 °C and one atmosphere — a little over half the density of air, which is the whole
+  # reason it sits in the roof.
+  density_kg_per_m3: 0.668
+  molar_mass_g_per_mol: 16.04
+
+# **Blackdamp — stythe, chokedamp. The quiet one, and the opposite of firedamp in every way
+# that matters.**
+#
+# Air with the oxygen already taken out of it: nitrogen and carbon dioxide, left behind where
+# coal has slowly oxidised in the worked-out ground. It does not burn, it does not explode, and
+# there is nothing to smell. It kills by being there instead of air.
+#
+# **Heavier than air, so it lies in the dips, the sumps and the old workings** — which is why
+# it is the pit bottom's hazard where firedamp is the face's. Stratification is not modelled, so
+# the mine says this by venting it into the lowest volume rather than by letting it sink.
+#
+# The warning is the instrument: **a flame lamp dims and goes out in blackdamp before a man
+# collapses in it.** That is not a game concession, it is why the lamp was worth carrying for
+# something other than light, and it is the one hazard in the mine whose gauge trips *before*
+# the danger does.
+blackdamp:
+  tags: [gas, damp, inert]
+  # Mostly nitrogen with enough carbon dioxide to matter — heavier than the air it replaces,
+  # which is the whole of its behaviour.
+  specific_heat_j_per_kg_k: 950
+  density_kg_per_m3: 1.42
+  molar_mass_g_per_mol: 33.0
+
+# **Whitedamp — carbon monoxide. The one that does not need to displace anything.**
+#
+# Blackdamp kills by taking the place of air; a lungful that is still 99.8% good air will kill
+# you just as dead if the rest is this. It is what a fire makes when it is smothered — behind a
+# stopping, in a gob that is heating, in a district sealed after an explosion — so unlike every
+# other damp it is not something the ground gives off. **It is something the mine does.**
+#
+# Odourless and colourless, so there is no warning at all except an instrument. That is what
+# the canary was for: a bird goes over at a concentration a man can still walk in, which buys
+# the minutes it takes to get out.
+#
+# `toxic_fraction:` is the whole of the model: above this share of the volume the air is
+# unbreathable however much of it is air. 0.15% is the concentration that kills over hours,
+# which is the right order for a district somebody is working in.
+whitedamp:
+  tags: [gas, damp]
+  toxic_fraction: 0.0015
+  specific_heat_j_per_kg_k: 1040
+  density_kg_per_m3: 1.145
+  molar_mass_g_per_mol: 28.01
+
+# **Coal dust, and it is what turns an accident into a catastrophe.**
+#
+# The critical discovery of the nineteenth century, and the reason Courrières killed 1,099 and
+# Senghenydd 439. A small local firedamp ignition raises the dust lying on the floor and the
+# roadway ledges *ahead of its own pressure wave*, and that dust then burns, raising more dust
+# further on. It propagates through the entire mine.
+#
+# **`dust` is its own tag and neither `gas` nor `solid`**, which is the modelling decision this
+# whole mechanic rests on. Tags govern *transport*, not what can react, so dust tagged this way
+# burns perfectly well in the district's air while no conduit in the mine will carry it:
+#
+#   solid  would ride out on the tubs with the coal, and never be there to burn
+#   gas    would be swept away by the fan — and **settled dust is the entire hazard.** It lies
+#          on the floor and the ledges for months; ventilation does not touch it, which is why
+#          a well-ventilated pit could still be destroyed by it
+#
+# So it accumulates where it is made and the only things that remove it are burning and being
+# covered over. That is what makes a mine get more dangerous the longer it is worked.
+coal_dust:
+  tags: [dust, fuel]
+  specific_heat_j_per_kg_k: 1260
+  density_kg_per_m3: 800
+
+# The remedy, and the least dramatic thing in the game.
+#
+# Limestone, spread along the roadways so that what gets raised is mostly inert and the mixture
+# cannot carry a flame. It wins no coal, costs money, has to be kept up, and does absolutely
+# nothing at all until the day it saves everybody — which is the whole character of it.
+stone_dust:
+  tags: [dust, inert]
+  specific_heat_j_per_kg_k: 910
+  density_kg_per_m3: 1600

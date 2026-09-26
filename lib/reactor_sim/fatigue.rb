@@ -70,8 +70,14 @@ module ReactorSim
     # working, recover while not — puts a discontinuity at zero demand and makes a lightly worked
     # station behave like an idle one. Netting is continuous, and it is what makes "light work is
     # sustainable, hard work is not" fall out of the arithmetic instead of being a special case.
-    def advance(minion, state, control:, demand: 0.0, dt:)
-      rate = accrual(minion, state, control, demand) - recovery(control)
+    #
+    # **`suffocation:` is a third term rather than part of `accrual`**, because everything in
+    # `accrual` is about the work — station, lever, capability — and bad air is about *where you
+    # are standing*, which no lever describes. Added here it nets with recovery like everything
+    # else, so walking into clean air is recovery with no mechanism of its own. `Breath` computes
+    # it; see `docs/design_sketches/breathable-air.md`.
+    def advance(minion, state, control:, dt:, demand: 0.0, suffocation: 0.0)
+      rate = accrual(minion, state, control, demand) - recovery(control) + suffocation
       next_fatigue = (state.fetch(:fatigue, 0.0) + (rate * dt)).clamp(RANGE.begin, RANGE.end)
 
       state.merge(fatigue: next_fatigue)

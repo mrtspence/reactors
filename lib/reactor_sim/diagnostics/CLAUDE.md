@@ -25,8 +25,8 @@ either. If reading drew noise, how many people happened to be watching would cha
 
 ## Sources — stateless, pure
 
-`Field`, `Flag`, `Derived`, `Level`, `Contents`, `Durability`, `Broken`, `Aggregate`. A snapshot; the
-palette is the truth:
+`Field`, `Flag`, `Derived`, `Level`, `Contents`, `Fraction`, `Durability`, `Broken`, `Aggregate`. A
+snapshot; the palette is the truth:
 
 ```sh
 grep -oP '^\s{4}class \K\w+' lib/reactor_sim/diagnostics/sources.rb   # sources
@@ -41,6 +41,12 @@ where a gauge author looks before reaching for a quantity.
 
 A source that cannot read reports unavailable and the diagnostic flags `:offline`, rather than
 reporting a fabricated zero.
+
+**`Contents` is kilograms and `Fraction` is a percentage, and which one you want is a real
+question.** Wherever the *total* can move, kilograms mean different things at different times: a
+district holding 30 kg of firedamp is comfortable with the fan running and lethal without it,
+because the air went with the fan. Concentration is the quantity that means one thing in both
+cases — and for a damp it is also the quantity a flame actually responds to.
 
 **Anything needing memory is a filter, not a source.** That is why `Rate` is a filter.
 

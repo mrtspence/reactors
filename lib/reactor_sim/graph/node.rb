@@ -74,7 +74,11 @@ module ReactorSim
     # rather than a cap on the extent, because choking slows a reaction down; it does not put a
     # ceiling on it. (Scaling the extent would charge a fire for its draught twice, which is the
     # mistake `Resources::Ignition` records having made with the lit-mass term.)
-    def reaction_throttle(_state, _content) = 1.0
+    # **Per reaction, because a node can host two that are choked by different things.** A
+    # firebox throttles everything on its grate alike and ignores the argument; a mine's
+    # district is inerted against its coal dust and not against its gas, and a single figure
+    # for both meant stone dusting quietly cancelled the firedamp hazard as well.
+    def reaction_throttle(_state, _content, _reaction_id = nil) = 1.0
 
     # --- lifecycle -----------------------------------------------------------
 

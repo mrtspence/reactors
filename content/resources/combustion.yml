@@ -7,8 +7,16 @@
 # Densities for the solid fuels are bulk (as-heaped) rather than true material density,
 # because what matters is how much of a bunker a tonne of coal fills.
 
+# **`breathable` is the whole of the asphyxiation model, and air is the only thing that carries
+# it.** Every other gas is an asphyxiant by definition, because what suffocates somebody is air
+# not being there — so a new gas nobody thought about is dangerous by omission rather than safe
+# by omission, which is the only safe direction for a hazard tag to fail in.
+#
+# The corollary is that afterdamp needs no content at all: `flue_gas` below is what firedamp and
+# coal dust leave behind, 17.2 kg of air consumed per kilogram of gas burnt, and it is already
+# not breathable.
 air:
-  tags: [gas, oxidiser]
+  tags: [gas, oxidiser, breathable]
   specific_heat_j_per_kg_k: 1005
   density_kg_per_m3: 1.225
   molar_mass_g_per_mol: 28.96

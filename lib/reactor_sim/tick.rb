@@ -14,9 +14,10 @@ module ReactorSim
   #   3 SETTLE    one pure function over every claim — mass, heat and momentum alike
   #   4 TRANSFER  a advection  b conduction  c ambient  d drivetrain  e torque
   #   5 REACT     phase change and chemistry, local to each node
-  #   6 STRESS    durability, overload, failure events
-  #     a endanger — what a failure does to the people near it
-  #     b tire     — what the work does to the people doing it
+  #   6 STRESS    a durability, overload, failure events
+  #              b endanger — what a failure does to the people near it
+  #              c tire     — what the work does to the people doing it
+  #              d travel   — where the people have got to
   #   7 OBSERVE   instruments sample and their filters advance
   #
   # Phase 4's internal order matters: mass moves before heat so a parcel's energy travels with
@@ -69,8 +70,26 @@ module ReactorSim
       end
     end
 
+    # What is dangerous this tick, by the two things that can make it so: the post somebody is
+    # standing at, and the room they are standing in. Resolved together per minion, because a
+    # hewer whose roof comes in while his district is full of afterdamp is in both.
+    Exposure = Struct.new(:stations, :places, keyword_init: true) do
+      def empty? = stations.empty? && places.empty?
+
+      # Severity ADDS and tags union, the same rule two failures at one post already follow.
+      def at(station, place)
+        found = [ stations[station], places[place] ].compact
+        return nil if found.empty?
+        return found.first if found.one?
+
+        found.reduce do |a, b|
+          a.merge(b) { |key, x, y| key == :severity ? x + y : x | y }
+        end
+      end
+    end
+
     attr_reader :state, :nodes, :links, :paths, :thermal_links, :drive_links, :control_points,
-                :diagnostics, :minions, :content, :rngs
+                :diagnostics, :minions, :content, :rngs, :layout, :routing
 
     def initialize(operation, state)
       @state = state
@@ -84,6 +103,8 @@ module ReactorSim
       @minions = operation.minions
       @content = operation.content
       @rngs = operation.rngs
+      @layout = operation.layout
+      @routing = operation.routing
     end
 
     # Returns the next state. The operation installs it; nothing is mutated here.
@@ -110,7 +131,8 @@ module ReactorSim
       ledger = record_injections(ledger, next_nodes)
       next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx)  # phase 6
       next_minions, hurt_events = endanger(wear_events, ctx)     # phase 6b
-      next_minions, spent_events = tire(next_minions, controls, ctx)     # phase 6c
+      next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx)  # phase 6c
+      next_minions = travel(next_minions, ctx)                   # phase 6d
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
 
       # Phase 8. Note that this hash IS the next state — a key not named here is silently
@@ -182,7 +204,8 @@ module ReactorSim
       minion = minions[minion_id] or return 0.0
       control.value(control_state) *
         minion.capability(state.fetch(:minions).fetch(minion_id),
-                          effort: control.effort, aided_by: control.aided_by)
+                          effort: control.effort, aided_by: control.aided_by,
+                          gated_by: control.gated_by)
     end
 
     # Phase 4a. Granted parcels move, carrying their energy with them. Ungranted mass stays
@@ -570,7 +593,7 @@ module ReactorSim
         parcels, released = Resources::Reaction.advance(
           spec, acc.fetch(:parcels),
           temperature_k: node.temperature_k(acc, content),
-          dt: ctx.dt * node.reaction_throttle(acc, content), content: content,
+          dt: ctx.dt * node.reaction_throttle(acc, content, reaction_id), content: content,
           ignited_fuel_kg: ignited_fuel_kg(spec, reaction_id, acc)
         )
         next acc if released.zero? && parcels.equal?(acc.fetch(:parcels))
@@ -739,10 +762,11 @@ module ReactorSim
       events = []
       next_states = minions_state.to_h do |id, minion_state|
         minion = minions[id]
-        # A station is where somebody IS, so it comes from state rather than config — a minion
-        # who has been reassigned is standing somewhere else, and one already carried out is
-        # standing nowhere and cannot be hurt again by the same blast.
-        hazard = exposure[minion_state[:station]]
+        # Both come from state rather than config — a minion who has been reassigned is standing
+        # somewhere else, and one already carried out has no station and cannot be hurt again by
+        # the same blast. **A place outlives a station**: being stood down clears the post but
+        # not the room, so somebody carried out of a district full of afterdamp is still in it.
+        hazard = exposure.at(minion_state[:station], minion_state[:place])
         next [ id, minion_state ] if minion.nil? || hazard.nil?
 
         hurt, mode = Injury.check(minion, minion_state, hazard)
@@ -753,7 +777,10 @@ module ReactorSim
       [ next_states, events ]
     end
 
-    # Phase 6c. What the work does to the people doing it.
+    # Phase 6c. What the work does to the people doing it — and what the air does to them,
+    # which is the same pool and deliberately so. Bad air derates capability on the way down, so
+    # somebody works worse before they drop; it recovers when they reach clean air; and
+    # `endurance` is already its divisor, which is the right stat for how long a person lasts.
     #
     # **Runs after `endanger`, not at phase 0.** Three reasons, and the third is the one that
     # bites: the effort actually demanded this tick is settled at phase 1, so accruing at phase 0
@@ -765,8 +792,9 @@ module ReactorSim
     # lever costs them more from the moment they are hurt.
     #
     # **No entropy**, exactly as the Danger Check draws none, so a tired minion replays exactly.
-    def tire(minions_state, controls, ctx)
+    def tire(minions_state, states, controls, ctx)
       events = []
+      air = breathable_air(states)
 
       next_states = minions_state.to_h do |id, minion_state|
         minion = minions[id]
@@ -774,14 +802,139 @@ module ReactorSim
 
         control = control_points[minion_state[:station]]
         demand = control ? control.demand(controls.fetch(control.id)) : 0.0
+        here = air.fetch(minion_state[:place], 1.0)
+        choking = Breath.rate(here, minion, minion_state)
 
-        tired = Fatigue.advance(minion, minion_state, control: control, demand: demand, dt: ctx.dt)
+        tired = Fatigue.advance(minion, Breath.draw(minion_state, here, minion),
+                                control: control, demand: demand,
+                                dt: ctx.dt, suffocation: choking)
         tired, spent = Fatigue.check_spent(tired)
         events << spent_event(minion, control, ctx) if spent
+
+        tired, mode = choke(tired, choking, ctx.dt)
+        events << suffocated_event(minion, tired, mode, ctx) if mode
         [ id, tired.freeze ]
       end
 
       [ next_states, events ]
+    end
+
+    # **The air in each room, once per tick rather than once per person.** Read off the state
+    # phase 5 just produced, so a district that exploded this tick is unbreathable this tick
+    # rather than next. A place is never missing an air node — `Layout` refuses to build one
+    # that has none — so a fraction here is always a real reading.
+    def breathable_air(states)
+      # Gated on PLACES, never on passages: a room needs no way out of it to have air in it, and
+      # `spatial?` answers a different question. An operation that declares no places — the steam
+      # engine — gets an empty map and every lookup falls back to clean.
+      return {} if layout.places.empty?
+
+      layout.places.to_h do |place|
+        parcels = states.dig(layout.breathes(place), :parcels)
+        [ place, parcels ? breathability(parcels) : 1.0 ]
+      end
+    end
+
+    # **Poisoned air reads as no air at all**, which is the whole difference between whitedamp
+    # and every other damp: carbon monoxide does not have to displace anything, so a lungful
+    # that is still almost entirely air kills just the same. Collapsing it to zero here rather
+    # than in `Breath.rate` keeps the rate a function of one number and puts both ways of
+    # ruining a volume of air in the same place.
+    def breathability(parcels)
+      return 0.0 if Breath.poisoned?(parcels, content)
+
+      Breath.breathable_fraction(parcels, content)
+    end
+
+    # Collapse, and then the clock. **Pinned at the fatigue ceiling is not enough on its own** —
+    # a stoker flat out reaches it too and is merely spent. Pinned there *in bad air* is a
+    # different thing, and the dwell from there to a mortal injury is what makes going back for
+    # somebody worth doing: fix the ventilation and the clock runs backwards.
+    def choke(state, rate, dt)
+      state = Breath.advance(state, rate, dt)
+      return [ state, nil ] unless rate.positive? && state.fetch(:fatigue) >= Fatigue::RANGE.end
+
+      Injury.succumb(state, Breath.suffocated?(state) ? :mortal : :severe)
+    end
+
+    def suffocated_event(minion, state, mode, ctx)
+      Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
+                  severity: :critical, tick: ctx.tick, mode: mode,
+                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
+                            place: state[:place], cause: :asphyxia,
+                            asphyxia: state.fetch(:asphyxia, 0.0).round(3) })
+    end
+
+    # Phase 6d. Where everybody has got to.
+    #
+    # **Runs after `tire`, and reads no controls**, so who is standing where still comes from the
+    # previous tick everywhere it matters — `station_index` and `control_values` are built in
+    # phase 0 from N−1, so a minion who arrives here takes up their post on the NEXT tick. That is
+    # the same one-hop delay every other thing in the engine has, and it is what keeps arrival
+    # from depending on phase order.
+    #
+    # An operation with no passages has no geometry and this is a no-op, which is what leaves the
+    # steam engine bit-identical.
+    def travel(minions_state, ctx)
+      return minions_state unless layout.spatial?
+
+      minions_state.to_h do |id, minion_state|
+        minion = minions[id]
+        next [ id, minion_state ] if minion.nil?
+
+        [ id, walk(minion, minion_state, ctx).freeze ]
+      end
+    end
+
+    def walk(minion, state, ctx)
+      destination = layout.place_of(minion.posting(state))
+      here = minion.place(state)
+      # A posting with no place, or none at all, is worked from wherever they are standing.
+      return state.merge(station: minion.posting(state), progress: 0.0) if destination.nil?
+      return state.merge(station: minion.posting(state), progress: 0.0) if destination == here
+
+      step(minion, state, here, destination, ctx)
+    end
+
+    # One tick's walking, which may cross more than one passage if the stretches are short or the
+    # clock is fast. **Distance carries over between them** rather than being discarded at each
+    # place, or a mine run at a high `time_scale` would advance one passage per tick however long
+    # the tick was.
+    def step(minion, state, here, destination, ctx)
+      remaining = minion.pace(state) * ctx.dt
+      progress = state.fetch(:progress, 0.0)
+
+      while remaining.positive? && here != destination
+        hop = layout.next_hop(here, destination, routing.fetch(minion.id, []))
+        passage = hop && quickest(here, hop, ctx)
+        # No way on, or the only ways on are powered and stopped. They wait where they are,
+        # which is what being stranded underground looks like.
+        break if passage.nil?
+
+        speed = passage.speed_in(ctx)
+        break unless speed.positive?
+
+        travelled = remaining * speed
+        if progress + travelled < passage.metres
+          progress += travelled
+          break
+        end
+
+        remaining -= (passage.metres - progress) / speed
+        here = hop
+        progress = 0.0
+      end
+
+      arrived = here == destination
+      minion.advance_to(state, place: here, progress: arrived ? 0.0 : progress,
+                               station: arrived ? minion.posting(state) : nil)
+    end
+
+    # Somebody takes the quickest way that is actually running. With the cage stopped that is
+    # the ladderway; with it going it is the cage. **Ties break on declaration order**, so a
+    # layout stays deterministic when two ways are equally good.
+    def quickest(here, hop, ctx)
+      layout.passages_between(here, hop).max_by { |p| p.speed_in(ctx) }
     end
 
     # The person and the post, the same split `hurt_event` makes: the post outlives whoever was
@@ -795,20 +948,36 @@ module ReactorSim
     # Severity ADDS where two failures endanger one station on the same tick, because two things
     # letting go beside somebody is worse than either. Tags union, so gear that resists one of
     # them still helps.
+    #
+    # **Two keys, and `places:` is the one that says the true thing.** A hazard keyed by station
+    # says somebody was hurt because of the job they were doing; a boiler letting go hurts
+    # whoever is in the engine room, and misses the fireman who left two minutes ago. Both are
+    # legal — an operation with no geometry has only stations to name — and a minion is looked up
+    # in each, which is what lets a machine be moved onto places without moving all of them at
+    # once. See `docs/design_sketches/breathable-air.md` §5.
     def hazards_from(wear_events)
-      wear_events.each_with_object({}) do |event, acc|
+      exposure = Exposure.new(stations: {}, places: {})
+
+      wear_events.each do |event|
         node = nodes[event[:node]]
         next unless node.respond_to?(:failure_hazards)
 
         declared = node.failure_hazards[event[:mode]] or next
         scale = hazard_scale(declared, event)
 
-        (declared[:stations] || {}).each do |station, weight|
-          at = acc[station] ||= { station: station, severity: 0.0, tags: [], sources: [] }
-          at[:severity] += weight.to_f * scale
-          at[:tags] |= Array(declared[:tags])
-          at[:sources] |= [ event[:node] ]
-        end
+        accrue(exposure.stations, :station, declared[:stations], declared, scale, event[:node])
+        accrue(exposure.places, :place, declared[:places], declared, scale, event[:node])
+      end
+
+      exposure
+    end
+
+    def accrue(index, key_name, weights, declared, scale, source)
+      (weights || {}).each do |key, weight|
+        at = index[key] ||= { key_name => key, severity: 0.0, tags: [], sources: [] }
+        at[:severity] += weight.to_f * scale
+        at[:tags] |= Array(declared[:tags])
+        at[:sources] |= [ source ]
       end
     end
 
@@ -852,6 +1021,7 @@ module ReactorSim
                   detail: { minion: minion.minion,
                             lasting: Injury.lasting?(mode),
                             station: hazard[:station],
+                            place: hazard[:place],
                             by: hazard[:sources],
                             tags: hazard[:tags],
                             resilience_left: hurt.fetch(:resilience).round(3) })

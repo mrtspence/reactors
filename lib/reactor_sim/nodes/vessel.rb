@@ -97,7 +97,8 @@ module ReactorSim
       # is left to burn. Expressed as a slowdown rather than as a cap, because that is what
       # choking is — the fuel and the air are both still there, they are just no longer meeting.
       # Linear in the free void, and it reaches zero only when the bed is solid.
-      def reaction_throttle(state, content)
+      # Ignores the reaction: a choked grate is choked for everything on it.
+      def reaction_throttle(state, content, _reaction_id = nil)
         return 1.0 if @obstruction_tags.empty?
 
         [ 1.0 - occupancy(state, content), 0.0 ].max

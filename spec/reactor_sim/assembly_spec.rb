@@ -306,10 +306,12 @@ RSpec.describe ReactorSim::Assembly do
       it "marks every registered rig as one" do
         rigs = ReactorSim::Operations.known - ReactorSim::Operations.catalogued
 
-        expect(ReactorSim::Operations.known - rigs).to eq([ :steam_engine ]),
-                                                       "an operation registered by a spec is " \
-                                                       "being counted as a machine — pass " \
-                                                       "`harness: true` when registering it"
+        # The shipped machines, and this list grows deliberately — a rig appearing in it is the
+        # bug being guarded against, not a new operation.
+        expect(ReactorSim::Operations.known - rigs)
+          .to contain_exactly(:steam_engine, :mine),
+              "an operation registered by a spec is being counted as a machine — pass " \
+              "`harness: true` when registering it"
       end
     end
 

@@ -123,6 +123,22 @@ volume and 100% of its clearance. Detail in
   mechanic — which is why the ashpan and its lever landed with the choke.
 - Needs `Holds`, so **a conduit cannot foul**: it holds nothing by design.
 
+## A fan at rest is a hole; a pump at rest is a closed valve
+
+**`driven_by:` alone is a BILL, not a gate.** It charges a shaft for work the stream already did,
+and `drag_conductances` returns `{}` the moment the shaft stops — so a fitting with no power
+passes its full rating for free. For a **fan** that is exactly right: air goes through a stopped
+fan perfectly well and only the head is lost.
+
+For a bucket pump, a winding drum or a screw conveyor it is completely wrong. Those move material
+*because* they are turning. Measured on the first mine: with the line shaft stationary, the sump
+pump lifted its water **90 m for nothing**, at the full seepage rate, indefinitely — so the mine
+could never drown and the one failure the whole operation is built around was unreachable.
+
+`displacement: true` adds the missing term — throughput scales with `ω / rated_omega` and is zero
+at rest. **Opt-in**, so every fitting that does not ask for it is bit-identical; the engine's
+donkey blower deliberately does not, because it is a fan.
+
 ## A rupture is not a plug, and a hole does not narrow the pipe
 
 Returning 0 from `Conduit#throughput_kg` for a broken conduit makes a burst pipe a **better seal
@@ -173,13 +189,15 @@ same commit.**
 | Node | Concerns | What it is |
 |---|---|---|
 | `Vessel` | Thermal, Holds, Obstructs, Wearing, Pressurized | Tank, vat, drum, pressure vessel. **Passive** — declares no intent. Optional heater, `reactions:`, `obstruction_tags:` + `void_fraction:` for a bed its own waste can choke, and `damages:` for what it takes with it when it lets go. Reports `:fire_lit` / `:fire_out` for a vessel with an ignited reaction in it, and `:heater_engaged` on the rising edge of its heater lever. |
-| `Conduit` | Thermal, Wearing | Pipe or valve. **Transport** — holds nothing. Rate limit, lever, wall, failure. Optional `control_id`, `rangeability:` (valve trim). **`driven_by:` makes it cost torque**: a fan or pump is charged `(head_pa + ρ·g·lift_m)·Q ÷ efficiency` off the shaft it names, as a drag conductance the drive solve handles unchanged. `Tick#advect` gives it `carried_kg`/`carried_m3`, because a node resolved *through* is never a flow's endpoint and has no other way to know what it passed. |
+| `Conduit` | Thermal, Wearing | Pipe or valve. **Transport** — holds nothing. Rate limit, lever, wall, failure. Optional `control_id`, `rangeability:` (valve trim). **`driven_by:` makes it cost torque**: a fan or pump is charged `(head_pa + ρ·g·lift_m)·Q ÷ efficiency` off the shaft it names, as a drag conductance the drive solve handles unchanged. **`displacement: true` makes it cost torque to move at all** — see below. `Tick#advect` gives it `carried_kg`/`carried_m3`, because a node resolved *through* is never a flow's endpoint and has no other way to know what it passed. |
 | `Motor` | Thermal, Holds, Pressurized, Rotating, Wearing | A small engine carrying **its own rotor** — `drives` returns its own id. For driving a fitting on a black start, when the main drivetrain is what you are trying to start. Burns its charge through ordinary `reactions:`. Torque from the **ignited fraction**, never `power ÷ ω`; breathes by **displacement**, never by thermal cycling. Both of those were built the wrong way first — see below. |
 | `Boiler` | (a `Vessel`) | A drum holding a liquid and its own vapour. Its vapour outlet is never quite dry; **swell** lifts the level when it is pulled hard, and priming is what happens when a high glass and a hard pull coincide. How badly it fails is decided by **flash evaporation**, not by pressure — see below. `working_pressure_pa:` is what the drum is *for* (nil to say nothing) and is the mark it reports `:steam_raised` at — never the shell's rating, which is ~2.4× too high to mean anything operationally, and never the safety valve's setting, which lives in a different slot. |
-| `Atmosphere` | Thermal, Holds | The outside world: unlimited source and sink, fixed pressure reference. **Two inlets** — `:exhaust` books `mass_vented`, `:spill` books `mass_spilled`, because a safety valve lifting and a boiler bursting must not be the same number. |
+| `Atmosphere` | Thermal, Holds | The outside world: unlimited source and sink, fixed pressure reference. **Two inlets** — `:exhaust` books `mass_vented`, `:spill` books `mass_spilled`, because a safety valve lifting and a boiler bursting must not be the same number. **Receipts at `:intake` are booked too**, because a link is two-way: an operation whose draught falls away pushes air back up the way it came, and this node resets to baseline every tick, so a port nobody counts destroys mass silently. |
+| `Delivery` | Thermal, Holds | **Where the operation's output goes** — screens at the pit bank, a gas main, a wagon on the weighbridge. Shaped like `Atmosphere` and separate from it because what leaves here left *because the operation did its job*: the only writer of `mass_delivered`. Not a source and not a pressure reference. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
 | `Bearing` | Thermal, Holds, Wearing | A **friction interface** worth modelling — a journal, a piston in its bore, a rope on a pulley. `supports:` is the shaft it drags on, `duty:` supplies sliding speed and load, `loaded_by:` names what pushes through it. Not `Rotating`: the shaft turns, this is the stationary half, and it is a separate node precisely so it can be hot while the shaft is not. Its drag heats **itself** rather than the ledger, which is what lets it cook. `wiped` then `seized`, off temperature. Holds its own oil and **declares its draw even when it is full** — return `Intent.none` there and the path drives the flow, filling the housing instead of the charge. Wears two ways, and they are two things: Archard against boundary friction power (hours) and heat above the service limit (minutes). `mu_film:`/`mu_boundary:` let a fitting override the duty's curve, which is how a roller says it does not care about oil. |
 | `Load` | Rotating | Where useful work leaves the operation. |
+| `Import` | Rotating | **Where work arrives from another operation** — a line shaft, a rope drive, an incoming main. Carries its own rotor and spends a `supply_joules` buffer that `Match#exchange!` fills; torque is `Motor`'s governed curve with the combustion taken out, so it is full at rest and nothing at `rated_omega`. Starvation needs no special case: an empty buffer still declares stall torque and `transmit_torque` scales the impulse to nothing, so the shaft winds down under its load instead of switching off. |
 | `Cylinder` | Thermal, Holds, Obstructs, Pressurized, Wearing | An indicator diagram → shaft torque. Positive-displacement intake at **supply** density. Working fluid is configuration. `drain_authority:` bleeds the diagram when the cocks are open; `material:` + `wall_thickness_m:` rate the barrel off its own bore. Fails two ways that behave differently: a **scored bore** still turns and pulls badly, a **blown head** does neither and is a hole. |
 | `ReliefValve` | (a `Conduit`) | Opens itself above a sensed quantity. `senses_quantity:` defaults to `pressure_pa` and need not be it. **Three levers, three meanings:** `ease_control_id:` opens it further by hand (`max`), `control_id:` is a gag and can shut it (`×`), `setting_control_id:` is the adjusting screw and moves the setting itself (margin 100 → safe, 0 → `max_relief_pressure_pa`). Records `lift:` and `setting_pa:` in `apply` so gauges can read them, and reports `:blew_off` once per episode — see below. |
 | `FusiblePlug` | (a `Conduit`) + Fusible | Senses a **state key** on another node and **melts** — real alloy, real latent heat, opening as it runs and never coming back. The melting point is the material's, not a configured threshold. A fuse, not a valve — see below. |

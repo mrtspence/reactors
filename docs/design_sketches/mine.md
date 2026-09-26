@@ -477,6 +477,26 @@ Starting configuration:
 - **Hewers at the faces**, deputies inspecting districts, an onsetter and a banksman at the shaft.
 - **Safety lamps** as the gas instrument.
 
+### Scale: full-size mine, undermanned
+
+**The first mine runs a crew of 12–20, and nothing else scales down.** Geometry, districts, shaft
+depth, power draws, hazards and the tech tree are all full size. The mine is simply short-handed,
+and is correspondingly far less productive than the historical figures in §1.7. That is the correct
+dial to be wrong on: productivity is one number to tune, whereas a mine built small is a mine that
+has to be rebuilt.
+
+The ceiling is a **crew-management UI** limit, not a simulation one. Today the whole
+operation-management surface is one `<select>` per minion in `crew_component.html.erb`; twenty
+dropdowns is already the edge of usable, and a historical ~100-person shift would mean the player
+spends the match fiddling with assignment controls instead of running a mine. More crew quarters
+is the upgrade that lifts the ceiling, and `crew_capacity` should not go past ~20 until minion
+management gets a proper design pass. See [`mine-follow-ups.md`](mine-follow-ups.md) §0.
+
+**This makes the triage sharper, not softer.** `crew_capacity.md` already says *"hewing, hauling,
+pumping and ventilating are four jobs; two hands makes the whole operation a triage problem, which
+is the game."* Twenty hands against a full-size mine's stations is the same problem with more
+interesting shapes in it.
+
 ### Why this one
 
 1. **It is the only candidate whose power demand has *shape*.** Base load that must never fail (the
@@ -577,13 +597,11 @@ The shape:
 
 Three things to settle before writing it:
 
-1. **`time_scale` mismatch.** [`tick.md`](../reference/tick.md) says *"a steam engine uses 1.0; a
-   mine would use much more."* If the mine runs 40× faster, one mine tick cannot consume one engine
-   tick's work. Either the exchange integrates over simulated seconds on both sides, or coupled
-   operations must share a `time_scale`. **Exchange in joules per simulated second and let each side
-   integrate over its own `dt`** — but this needs its own conservation spec, because it is exactly
-   where a factor-of-`time_scale` error hides. Fatigue's first figures shipped 40× too slow for this
-   reason.
+1. ~~**`time_scale` mismatch.**~~ **Settled in stage A: coupled operations must share a clock**, and
+   `Match#validate_couplings!` raises when they do not. See the note in §4.6 — the buffer smooths
+   jitter but cannot bridge two rates of time, and scaling the transfer to compensate would mint
+   energy. [`tick.md`](../reference/tick.md)'s *"a mine would use much more"* holds only for a mine
+   running alone.
 2. **Ordering and determinism.** Two operations exchanging inside one tick reintroduces
    order-dependence, which invariant 3 forbids. The exchange must read both operations' **frozen**
    N−1 state and write N, exactly like a node does.
@@ -712,20 +730,228 @@ The upgrade rule holds: **an upgrade may reduce a filter, never remove a class o
 
 ## 4.6 Release sequence
 
-Each stage separately shippable and separately reviewable. Stages 1 and 2 each want their own sketch
-before code.
+Each stage separately shippable and separately reviewable, lettered as the bearings and
+modularisation releases were.
 
-1. **The imported shaft.** New node, match-level exchange, conservation spec across the boundary,
-   brownout behaviour. Independently testable against two steam engines before a mine exists.
-2. **The spatial model.** Volume nodes, roadway conduits, minion travel state, the four edits above,
-   rules for the two expedients. Still no mine — provable on a rig.
-3. **The mine, statically staffed.** Faces, hewers, coal to the pit bottom, `mass_delivered`,
-   drainage on the imported shaft. Ventilation present but not yet dangerous.
-4. **Ventilation and gas.** Firedamp emission, accumulation, dilution, the lamp instrument, ignition.
-   The stage that makes it a game.
-5. **Hoisting.** The cage as a real cycle competing for the shaft; the men-or-coal choice.
-6. **Hazards and the tech tree.** Roof falls, inundation, the upgrade ladder (fan tiers, pump tiers,
-   cage → man engine, coal cutters, stone dusting).
+### Stage A — the coupling
+
+Power crossing between two operations. **No mine.** Proved against two steam engines, one driving
+the other's line shaft.
+
+**The model, and why it is not `τ = P/ω`.** `nodes/CLAUDE.md` is explicit that *"torque is not
+`power ÷ ω`. It is the obvious derivation and it explodes at rest"* — `Nodes::Motor` did it first
+and ate 1.88 MJ of friction out of a 154 kJ burn. So an imported shaft must derive torque from a
+**state**, exactly as `Motor` derives it from an ignited fraction, and let `Tick#transmit_torque`
+bill the measured kinetic energy gain.
+
+The state is a **supply buffer**. Energy arrives from upstream into a stored `supply_joules`;
+torque comes off a motor curve scaled by whether the buffer can pay for it; `transmit_torque`
+charges the buffer what the shaft measurably gained.
+
+> **The buffer smooths jitter, and does NOT solve the `time_scale` problem.** It was written here
+> that it did; building it showed otherwise. A joule is a joule, but a *rate* is not: at
+> `time_scale` 40 an operation lives 10 simulated seconds per tick against 0.25 at 1.0, so the
+> fast side needs forty times the energy per tick to run the same machines and is starved 40:1
+> against a supplier whose own instruments say it is delivering exactly what it promised. Scaling
+> the transfer to compensate would mint energy.
+>
+> **Coupled operations therefore share a clock**, and `Match` refuses to build a coupling where
+> they do not. Two operations joined by a rope are in the same world at the same time. The
+> consequence is real: a coupled mine runs at its engine's rate, whatever
+> [`tick.md`](../reference/tick.md) says a lone mine might prefer.
+
+Deliverables:
+
+- `Nodes::Export < Load` — a load whose absorbed work is *nameable*, recording `joules_exported`
+  in its own state. One export point per operation, declared rather than inferred from the
+  aggregate ledger.
+- `Nodes::Import` — includes `Rotating`, holds `supply_joules`, declares torque from a linear
+  motor curve (`τ = rated_torque × (1 − ω/ω_noload)`, floored at zero) scaled by supply
+  availability. Full torque at rest, which is correct for a stalled motor and is what keeps it
+  finite. A mine labels it "Line Shaft"; the class stays generic.
+- `Match#exchange!` — runs **before any operation steps**, reading every operation's settled N−1
+  state, so it cannot depend on the order operations are visited in (invariant 3). Couplings are
+  match-level config and must survive `to_h`/`from_h`.
+- `Ledger` gains `joules_imported` on the entry side. `joules_to_work` stays the exit on the
+  exporter, so per-operation conservation holds on both sides and a match-level sum cancels.
+- Specs: conservation across the boundary at **mismatched `time_scale`s**; a brownout — starve the
+  exporter and watch the importer's shaft slow rather than stop dead; snapshot round-trip carrying
+  couplings and buffer.
+
+### Stage B — the spatial model ✅
+
+**Built.** `Passage` (the fourth kind of edge) and `Layout` (where everything is), both build-time
+only. `ControlPoint#place:`, minion `posting`/`place`/`progress`, and phase **6d `travel`**.
+`Minion::PACE` runs through `capability`, so fatigue and injury slow a walk as they slow a shovel.
+
+Two things came out differently from this sketch:
+
+- **`posting` and `station` are separate stored fields**, not one derived from the other. The
+  command writes `posting`; only the travel phase writes `station`. Deriving would have been
+  tidier but puts the layout inside `Minion`, which has no business knowing it.
+- **Geometry is opt-in.** An operation with no passages has an empty `Layout` and behaves exactly
+  as before, which is what let this land without touching the steam engine at all.
+
+Still outstanding from §4.3, and deliberately: the two `TODO: expedient` cases in `tick.rb` (two
+minions at one station, and an unmanned valve moving at full rate), and **walking costs no
+fatigue** — a travelling minion is off post and so recovers, which makes travel a form of rest. All
+three want a rule before the mine leans on them.
+
+> On the unmanned valve: the mine may already have answered it. Every one of its valves is at
+> `:bank` and every effort station is underground, so "the overseer works what is in front of
+> them and the crew works what is not" falls out of the geometry rather than needing a rule. If
+> that holds, the expedient is a decision rather than a bug.
+
+### Stage C — the mine, statically staffed ✅
+
+**Built.** `Operations::Mine`: a two-shaft frame, 17 nodes, four slots, seven levers, seven
+gauges. All five subsystems wired, `Nodes::Delivery` writing `mass_delivered`, drainage and
+winding both on the imported shaft.
+
+Three things came out differently from this sketch:
+
+- **Winning coal needed no new node.** §4.4 listed a bespoke "coal face" node; the seam is a block
+  of coal in a `Vessel` and the hewer's lever is a `Conduit` drawing out of it — the stoker's line
+  exactly. A district that has been worked out then falls out for free.
+- **`driven_by:` was a bill, not a gate**, so the pump lifted water with the shaft stopped and the
+  mine could not drown. `displacement: true` is the fix, and it is opt-in because a fan at rest
+  genuinely *is* a hole while a pump at rest is a closed valve.
+- **The sump is the pit bottom's own low corner**, not a node of its own — a second vessel would
+  add a tick of lag between the two and buy no behaviour.
+
+~~Owed: light and tool gating.~~ **Done in the stage F follow-up.** `ControlPoint#gated_by:` and
+`Minion#capability`'s `gate` multiply where `aided_by:` adds, so a missing tag is a zero.
+Measured over 500 s at the face: no kit **0 kg**, crude pick and candle 0.025× nominal, crude
+pick and hand lamp 167 kg, proper pick and Davy lamp 298 kg.
+
+### Stage D — ventilation and gas ✅
+
+**Built.** Firedamp is a resource with a `damp` tag and a real combustion reaction; the seam
+carries it alongside the coal and a **blower** vents it into the district continuously. Dilution
+needed no new machinery at all — the air circuit already carried gas, so the fan clears it and
+stopping the fan lets it build. `Sources::Fraction` gives concentration rather than kilograms,
+and the **flame cap** reads it as prose through lag, noise, a sticky needle and bands.
+
+Ignition is `:naked_lights`, a lever rather than a fitting, because working by naked flame is a
+standing order to the shift rather than something you buy. With safety lamps the district never
+lights however gassy it gets; with naked lights it does, the district ruptures, and `endangers:`
+carries it to the hewer at the face **and the putter at the pit bottom** — a blast travels the
+roadways and afterdamp travels further.
+
+Measured: fan running holds ~1.7% and genuinely settles; fan stopped climbs through 5% and on to
+17%. Conservation holds exactly through ignition and rupture.
+
+Three things came out differently from this sketch:
+
+- **The blower is pressure-driven, and had to be.** Written with a rate cap beside a conductance
+  it passed 4.2 kg a tick against a 0.0125 kg rating; written rate-driven with the conductance
+  removed it passed *nothing*, because a path between two passive holders has nothing to drive
+  it. Pressure-driven is also the better model — emission falls as the district fills, so a
+  cleared working vents harder.
+- **The fan was badly undersized.** A real colliery moves ~170 kg/s of air; this one moved 2.8,
+  so the fan could not clear what the seam gave off and gas built at the same rate either way.
+  Head went from 480 Pa to 2.2 kPa and the emission with it.
+- **An explosion in an empty district hurts nobody**, which is correct and is why the hazard
+  examples have to get the shift underground first. A day-labourer takes fourteen simulated
+  minutes to reach the face and the explosion happens without them.
+
+Owed: blackdamp, whitedamp and **afterdamp** — the mixture that fills a mine after an explosion
+and historically killed more than the blast. The district burns its oxygen and the survivors
+should then be suffocating; today they are merely in a wrecked roadway. Also **coal dust**, which
+is what turns a local ignition into a whole-mine catastrophe, and the buoyancy that makes
+firedamp collect in the roof rather than mixing evenly.
+
+### Stage E — hoisting ✅
+
+**Built.** `Passage` can now be **powered** — `control_id:` scales it by a lever,
+`driven_by:`/`rated_omega:` by a shaft — so a cage nobody has called, or one whose supply has
+failed, is not a slow way down but *no* way down. `Fragment` carries passages, so the cage
+arrives with the `cage_winder` fitting rather than being part of the hole; the ladderway is a
+fixture, because every shaft can be climbed and only a mine that has bought the gear can be
+ridden.
+
+Two places can now be joined more than once, so `Layout#passages_between` is plural and
+`Tick#quickest` takes the fastest way *running*. Uncalled, the shift takes the ladders; called,
+they ride. Measured: **150 s on the ladders against 41 s in the cage.**
+
+> **The tradeoff is men-or-AIR, not men-or-coal**, and the numbers rather than the sketch
+> decided that. The plan was that a drum can wind one thing at a time. What the model actually
+> produced is better and more historically exact: the cage hangs off the same line shaft as the
+> fan and the pump, so calling it drags the shaft from 178 to 131 rpm and the fan slows with it
+> — **air 10.3 → 5.6 kg/s and the district from 1.86% to 3.30% gas** while the shift is being
+> wound. Winding engines and fans really did compete for one boiler.
+>
+> Coal was unaffected, because the winder has five times the capacity the pick can feed it. A
+> drum interlock could be added later; it is not needed for the choice to bite.
+
+Owed: the **man engine** — the tier between ladders and a cage, and the most vivid machine in
+the research — and a separate man-riding shaft, which is what a real colliery bought when shift
+change started costing it coal.
+
+### Stage F — hazards and the tech tree ◐
+
+**Roof falls and man riding are built.** `Mine::Roadway` is a `Conduit` subclass — machine-
+specific, so it lives under `operations/mine/` — whose wear is driven by **ground opened faster
+than it is supported**: `hewing − timbering`, floored at zero. A `:timbering` effort station is
+the third job underground and the only one that produces nothing, which against four hands and
+five posts is the triage the whole operation exists to create.
+
+Measured gradient: fully timbered never falls; half-supported falls at 754 s with a minor and a
+severe; wholly unsupported falls at **336 s and kills the putter**. Severity scales with how far
+the face had run ahead, so the same fall is worse on a face being driven hard.
+
+**Man riding moved to its own slot**, which is what it should always have been — a man engine
+winds no coal, so making it a winder tier was wrong. Three tiers now: ladders (nothing fitted),
+`man_engine` at 1.8 m/s, `cage_gear` at 4.2. Empty is legal and is where every mine starts.
+
+> **A rate is meaningless without the scale it is against.** `UNSUPPORTED_RATE` was first
+> written as `9.0e-3`, which is a plausible figure for a fraction-per-second and is two orders
+> of magnitude wrong against `Wearing`'s 850–1150 durability pool: 2% off a roadway in 1500 s,
+> with the gradient visibly correct at every setting. It read as a balance decision rather than
+> as a broken number.
+
+**Inundation and the cutting tier landed in the follow-up.** `Mine::Inrush` is a fissure that
+gives way on how hard the face is being driven — so a district nobody is working never breaks
+into anything — and it is **sized for the inrush and throttled down while sound**, because a
+`derates: { throughput: }` above 1.0 cannot beat the narrowest port on the path. At 18 kg/s it
+overwhelms a sinking set's 14 and is held by a Cornish set's 26, which is the shape every
+upgrade in this mine has: nothing at all until the day it matters. Measured: breaks through at
+t+7473 driving flat out, and the sump takes 12.5 tonnes.
+
+Cutting is a slot now — `hand_picks` at 1.4 kg/s against `coal_cutter` at 5.6, and the cutter's
+real value is that **it does not tire**: `exertion` drops from 1.2e-3 to 3.0e-4, so the seat it
+frees is worth more than the coal it adds.
+
+**Coal dust and stone dusting landed after that.** `coal_dust` and `stone_dust` are resources
+tagged **`dust`** — neither `gas` nor `solid`, which is the decision the whole mechanic rests on.
+Tags govern transport and never what can react, so dust burns in the district's air while no
+conduit in the mine will carry it: tagged `solid` it would ride out on the tubs, tagged `gas` the
+fan would sweep it away, and **settled dust is the entire hazard**.
+
+Dust is made by cutting, not vented by the ground, and accumulates where it is made. Measured:
+**0 kg with nobody at the face, 244 kg cutting flat out — identical with the fan running and
+with it stopped.**
+
+The Senghenydd case is the one that matters. Fan running, gas cleared to 0.01 kg, roads dusty:
+the firedamp alone cannot do it, and the dust **consumes every kilogram of itself** carrying the
+explosion instead — 244 kg burned to nothing, a mortal and a minor. Dusted to 91% inert, 152 kg
+is left unburned and the worst injury is a severe.
+
+> **`reaction_throttle` had to become per-reaction**, and that is a generic engine change rather
+> than a mine one. A district hosts two reactions choked by different things: stone dust inerts
+> the coal dust and does nothing to the gas. Throttling both alike left a dusted district sitting
+> at **ambient** through a naked light in 12% firedamp — stone dusting quietly cancelling the
+> entire gas hazard, which is neither the history nor the design. Stone dusting is why ignitions
+> stopped becoming disasters, not why they stopped happening.
+
+Still owed: **afterdamp** — the district burns its oxygen and the survivors should be suffocating
+rather than merely standing in a wrecked roadway. It needs a *continuous* hazard rather than a
+failure-triggered one, which is a mechanism the engine does not have yet, so it wants its own
+pass.
+
+Then [`mine-follow-ups.md`](mine-follow-ups.md): **minion-caused accidents** — misread gauges,
+fumbled levers, and the hidden-exposure accident model. Sequenced after the mine is playable,
+because every one of those mechanics is only legible against a machine somebody is already running.
 
 ## 4.7 Documentation owed
 

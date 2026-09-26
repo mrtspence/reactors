@@ -200,11 +200,15 @@ export default class extends Controller {
   paintMinion(el, crew) {
     if (!crew) return
 
+    // **Bound to `posting`, not `station`.** Somebody walking to the far face has been sent
+    // there and has not arrived; binding the control to where they currently stand would blank
+    // the dropdown for the whole journey and read as the order having been lost.
     const select = el.querySelector("[data-minion-station]")
     if (select && document.activeElement !== select) {
-      select.value = crew.station || ""
+      select.value = crew.posting || ""
     }
 
+    this.paintTravel(el, crew)
     this.paintFatigue(el, crew)
 
     const injury = el.querySelector("[data-minion-injury]")
@@ -215,6 +219,18 @@ export default class extends Controller {
     // A scratch and being carried out are not the same news.
     injury.classList.toggle("text-amber-400", crew.injury === "minor")
     injury.classList.toggle("text-rose-400", Boolean(crew.injury) && crew.injury !== "minor")
+  }
+
+  // Ordered somewhere and not there yet. `posting` set with no `station` is exactly that state,
+  // so it needs no extra field on the wire — and an operation with no geometry never enters it,
+  // because arrival is the same instant as the order.
+  paintTravel(el, crew) {
+    const travel = el.querySelector("[data-minion-travel]")
+    if (!travel) return
+
+    const walking = Boolean(crew.posting) && !crew.station
+    travel.textContent = walking ? "on the road" : ""
+    travel.classList.toggle("hidden", !walking)
   }
 
   // A spent worker mans nothing at all — capability is exactly zero — so the bar filling is the

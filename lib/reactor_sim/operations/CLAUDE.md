@@ -53,9 +53,15 @@ Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass
 Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisories:)
 ```
 
-- **A part contributes a `Fragment`** — nodes, links, thermal/drive links, control points —
-  because a part is almost never one node. Its gauges are named by id and come from the
-  operation's panel catalogue.
+- **A part contributes a `Fragment`** — nodes, links, thermal/drive links, **passages**,
+  **places**, control points — because a part is almost never one node. A cage winder is the
+  worked example: it brings a node, a drive link, a lever *and* a way through the shaft, because
+  fitting one is what makes the shaft ridable at all. Its gauges are named by id and come from
+  the operation's panel catalogue.
+- **The chassis owns the rooms; a fitting places only what it installs.** `Place`s union by id,
+  so `Place.new(id: :bank, nodes: [ :cage_drive ])` on a fitting adds its gear to a pit bank the
+  chassis declared, and a fitting never has to know what else is in there. A node in no place is
+  legal and means it is not in a room — rock, water behind rock, a conduit between two rooms.
 - **`provides:` is the id contract.** The id belongs to the **role**, not the part: every
   boiler names its drum `:boiler`, so the wiring, the gauges and the rng stream all survive a
   swap.
