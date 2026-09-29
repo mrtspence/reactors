@@ -126,6 +126,11 @@ Five things to know:
 - **Nobody starts at a working station, and it has to stay that way.** A machine that lets an
   effort station be a starting post hands the player a shift already at the face for free — which
   for a mine is most of the operation given away. Deploying the shift is the opening move.
+- **A seat may start in a different PLACE, which is a different statement.** `Mine::ADVANCE_SHIFT`
+  starts the last three seats in the district with **no station at all**: they are somewhere
+  useful and still posted to nothing, so the opening move is still the player's. Without it a
+  spatial operation's first five minutes are a walk. Build it the same way — `place:` on the
+  `Minion`, decided by the chassis, never by the roster.
 - **A crew quarters builds no node.** It is a *place*, and a place is a `ControlPoint` with no
   `node:` — `ControlPoint#lever?` is what keeps it off the lever strip while leaving it on the
   crew screen. Do **not** write `provides: %i[quarters]`: `provides:` names NODE ids, and node,

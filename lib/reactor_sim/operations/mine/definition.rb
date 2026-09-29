@@ -33,6 +33,21 @@ module ReactorSim
       # at when it is bought from an engine at 1.0. See `Match#validate_couplings!`.
       DEFAULT_TIME_SCALE = 1.0
 
+      # **The shift that is already down when the whistle goes.**
+      #
+      # Bank to the face is minutes, and a player who has to spend all of them before anything
+      # can happen is a player watching a loading bar. A few hands already in the district are
+      # the mine's opening move: coal can be cut on tick one while the rest of the shift walks.
+      #
+      # **The last seats, not the first**, so seat one is still somebody at bank and a roster
+      # that fills only the top of the list gets a shift that has to be sent down.
+      #
+      # TODO: first caller of a *fitted* version is the blueprint tree — this belongs on a part
+      # (a night shift, a lodging house, an underground stable) so a player buys the head start
+      # rather than being given it, and so a frame can offer more than one arrangement. Declared
+      # on the chassis today because nothing yet sells it.
+      ADVANCE_SHIFT = { seats: 3, place: :district }.freeze
+
       CHASSIS = {
         # The post-Hartley pit: two shafts, so the ventilation circuit is a circuit and there is
         # a second way out. The only frame offered for now; a single-shaft variant is a
@@ -44,7 +59,8 @@ module ReactorSim
             fan: :waddle_fan,
             pump: :sinking_set,
             quarters: :lamp_cabin
-          }.freeze
+          }.freeze,
+          advance: ADVANCE_SHIFT
         }.freeze
       }.freeze
 
@@ -68,7 +84,8 @@ module ReactorSim
           control_points: fragment.control_points,
           diagnostics: assembly.diagnostics,
           minions: crew_for(roster, content || Content.default,
-                            station: assembly.crew_origin, place: :bank)
+                            station: assembly.crew_origin, place: :bank,
+                            advance: CHASSIS.fetch(chassis)[:advance])
         )
       end
 
@@ -629,14 +646,30 @@ module ReactorSim
         )
       end
 
-      def crew_for(roster, content, station:, place:)
+      def crew_for(roster, content, station:, place:, advance: nil)
+        below = advance_seats(roster, advance)
+
         roster.map do |seat, posting|
           sheet = Crew.resolve(posting, content: content)
+          # **Already down, and posted to nothing.** Standing in the district is the head start;
+          # which face they work is still the player's first decision, and giving them a station
+          # as well would put a gang on one lever before anybody had asked for it.
+          underground = below.include?(seat)
 
-          Minion.new(id: seat, station: station, place: place, name: sheet.fetch(:name),
+          Minion.new(id: seat, station: underground ? nil : station,
+                     place: underground ? advance.fetch(:place) : place,
+                     name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
                      stats: sheet.fetch(:stats), tags: sheet.fetch(:tags))
         end
+      end
+
+      # Never more than the roster holds, so a small quarters is a shift that is entirely at
+      # bank rather than one with nobody left to send.
+      def advance_seats(roster, advance)
+        return [] if advance.nil? || !advance.fetch(:seats, 0).positive?
+
+        roster.keys.last(advance.fetch(:seats)).freeze
       end
     end
   end

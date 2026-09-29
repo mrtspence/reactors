@@ -116,6 +116,23 @@ So: before you call a piece of work done, check this table and update what your 
 - **`docs/design_sketches/` is the exception** and may stay verbose — it is the home for
   reasoning, alternatives and back-and-forth. Link to it instead of reproducing it.
 
+### A seam left for later must say so, in the code, by name
+
+The one forward-looking exception to "no dialectic". **Anything built ahead of its first
+caller — a parameter nothing passes, a branch nothing reaches, a field nothing reads — is
+invisible the moment the person who wrote it stops thinking about it.** It then rots in one of
+two directions: it is deleted as dead code, or the feature it was built for is implemented a
+second time beside it.
+
+So when you deliberately leave a hook:
+
+- **Mark it `TODO:` and name what would use it.** "TODO: first caller is the gasworks" is a
+  seam; "TODO: generalise" is a wish.
+- **Say if it is untested**, because a hook with no caller has no coverage by definition, and
+  the next person needs to know they are the first to run it.
+- **Name it for the thing it is for**, not for what it does generically — `extra_reagent_cap`
+  is findable when somebody wants water gas; `secondary_limit` is not.
+
 ### Inventory lists vs contract rules
 
 Two kinds of statement live in these files, and they age differently.

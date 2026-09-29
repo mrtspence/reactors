@@ -46,12 +46,19 @@ RSpec.describe "commands", type: :request do
   end
 
   # The other half of the same claim: address a different machine and the command follows.
+  #
+  # The second machine is named through `DevMatch` and its lever taken from that machine's own
+  # panel, because the match holds machines of different kinds — spelling either out would make
+  # this a test about the steam engine rather than about routing.
   it "addresses the operation the route names" do
-    post_command(operation_id: :engine_b, type: "set_control",
-                 control_point_id: "feed", value: 10)
+    other = DevMatch.operation_ids.last
+    control = DevMatch.panel(operation_id: other).fetch(:controls).first.fetch(:id)
+
+    post_command(operation_id: other, type: "set_control",
+                 control_point_id: control.to_s, value: 10)
 
     expect(producer).to have_received(:produce).with(
-      match_id: DevMatch::ID, command: hash_including("operation_id" => "engine_b")
+      match_id: DevMatch::ID, command: hash_including("operation_id" => other.to_s)
     )
   end
 

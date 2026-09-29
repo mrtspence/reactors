@@ -8,7 +8,8 @@ module ReactorSim
   #
   #   config: a RESOLVED sheet — stats and tags, all four layers already folded — plus who they
   #           are, which job they hold, and the station they start at
-  #   state:  health, fatigue, posting, station, place, progress, resilience, injury
+  #   state:  health, fatigue, posting, station, place, progress, remaining, journey,
+  #           resilience, injury
   #
   # **`posting` is where they have been SENT; `station` is what they are actually working.** In an
   # operation with no geometry the two are always equal and the distinction costs nothing. Where
@@ -75,7 +76,7 @@ module ReactorSim
       { health: 1.0, fatigue: 0.0, spent: false, asphyxia: 0.0,
         apparatus: Injury.numeric(tag(:respirator_air)),
         posting: @default_station, station: @default_station,
-        place: @default_place, progress: 0.0 }
+        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0 }
         .merge(Injury.initial_state(rng, toughness))
     end
 
@@ -169,9 +170,25 @@ module ReactorSim
       state.merge(posting: station, station: arrived ? station : nil)
     end
 
-    # Where a journey has got to, along the passage currently being walked.
-    def advance_to(state, place:, progress:, station: nil)
-      state.merge(place: place, progress: progress, station: station)
+    # Where a journey has got to: `progress` along the passage currently being walked,
+    # `remaining` to the far end of the whole walk.
+    #
+    # `journey` is set before the walking (see `Tick#walk`) and only cleared here, on arrival.
+    def advance_to(state, place:, progress:, remaining:, station: nil)
+      arrived = !station.nil? || remaining <= 0.0
+
+      state.merge(place: place, progress: progress,
+                  remaining: arrived ? 0.0 : remaining,
+                  journey: arrived ? 0.0 : state.fetch(:journey, 0.0),
+                  station: station)
+    end
+
+    # Nought to one across the walk they were sent on, and zero for somebody standing still.
+    def journey_fraction(state)
+      journey = state.fetch(:journey, 0.0)
+      return 0.0 unless journey.positive?
+
+      (1.0 - (state.fetch(:remaining, 0.0) / journey)).clamp(0.0, 1.0)
     end
   end
 end

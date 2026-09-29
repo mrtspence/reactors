@@ -230,6 +230,68 @@ RSpec.describe "passages and minion travel" do
     expect(crew(op, :crew_1)[:progress]).to be > 0.0
   end
 
+  # **A walk of several minutes has to look like one.** `progress` is metres into the passage
+  # currently being walked and resets at every place, so a bar drawn from it runs backwards
+  # three times on the way to the face. `journey` and `remaining` are the whole route.
+  describe "how far along they are" do
+    def fraction(op, seat)
+      op.minions.fetch(seat).journey_fraction(crew(op, seat))
+    end
+
+    it "is nothing at all for somebody standing at their post" do
+      op = rig
+      expect(fraction(op, :crew_1)).to eq(0.0)
+      expect(crew(op, :crew_1)[:remaining]).to eq(0.0)
+    end
+
+    it "counts down the whole route rather than the passage being walked" do
+      op = rig
+      op.assign_minion(:crew_1, :onsetting)
+      op.step!(tick: 1)
+
+      # bank -> pit_top -> pit_bottom is 40 m and then 60 m.
+      expect(crew(op, :crew_1)[:journey]).to be_within(1e-6).of(100.0)
+    end
+
+    # The claim the design exists for: crossing into pit_top does not restart the bar.
+    it "rises without ever going backwards, across a route with a place in the middle" do
+      op = rig
+      op.assign_minion(:crew_1, :onsetting)
+      seen = (1..40).map { |i| op.step!(tick: i); [ fraction(op, :crew_1), crew(op, :crew_1)[:station] ] }
+      walking = seen.take_while { |_, station| station.nil? }.map(&:first)
+
+      expect(crew(op, :crew_1)[:place]).to be(:pit_bottom)   # the middle place was crossed
+      expect(walking.each_cons(2).all? { |a, b| b >= a }).to be(true)
+      expect(walking.first).to be < 0.2
+      expect(walking.last).to be > 0.9
+    end
+
+    it "clears when they take up the post" do
+      op = rig
+      seconds_to_arrive(op, :crew_1, :banking)
+
+      expect(crew(op, :crew_1)[:journey]).to eq(0.0)
+      expect(crew(op, :crew_1)[:remaining]).to eq(0.0)
+    end
+
+    # Sent somewhere farther mid-walk, the bar has to start again rather than read past full —
+    # which is what the high-water mark buys, and it needs no memory of where they set off from.
+    it "starts again for somebody re-ordered farther on" do
+      op = rig
+      op.assign_minion(:crew_1, :banking)
+      # Four ticks of a forty-metre walk, so they are most of the way there and not yet posted.
+      4.times { |i| op.step!(tick: i + 1) }
+      near = fraction(op, :crew_1)
+
+      op.assign_minion(:crew_1, :onsetting)
+      op.step!(tick: 20)
+
+      expect(near).to be > 0.5
+      expect(fraction(op, :crew_1)).to be < near
+      expect(fraction(op, :crew_1)).to be <= 1.0
+    end
+  end
+
   describe "the command contract" do
     # `assign_minion` still names a DESTINATION and never a step, which is what lets it ride an
     # at-least-once log with no dedup table (invariants.md §4).

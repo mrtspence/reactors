@@ -114,6 +114,29 @@ RSpec.describe "the mine" do
       expect(crew(op, :crew_2)[:place]).to be(:pit_bottom)
       expect(crew(op, :crew_2)[:station]).to be(:haulage)
     end
+
+    # **Except for the ones who are already down.** A pit whose every hand starts at bank is a
+    # pit where the opening five minutes of a match are a walk, so the last seats are an advance
+    # shift standing in the district when the whistle goes.
+    describe "the advance shift" do
+      it "is already in the district, posted to nothing" do
+        op = mine
+        below = op.state.fetch(:minions).select { |_, s| s[:place] == :district }
+
+        expect(below.keys).to eq(%i[crew_8 crew_9 crew_10])
+        expect(below.values.map { |s| s[:posting] }).to all(be_nil)
+      end
+
+      # The point of them: coal on the first tick they are told to cut, with no walk first.
+      it "takes up a face post on the spot, where a hand at bank cannot" do
+        op = mine
+        op.assign_minion(:crew_8, :hewing)
+        op.step!(tick: 1)
+
+        expect(crew(op, :crew_8)[:station]).to be(:hewing)
+        expect(crew(op, :crew_1)[:place]).to be(:bank)
+      end
+    end
   end
 
   describe "output" do

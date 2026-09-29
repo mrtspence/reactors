@@ -40,6 +40,32 @@ RSpec.describe "crews" do
     (1..capacity).each { |n| expect(response.body).to include("Seat #{n}") }
   end
 
+  # **A match holds several machines and each is crewed separately.** Reaching the second one's
+  # crew meant going back through its console first. Named through `DevMatch` rather than spelled
+  # out, so this stays a test about the switcher rather than about the mine.
+  it "offers the same screen for every machine this player operates" do
+    get edit_path
+
+    DevMatch.operation_ids.each do |id|
+      expect(response.body).to include(edit_crew_path(match_id: DevMatch::ID, operation_id: id))
+    end
+  end
+
+  # Where a seat starts is the machine's business, not the roster's — and it is a real choice on
+  # a spatial machine, where the walk is minutes. Nothing to say for a footplate.
+  it "says where a seat starts when it is not the quarters" do
+    other = DevMatch.operation_ids.find do |id|
+      Crewing.for(owner_id: DevPlayer::ID, operation_id: id).seats.any? { |s|
+        Crewing.for(owner_id: DevPlayer::ID, operation_id: id).starts_in(s)
+      }
+    end
+    skip "no machine in the dev match starts a shift away from its quarters" unless other
+
+    get edit_crew_path(match_id: DevMatch::ID, operation_id: other)
+
+    expect(response.body).to include("starts at")
+  end
+
   it "posts a crew, stores it, and asks the runner to rebuild" do
     patch update_path, params: { crew: { crew_1: { minion: "jim", tool: "stokers_shovel" } } }
 

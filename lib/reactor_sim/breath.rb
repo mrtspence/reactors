@@ -129,7 +129,10 @@ module ReactorSim
 
     # One tick's worth, spent whenever the set is doing anything. **Nobody husbands it**: a
     # minion wearing apparatus in bad air breathes from it, and walking out is the only way to
-    # stop. Refilling is not modelled.
+    # stop.
+    #
+    # TODO: nothing refills a set — first caller is the rescue station, which is also what
+    # would make a spent one worth walking back for. Until then a respirator is once per match.
     def draw(state, fraction, minion)
       return state unless respirator(minion).positive? && air_left(state).positive?
       return state if fraction >= SAFE || unbreathing?(minion)

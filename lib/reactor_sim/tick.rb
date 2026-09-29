@@ -890,10 +890,26 @@ module ReactorSim
       destination = layout.place_of(minion.posting(state))
       here = minion.place(state)
       # A posting with no place, or none at all, is worked from wherever they are standing.
-      return state.merge(station: minion.posting(state), progress: 0.0) if destination.nil?
-      return state.merge(station: minion.posting(state), progress: 0.0) if destination == here
+      return arrived(minion, state) if destination.nil? || destination == here
 
-      step(minion, state, here, destination, ctx)
+      step(minion, embark(minion, state, here, destination), here, destination, ctx)
+    end
+
+    # **`journey` is the high-water mark of how far there was left to go, measured BEFORE this
+    # tick's walking** — taken after it, the first tick's strides are missing from the total and
+    # everybody arrives short of the far end of their own bar.
+    #
+    # A high-water mark rather than a remembered starting point is what lets somebody re-ordered
+    # to a farther face have their bar start again instead of reading past full, without the
+    # walk having to know it was re-ordered.
+    def embark(minion, state, here, destination)
+      setting_out = left(minion, state, here, destination, state.fetch(:progress, 0.0))
+
+      state.merge(journey: [ state.fetch(:journey, 0.0), setting_out ].max)
+    end
+
+    def arrived(minion, state)
+      state.merge(station: minion.posting(state), progress: 0.0, remaining: 0.0, journey: 0.0)
     end
 
     # One tick's walking, which may cross more than one passage if the stretches are short or the
@@ -925,9 +941,20 @@ module ReactorSim
         progress = 0.0
       end
 
-      arrived = here == destination
-      minion.advance_to(state, place: here, progress: arrived ? 0.0 : progress,
-                               station: arrived ? minion.posting(state) : nil)
+      at_post = here == destination
+      minion.advance_to(state, place: here, progress: at_post ? 0.0 : progress,
+                               remaining: at_post ? 0.0 : left(minion, state, here, destination, progress),
+                               station: at_post ? minion.posting(state) : nil)
+    end
+
+    # How much walking is left, for the panel rather than for the walking. `assign_minion`
+    # refuses a posting there is no way to, so a missing route means the ways out have changed
+    # under somebody already walking — they hold where they are, and so does their progress.
+    def left(minion, state, here, destination, progress)
+      route = layout.route_metres(here, destination, routing.fetch(minion.id, []))
+      return state.fetch(:remaining, 0.0) if route.nil?
+
+      [ route - progress, 0.0 ].max
     end
 
     # Somebody takes the quickest way that is actually running. With the cage stopped that is

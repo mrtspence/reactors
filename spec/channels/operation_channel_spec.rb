@@ -35,6 +35,21 @@ RSpec.describe OperationChannel do
     expect(subscription).to be_rejected
   end
 
+  # **The client sends a nonce so that two consoles never share an identifier**, because Action
+  # Cable keys subscriptions by the JSON of these params — and one console tearing down then
+  # removes whichever subscription is registered under that key, which after a navigation is
+  # the *other* console's. The channel must go on ignoring it, or the fix stops working the
+  # first time somebody reads `params` here.
+  it "ignores the client's nonce and streams the same operation" do
+    subscribe(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY.to_s,
+              nonce: "whatever-the-browser-made-up")
+
+    expect(subscription).to be_confirmed
+    expect(subscription).to have_stream_from(
+      StreamNames.operation(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY.to_s)
+    )
+  end
+
   it "streams the telemetry the runner broadcasts on" do
     subscribe_to_engine
 

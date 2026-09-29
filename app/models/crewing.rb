@@ -51,6 +51,20 @@ class Crewing
 
   def posting(seat_id) = @crew.fetch(seat_id.to_sym, {})
 
+  # **Where this seat's hand starts the match**, which is not the quarters for all of them: a
+  # mine puts an advance shift in the district so there is work to do before anybody has walked
+  # anywhere. Nil for a machine with no geometry, and nil is the common case.
+  #
+  # A property of the SEAT rather than of who is in it, so a draft never changes the answer.
+  # Nil also for the ordinary seats that begin in the quarters, so the line only ever calls out
+  # a seat that is somewhere else.
+  def starts_in(seat_id)
+    place, station = origins[seat_id.to_sym]
+    return nil if station == quarters_station
+
+    place_labels[place]
+  end
+
   # Who this player could put in this seat. Everybody they own, plus whoever is already posted
   # even if they have since become unavailable — hiding a fitted choice would report an error
   # about something the player cannot see, which is the rule `Outfitting#available` follows.
@@ -155,5 +169,22 @@ class Crewing
 
   def conditions
     @conditions ||= MinionCondition.remaining_for(owner_id)
+  end
+
+  # Both read off a built machine, because where a shift starts is decided by the operation and
+  # the fitted quarters rather than by anything on this screen.
+  def origins
+    @origins ||= DevMatch.crew(operation_id: operation_id)
+                         .to_h { |m| [ m.id, [ m.default_place, m.default_station ] ] }
+  end
+
+  def quarters_station
+    @quarters_station ||= DevMatch.outfitting(operation_id: operation_id).crew_origin
+  end
+
+  def place_labels
+    @place_labels ||= DevMatch.panel(operation_id: operation_id)
+                              .fetch(:places, [])
+                              .to_h { |place| [ place.fetch(:id), place.fetch(:label) ] }
   end
 end

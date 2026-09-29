@@ -223,9 +223,15 @@ module ReactorSim
       @state.fetch(:minions).to_h do |id, minion_state|
         # `asphyxia` is a rescue timer, not a status: somebody down in bad air is being lost at
         # a rate the player can still do something about, and a bar is the only way to say so.
+        #
+        # `travel` is the same argument for a walk that takes minutes: "sent to the far face" is
+        # not a state a player should have to take on trust for five minutes, so how far along
+        # they are goes on the projection beside where they have got to.
         [ id, { station: minion_state[:station], posting: minion_state[:posting],
                 place: minion_state[:place], injury: minion_state[:injury],
-                fatigue: minion_state[:fatigue], asphyxia: minion_state[:asphyxia] } ]
+                fatigue: minion_state[:fatigue], asphyxia: minion_state[:asphyxia],
+                travel: @minions[id]&.journey_fraction(minion_state) || 0.0,
+                remaining_m: minion_state[:remaining] } ]
       end.freeze
     end
 
@@ -249,7 +255,14 @@ module ReactorSim
         controls: @control_points.values.select(&:lever?).map { |c|
           { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit }
         },
-        stations: @control_points.values.map { |c| { id: c.id, label: c.label } } }
+        stations: @control_points.values.map { |c| { id: c.id, label: c.label } },
+        # **Empty for an operation with no geometry**, which is what makes the panel's "where
+        # are they" line nil-accepting rather than a mine-only feature: the steam engine ships
+        # no places and the client renders nothing.
+        places: @layout.places.filter_map { |id|
+          place = @layout.place(id)
+          { id: id, label: place.label } if place
+        } }
     end
 
     # Raw truth, bypassing the instruments entirely. For specs and the runner's stdout —

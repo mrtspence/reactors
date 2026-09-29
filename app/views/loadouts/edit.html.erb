@@ -10,6 +10,8 @@
 
     <div class="grow"></div>
 
+    <%= render "shared/machine_switcher", route: :edit_loadout_path %>
+
     <%= link_to "Back to the console",
                 console_path(match_id: params[:match_id], operation_id: params[:operation_id]),
                 class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \

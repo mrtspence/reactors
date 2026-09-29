@@ -39,7 +39,7 @@ engine uses 1.0; an operation running alone may use much more.
 | 6 | `stress` | Durability, overload, failure events | no |
 | 6b | `endanger` | What a failure does to the **people** near it: a Danger Check per minion, against both the **place** they are standing in and the station they are posted to. Severity adds where both reach them | no |
 | 6c | `tire` | What the **work** does to the people doing it, and what the **air** does to them: fatigue accrues on `intent ÷ capability`, recovery and suffocation net against it. Pinned at the ceiling in bad air is the collapse, and the clock from there to a mortal injury runs here | no |
-| 6d | `travel` | Where the people have got to: each minion walks toward the place their `posting` is worked, at their own `pace`, by the **quickest passage that is actually running**. A no-op in an operation that declares no passages | no |
+| 6d | `travel` | Where the people have got to: each minion walks toward the place their `posting` is worked, at their own `pace`, by the **quickest passage that is actually running**. Also keeps `remaining` and `journey`, which are how far there is left to go and how far there was to go at the farthest point of this walk — a panel divides them for a progress bar. A no-op in an operation that declares no passages | no |
 | 7 | `observe` | Instruments sample; their filters advance | **yes** |
 | 8 | publish | Freeze the new state, return this tick's events | no |
 

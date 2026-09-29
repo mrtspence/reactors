@@ -167,6 +167,10 @@ Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they
   turns them into routing tables **once, at build**, and nothing searches them in a tick. An
   operation that declares none has no geometry and every posting is worked from where you
   stand.
+- **The routing table carries a distance beside every first step**, so `Layout#route_metres`
+  answers "how far is it" as a lookup. It is **geometry, not duration** — a cage and a ladderway
+  are the same ninety metres and only one of them is quick — so what a walk costs is still
+  `route_metres ÷ what is running`.
 - **A passage can be powered**, and that is the point of the whole spatial model: ladders are
   free and slow, a cage is quick and costs a shaft. `control_id:` scales it by a lever and
   `driven_by:`/`rated_omega:` by a shaft's speed, so a cage nobody has called — or one whose

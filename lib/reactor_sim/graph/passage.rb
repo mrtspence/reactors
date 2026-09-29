@@ -115,7 +115,19 @@ module ReactorSim
     # through, which `Operation#assign_minion` treats as a refusal rather than as a minion who
     # walks into a wall.
     def next_hop(from, to, capabilities)
-      table_for(capabilities).dig(from&.to_sym, to&.to_sym)
+      table_for(capabilities).dig(from&.to_sym, to&.to_sym)&.first
+    end
+
+    # How far it is, following the route `next_hop` actually takes. Nil when there is no way
+    # through, and zero for somewhere you are already standing.
+    #
+    # **Geometry, not duration** — a cage and a ladderway are the same ninety metres and only one
+    # of them is quick, so what a walk *costs* is this divided by what is running. Precomputed
+    # with the routing table, so asking is a lookup.
+    def route_metres(from, to, capabilities)
+      return 0.0 if from == to
+
+      table_for(capabilities).dig(from&.to_sym, to&.to_sym)&.last
     end
 
     def reachable?(from, to, capabilities)
@@ -138,28 +150,32 @@ module ReactorSim
       @routes[key] ||= build_table(key).freeze
     end
 
-    # Breadth-first from every place, recording the first step toward each destination. Passages
-    # are walked in declaration order so the table is deterministic where two routes tie.
+    # Breadth-first from every place, recording the first step toward each destination **and how
+    # far the whole way is**. Passages are walked in declaration order so the table is
+    # deterministic where two routes tie.
     def build_table(capabilities)
       usable = @adjacency.transform_values do |neighbours|
-        neighbours.select { |_, passage| passable?(passage, capabilities) }.keys.freeze
+        neighbours.select { |_, passage| passable?(passage, capabilities) }.freeze
       end
 
       @places.to_h { |origin| [ origin, first_steps(origin, usable) ] }
     end
 
+    # `{ destination => [first step, metres] }`. Distance accumulates along the route the search
+    # settles on rather than over the shortest one by length, so it is the way somebody will
+    # actually be walked.
     def first_steps(origin, usable)
       steps = {}
-      queue = usable.fetch(origin, []).map { |n| [ n, n ] }
-      queue.each { |place, step| steps[place] ||= step }
+      queue = usable.fetch(origin, {}).map { |n, passage| [ n, n, passage.metres ] }
+      queue.each { |place, step, metres| steps[place] ||= [ step, metres ] }
 
       until queue.empty?
-        place, step = queue.shift
-        usable.fetch(place, []).each do |neighbour|
+        place, step, metres = queue.shift
+        usable.fetch(place, {}).each do |neighbour, passage|
           next if neighbour == origin || steps.key?(neighbour)
 
-          steps[neighbour] = step
-          queue << [ neighbour, step ]
+          steps[neighbour] = [ step, metres + passage.metres ]
+          queue << [ neighbour, step, metres + passage.metres ]
         end
       end
 

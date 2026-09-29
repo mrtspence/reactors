@@ -173,9 +173,9 @@ module ReactorSim
       # steam rather than carbon and less air — and then its own supply caps it, so a pathway
       # whose extra reagent is absent simply cannot run and the cascade falls through.
       #
-      # > **This is a seam, and it ships under-tested.** Nothing in the game declares an extra
-      # > reagent yet, so the only coverage is a rig. If you are the first to build on it — a
-      # > gasworks, a producer-gas plant — treat a surprise here as a gap in
+      # > **TODO: first caller is the gasworks** (water gas, producer gas). Nothing in the game
+      # > declares an extra reagent today, so this branch is **untested outside `pathway_spec`**
+      # > and you are the first to run it for real. Treat a surprise as a gap in
       # > `docs/design_sketches/reaction-pathways.md` rather than as a bug in your content.
       def extra_reagent_cap(pathway, preferred, held)
         extras = pathway.fetch(:consumes).reject { |r, _| preferred.fetch(:consumes).key?(r) }

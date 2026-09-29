@@ -222,8 +222,8 @@ module ReactorSim
       # from. Found by what the slot accepts, so the mine gets `crew_capacity` and an origin
       # without reimplementing either.
       Parts.register(:lamp_cabin, kind: :crew_quarters, label: "Lamp Cabin",
-                     description: "Where lamps are issued and tallies are taken. Four hands.",
-                     stats: { crew_capacity: 4, recovery_rate: 2.0 }) do |_spec|
+                     description: "Where lamps are issued and tallies are taken. Two shifts.",
+                     stats: { crew_capacity: 10, recovery_rate: 2.0 }) do |_spec|
         Fragment.new(
           control_points: [
             ControlPoint.new(id: :quarters, label: "Lamp Cabin", place: :bank,
@@ -234,7 +234,7 @@ module ReactorSim
 
       Parts.register(:pit_head_baths, kind: :crew_quarters, label: "Pit Head Baths",
                      description: "Lamps, lockers and hot water. Somewhere worth resting.",
-                     stats: { crew_capacity: 6, recovery_rate: 3.0 }) do |_spec|
+                     stats: { crew_capacity: 14, recovery_rate: 3.0 }) do |_spec|
         Fragment.new(
           control_points: [
             ControlPoint.new(id: :quarters, label: "Pit Head Baths", place: :bank,

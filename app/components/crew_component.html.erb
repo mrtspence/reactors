@@ -1,12 +1,15 @@
-<section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3">
+<section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3"
+         data-crew-places="<%= place_labels %>">
   <h2 class="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Crew</h2>
   <ul class="flex flex-col gap-2">
     <% minions.each do |minion| %>
       <li class="flex items-center gap-2 text-sm" data-minion-id="<%= minion.id %>">
         <span class="flex flex-col grow min-w-0">
           <span class="text-slate-200 truncate"><%= minion.name %></span>
+          <%# Where they are, which is not where they were sent. Blank on a machine with no
+              geometry — the steam engine ships no places and this line simply never fills. %>
           <span class="text-[10px] uppercase tracking-wide text-slate-500">
-            <%= minion.id.to_s.tr("_", " ") %>
+            <%= minion.id.to_s.tr("_", " ") %><span data-minion-place></span>
           </span>
         </span>
         <%# Filled in from the projection, which is the only thing that knows. Empty until the
@@ -16,15 +19,32 @@
                 data-minion-injury></span>
           <%# Sent somewhere but not there yet. Worth its own line rather than folding into the
               select, because "ordered to the far face" and "working the far face" are different
-              facts and the gap between them is minutes. %>
+              facts and the gap between them is minutes.
+
+              And minutes is why there is a bar under it: bank to the face is a shaft and four
+              hundred metres of roadway, and a static "on the road" for five minutes is
+              indistinguishable from a console that has stopped. %>
           <span class="text-[10px] uppercase tracking-wide text-amber-400 hidden"
                 data-minion-travel></span>
+          <span class="h-1 w-10 rounded-full bg-slate-700 overflow-hidden hidden"
+                data-minion-travel-bar>
+            <span class="block h-full w-0 bg-amber-400 transition-all duration-300"
+                  data-minion-progress></span>
+          </span>
           <%# Fatigue is a number rather than prose, unlike condition: it is the reading a
               player rotates the crew on, and a worker flagging is not something a gauge
               mediates — you can see it. %>
           <span class="block h-1 w-10 rounded-full bg-slate-700 overflow-hidden" title="Fatigue">
             <span class="block h-full w-0 bg-slate-400 transition-all duration-300"
                   data-minion-fatigue></span>
+          </span>
+          <%# Somebody down in air they cannot breathe. Hidden entirely until it starts, unlike
+              fatigue: an empty bar on every crew member would read as a condition everyone has
+              rather than as the emergency it is. %>
+          <span class="h-1 w-10 rounded-full bg-rose-950 overflow-hidden hidden"
+                data-minion-asphyxia-bar title="Suffocating">
+            <span class="block h-full w-0 bg-rose-500 transition-all duration-300"
+                  data-minion-asphyxia></span>
           </span>
         </span>
         <select class="bg-slate-900 text-slate-200 text-xs rounded px-1 py-0.5 ring-1 ring-slate-700"

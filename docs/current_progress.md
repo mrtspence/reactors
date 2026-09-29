@@ -679,6 +679,27 @@ preferred one does not and that seam ships under-tested** (water gas is the case
 yet** — deliberately much later, since a banked fire quietly gassing a boiler house is a change
 to an operation people already know and it wants the places retrofit first.
 
+**What the first playthrough of the mine changed.** All five were about the walk being invisible
+or the shift being too small to absorb it:
+
+- **The panel says where somebody is and how far along.** `crew_view` carries `place`, `travel`
+  (nought to one across the whole walk) and `remaining_m`; `Operation#panel` carries `places:`,
+  which is **empty for an operation with no geometry** so the steam engine's console is
+  unchanged. A bar drawn from `progress` alone would have run backwards at every place — hence
+  `journey`, the high-water mark of how far there was left to go.
+- **`Layout` carries a distance beside every first step**, so `route_metres` is a lookup rather
+  than a search. Geometry, not duration: a cage and a ladderway are the same ninety metres.
+- **The pit fields ten**, up from four, and **the last three start in the district** posted to
+  nothing (`Mine::ADVANCE_SHIFT`). A pit whose every hand starts at bank spends the opening five
+  minutes on a walk while the engine house is still raising steam. Its fitted version is
+  follow-up 7.
+- **The fitting screens switch machines.** Reaching the second operation's crew or outfitting
+  meant going back through its console first.
+- **`DevMatch.crew` is memoised per ROSTER**, not per operation — keyed on the operation alone it
+  survived the life of the process, so a player who posted a crew kept being shown the one it
+  happened to hold first. The machine had the right people; the screen did not. Same bug shape as
+  the panel cache, one level down.
+
 Then
 [`design_sketches/mine-follow-ups.md`](design_sketches/mine-follow-ups.md): **minion-caused
 accidents**, a second route into harm that does not begin with a part breaking. Misread gauges
@@ -1672,6 +1693,12 @@ documented where they matter and collected here because the collection is worth 
   to `0.5..2.0`, because an oxygen reserve genuinely varies between people by about a factor of
   two and never by more — so the clamp is physiology rather than a workaround for a fixture.
   **Any new consumer of `endurance` has to pick one of those two on purpose.**
+- **A hook built ahead of its caller is invisible unless it says so.** `Breath.poisoned?`
+  shipped with `toxic_fraction:` in its signature, no substance declaring one, and no marking
+  — inert for a whole release, and findable only because the same person happened to build its
+  consumer. It survived; the next one will be deleted as dead code or reimplemented beside
+  itself. **Mark every seam `TODO:` with the name of its first caller**, say that it is
+  untested, and name it for what it is for. The rule is in the root `CLAUDE.md`.
 - **Content is global and is never snapshotted.** `Operation.from_h` rebuilds through the
   registered builder with no `content:`, so a restored match always resolves against
   `Content.default` — a registry injected at build does not exist after a round trip, and the

@@ -183,9 +183,23 @@ PlayerView(tick:, operation_id:, viewer:, gauges:, flags:, controls:, incidents:
 `controls` reports `{ target:, actual: }` per lever, so a client can show a valve that is
 still travelling.
 
-`crew` reports `{ station:, injury: }` per minion — **only what changes.** A minion's name, job
-and race are configuration and reach the client once with the panel; where they are standing and
-what has happened to them are state.
+`crew` reports **only what changes** per minion. A minion's name, job and race are configuration
+and reach the client once with the panel; where they are standing and what has happened to them
+are state:
+
+| Field | What it is |
+|---|---|
+| `posting` | Where they have been **sent**. What the crew dropdown binds to |
+| `station` | What they are actually working. Nil for the whole of a walk |
+| `place` | Which room they are in. Nil in an operation with no geometry |
+| `travel` | Nought to one across the walk they were sent on, zero when standing still |
+| `remaining_m` | Metres still to walk |
+| `fatigue`, `asphyxia` | The two bars: what the work is doing to them, and what the air is |
+| `injury` | The mode, or nil |
+
+`op.panel` carries the matching chrome — `stations:` (everywhere a person can stand, a longer
+list than the levers) and `places:` (every room's label, **empty for an operation with no
+geometry**, which is what keeps "where are they" off the steam engine's console).
 
 It exists because the console's crew dropdown could *send* an assignment with no source of truth
 to display one, so it rendered at its first option whatever the real posting was, and a

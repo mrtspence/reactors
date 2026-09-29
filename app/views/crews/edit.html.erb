@@ -6,7 +6,11 @@
     preview, where one here survives and simply re-scans. %>
 <div class="mx-auto max-w-3xl p-4 text-slate-200">
   <header class="mb-4">
-    <h1 class="text-lg font-semibold">Crew</h1>
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-semibold">Crew</h1>
+      <div class="grow"></div>
+      <%= render "shared/machine_switcher", route: :edit_crew_path %>
+    </div>
     <p class="text-sm text-slate-400">
       Who stands where, and what they have with them. An empty post is not an empty post —
       the labour exchange will send somebody, and you will not enjoy it.
@@ -43,16 +47,18 @@
                   method: :patch, data: { outfit_target: "form" },
                   authenticity_token: form_authenticity_token do %>
       <div class="flex flex-col gap-3">
-        <%# Seats, not jobs. Which station somebody works is decided during the match — everybody
-            starts in the quarters and is sent somewhere — so there is deliberately nothing here
-            to set it with. %>
+        <%# Seats, not jobs. Which station somebody works is decided during the match, so there
+            is deliberately nothing here to set it with — but WHERE a seat starts is a property
+            of the machine, and a mine's last few seats are already underground. %>
         <% @crewing.seats.each_with_index do |role, index| %>
           <% posting = @crewing.posting(role) %>
           <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3">
             <header class="flex items-baseline justify-between mb-2">
               <h2 class="text-sm font-medium">Seat <%= index + 1 %></h2>
-              <span class="text-[11px] uppercase tracking-wide text-slate-500">
-                starts in the quarters
+              <% origin = @crewing.starts_in(role) %>
+              <span class="text-[11px] uppercase tracking-wide <%=
+                      origin ? 'text-amber-400' : 'text-slate-500' %>">
+                <%= origin ? "starts at #{origin}" : "starts in the quarters" %>
               </span>
             </header>
 

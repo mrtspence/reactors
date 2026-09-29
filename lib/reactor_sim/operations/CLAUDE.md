@@ -27,6 +27,12 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > naming more seats than that is **refused**, never truncated: truncating silently discards
 > somebody the player chose. And a seat carries no station, because everybody starts in the
 > quarters and is sent somewhere.
+>
+> **Except where the operation says otherwise.** A spatial operation may start part of its shift
+> somewhere else — the mine's `ADVANCE_SHIFT` puts the last three seats in the district, posted
+> to nothing, so there is work to do before anybody has walked anywhere. It is a property of the
+> SEAT, decided by the chassis at build, so a draft roster never changes the answer; the crew
+> screen reads it back off the built minions' `default_place`.
 
 Three ways that goes wrong, all of them silent:
 

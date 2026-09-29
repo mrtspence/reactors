@@ -714,6 +714,120 @@ stop being risks the moment they have a number.
 | 3 | Wrong *lever* | As above, over the levers in the same volume | Phase 0 | none beyond the spatial model | **Small, after space** |
 | 4 | Basic mistakes | A hidden **renewable margin**: wide initial roll, spent in **activity-driven bursts**, recovered by safe work and rest, re-rolled on refill. Produces a hazard phase 6b already understands | `initial_state` + phase 0 re-rolls | `perils:` on a place (tag-gated); phase **6d** `blunder`; safety fittings | **Medium — the real work** |
 
+---
+
+# Part 6 — Carrying somebody out
+
+**Not a mine mechanic, and that is the point.** Every operation can hurt somebody where they
+stand, and the engine's answer today is the same in all of them: `Injury.apply_mode` clears the
+station and the posting and leaves the body exactly where it fell. In the steam engine that was
+invisible — the footplate has no geometry, so "carried out" and "standing there hurt" were the
+same state. The mine made it visible, and bad air made it lethal: a minion collapsed in a
+district keeps taking the hazard that collapsed them, and the only counterplay is a lever at
+bank.
+
+That is a real gap rather than a missing convenience. **Rescue is the oldest mechanic in
+mining** — the reason apparatus, rescue stations and trained teams exist at all — and the mine
+currently has the danger with none of the answer.
+
+## What exists to build on
+
+| Need | Exists | Where |
+|---|---|---|
+| A place a person is, and a route between places | `Layout`, `Passage`, phase 6d | `graph/passage.rb`, `tick.rb` |
+| Somebody walking somewhere on an absolute order | `assign_minion` → `posting`, advanced in 6d | `minion.rb`, `operation.rb` |
+| Speed as a property of the person | `Minion::PACE`, through `capability` | `minion.rb` |
+| A reason to hurry | `Breath`'s `asphyxia` clock, already a 0..1 rescue timer | `breath.rb` |
+| Gear that makes the trip survivable | `rescue_apparatus`, metered in ticks | `kit.rb` |
+| A stood-down minion who cannot walk | `apply_mode` clears `posting` — deliberately | `injury.rb` |
+
+**The clock is the part already finished.** `asphyxia` fills while somebody is down in bad air
+and drains when the air comes back, so the window a rescue has to fit inside is a number the
+simulation already keeps and the UI can already show.
+
+## The shape, and the one hard question
+
+A rescue is: somebody walks to where the casualty is, picks them up, and walks somewhere safe.
+Mechanically that is **one minion's movement becoming two minions' movement**, and the hard
+question is what a carrier *is*:
+
+**(a) A carried minion's `place` is slaved to the carrier's.** Cheapest. Phase 6d already moves
+everybody; a carried person just copies a place instead of computing one. *Cons:* two minions'
+states become coupled inside a phase that currently treats each independently, which is a real
+order-independence hazard — the carrier must be advanced before the carried, and "before" is
+not a thing phase 6d has.
+
+**(b) Carrying is a posting.** `assign_minion(:crew_2, casualty: :crew_1)` — the carrier is
+*posted to the casualty* rather than to a station, and the travel phase resolves that posting to
+wherever the casualty is. The casualty moves as cargo when the carrier arrives somewhere.
+*Pros:* it stays an absolute, idempotent order, which is the invariant that matters most; it
+needs no new command shape. *Cons:* `posting` currently means a station id, and this overloads
+it.
+
+**(c) The casualty is a load, not a person, while carried** — removed from the place graph and
+held in the carrier's state until set down. *Pros:* no coupling, no ordering problem. *Cons:* a
+minion that is temporarily not anywhere will surprise every consumer that iterates places,
+including the crew screen and any future peril sweep.
+
+> **Lean: (b), with the carried minion's place written by the carrier's own step.** It keeps
+> the command protocol unchanged, which is worth more than the tidiness of (c) — and the
+> ordering hazard in (a) is avoidable if exactly one of the pair writes both places.
+
+## What it costs the carrier
+
+The interesting half, and the reason this is a mechanic rather than a button:
+
+- **Pace.** Carrying a body is not walking. A `carrying` penalty on `Minion#pace` is the whole
+  of it, and it should be heavy enough that a strong minion is meaningfully the better choice.
+- **A second person out of production.** The real cost, and it is already expressible: the
+  rescuer is not at their station, so whatever they were doing stops.
+- **Their own air.** The rescuer walks *into* the thing that dropped the casualty, so the run
+  is bounded by `respirator_air` — which is exactly what apparatus was for and needs no new
+  mechanism.
+- **Nothing else.** Resist adding a stretcher fitting, a two-carrier rule, or a fatigue cost
+  until the basic loop is playable.
+
+## Why it is not a mine feature
+
+Written here because the mine is where it became visible, but **the implementation belongs in
+the engine**, beside `Injury` and phase 6d, with no mine-specific code at all. A boiler house
+with places will want it on the day the steam engine is retrofitted; so will every operation
+after. Treat "carrying" as a peer of "travel", not as something a colliery has.
+
+## The prerequisite
+
+**Nothing here works until the steam engine has places**, or at least until `Layout` is no
+longer the only thing that knows where anybody is. It is not urgent for the mine — a collapsed
+minion there is a real, legible loss and the fan is a real, legible answer — so this is
+sequenced after the mine's own follow-ups rather than in front of them.
+
+---
+
+# Part 7 — The advance shift becomes something you buy
+
+`Mine::ADVANCE_SHIFT` puts the last three seats in the district at build, because a pit whose
+every hand starts at bank spends the opening five minutes of a match on a walk. It is declared
+on the chassis and given away free, which is the wrong end state for two reasons: a head start
+is exactly the kind of thing a player should be *buying*, and a frame that offers only one
+arrangement cannot express the choice between them.
+
+The fitted version is a `crew_quarters`-adjacent part — a night shift, a lodging house, an
+underground stable — declaring how many seats begin elsewhere and where. `Assembly` already
+finds capacity and origin by what a slot **accepts**, so the same route works here and no
+operation has to reimplement it.
+
+Two questions it should settle, neither of which the constant answers:
+
+- **Which seats.** Positional today (the last ones), so a player has no say in who is already
+  down. Once it is a purchase, the crew screen should probably let them choose — which makes it
+  a field on the roster rather than a property of the seat, and `Crewing#starts_in` becomes a
+  read of the posting instead.
+- **What it costs beyond money.** Men who started underground have not been through the lamp
+  cabin, which is where the tally is taken. A head start that quietly breaks the roll-call is a
+  better mechanic than a free one.
+
+---
+
 ## Sequencing
 
 Everything here comes **after** the mine is playable. Within that:
@@ -726,6 +840,10 @@ Everything here comes **after** the mine is playable. Within that:
 4. **The accident model (4)**. Largest, overlaps the reserved probabilistic-injury design, and
    wants its own sketch and review before code.
 5. **Wrong lever (3)**, folded in once volumes exist.
+6. **Carrying somebody out (6)**, last of these and **not a mine feature** — it belongs beside
+   phase 6d in the engine and wants the steam engine to have places first.
+7. **The advance shift as a fitting (7)**, whenever the blueprint tree is next opened. Small,
+   independent of all of the above, and the constant works until then.
 
 ## What this does not touch
 
