@@ -142,10 +142,22 @@ RSpec.describe "crews" do
       expect(Roster.find_by(match_id: DevMatch::ID)).to be_nil
     end
 
-    it "offers no kit at all for a seat nobody is sitting in" do
+    # **A seat nobody is sitting in has no wardrobe of its own**, because there is nobody to
+    # own one. What it gets is the pit's rack, set once for the whole roster — so the check is
+    # that the SEAT offers nothing, not that the page does.
+    it "offers no kit on a seat nobody is sitting in" do
       post draft_path, params: { crew: { crew_1: {} } }
 
-      expect(response.body).not_to include("Gauge Spanner")
+      expect(response.body).not_to include('name="crew[crew_1][tool]"')
+    end
+
+    # The other half: the exchange's rack is offered instead, and it is one set of selects for
+    # every empty seat rather than one per seat.
+    it "offers the pit's own kit for whoever the exchange sends" do
+      post draft_path, params: { crew: { crew_1: {} } }
+
+      expect(response.body).to include('name="standin[tool]"')
+      expect(response.body.scan('name="standin[tool]"').length).to eq(1)
     end
   end
 

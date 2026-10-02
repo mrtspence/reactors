@@ -11,7 +11,7 @@ module ReactorSim
   # application would make replay diverge.
   class ControlPoint
     attr_reader :id, :label, :node, :min, :max, :default, :unit, :stiffness, :effort, :aided_by,
-                :exertion, :recovery, :place, :gated_by
+                :exertion, :recovery, :place, :gated_by, :capacity
 
     # **A valve is not a job, and that distinction is what makes a crew matter.** Most controls
     # are valves: a regulator goes where you put it and who put it there is irrelevant. A few are
@@ -47,9 +47,14 @@ module ReactorSim
     # `place:` is **where this lever stands** — a place id in the operation's `Layout` — and is
     # what makes manning it cost a walk. Nil means it can be worked from anywhere, which is every
     # control in an operation that declares no passages at all.
+    # `capacity:` is **how many people this station has room for**, and nil — every lever in the
+    # game but one — means it does not care. A hole cut in a roadway side takes one man, and a
+    # bigger one is something a mine buys, so the number is a part's stat rather than a rule.
+    # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can
+    # walk to.
     def initialize(id:, label: nil, node: nil, min: 0.0, max: 100.0, default: 0.0,
                    unit: "%", stiffness: Float::INFINITY, effort: nil, aided_by: nil,
-                   exertion: 0.0, recovery: nil, place: nil, gated_by: nil)
+                   exertion: 0.0, recovery: nil, place: nil, gated_by: nil, capacity: nil)
       @id = id.to_sym
       @label = label || @id.to_s.tr("_", " ").capitalize
       @node = node&.to_sym
@@ -66,10 +71,15 @@ module ReactorSim
       @gated_by = gated_by&.map(&:to_sym)&.freeze
       @exertion = exertion.to_f
       @recovery = (recovery || (effort ? 0.0 : Fatigue::BASE_RECOVERY)).to_f
+      @capacity = capacity&.to_i
       validate_effort!
       validate_fatigue!
+      validate_capacity!
       freeze
     end
+
+    # Room for somebody, given who is already posted here. Always true where none is declared.
+    def room_for?(occupants) = @capacity.nil? || occupants < @capacity
 
     # Work somebody does, as opposed to a setting somebody chooses.
     def effort? = !@effort.nil?
@@ -146,6 +156,14 @@ module ReactorSim
       return if @exertion.zero? || effort?
 
       raise Error, "control #{@id}: exertion declared on a control with no effort:"
+    end
+
+    # Zero would be a station nobody may ever be posted to, which is indistinguishable from one
+    # that does not exist and is never what anybody meant to declare.
+    def validate_capacity!
+      return if @capacity.nil? || @capacity.positive?
+
+      raise Error, "control #{@id}: capacity #{@capacity} must be positive or absent"
     end
   end
 end

@@ -39,6 +39,7 @@ RSpec.describe "coal dust" do
     ReactorSim::Match
       .create(id: "d", seed: 3,
               operations: [ { id: "pit", type: :mine, loadout: { manriding: :cage_gear },
+                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
                               crew: DustCrew::CREW } ])
       .operation(:pit)
   end
@@ -95,7 +96,7 @@ RSpec.describe "coal dust" do
   end
 
   def ignite!(op, ticks: 8_000, from: 3_600)
-    op.set_control(:naked_lights, 100)
+    op.set_control(:naked_flame, 100)
     run!(op, ticks, from: from)
   end
 

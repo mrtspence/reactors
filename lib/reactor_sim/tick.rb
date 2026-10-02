@@ -189,23 +189,50 @@ module ReactorSim
     #
     # **Nobody posted means nothing gets done.** An unmanned shovel moves no coal.
     def control_values(controls)
+      levers = controls.to_h { |id, s| [ id, control_points.fetch(id).value(s) ] }
+      ambient = ambient_tags(levers)
+
       controls.to_h do |id, s|
         control = control_points.fetch(id)
-        [ id, control.effort? ? worked(control, s) : control.value(s) ]
+        [ id, control.effort? ? worked(control, s, ambient) : levers.fetch(id) ]
       end.freeze
+    end
+
+    # **What the ROOM contributes to a job, as opposed to what the person brought to it.**
+    #
+    # A lamp on the wall and a lamp on your belt are the same fact to a gate: `gated_by:
+    # darkvision` asks whether somebody can see, not whose light it is. So a node that lights a
+    # place offers its tag to everybody standing in it, and `Minion#gate` takes the better of
+    # the two — the better, never the sum, because two lamps do not let you see twice.
+    #
+    # Read from N−1 node state and this tick's lever positions, exactly as `worked` reads N−1
+    # minions, so nothing here can depend on phase order. An operation with no places — the
+    # steam engine — skips it entirely and every gate stays what the minion carries.
+    def ambient_tags(levers)
+      return {} if layout.places.empty?
+
+      nodes.each_with_object({}) do |(id, node), acc|
+        next unless node.respond_to?(:ambient_tags)
+
+        place = layout.place_of_node(id) or next
+        offered = node.ambient_tags(state.fetch(:nodes).fetch(id), levers)
+        acc[place] = (acc[place] || {}).merge(offered) { |_, a, b| [ a, b ].max }
+      end
     end
 
     # Read from the PREVIOUS tick's minion state, so who is standing where cannot depend on
     # phase order. A minion carried out has `station: nil` and therefore mans nothing.
-    def worked(control, control_state)
+    def worked(control, control_state, ambient)
       minion_id = station_index[control.id]
       return 0.0 if minion_id.nil?
 
       minion = minions[minion_id] or return 0.0
+      minion_state = state.fetch(:minions).fetch(minion_id)
       control.value(control_state) *
-        minion.capability(state.fetch(:minions).fetch(minion_id),
+        minion.capability(minion_state,
                           effort: control.effort, aided_by: control.aided_by,
-                          gated_by: control.gated_by)
+                          gated_by: control.gated_by,
+                          ambient: ambient[minion_state[:place]])
     end
 
     # Phase 4a. Granted parcels move, carrying their energy with them. Ungranted mass stays
@@ -857,11 +884,13 @@ module ReactorSim
       Injury.succumb(state, Breath.suffocated?(state) ? :mortal : :severe)
     end
 
+    # **`cause:` is a top-level field, the same one `break_part` sets**, because the feed reads
+    # it there. Inside `detail:` it is invisible to every consumer and the line reads "unknown".
     def suffocated_event(minion, state, mode, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
-                  severity: :critical, tick: ctx.tick, mode: mode,
+                  severity: :critical, tick: ctx.tick, mode: mode, cause: :asphyxia,
                   detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
-                            place: state[:place], cause: :asphyxia,
+                            place: state[:place],
                             asphyxia: state.fetch(:asphyxia, 0.0).round(3) })
     end
 
@@ -968,7 +997,7 @@ module ReactorSim
     # standing at it, and a consumer given only the job could not say who needs a rest.
     def spent_event(minion, control, ctx)
       Event.build(type: :minion_spent, node: minion.id, label: minion.name,
-                  severity: :warning, tick: ctx.tick,
+                  severity: :warning, tick: ctx.tick, cause: :exhaustion,
                   detail: { minion: minion.minion, station: control&.id })
     end
 
@@ -1041,10 +1070,15 @@ module ReactorSim
     # everything inside the operation is keyed by. But the **injury list belongs to a person**:
     # Jim is out for two matches, and the fireman's job is still there for somebody else to
     # stand in. A consumer given only the role could not write that down.
+    # **`cause:` is the KIND of harm, not the part.** "Rockfall" is what a player needs to read
+    # off the feed; which node's failure delivered it is already on the record as `by:`. A
+    # hazard that declared no tags falls back to naming the part, because "unknown" next to a
+    # dead minion is the one thing the line must never say.
     def hurt_event(minion, hurt, mode, hazard, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: mode == :minor ? :warning : :critical,
                   tick: ctx.tick, mode: mode,
+                  cause: hazard[:tags].first || hazard[:sources].first,
                   detail: { minion: minion.minion,
                             lasting: Injury.lasting?(mode),
                             station: hazard[:station],

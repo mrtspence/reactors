@@ -42,6 +42,33 @@ RSpec.describe "Outfitting", type: :request do
       expect(response.body).to include("Fit and test drive")
     end
 
+    # **A frame id is scoped to the machine it is a frame FOR**, so anything that resolves one
+    # has to use this operation's kind and not the match's first. Defaulting to the primary
+    # asked the catalogue for `steam_engine/two_shaft` on the mine's screen — a frame nothing
+    # has ever registered — and the page 500'd on a `Blueprint::Unknown`.
+    #
+    # Driven off `DevMatch` rather than naming the mine, so this is a test about scoping.
+    it "renders for every machine in the match, each on its own frames" do
+      DevMatch.operation_ids.each do |id|
+        get edit_loadout_path(match_id: DevMatch::ID, operation_id: id)
+
+        expect(response).to have_http_status(:ok), "#{id} did not render"
+        frames = ReactorSim::Operations.chassis_for(DevMatch.kind_of(id))
+        expect(response.body).to include(Blueprint.fetch(
+          :chassis, Blueprint.chassis_id(DevMatch.kind_of(id), frames.first)
+        ).label)
+      end
+    end
+
+    it "offers the same screen for every machine this player operates" do
+      get path
+
+      DevMatch.operation_ids.each do |id|
+        expect(response.body).to include(edit_loadout_path(match_id: DevMatch::ID,
+                                                           operation_id: id))
+      end
+    end
+
     # The hole where a part would go is the point of the screen.
     it "shows an empty optional slot as empty rather than hiding it" do
       Loadout.fit(match_id: DevMatch::ID, operation_id: DevMatch::PRIMARY,

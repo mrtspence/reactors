@@ -48,7 +48,10 @@ class Outfitting
     frames.select { |frame| owned.include?(blueprint_id_for(frame, kind)) || frame == current }
   end
 
-  def self.blueprint_id_for(frame, kind = DevMatch.kind_of(DevMatch::PRIMARY))
+  # **`kind` is required, and that is the whole point.** A frame id is scoped to the machine it
+  # is a frame *for*, so a default here answers for whichever machine the match happens to list
+  # first — which on any other machine's screen is a lookup for a frame nothing ever registered.
+  def self.blueprint_id_for(frame, kind)
     Blueprint.chassis_id(kind, frame)
   end
 
@@ -91,12 +94,21 @@ class Outfitting
   # reported on its own line rather than folded in with the parts, which would read as though a
   # fitting were at fault.
   def chassis_locked?
-    !owned_ids(:chassis).include?(self.class.blueprint_id_for(chassis))
+    !owned_ids(:chassis).include?(blueprint_id_for(chassis))
   end
 
-  def chassis_label = Blueprint.fetch(:chassis, self.class.blueprint_id_for(chassis)).label
+  def chassis_label = Blueprint.fetch(:chassis, blueprint_id_for(chassis)).label
 
-  def chassis_choices = self.class.chassis_choices(owner_id, chassis)
+  def chassis_choices
+    self.class.chassis_choices(owner_id, chassis, operation_id: operation_id)
+  end
+
+  # **Scoped to THIS machine**, which is the only reason this exists beside the class method:
+  # an instance knows which operation it is outfitting, and every frame it names is a frame for
+  # that one.
+  def blueprint_id_for(frame) = self.class.blueprint_id_for(frame, kind)
+
+  def kind = DevMatch.kind_of(operation_id)
 
   def errors = assembly.verdict.errors
   def warnings = assembly.verdict.warnings

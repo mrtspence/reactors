@@ -55,6 +55,9 @@ module ReactorSim
         # gauge glass shows and why a swelling boiler reads high. See `Nodes::Boiler`.
         effective_fill: :with_content,
         contents_kg: :state_only,
+        # How close a sump is to the mark where it stops being wet and starts being flooded.
+        # A fraction rather than a weight, because that is what a float on a chain reports.
+        flooding: :with_content,
         # Rotation and wear. All state-only, because none of them need to know what the
         # node is holding — a flywheel's speed does not depend on the weather.
         omega: :state_only,

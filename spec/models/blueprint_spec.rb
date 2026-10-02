@@ -58,20 +58,27 @@ RSpec.describe Blueprint do
     # resort: it turns up when nobody better will, and it cannot be taken away. It is an ordinary
     # individual in content — one resolution path, not a special case in the engine — and
     # `hireable: false` is the single field that keeps it out of the shop.
-    it "does not offer the standin, nor kit or courses for it" do
+    # **The standin is not for sale, and is still kitted out** — because the gear belongs to
+    # the pit, not to the man. Equipment scoped to the labour exchange is the rack in the lamp
+    # cabin that whoever turns up is issued from; a course is not, because there is nobody for
+    # it to stay with.
+    it "does not offer the standin, nor courses for it, but does offer it kit" do
       standin = ReactorSim::Content.default.minions.keys -
                 ReactorSim::Content.default.hireable.keys
 
       expect(standin).not_to be_empty, "no standin in the roster at all"
       standin.each do |id|
         expect(described_class.key?(:minion, id)).to be(false)
-        expect(described_class.key?(:equipment, "#{id}/leather_apron")).to be(false)
         expect(described_class.key?(:training, "#{id}/hot_work_ticket")).to be(false)
+        expect(described_class.key?(:equipment, "#{id}/leather_apron")).to be(true)
       end
     end
 
+    # **Everybody who can hold a job, the standin included.** Kit is the pit's rather than the
+    # person's — the rack in the lamp cabin that whoever the exchange sends is issued from — so
+    # this is the whole roster where training is only the hireable part of it.
     it "scopes equipment to a minion, one blueprint per pairing" do
-      roster = ReactorSim::Content.default.hireable.keys
+      roster = ReactorSim::Content.default.minions.keys
       expected = roster.flat_map { |m| ReactorSim::Equipment.known.map { |i| "#{m}/#{i}" } }
 
       expect(described_class.of_kind(:equipment).map(&:blueprint_id)).to match_array(expected)
@@ -203,12 +210,13 @@ RSpec.describe Blueprint do
     end
 
     describe "a bill naming something nothing knows" do
-      # There is no `copper` in `content/resources/materials.yml` — the six metals are cast iron,
-      # wrought iron, steel, bronze, babbitt and fusible alloy. This is not a hypothetical: the
-      # design sketch's own worked example priced a boiler in copper.
+      # **A bill may only name a resource the simulation has**, and the check is here because a
+      # price is the one place a typo would otherwise cost nothing until somebody tried to buy
+      # the thing. Deliberately a substance that will never exist, rather than one the mine's
+      # next fitting might introduce.
       it "refuses an unknown material" do
         allow(described_class).to receive(:costs)
-          .and_return({ [ :operation, "steam_engine" ] => { "materials" => { "copper" => 5 } } })
+          .and_return({ [ :operation, "steam_engine" ] => { "materials" => { "orichalcum" => 5 } } })
         described_class.reload!
 
         expect { described_class.known }.to raise_error(ReactorSim::Error, /unknown resource/)

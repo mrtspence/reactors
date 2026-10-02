@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -36,8 +36,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
   end
 
   create_table "incidents", force: :cascade do |t|
+    t.string "cause"
     t.datetime "created_at", null: false
     t.jsonb "detail", default: {}, null: false
+    t.string "label"
     t.string "mode"
     t.string "node"
     t.string "operation_id", null: false
@@ -112,6 +114,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
     t.jsonb "crew", default: {}, null: false
     t.string "match_id", null: false
     t.string "operation_id", null: false
+    t.jsonb "standin", default: {}, null: false
     t.datetime "updated_at", null: false
     t.index ["match_id", "operation_id"], name: "index_rosters_on_match_id_and_operation_id", unique: true
   end

@@ -279,6 +279,14 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   by the bare item id** (`Blueprint.build(priced_as:)`): an apron costs what an apron costs, and
   pricing every pairing would put 39 identical lines in `config/blueprints.yml` today and need a
   fresh one whenever anybody hires a minion.
+- **The standin is scoped for EQUIPMENT and not for training, and the split is the point.** Kit
+  bought against `kobold_temp` is the pit's rack, not a man's wardrobe — the lamp cabin issues
+  it to whoever the exchange sends, which is what a lamp cabin was for. A course is not like
+  that: there is nobody for it to stay with. `Roster#standin` holds one kit for the whole
+  roster and `DevMatch.issue_kit` merges it into every seat nobody was posted to, at the
+  boundary rather than into the stored row — so raising the standard re-equips them all at
+  once, and a seat's own choice still wins. The sim needs nothing for this: `Crew.resolve`
+  already folds a posting's equipment whether or not it names anybody.
 - **Operations come from `Operations.catalogued`, never `Operations.known`.** A spec rig registers
   globally and `known` includes it, so deriving from `known` made `spec/support/loop_rig.rb` an
   unlockable machine nobody had priced — which took the whole catalogue down, and **only in a

@@ -133,19 +133,27 @@ module ReactorSim
     # coal out of a seam however strong they are, and nobody gets any in the dark. A crude kit
     # and a tallow candle is a punishing 0.25 × 0.45; a proper pick and a Davy lamp is 0.8 × 1.0.
     # That spread is the whole reason equipment is worth buying.
-    def capability(state, effort:, aided_by: nil, gated_by: nil)
+    # `ambient:` is what the ROOM supplies toward the same gates — light on the roadway against
+    # a lamp on your belt. See `Tick#ambient_tags`.
+    def capability(state, effort:, aided_by: nil, gated_by: nil, ambient: nil)
       condition = state.fetch(:health) * (1.0 - state.fetch(:fatigue))
       blended = effort.sum { |stat, weight| effective(stat, state) * weight }
       aid = aided_by ? Injury.numeric(tag(aided_by)) : 0.0
 
-      [ blended * (1.0 + aid) * gate(gated_by) * condition, 0.0 ].max
+      [ blended * (1.0 + aid) * gate(gated_by, ambient) * condition, 0.0 ].max
     end
 
     # One for a job that needs nothing, so a station declaring no gates is unchanged.
-    def gate(tags)
+    #
+    # **The better of what you carry and what the room gives, never the sum.** Two lamps do not
+    # let you see twice, and adding them would make a well-lit district turn a blind minion into
+    # a better hewer than a sighted one somewhere dark.
+    def gate(tags, ambient = nil)
       return 1.0 if tags.nil? || tags.empty?
 
-      tags.reduce(1.0) { |acc, key| acc * Injury.numeric(tag(key)) }
+      tags.reduce(1.0) do |acc, key|
+        acc * [ Injury.numeric(tag(key)), Injury.numeric(ambient&.fetch(key, nil)) ].max
+      end
     end
 
     def injured?(state) = !state.fetch(:injury, nil).nil?

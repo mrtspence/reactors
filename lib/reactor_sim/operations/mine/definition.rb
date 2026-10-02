@@ -55,19 +55,25 @@ module ReactorSim
         two_shaft: {
           parts: {
             cutting: :hand_picks,
+            lighting: :tallow_candles,
             winder: :steam_whim,
             fan: :waddle_fan,
             pump: :sinking_set,
-            quarters: :lamp_cabin
+            quarters: :lamp_cabin,
+            rest: :refuge_hole
           }.freeze,
           advance: ADVANCE_SHIFT
         }.freeze
       }.freeze
 
-      def build(id:, seed:, chassis: :two_shaft, loadout: {}, crew: {},
+      # `ground:` pins how gassy and how wet this pit is instead of drawing it. **Not in
+      # `options:`**, and it does not need to be: it changes `initial_state` and nothing about
+      # the graph, and a restored snapshot installs its own state over the top — so the ground
+      # a match was given survives a round trip whatever this was called with.
+      def build(id:, seed:, chassis: :two_shaft, loadout: {}, crew: {}, ground: nil,
                 time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         chassis = chassis.to_sym
-        assembly = assembly_for(chassis, loadout)
+        assembly = assembly_for(chassis, loadout, ground: ground)
         fragment = assembly.build!
         roster = Crew.normalise(crew, capacity: assembly.crew_capacity)
 
@@ -89,8 +95,9 @@ module ReactorSim
         )
       end
 
-      def assembly_for(chassis, loadout = {})
+      def assembly_for(chassis, loadout = {}, ground: nil)
         spec = CHASSIS.fetch(chassis.to_sym) { raise Error, "unknown mine chassis #{chassis.inspect}" }
+        spec = spec.merge(ground: ground) if ground
 
         Assembly.new(
           slots: slots(spec), loadout: loadout, spec: spec,
@@ -160,8 +167,28 @@ module ReactorSim
       end
 
       # The pit bottom: a real volume of air, somewhere to stand, and the place water collects.
+      # **The shaft bottom, and the low corner of the whole mine.**
+      #
+      # Water runs downhill and this is downhill, so what the pumps do not lift stands here.
+      # `flooding` is what a float on a chain actually tells you: not a weight, but how far up
+      # it has come against the point where it is over the rails and backing up the road.
+      class Sump < Nodes::Vessel
+        # Where the pit bottom stops being wet and starts being flooded — water over the
+        # landing, the onsetter's feet and the bottom of the cage. Nothing enforces it; it is
+        # the mark the gauge is read against, and the number a player is actually racing.
+        FLOOD_KG = 2_400.0
+
+        def flooding(state, content)
+          standing = Parcel.total_kg(
+            Parcel.matching(state.fetch(:parcels), [ :liquid ], content)
+          )
+
+          (standing / FLOOD_KG).clamp(0.0, 1.0)
+        end
+      end
+
       def pit_bottom
-        Nodes::Vessel.new(
+        Sump.new(
           id: :pit_bottom, label: "Pit Bottom", volume_m3: 900.0,
           heat_capacity: 2.0e5, ambient_conductance: 220.0,
           initial_contents: [ { resource: :air, kg: 1_100.0 } ],
@@ -194,10 +221,11 @@ module ReactorSim
       # The working district. Air, men, coal and gas all meet here, which is what makes one
       # volume the right model for it rather than four.
       #
-      # **It hosts the firedamp reaction, and `:naked_lights` is the igniter.** Working by naked
-      # flame is a real decision with a real payoff — you can see what you are doing — and the
-      # whole of its cost is that the district then contains a light. Everything else follows
-      # from the gas being there or not.
+      # **It hosts the firedamp reaction, and the igniter is whatever the district is lit by.**
+      # Working by naked flame is a real decision with a real payoff — you can see what you are
+      # doing, and hewing is gated on seeing — and the whole of its cost is that the district
+      # then contains a light. Everything else follows from the gas being there or not. See
+      # `Lighting` for how a tier decides whether it is an ignition source.
       # **What stone dust does, and why it is a throttle rather than a cap.**
       #
       # Limestone spread along the roadways does not stop coal dust burning — it means what gets
@@ -245,7 +273,11 @@ module ReactorSim
           heat_capacity: 3.0e5, ambient_conductance: 300.0,
           initial_contents: [ { resource: :air, kg: 1_700.0 } ],
           reactions: %i[firedamp_combustion coal_dust_combustion],
-          heater_control_id: :naked_lights, heater_watts: 1.2e3,
+          # **The igniter names the OPEN-FLAME lever, and a safe lighting tier does not declare
+          # it.** `run_heater` reads `ctx.controls.fetch(id, 0.0)`, so with gauze lanterns or
+          # electric lamps fitted this resolves to zero and the district has no ignition source
+          # at all — which is what "safe lighting" has to mean in a pit that makes firedamp.
+          heater_control_id: :naked_flame, heater_watts: 1.2e3,
           igniter_kg_per_s: 4.0e-4,
           # **What a roadway stands, which is not much.** Timber, and men. Past this the district
           # is on fire, and `stress_rate` is high because there is no slow version of this
@@ -391,9 +423,57 @@ module ReactorSim
       # Pressure-driven is also the better model, and it gives one behaviour for free that a
       # fixed rate cannot: **emission falls as the district fills**, because the gradient it is
       # venting against is what drives it. A gassy working vents harder once it is cleared.
-      def blower(conductance:)
-        Nodes::Conduit.new(
-          id: :blower, label: "Blower", accepts: [ :gas ],
+      # **Ground varies, and a pit whose numbers are identical every match is a pit you learn
+      # once.** How fiery a panel is, how sour the old workings are and how wet the strata runs
+      # are properties of the *ground*, not of mining — a colliery two miles away is a different
+      # proposition, and knowing which one you have been given is most of an overseer's job.
+      #
+      # Drawn in `initial_state`, one of the three places entropy is permitted, and held in
+      # state so it snapshots and replays exactly. **Each seep has its own RNG stream**, because
+      # ids key the stream table — so a fiery pit is not also a wet one, and a player cannot
+      # learn one number and infer the rest.
+      module Ground
+        # Wide on purpose, and it reaches genuinely low. 0.2 is a panel that barely makes gas at
+        # all; 2.4 is one that has to be fought all shift — **and the starting fan does not hold
+        # the top of it**, which is deliberate: a range the base machine always copes with is a
+        # range that changes nothing. Anything narrower and the counter-measure is the same
+        # every match, which is the rote this exists to break.
+        RANGE = (0.2..2.4)
+
+        # **1.0 is the ground a spec measures a MACHINE on**, and the argument is
+        # `ReferenceCrew`'s exactly: a spec that runs a mine and does not say what ground it was
+        # given measures the luck rather than the pit. `Mine.build(ground: 1.0)` pins every seep
+        # at ordinary; left nil, each draws its own.
+        ORDINARY = 1.0
+
+        def initialize(ground: nil, **opts)
+          @ground = ground&.to_f
+          super(**opts)
+        end
+
+        def initial_state(rng, content = nil)
+          super.merge(ground: @ground || rng.between(RANGE.begin, RANGE.end))
+        end
+
+        # 1.0 for a state written before this existed, so a restored snapshot is merely average
+        # rather than inert.
+        def ground(state) = state.fetch(:ground, 1.0)
+      end
+
+      # A fissure venting gas under pressure, at whatever rate this particular ground does it.
+      class Seep < Nodes::Conduit
+        include Ground
+
+        def gas_conductance(state, ctx)
+          base = super or return nil
+
+          base * ground(state)
+        end
+      end
+
+      def blower(conductance:, ground: nil)
+        Seep.new(
+          id: :blower, label: "Blower", accepts: [ :gas ], ground: ground,
           max_kg_per_s: 0.5, conductance: conductance, heat_capacity: 1.0e3
         )
       end
@@ -403,9 +483,52 @@ module ReactorSim
       # more of this the longer it has been worked, from ground nobody goes into any more.
       #
       # Placeless, like the seam: it is collapsed rock, not a room.
-      def goaf(kg:)
-        Nodes::Vessel.new(
+      # **How sour the waste is running, which is the one damp a pit can make without a fire.**
+      #
+      # Coal left behind oxidises, and where it oxidises hot it goes to carbon monoxide instead
+      # of stopping at carbon dioxide. Some panels do this and some never do, so the share is
+      # drawn per match beside everything else about the ground.
+      #
+      # It matters out of all proportion to its size: whitedamp poisons at a concentration that
+      # displaces nothing, so a pit whose goaf has gone sour is one where the canary is the only
+      # warning there will be — and the flame lamp reads perfectly clear the whole time.
+      class OldWorkings < Nodes::Vessel
+        SOUR = (0.0..0.09)
+
+        # Pinned by `ground:` the way the seeps are, so a spec about a machine is not also a
+        # spec about which waste it was given. Sweet, because sour is the exception.
+        ORDINARY_SOUR = 0.0
+
+        def initialize(sour: nil, **opts)
+          @sour = sour&.to_f
+          super(**opts)
+        end
+
+        def holds_initial_state(rng, content)
+          state = super
+          share = @sour || rng.between(SOUR.begin, SOUR.end)
+          { parcels: Parcel.normalise(state.fetch(:parcels).flat_map { |parcel|
+              sour(parcel, share, content)
+            }) }
+        end
+
+        private
+
+        # Only the blackdamp turns; anything else declared stays as it was.
+        def sour(parcel, share, content)
+          return [ parcel ] unless parcel.fetch(:resource) == :blackdamp
+
+          taken, left = Parcel.split(parcel, parcel.fetch(:kg) * share)
+          [ left, Parcel.build(resource: :whitedamp, kg: taken.fetch(:kg),
+                               temperature_k: Parcel.temperature_k(taken, content),
+                               content: content) ]
+        end
+      end
+
+      def goaf(kg:, sour: nil)
+        OldWorkings.new(
           id: :goaf, label: "Old Workings", volume_m3: 3_000.0, ambient_conductance: 0.0,
+          sour: sour,
           initial_contents: [ { resource: :blackdamp, kg: kg } ],
           ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :gas ],
                             max_kg_per_s: 2.0) ]
@@ -420,10 +543,65 @@ module ReactorSim
       # Pressure-driven for the same reason the blower is — a rate cap between two passive
       # holders moves nothing or everything — and it gives the same behaviour for free: it vents
       # harder into a pit bottom that has been cleared than into one already full of it.
-      def goaf_seep(conductance:)
-        Nodes::Conduit.new(
-          id: :goaf_seep, label: "Blackdamp", accepts: [ :gas ],
+      def goaf_seep(conductance:, ground: nil)
+        Seep.new(
+          id: :goaf_seep, label: "Blackdamp", accepts: [ :gas ], ground: ground,
           max_kg_per_s: 0.5, conductance: conductance, heat_capacity: 1.0e3
+        )
+      end
+
+      # **Light on the roadway, as opposed to light in your hand.**
+      #
+      # Hewing is `gated_by: %i[mining_effectiveness darkvision]` and a gate is a *zero* when it
+      # is missing, so light is not a bonus — it is the difference between a shift that wins
+      # coal and one that does not. A lamp on your belt is the minion's own tag; this is the
+      # other way of getting it, and `Minion#gate` takes the better of the two rather than the
+      # sum, because two lamps do not let you see twice.
+      #
+      # **A `Load`, always**, even for the tiers that burn nothing: the unpowered ones simply
+      # declare no torque and hang off no shaft, so their `omega` stays zero and is never
+      # consulted. That keeps one class, one node id and one slot across a tech tree whose top
+      # end is wired to the engine house and whose bottom end is a candle on a nail.
+      #
+      # **`control_id` differs by tier and that is the mechanism, not an accident.** The
+      # district's igniter names `:naked_flame`; a tier that is an open flame in a gassy room
+      # declares its lever under that id and therefore lights the gas, and a safe tier declares
+      # `:safe_light` instead. `Vessel#run_heater` reads `ctx.controls.fetch(id, 0.0)`, so a
+      # lever nobody declared is simply zero and the district has no ignition source at all.
+      # Both are labelled "Sconces", because to the player it is one lever either way — and
+      # neither may be called `:sconces`, which is the NODE: one flat id namespace.
+      class Lighting < Nodes::Load
+        attr_reader :illumination
+
+        def initialize(illumination:, **opts)
+          @illumination = illumination.to_f
+          super(**opts)
+        end
+
+        # What somebody standing in this room gets for free. Read off N−1 state and the
+        # actuated levers, so it cannot depend on phase order.
+        def ambient_tags(state, levers) = { darkvision: lit(state, levers) }
+
+        # Turned down is dimmer; a powered tier whose shaft has stopped is dark. Both are
+        # fractions of what this fitting manages at full.
+        def lit(state, levers)
+          fraction = @control_id ? (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
+          fraction *= (omega(state).abs / @rated_omega).clamp(0.0, 1.0) if @rated_omega.positive?
+
+          @illumination * fraction
+        end
+
+        # Recorded so the panel can read it as an ordinary field, the way `carried_kg` is.
+        def apply(state, ctx, grant)
+          super.merge(lit: lit(state, ctx.controls))
+        end
+      end
+
+      def sconces(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0)
+        Lighting.new(
+          id: :sconces, label: "Sconces", illumination: illumination, control_id: control_id,
+          max_torque: max_torque, rated_omega: rated_omega, curve: :viscous,
+          moment_of_inertia: 12.0
         )
       end
 
@@ -570,9 +748,9 @@ module ReactorSim
       # the path is also capped by the narrowest *port* along it, so a conduit rated at the
       # seepage rate stays at the seepage rate however far its throughput is derated upward.
       # One restriction, one number — and here the number belongs to the node.
-      def seepage(inrush_kg_per_s:)
+      def seepage(inrush_kg_per_s:, ground: nil)
         Inrush.new(
-          id: :seepage, label: "Seepage", accepts: [ :liquid ],
+          id: :seepage, label: "Seepage", accepts: [ :liquid ], ground: ground,
           max_kg_per_s: inrush_kg_per_s, heat_capacity: 1.0e3
         )
       end
@@ -585,6 +763,8 @@ module ReactorSim
       # two consequences of one decision, which is how hard to push a face you cannot see the
       # far side of.
       class Inrush < Nodes::Conduit
+        include Ground
+
         # Slower than a roof fall by a good margin: breaking through is rarer than being
         # careless with timber, and it is meant to catch a player who has got comfortable
         # rather than one who is being reckless today.
@@ -606,8 +786,16 @@ module ReactorSim
         # The hole is the conduit, and while the ground holds it is nearly shut. Nothing is
         # derated: the node governs its own throughput, so there is one restriction and one
         # number for it.
+        #
+        # **`ground` varies the ordinary make and never the inrush**, because they are two
+        # different facts: how wet the strata runs is the ground, and what is standing behind
+        # the fissure is not. Scaling the breach as well would make a dry pit's inundation
+        # something the starting set could simply pump away, which is the one moment the pump
+        # tier is supposed to decide.
         def throughput_kg(state, ctx)
-          super * (broken?(state) ? 1.0 : SEEP_FRACTION)
+          return super if broken?(state)
+
+          super * SEEP_FRACTION * ground(state)
         end
 
         def failure_modes = { inrush: {} }

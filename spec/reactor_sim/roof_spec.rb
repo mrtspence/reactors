@@ -46,6 +46,7 @@ RSpec.describe "the roof" do
          .create(id: "r", seed: 3,
                  operations: [ { id: "pit", type: :mine,
                                  loadout: { manriding: :cage_gear },
+                                 ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
                                  crew: RoofCrew::CREW } ])
          .operation(:pit)
     op.set_control(:winding, 100)
@@ -150,7 +151,8 @@ RSpec.describe "the roof" do
   it "conserves mass and energy through a fall" do
     op = ReactorSim::Match
          .create(id: "r", seed: 3,
-                 operations: [ { id: "pit", type: :mine, crew: RoofCrew::CREW } ])
+                 operations: [ { id: "pit", type: :mine, crew: RoofCrew::CREW,
+                                 ground: ReactorSim::Operations::Mine::Ground::ORDINARY } ])
          .operation(:pit)
     op.set_control(:winding, 100)
     op.assign_minion(:crew_1, :hewing)

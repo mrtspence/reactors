@@ -98,6 +98,7 @@ module ReactorSim
       minions = @state.fetch(:minions)
       current = minions.fetch(minion.id)
       return false unless can_reach?(minion, current, station)
+      return false unless room_at?(minion, station)
 
       assigned = minion.assign(current, station, arrived: standing_at?(minion, current, station))
       @state = @state.merge(minions: minions.merge(minion.id => assigned.freeze).freeze).freeze
@@ -112,6 +113,20 @@ module ReactorSim
 
       destination = @layout.place_of(station)
       destination.nil? || destination == minion.place(state)
+    end
+
+    # **Counted over `posting`, not `station`.** Two people sent to a one-man hole must be
+    # refused when the order is given, not discovered on arrival minutes later — and the second
+    # of them would otherwise walk the length of the district to stand in somebody's lap.
+    #
+    # The minion being posted is excluded, so re-sending somebody to the station they already
+    # hold stays the no-op an at-least-once log needs it to be.
+    def room_at?(minion, station)
+      control = station && @control_points[station]
+      return true if control.nil?
+
+      taken = @state.fetch(:minions).count { |id, s| id != minion.id && s[:posting] == station }
+      control.room_for?(taken)
     end
 
     def can_reach?(minion, state, station)

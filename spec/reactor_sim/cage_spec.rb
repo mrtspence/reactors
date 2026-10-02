@@ -42,6 +42,7 @@ RSpec.describe "the cage" do
          .create(id: "c", seed: 3,
                  operations: [ { id: "pit", type: :mine,
                                  loadout: { manriding: manriding || :none },
+                                 ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
                                  crew: CageCrew::CREW } ])
          .operation(:pit)
     op.set_control(:winding, 100)

@@ -25,8 +25,8 @@ class Crewing
 
   attr_reader :owner_id, :operation_id, :crew
 
-  def self.for(owner_id:, operation_id: DevMatch::PRIMARY, crew: nil)
-    new(owner_id: owner_id, operation_id: operation_id, crew: crew)
+  def self.for(owner_id:, operation_id: DevMatch::PRIMARY, crew: nil, standin: nil)
+    new(owner_id: owner_id, operation_id: operation_id, crew: crew, standin: standin)
   end
 
   # Lives here rather than in the controller so `permit` does not have to know what a seat is —
@@ -35,12 +35,17 @@ class Crewing
     new(owner_id: nil, operation_id: operation_id).seats.map(&:to_s)
   end
 
-  def initialize(owner_id:, operation_id: DevMatch::PRIMARY, crew: nil)
+  # Who the labour exchange sends when a seat is left empty. Not a person a player owns — the
+  # sim resolves an unnamed posting to `Crew::STANDIN` — but the gear they are handed is.
+  STANDIN = ReactorSim::Crew::STANDIN
+
+  def initialize(owner_id:, operation_id: DevMatch::PRIMARY, crew: nil, standin: nil)
     @owner_id = owner_id.to_s
     @operation_id = operation_id.to_sym
     # nil means "show what is stored"; a hash means "show this draft", and an empty hash means
     # every seat deliberately unfilled — which is a legitimate machine crewed by day-labourers.
     @crew = resolve(crew)
+    @standin = standin&.to_h { |k, v| [ k.to_sym, v ] }
   end
 
   # From the fitted quarters, through the registry — so this screen never names a concrete
@@ -97,9 +102,28 @@ class Crewing
   def equipment_for(seat_id, slot)
     minion = posting(seat_id)[:minion] or return []
 
-    ReactorSim::Equipment.of_slot(slot).select do |item|
-      owns?(:equipment, "#{minion}/#{item.id}")
-    end
+    kit_for(minion, slot)
+  end
+
+  # --- the labour exchange ------------------------------------------------------------------
+  #
+  # **One kit for every seat nobody was posted to**, because it is the pit's gear rather than
+  # anybody's: a rack in the lamp cabin that whoever turns up is issued from. Without it a
+  # day-labourer is a hewer with no pick and no light, and `gated_by:` scores that at exactly
+  # zero however many of them you field.
+  #
+  # Stored beside the roster rather than copied into each empty seat, so raising the standard
+  # re-equips them all at once instead of only the ones saved since.
+
+  # nil means "show what is stored", exactly as `crew:` does.
+  def standin_posting = @standin_posting ||= @standin || stored_standin
+
+  def standin_equipment(slot) = kit_for(STANDIN, slot)
+
+  # Nothing to choose from in any slot means nothing to show. A player who has bought no gear
+  # for the exchange should see the section explain itself, not three empty dropdowns.
+  def standin_kit_offered?
+    ReactorSim::Equipment::SLOTS.any? { |slot| standin_equipment(slot).any? }
   end
 
   def training_for(seat_id)
@@ -131,7 +155,8 @@ class Crewing
   # after the command is built, so somebody whose last match this was is still out for the
   # machine being built now.
   def fit!
-    Roster.fit(match_id: DevMatch::ID, operation_id: operation_id, crew: to_sim)
+    Roster.fit(match_id: DevMatch::ID, operation_id: operation_id, crew: to_sim,
+               standin: standin_posting)
     command = DevMatch.reset_command
     DevMatch.start!
     CommandProducer.instance.produce(match_id: DevMatch::ID, command: command)
@@ -146,6 +171,14 @@ class Crewing
     return stored if given.nil?
 
     ReactorSim::Crew.normalise(given, capacity: capacity)
+  end
+
+  def kit_for(minion, slot)
+    ReactorSim::Equipment.of_slot(slot).select { |item| owns?(:equipment, "#{minion}/#{item.id}") }
+  end
+
+  def stored_standin
+    Roster.find_by(match_id: DevMatch::ID, operation_id: operation_id.to_s)&.standin_kit || {}
   end
 
   # **A stored roster can name more seats than the fitted quarters has**, because a player may

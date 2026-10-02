@@ -51,8 +51,8 @@ Diagnostic.new(
 `Derived` accepts only the quantities in `Sources::Derived::SIGNATURES` — a snapshot, and
 `ruby -Ilib -e 'require "reactor_sim"; puts ReactorSim::Sources::Derived::SIGNATURES.keys'`
 is the truth: `temperature_k`, `pressure_pa`, `contents_volume`, `room_m3`, `occupancy`,
-`compression_pressure_pa`, `effective_fill`, `contents_kg`, `omega`, `rpm`, `rim_speed`,
-`kinetic_joules`,
+`compression_pressure_pa`, `effective_fill`, `contents_kg`, `flooding`, `omega`, `rpm`,
+`rim_speed`, `kinetic_joules`,
 `stress_fraction`, `integrity`.
 **Add new ones there** with the right arity (`:with_content` or `:state_only`) or the source
 will not build — it raises at construction rather than reading nothing at runtime.
@@ -224,6 +224,16 @@ A failure event carries more than the fact of it, and the panel is expected to u
 | `escalated_from` | present only when the part was already broken and got worse |
 | `damaged` | node ids this failure took with it, or absent |
 | `detail` | per-part forensics: rpm at burst, occupancy, pressure |
+
+**A casualty carries the same two, and `cause:` is top level for both.** `minion_hurt` and
+`minion_spent` name the kind of harm — `asphyxia`, `exhaustion`, or the hazard tag that reached
+them — with the part that delivered it riding along in `detail[:by]`. Put `cause` inside
+`detail` and the feed reads "unknown" beside a dead minion, which is the one thing it must never
+say.
+
+**The durable row carries `label` and `cause` as columns**, because the feed renders `label` and
+falls back to `node`. A backfilled line missing them reads `crew_8` where the live one read the
+person's name, so history and live disagree — see `Incident`.
 
 **Lead with `mode`, not `cause`.** What a part became decides what the operator does next; what
 broke it is history. The console led with the cause for a while and buried the one fact that

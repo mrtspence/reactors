@@ -855,6 +855,25 @@ Three things came out differently from this sketch:
   examples have to get the shift underground first. A day-labourer takes fourteen simulated
   minutes to reach the face and the explosion happens without them.
 
+A fourth, found in play and fixed afterwards:
+
+- **`:naked_lights` as a lever was a trap with no payoff.** The sketch argued it should be a
+  standing order rather than a purchase, and the reasoning was sound as far as it went — but
+  light is a `gated_by:` term on hewing and only a *carried* lamp could satisfy it, so the lever
+  did nothing whatever except ignite the district. A player who found it was simply punished.
+  Lighting became a fitting with four tiers, a node answering `ambient_tags` so the **room** can
+  meet a gate, and the ignition source decided by which lever id a tier declares. The lesson is
+  general: **a lever whose only effect is a cost is not a decision**, and a hazard has to be
+  paired with the thing a player wanted badly enough to risk it.
+
+  What makes the tier a purchase rather than a preference is that **the fan does not buy the
+  flame off**. A worked district lit by flares fires with the ventilation hard over — later
+  than with it stopped, but it fires — so the open flame is a hazard a player can only replace,
+  never ventilate away. The measured consequence is that light and survival point opposite ways
+  over a long window: brighter flame wins more coal per minute and loses the district sooner,
+  which is why the tier comparison in `mine_tech_spec` is measured before anything goes wrong
+  and the ignition is a claim of its own.
+
 Owed: blackdamp, whitedamp and **afterdamp** — the mixture that fills a mine after an explosion
 and historically killed more than the blast. The district burns its oxygen and the survivors
 should then be suffocating; today they are merely in a wrecked roadway. Also **coal dust**, which

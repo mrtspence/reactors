@@ -131,6 +131,11 @@ Five things to know:
   useful and still posted to nothing, so the opening move is still the player's. Without it a
   spatial operation's first five minutes are a walk. Build it the same way — `place:` on the
   `Minion`, decided by the chassis, never by the roster.
+- **A station may have room for only so many.** `capacity:` on a `ControlPoint` is how many
+  people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
+  posting nobody can walk to. Every lever but one declares none and takes a crowd; the mine's
+  refuge hole takes one man, and a bigger cut-out is something a pit buys. Counted over
+  `posting`, so the refusal lands when the order is given rather than on arrival.
 - **A crew quarters builds no node.** It is a *place*, and a place is a `ControlPoint` with no
   `node:` — `ControlPoint#lever?` is what keeps it off the lever strip while leaving it on the
   crew screen. Do **not** write `provides: %i[quarters]`: `provides:` names NODE ids, and node,

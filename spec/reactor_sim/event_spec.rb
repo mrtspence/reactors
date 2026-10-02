@@ -122,5 +122,26 @@ RSpec.describe "events" do
       # also the wrong clock: `tick` is the one replay and the projection already agree on.
       expect(failure.keys).not_to include(:at, :timestamp, :produced_at_ms)
     end
+
+    # **`cause:` is a top-level field and every casualty owes one**, because that is where the
+    # feed reads it: put it inside `detail:` and the line reads "unknown" beside a dead minion,
+    # which is the one thing it must never say. A `minion_hurt` names the kind of harm
+    # (`asphyxia`, a hazard tag) rather than the part, which rides along as `by:`.
+    it "says what hurt somebody, not merely that something did" do
+      op = ReactorSim::Match
+           .create(id: "h", seed: 5,
+                   operations: [ { id: "pit", type: :mine,
+                                   ground: ReactorSim::Operations::Mine::Ground::ORDINARY } ])
+           .operation(:pit)
+      op.assign_minion(:crew_8, :hewing)
+      op.set_control(:hewing, 100)
+
+      to_a_person = %i[minion_hurt minion_spent]
+      casualties = Array.new(3_000) { |i| op.step!(tick: i + 1) }
+                        .flatten.select { |e| to_a_person.include?(e[:type]) }
+
+      expect(casualties).not_to be_empty
+      expect(casualties.map { |e| e[:cause] }.uniq).to all(be_a(Symbol))
+    end
   end
 end

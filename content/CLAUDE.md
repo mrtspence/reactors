@@ -55,9 +55,11 @@ governs *physiology*: `breathable`. Say which when you add one.
 > **`damp` is a mine's word, not a chemist's** — whatever comes out of the strata that is not
 > air, named for what it does rather than what it is. Kept because it is the vocabulary the
 > instruments are written in: a deputy does not read 4.2% methane, he sees a cap on the flame.
-> `content/resources/damps.yml` holds firedamp and blackdamp; whitedamp wants a home there and
-> is not built, because it needs incomplete combustion first. **Afterdamp does not need one** —
-> it is `flue_gas` in a place with people in it.
+> `content/resources/damps.yml` holds firedamp, blackdamp and whitedamp. **Afterdamp needs no
+> entry** — it is `flue_gas` in a place with people in it. Whitedamp arrives two ways and both
+> are emergent rather than declared: a fire that could not get air makes it (the second
+> `alternatives:` pathway on each combustion reaction), and the goaf makes a little of it on
+> its own, in a share drawn per match.
 >
 > **Blackdamp is firedamp's opposite and is modelled by where it is wired, not by its density.**
 > It does not burn, there is nothing to smell, and it kills by being there instead of air.

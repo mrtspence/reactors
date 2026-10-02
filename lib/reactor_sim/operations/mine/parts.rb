@@ -43,14 +43,14 @@ module ReactorSim
 
       Parts.register(:steam_whim, kind: :winder, label: "Steam Whim",
                      description: "A drum, a rope, and a kibble. One load at a time.",
-                     provides: %i[winder], instruments: %i[coal_raised],
+                     provides: %i[winder], instruments: %i[coal_raised winding_gear],
                      stats: { max_kg_per_s: 2.2 }) do |_spec|
         Mine.winding_fragment(max_kg_per_s: 2.2)
       end
 
       Parts.register(:cage_winder, kind: :winder, label: "Cage Winder",
                      description: "Guided cage on wire rope. Takes tubs by the deck.",
-                     provides: %i[winder], instruments: %i[coal_raised],
+                     provides: %i[winder], instruments: %i[coal_raised winding_gear],
                      stats: { max_kg_per_s: 7.0 }) do |_spec|
         Mine.winding_fragment(max_kg_per_s: 7.0)
       end
@@ -125,7 +125,7 @@ module ReactorSim
       # shift's output.
       Parts.register(:man_engine, kind: :manriding, label: "Man Engine",
                      description: "Stepped rods and sollars. You ride it twelve feet at a time.",
-                     provides: %i[cage_drive],
+                     provides: %i[cage_drive], instruments: %i[cage_speed],
                      stats: { speed_m_s: 1.8, max_torque: 520.0 }) do |_spec|
         Mine.manriding_fragment(speed_m_s: 1.8, max_torque: 520.0, label: "Man Engine")
       end
@@ -133,7 +133,7 @@ module ReactorSim
       # Quick, and it costs the whole mine while it runs.
       Parts.register(:cage_gear, kind: :manriding, label: "Cage",
                      description: "Guided cage and safety catches. Quick, and heavy on the shaft.",
-                     provides: %i[cage_drive],
+                     provides: %i[cage_drive], instruments: %i[cage_speed],
                      stats: { speed_m_s: 4.2, max_torque: 1_600.0 }) do |_spec|
         Mine.manriding_fragment(speed_m_s: 4.2, max_torque: 1_600.0, label: "Cage")
       end
@@ -243,6 +243,104 @@ module ReactorSim
         )
       end
 
+      # ---------------------------------------------------------------- lighting
+
+      # **What the district is lit by, and it is a purchase rather than a standing order.**
+      #
+      # Hewing is gated on `darkvision`, and a gate is a zero when it is missing — so light is
+      # the difference between a shift that wins coal and one that stands in the dark being
+      # paid. The tree is the real one, and every step is a genuine trade:
+      #
+      #   tallow candles   dim, free to run, and an open flame in a gassy room
+      #   oil flares       twice the light, the same open flame
+      #   gauze lanterns   Davy gauze on the roadway: safe, and you can see less by it
+      #   electric lamps   the best light there is, and it hangs off the same shaft as the fan
+      #
+      # A pit starts with candles, which is why the first upgrade a player reaches for is
+      # usually the one that makes the district brighter *and* keeps it lethal.
+      Parts.register(:tallow_candles, kind: :lighting, label: "Tallow Candles",
+                     description: "Candles on nails down the roadway. An open flame, in a pit.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 0.35 }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.35, control_id: :naked_flame)
+      end
+
+      Parts.register(:oil_flares, kind: :lighting, label: "Oil Flares",
+                     description: "Open oil flares on brackets. You can see; so can the gas.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 0.75 }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.75, control_id: :naked_flame)
+      end
+
+      # **The first tier that is not an ignition source**, because its lever is not the one the
+      # district's igniter names. Dimmer than the flares it replaces, which is the trade.
+      Parts.register(:gauze_lanterns, kind: :lighting, label: "Gauze Lanterns",
+                     description: "Davy gauze on the roadway side. Safe, and you see less by it.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 0.5 }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.5, control_id: :safe_light)
+      end
+
+      # Hung off the same line shaft as the fan, the pump and the winder — so the best light in
+      # the mine is also one more thing competing for the supply, and a brownout puts the
+      # district dark with the shift still in it.
+      Parts.register(:electric_lamps, kind: :lighting, label: "Electric Lamps",
+                     description: "A dynamo off the line shaft. The best light there is, while the shaft turns.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 1.0, max_torque: 210.0 }) do |_spec|
+        Mine.lighting_fragment(illumination: 1.0, control_id: :safe_light,
+                               max_torque: 210.0, rated_omega: WORKING_OMEGA)
+      end
+
+      def self.lighting_fragment(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0)
+        Fragment.new(
+          nodes: [ Mine.sconces(illumination: illumination, control_id: control_id,
+                                max_torque: max_torque, rated_omega: rated_omega) ],
+          # Only a powered tier hangs off the shaft. The rest are a flame on a bracket.
+          drive_links: rated_omega.positive? ?
+            [ DriveLink.new(a: :line_shaft, b: :sconces, stiffness: 1.4e3) ] : [],
+          places: [ Place.new(id: :district, nodes: [ :sconces ]) ],
+          control_points: [
+            # **At bank**, because it is a standing order to the shift rather than something
+            # anybody walks over to turn up. Labelled the same in every tier: to the player it
+            # is one lever, and which id it carries is what decides whether it fires the gas.
+            ControlPoint.new(id: control_id, label: "Sconces", node: :sconces,
+                             default: 0.0, place: :bank)
+          ]
+        )
+      end
+
+      # **Somewhere to sit down without walking out**, which is the whole of it.
+      #
+      # The lamp cabin is at bank, and bank is a shaft and four hundred metres of roadway away
+      # from the face — so resting a spent hewer cost the round trip and the player simply never
+      # did it. A cut-out in the roadway side is the historical answer and the cheap one.
+      #
+      # **`capacity:` is the mechanic and the upgrade path.** A manhole takes one man; whether a
+      # second may be sent is `Operation#assign_minion`'s refusal, not a rule here.
+      Parts.register(:refuge_hole, kind: :rest_station, label: "Refuge Hole",
+                     description: "A manhole cut in the roadway side. Room for one, and no more.",
+                     stats: { rest_capacity: 1, recovery_rate: 1.4 }) do |_spec|
+        Mine.rest_fragment(capacity: 1, recovery_rate: 1.4, label: "Refuge Hole")
+      end
+
+      Parts.register(:snap_cabin, kind: :rest_station, label: "Snap Cabin",
+                     description: "A proper cut-out with a bench and a water can. Three at a time.",
+                     stats: { rest_capacity: 3, recovery_rate: 2.4 }) do |_spec|
+        Mine.rest_fragment(capacity: 3, recovery_rate: 2.4, label: "Snap Cabin")
+      end
+
+      # **In the district, which is the entire point**, and a control point with no `node:` —
+      # somewhere to stand, not something to set.
+      def self.rest_fragment(capacity:, recovery_rate:, label:)
+        Fragment.new(
+          control_points: [
+            ControlPoint.new(id: :rest, label: label, place: :district, capacity: capacity,
+                             recovery: Fatigue::BASE_RECOVERY * recovery_rate)
+          ]
+        )
+      end
+
       # ---------------------------------------------------------------- slots
 
       # Declaration order is the panel's lever order. Ordered by where the work is — bank first,
@@ -260,12 +358,19 @@ module ReactorSim
           # ever *adds* a faster way through a shaft that could always be climbed.
           Slot.new(id: :manriding, accepts: :manriding, label: "Man Riding", group: :shaft,
                    required: false, default: nil, when_empty: :omit),
+          Slot.new(id: :lighting, accepts: :lighting, label: "Lighting", group: :face,
+                   required: true, default: fitted.fetch(:lighting)),
           Slot.new(id: :fan, accepts: :fan, label: "Fan", group: :air,
                    required: true, default: fitted.fetch(:fan)),
           Slot.new(id: :pump, accepts: :pump, label: "Pump", group: :water,
                    required: true, default: fitted.fetch(:pump)),
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Lamp Cabin", group: :crew,
-                   required: true, default: fitted.fetch(:quarters))
+                   required: true, default: fitted.fetch(:quarters)),
+          # **Not `:crew_quarters`, and it matters.** `Assembly#crew_capacity` finds the
+          # quarters by what a slot ACCEPTS and takes the first — a second one would make a
+          # rest station decide how many hands the pit can field.
+          Slot.new(id: :rest, accepts: :rest_station, label: "Rest Station", group: :crew,
+                   required: true, default: fitted.fetch(:rest))
         ]
       end
 
@@ -276,10 +381,18 @@ module ReactorSim
       # **Its gauges are supplied rather than named**, for the same reason its nodes are: they
       # read fixtures, so no part can take them away. Pulled from the catalogue rather than
       # rebuilt here, so a gauge has one definition wherever it arrives from.
-      def self.fixtures(_spec)
+      # `spec[:ground]` pins every seep at one multiplier instead of drawing one. Nil — a real
+      # match — draws, which is the point of the whole mechanism; a spec measuring the machine
+      # passes `Ground::ORDINARY`.
+      def self.fixtures(spec)
+        ground = spec[:ground]
         Fragment.new(
           diagnostics: Mine.catalogue.values_at(:flame_cap, :lamp_flame, :canary, :shaft_speed,
-                                                :shaft_supply, :district_air, :seam_remaining),
+                                                :shaft_supply, :district_air, :seam_remaining,
+                                                # The road, what moves on it and what the ground
+                                                # is making are the hole itself rather than a
+                                                # fitting, so no part can take these away.
+                                                :roof_timber, :putting, :water_make),
           # Every shaft can be climbed. Only one that has bought the gear can be ridden.
           passages: Mine.passages,
           places: PLACES,
@@ -289,14 +402,17 @@ module ReactorSim
             Mine.seam(kg: 90_000.0, firedamp_kg: 4_000.0),
             Mine.dust_source(kg: 3_000.0),
             # Deep enough that it never runs dry: a pit does not stop making blackdamp.
-            Mine.goaf(kg: 20_000.0), Mine.goaf_seep(conductance: 1.8e-5),
-            Mine.blower(conductance: 2.5e-4), Mine.dust_line(max_kg_per_s: 0.30),
+            Mine.goaf(kg: 20_000.0, sour: (Mine::OldWorkings::ORDINARY_SOUR if ground)),
+            Mine.goaf_seep(conductance: 1.8e-5, ground: ground),
+            Mine.blower(conductance: 2.5e-4, ground: ground),
+            Mine.dust_line(max_kg_per_s: 0.30),
             Mine.dust_store(kg: 6_000.0), Mine.dusting_line(max_kg_per_s: 0.55),
             Mine.tub_road(max_kg_per_s: 6.0), Mine.screens,
             # 18 kg/s through a broken fissure, against a sinking set's 14 and a Cornish set's
             # 26 — so the starting pump is overwhelmed by an inrush and the upgrade is what
             # holds it. That gap is the reason to buy the better set.
-            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0), Mine.drainage
+            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0, ground: ground),
+            Mine.drainage
           ],
           links: [
             # Air: down the downcast, round the workings. The return side comes with the fan.
@@ -328,12 +444,6 @@ module ReactorSim
           control_points: [
             ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0,
                              place: :bank),
-            # **Naked lights.** Off by default, because the default has to be the one that does
-            # not kill anybody. Historically the decision that separates a pit that has had an
-            # explosion from one that has not, and it is a lever rather than a fitting because
-            # it is a standing order to the shift rather than a thing you buy.
-            ControlPoint.new(id: :naked_lights, label: "Naked Lights", node: :district,
-                             default: 0.0, place: :bank),
             # **The most boring lever in the game, and the one that decides whether an ignition
             # is an incident or a disaster.** It wins no coal, spends stores that run out, and
             # does nothing whatever until the day the gas goes up.

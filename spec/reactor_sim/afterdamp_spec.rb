@@ -38,6 +38,7 @@ RSpec.describe "afterdamp" do
     ReactorSim::Match
       .create(id: "a", seed: 3,
               operations: [ { id: "pit", type: :mine, loadout: { manriding: :cage_gear },
+                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
                               crew: AfterdampCrew::CREW } ])
       .operation(:pit)
   end
@@ -97,7 +98,7 @@ RSpec.describe "afterdamp" do
       op = worked
       before = air(op, :district)
 
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       run!(op, 600, from: 3_600)
 
       expect(air(op, :district)).to be < before
@@ -106,7 +107,7 @@ RSpec.describe "afterdamp" do
 
     it "reaches the pit bottom as well as the face" do
       op = worked
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       worst = 1.0
       600.times do |i|
         run!(op, 1, from: 3_600 + i)
@@ -120,7 +121,7 @@ RSpec.describe "afterdamp" do
     # decision rather than a formality.
     it "never touches the pit bank" do
       op = worked
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       run!(op, 2_000, from: 3_600)
 
       expect(air(op, :bank)).to eq(1.0)
@@ -129,12 +130,12 @@ RSpec.describe "afterdamp" do
 
     it "stands the shift down and puts the cause on the record" do
       op = worked
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       events = run!(op, 2_000, from: 3_600)
       hurt = events.select { |e| e[:type] == :minion_hurt }
 
       expect(hurt).not_to be_empty
-      expect(hurt.map { |e| e.dig(:detail, :cause) }).to include(:asphyxia)
+      expect(hurt.map { |e| e[:cause] }).to include(:asphyxia)
       expect(crew(op, :crew_1)[:injury]).not_to be_nil
     end
 
@@ -143,7 +144,7 @@ RSpec.describe "afterdamp" do
     # hazards belonging to places.
     it "kills at the face and only stands down at the pit bottom" do
       op = worked
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       run!(op, 6_000, from: 3_600)
 
       expect(crew(op, :crew_1)[:injury]).to be(:mortal)

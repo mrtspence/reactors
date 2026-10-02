@@ -41,7 +41,9 @@ RSpec.describe "firedamp" do
   def pit(**opts)
     ReactorSim::Match
       .create(id: "f", seed: 7,
-              operations: [ { id: "pit", type: :mine, crew: FiredampCrew::CREW, **opts } ])
+              operations: [ { id: "pit", type: :mine, crew: FiredampCrew::CREW,
+                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
+                              **opts } ])
       .operation(:pit)
   end
 
@@ -169,7 +171,7 @@ RSpec.describe "firedamp" do
       op = pit
       op.set_control(:ventilation, 0)
       run!(op, 2_000)
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       events = run!(op, 2_000, from: 2_000)
 
       expect(events.map { |e| e[:type] }).to include(:fire_lit)
@@ -178,7 +180,7 @@ RSpec.describe "firedamp" do
     it "wrecks the district when it goes up" do
       op = pit
       op.set_control(:ventilation, 0)
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       events = run!(op, 4_000)
 
       failed = events.select { |e| e[:type] == :part_failed }
@@ -193,7 +195,7 @@ RSpec.describe "firedamp" do
       expect(station_of(op, :crew_1)).to be(:hewing)
 
       op.set_control(:ventilation, 0)
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       events = run!(op, 4_000, from: 1_600)
 
       hurt = events.select { |e| e[:type] == :minion_hurt }
@@ -213,7 +215,7 @@ RSpec.describe "firedamp" do
       intact = op.state.fetch(:minions).fetch(:crew_2).fetch(:resilience)
 
       op.set_control(:ventilation, 0)
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       run!(op, 4_000, from: 1_600)
 
       expect(op.state.fetch(:minions).fetch(:crew_2).fetch(:resilience)).to be < intact
@@ -225,7 +227,7 @@ RSpec.describe "firedamp" do
     it "holds through ignition, rupture and everything after it" do
       op = pit
       op.set_control(:ventilation, 0)
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
       joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 

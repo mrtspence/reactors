@@ -46,6 +46,42 @@
                                  operation_id: params[:operation_id]),
                   method: :patch, data: { outfit_target: "form" },
                   authenticity_token: form_authenticity_token do %>
+      <%# **The pit's own gear, not anybody's.** Every seat nobody is posted to is filled by the
+          labour exchange, and whoever turns up is issued from this rack — so one decision here
+          equips all of them, and raising the standard re-equips them at once. A day-labourer
+          with no pick and no light hews exactly nothing, because both are gates. %>
+      <% if @crewing.standin_kit_offered? %>
+        <section class="rounded-lg bg-slate-800/40 ring-1 ring-slate-700 border-l-2
+                        border-l-amber-700/60 p-3 mb-3">
+          <header class="flex items-baseline justify-between mb-2">
+            <h2 class="text-sm font-medium">Labour Exchange</h2>
+            <span class="text-[11px] uppercase tracking-wide text-slate-500">
+              issued to every empty seat
+            </span>
+          </header>
+
+          <div class="grid grid-cols-3 gap-2">
+            <% ReactorSim::Equipment::SLOTS.each do |slot| %>
+              <div>
+                <label class="block text-[11px] uppercase tracking-wide text-slate-400 mb-1"
+                       for="standin_<%= slot %>"><%= slot %></label>
+                <select name="standin[<%= slot %>]" id="standin_<%= slot %>"
+                        class="w-full bg-slate-900 text-slate-200 text-xs rounded px-2 py-1 ring-1 ring-slate-700"
+                        data-action="change->outfit#preview">
+                  <option value="">— nothing —</option>
+                  <% @crewing.standin_equipment(slot).each do |item| %>
+                    <option value="<%= item.id %>"
+                            <%= "selected" if @crewing.standin_posting[slot]&.to_s == item.id.to_s %>>
+                      <%= item.label %>
+                    </option>
+                  <% end %>
+                </select>
+              </div>
+            <% end %>
+          </div>
+        </section>
+      <% end %>
+
       <div class="flex flex-col gap-3">
         <%# Seats, not jobs. Which station somebody works is decided during the match, so there
             is deliberately nothing here to set it with — but WHERE a seat starts is a property

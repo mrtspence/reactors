@@ -292,6 +292,42 @@ RSpec.describe "passages and minion travel" do
     end
   end
 
+  # **A hole cut in a roadway side takes one man**, and the refusal has to come when the order
+  # is given rather than on arrival — the second of two sent to a one-man refuge would
+  # otherwise walk the length of the district to stand in somebody's lap.
+  describe "a station with room for a number of people" do
+    it "refuses a posting past what it holds" do
+      op = ReactorSim::Match
+           .create(id: "r", seed: 5, operations: [ { id: "pit", type: :mine } ])
+           .operation(:pit)
+
+      expect(op.assign_minion(:crew_8, :rest)).to be(true)
+      expect(op.assign_minion(:crew_9, :rest)).to be(false)
+      expect(crew(op, :crew_9)[:posting]).to be_nil
+    end
+
+    # The minion being posted is excluded from the count, or re-sending somebody to the station
+    # they already hold would be refused — and an at-least-once log replays exactly that.
+    it "still accepts the person already standing there" do
+      op = ReactorSim::Match
+           .create(id: "r", seed: 5, operations: [ { id: "pit", type: :mine } ])
+           .operation(:pit)
+      op.assign_minion(:crew_8, :rest)
+
+      expect(op.assign_minion(:crew_8, :rest)).to be(true)
+      expect(crew(op, :crew_8)[:posting]).to be(:rest)
+    end
+
+    # Every other lever declares none, and must go on taking a crowd — `station_index` being
+    # last-writer-wins is a separate expedient and this must not quietly become its fix.
+    it "lets a station that declares no capacity take anybody" do
+      op = rig
+
+      expect(op.assign_minion(:crew_1, :banking)).to be(true)
+      expect(op.assign_minion(:crew_2, :banking)).to be(true)
+    end
+  end
+
   describe "the command contract" do
     # `assign_minion` still names a DESTINATION and never a step, which is what lets it ride an
     # at-least-once log with no dedup table (invariants.md §4).

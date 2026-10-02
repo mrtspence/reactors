@@ -417,3 +417,30 @@ part:
     materials:
       wrought_iron: 900
       cast_iron: 500
+  # Lighting. Tallow and oil are cheap because what they cost is paid somewhere else.
+  tallow_candles:
+    materials:
+      wood: 20
+  oil_flares:
+    materials:
+      wrought_iron: 70
+      wood: 30
+  gauze_lanterns:
+    materials:
+      wrought_iron: 180
+      bronze: 40
+  # A dynamo, a run of cable and a lamp every twenty yards.
+  electric_lamps:
+    materials:
+      copper: 420
+      wrought_iron: 300
+      steel: 160
+  # A hole cut in the side of a roadway is labour and a few props, which is why it is the one
+  # a pit starts with.
+  refuge_hole:
+    materials:
+      wood: 90
+  snap_cabin:
+    materials:
+      wood: 340
+      wrought_iron: 120

@@ -233,7 +233,7 @@ RSpec.describe ReactorSim::Breath do
       op = room({ air: 5.0, flue_gas: 70.0 })
       event = run!(op, 400).find { |e| e[:type] == :minion_hurt }
 
-      expect(event.dig(:detail, :cause)).to be(:asphyxia)
+      expect(event[:cause]).to be(:asphyxia)
       expect(event.dig(:detail, :place)).to be(:room)
     end
   end

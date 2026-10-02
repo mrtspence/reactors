@@ -17,7 +17,7 @@ class CrewsController < ApplicationController
 
   def update
     @crewing = Crewing.for(owner_id: current_player, operation_id: operation_id,
-                           crew: submitted_crew)
+                           crew: submitted_crew, standin: submitted_standin)
 
     return render :edit, status: :unprocessable_content unless @crewing.ok?
 

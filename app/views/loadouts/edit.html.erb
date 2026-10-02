@@ -137,7 +137,7 @@
           <select name="chassis" id="chassis" data-action="change->outfit#preview"
                   class="text-sm bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100">
             <% @outfitting.chassis_choices.each do |frame| %>
-              <% blueprint = Blueprint.fetch(:chassis, Outfitting.blueprint_id_for(frame)) %>
+              <% blueprint = Blueprint.fetch(:chassis, @outfitting.blueprint_id_for(frame)) %>
               <option value="<%= frame %>" <%= "selected" if frame == @outfitting.chassis %>>
                 <%= blueprint.label %><%= " (locked)" if frame == @outfitting.chassis && @outfitting.chassis_locked? %>
               </option>

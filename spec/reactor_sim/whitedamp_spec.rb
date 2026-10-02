@@ -36,6 +36,7 @@ RSpec.describe "whitedamp" do
     ReactorSim::Match
       .create(id: "w", seed: 3,
               operations: [ { id: "pit", type: :mine, loadout: { manriding: :cage_gear },
+                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
                               crew: WhitedampCrew::CREW } ])
       .operation(:pit)
   end
@@ -80,7 +81,7 @@ RSpec.describe "whitedamp" do
     op.set_control(:ventilation, ventilation)
     run!(op, 3_000, from: 600)
 
-    op.set_control(:naked_lights, 100)
+    op.set_control(:naked_flame, 100)
     run!(op, after, from: 3_600)
     op
   end
@@ -136,7 +137,7 @@ RSpec.describe "whitedamp" do
       op = ignited(ventilation: 0)
       expect(poisoned?(op, :district)).to be(true)
 
-      op.set_control(:naked_lights, 0)
+      op.set_control(:naked_flame, 0)
       op.set_control(:hewing, 0)
       op.set_control(:ventilation, 100)
       run!(op, 2_000, from: 4_600)

@@ -34,6 +34,21 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > SEAT, decided by the chassis at build, so a draft roster never changes the answer; the crew
 > screen reads it back off the built minions' `default_place`.
 
+> **Ground is drawn per match, and a mine that is the same every time is a mine you learn
+> once.** `Mine::Ground` gives the firedamp blower, the goaf seep and the water seepage a
+> multiplier from their own RNG stream at `initial_state`, and the goaf a random share of
+> whitedamp — so a fiery pit is not also a wet one and the player has to feel out which
+> colliery they were given. Entropy at `initial_state` only; the figure lives in state and
+> therefore snapshots and replays exactly. **Vary the ordinary make, never the catastrophe**:
+> `Inrush` scales its seep and leaves the breach alone, or a dry pit's inundation becomes
+> something the starting pump can simply handle and the upgrade decides nothing. **The range
+> deliberately exceeds what the starting fan holds** — a spread the base machine always copes
+> with is a spread that changes nothing.
+>
+> **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, or the example measures
+> which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
+> down, and the failure looks identical — a physics regression that is really a bad draw.
+
 Three ways that goes wrong, all of them silent:
 
 - **Symbols as VALUES do not survive JSON.** `deep_symbolize` converts keys only, so a loadout

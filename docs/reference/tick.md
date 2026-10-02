@@ -26,7 +26,7 @@ engine uses 1.0; an operation running alone may use much more.
 | # | Phase | What it does | May draw entropy? |
 |---|---|---|---|
 | 0 | `actuate` | Levers travel toward their targets, at the rate their minion can manage | **yes** |
-| 1 | read | Freeze tick N−1, build the `Context` every node sees | no |
+| 1 | read | Freeze tick N−1, build the `Context` every node sees. `ctx.controls` is not the lever positions: an **effort** station's value is its position scaled by what the person posted there can manage, gates included — and a gate may be met by the **room** as well as by the person, which is `Tick#ambient_tags` (light on the roadway against a lamp on a belt; the better of the two, never the sum) | no |
 | 2 | `plan` | Every node declares intent, independently, against N−1 | no |
 | 3 | settle | One pure function over every claim — mass, heat, momentum | no |
 | 4a | `advect` | Granted parcels cross a whole **path**, carrying their energy. Returns what was *delivered* per inlet, which is what the walls left of it | no |

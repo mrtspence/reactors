@@ -20,6 +20,12 @@ module CrewParams
            .to_h { |seat| [ seat.to_sym, posting_for(submitted[seat]) ] }
   end
 
+  # **One kit for every unfilled seat**, in a posting's shape and permitted the same way —
+  # minus `minion:`, because the whole point of it is that nobody was named.
+  def submitted_standin
+    posting_for(params[:standin]).except(:minion, "minion")
+  end
+
   def posting_for(given)
     return {} unless given.is_a?(ActionController::Parameters)
 

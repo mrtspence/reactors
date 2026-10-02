@@ -14,6 +14,7 @@ module MineTech
   # comparison of the kit and nothing else.
   KITS = {
     bare: {},
+    pick: { mining_effectiveness: 0.8 },
     candle: { mining_effectiveness: 0.25, darkvision: 0.1 },
     lamp: { mining_effectiveness: 0.25, darkvision: 0.45 },
     proper: { mining_effectiveness: 0.8, darkvision: 0.75 }
@@ -37,12 +38,18 @@ RSpec.describe "the mine's tech tree" do
 
   SUPPLY_J = 9.0e4
 
-  def pit(kit: :proper, **loadout)
+  # **Ordinary ground unless an example asks for worse.** How gassy and how wet a pit is is
+  # drawn per match, and a spec comparing two fittings has to hold it still or it is comparing
+  # luck — the same argument that keeps `ReferenceCrew` out of `content/minions/`.
+  ORDINARY = ReactorSim::Operations::Mine::Ground::ORDINARY
+
+  def pit(kit: :proper, ground: ORDINARY, **loadout)
     hand = :"hand_#{kit}"
     ReactorSim::Match
       .create(id: "t", seed: 5,
               operations: [ { id: "pit", type: :mine,
                               loadout: { manriding: :cage_gear, **loadout },
+                              ground: ground,
                               crew: (1..4).to_h { |i| [ :"crew_#{i}", { minion: hand } ] } } ])
       .operation(:pit)
   end
@@ -109,6 +116,7 @@ RSpec.describe "the mine's tech tree" do
            .create(id: "t", seed: 5,
                    operations: [ { id: "pit", type: :mine,
                                    loadout: { manriding: :cage_gear },
+                                   ground: ORDINARY,
                                    crew: (1..4).to_h { |i|
                                      [ :"crew_#{i}", { minion: :hand_lit } ]
                                    } } ])
@@ -145,6 +153,71 @@ RSpec.describe "the mine's tech tree" do
     end
   end
 
+  # **Light is a gate, so the lighting tier is the one upgrade that can take output from
+  # nothing to something.** Hewing multiplies `darkvision`, and a gate is a zero when it is
+  # missing — a shift at an unlit face is being paid to stand in the dark.
+  #
+  describe "the lighting tier" do
+    # The `:pick` kit throughout — tools and no lamp — so the only light at the face is the
+    # room's and `Minion#gate`'s better-of-the-two has nothing carried to prefer.
+    #
+    # **The window is short on purpose.** An open flame fires the district even with the fan
+    # hard over, so measuring far enough out compares how long each pit lasted rather than how
+    # well it was lit — and inverts the order. That the flame tiers go up at all is the next
+    # example's claim, not this one's.
+    def won(tier, light:)
+      op = cutting(pit(kit: :pick, lighting: tier))
+      op.set_control(:ventilation, 100)
+      op.set_control(op.control_points.key?(:naked_flame) ? :naked_flame : :safe_light, light)
+      cut_over(op, 600)
+    end
+
+    it "lights a face for somebody carrying no lamp" do
+      expect(won(:oil_flares, light: 0)).to eq(0.0)
+      expect(won(:oil_flares, light: 100)).to be > 0.0
+    end
+
+    # The trade, in both directions: the brightest flame beats the safe lantern that replaces
+    # it, and the safe lantern is the one that does not fire the district.
+    it "pays for light, and the safe tier costs some of it" do
+      candles = won(:tallow_candles, light: 100)
+      flares = won(:oil_flares, light: 100)
+      lanterns = won(:gauze_lanterns, light: 100)
+
+      expect(flares).to be > candles
+      expect(lanterns).to be < flares
+      expect(lanterns).to be > candles
+    end
+
+    # **The whole point of a safety lamp, as a lever rather than a tag.** The district's
+    # igniter names the open-flame control; a safe tier declares a different one, so there is
+    # no ignition source in the room at all however gassy it gets.
+    it "fires the district on an open flame and never on a safe one" do
+      fired = %i[tallow_candles oil_flares gauze_lanterns electric_lamps].to_h do |tier|
+        op = pit(lighting: tier)
+        lever = op.control_points.key?(:naked_flame) ? :naked_flame : :safe_light
+        op.set_control(lever, 100)
+        # No supply at all, so the fan is stopped and the gas builds: the worst case there is.
+        events = 2_500.times.flat_map { |i| op.step!(tick: i + 1) }
+        [ tier, events.any? { |e| e[:node] == :district && e[:type] == :part_failed } ]
+      end
+
+      expect(fired.select { |_, lit| lit }.keys).to contain_exactly(:tallow_candles, :oil_flares)
+    end
+
+    # **And the fan does not buy it off.** A worked district lit by flares goes up with the
+    # ventilation hard over and a shift cutting at it — so an open flame is not a hazard a
+    # player can ventilate their way out of, only one they can replace.
+    it "goes up on an open flame even with the fan hard over" do
+      op = cutting(pit(kit: :pick, lighting: :oil_flares))
+      op.set_control(:ventilation, 100)
+      op.set_control(:naked_flame, 100)
+      events = run!(op, 1_200, from: 600)
+
+      expect(events.any? { |e| e[:node] == :district && e[:type] == :part_failed }).to be(true)
+    end
+  end
+
   # **What a better fan actually buys, and it is not a bigger number on a gauge.**
   #
   # Historically the Guibal is why Victorian pits stopped being places you could suffocate in
@@ -153,8 +226,8 @@ RSpec.describe "the mine's tech tree" do
   # about **how much margin there is before anything goes wrong**, which is what a player is
   # buying and what they never see directly.
   describe "the ventilation tier" do
-    def margin(fan)
-      op = cutting(pit(fan: fan))
+    def margin(fan, ground: ORDINARY)
+      op = cutting(pit(fan: fan, ground: ground))
       op.set_control(:ventilation, 100)
       worst = 1.0
       2_000.times do |t|
@@ -178,6 +251,16 @@ RSpec.describe "the mine's tech tree" do
     # The cheap fan holds the line and nothing more; the Guibal buys room to be unlucky in.
     it "buys several times the margin before anybody is suffering" do
       expect(margin(:guibal_fan)).to be > margin(:waddle_fan) * 2.0
+    end
+
+    # **And on the worst ground the cheap fan does not hold the line at all**, which is what
+    # makes `Ground` a mechanic rather than a flavour. A range the starting machine always
+    # copes with changes nothing; some pits have to be bought out of.
+    it "is not enough on the gassiest ground, where the Guibal still is" do
+      worst = ReactorSim::Operations::Mine::Ground::RANGE.end
+
+      expect(margin(:waddle_fan, ground: worst)).to be < 0.0
+      expect(margin(:guibal_fan, ground: worst)).to be > margin(:waddle_fan, ground: worst)
     end
   end
 

@@ -424,10 +424,11 @@ different things with the fan on and off — the air went with the fan. The **fl
 through lag, noise, a sticky needle and bands, into prose: *"no cap on the lamp"* through *"a
 tall cap — clear the district"*. A number there would be a different game.
 
-Ignition is `:naked_lights` — a lever, not a fitting, because it is a standing order to the shift
-rather than something you buy. Safety lamps and it never lights however gassy it gets; naked
-lights and it does, the district ruptures at 480 K, and `endangers:` carries the blast to the
-hewer at the face **and the putter at the pit bottom**. Conservation holds exactly through
+Ignition is whatever the district is **lit** by, and lighting is a fitting: a tier that is an
+open flame declares the lever the district's igniter names and a safe tier does not, so with
+gauze lanterns or electric lamps the district never lights however gassy it gets. With a flame
+it does, the district ruptures at 480 K, and `endangers:` carries the blast to the hewer at the
+face **and the putter at the pit bottom**. Conservation holds exactly through
 ignition and rupture.
 
 > **The fan was badly undersized and the ventilation mechanic did not work because of it.** A
@@ -699,6 +700,51 @@ or the shift being too small to absorb it:
   survived the life of the process, so a player who posted a crew kept being shown the one it
   happened to hold first. The machine had the right people; the screen did not. Same bug shape as
   the panel cache, one level down.
+
+**What the second playthrough changed.** Four gauges, one new station kind, and a labour market
+that was not worth turning up to:
+
+- **Four instruments the mine was flying without.** `putting` (what the putter is shifting),
+  `roof_timber` (the road's own integrity, which is what "is there enough timber in" means when
+  timbering is a lever and not a store), `cage_speed` (is the man-riding gear actually turning
+  — a cage is a *passage*, so calling it and it moving were two facts with one reading between
+  them), and `winding_gear` (what the rope has left; the seam for hot-rope failure).
+- **`ControlPoint#capacity`**, and `assign_minion` refuses past it — counted over `posting`, so
+  the second man sent to a one-man hole is turned away at the order rather than after walking
+  the district. The first user is the mine's **refuge hole**: somewhere to rest *in the
+  district*, because the lamp cabin is at bank and resting a spent hewer cost the round trip.
+- **A kobold's `endurance` is 1.4, not 0.7.** It divides fatigue accrual and enters no
+  capability blend, so it buys staying power and not a gram of coal: a day-labourer still hews
+  badly, now for 99 s flat out rather than under a minute.
+- **The pit owns the gear.** Equipment blueprints are scoped to the standin as well, one kit for
+  the whole roster, issued to every unfilled seat. Training deliberately is not — you can hand
+  somebody a lamp at the gate, not four years at the face. Without it a day-labourer was a hewer
+  with no pick and no light, which `gated_by:` scores at exactly zero however many you field.
+
+**What the third playthrough changed: the room can meet a gate, and no two pits are alike.**
+
+- **District lighting is a fitting with four tiers, and `naked_lights` is gone.** Light was a
+  `gated_by:` term that only a *carried* lamp could satisfy, so the lever that ignited the
+  district bought nothing at all — a pure trap. Now a node answers `ambient_tags` and
+  `Minion#gate` takes **the better of what you carry and what the room gives**, never the sum.
+  Measured, same hewer, 120 ticks: dark **0 kg**, tallow candles **11.8**, oil flares **25.2**,
+  gauze lanterns **16.8**, electric lamps **24.1**. The trade is real in both directions —
+  flares are the brightest flame and still fire the gas at t845 unventilated, while the two
+  safe tiers **never** do, and the electric tier reads 0.81 of its rating because it is hanging
+  off the same shaft as the fan.
+  > **The igniter names the lever, not the fitting.** `heater_control_id: :naked_flame`, and a
+  > safe tier declares `:safe_light` instead — `run_heater` reads `fetch(id, 0.0)`, so a lever
+  > nobody declared is zero. Neither may be called `:sconces`: that is the node, and ids are
+  > one flat namespace.
+- **`Mine::Ground` draws the ground per match** — firedamp, blackdamp and water each from their
+  own RNG stream, plus the goaf's whitedamp share. Seed 2 is fiery, dry and sweet; seed 3 is
+  fiery, dry and has **978 kg of carbon monoxide** standing in the waste. **The ordinary make
+  varies and the catastrophe does not**: `Inrush` scales its seep and leaves the breach alone,
+  or a dry pit's inundation stops being the moment the pump tier decides.
+- **The sump reads as a level, not a weight.** `Sump::FLOOD_KG` is the mark where water is over
+  the rails and backing up the road, and the needle is a percentage of it — distance from
+  disaster rather than an amount of water. Beside it, **The Make**: prose off the seepage's own
+  throughput, which is how a pit introduces itself now that no two are alike.
 
 Then
 [`design_sketches/mine-follow-ups.md`](design_sketches/mine-follow-ups.md): **minion-caused

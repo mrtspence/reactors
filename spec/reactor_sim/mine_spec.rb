@@ -46,7 +46,14 @@ RSpec.describe "the mine" do
   def mine(**opts)
     ReactorSim::Match
       .create(id: "m", seed: 11,
-              operations: [ { id: "pit", type: :mine, **MineCrew.options, **opts } ])
+              operations: [ { id: "pit", type: :mine,
+                              # **Ordinary ground unless an example asks otherwise.** How gassy
+                              # and how wet a pit is is drawn per match, so a spec that does not
+                              # pin it measures the luck rather than the mine — the same
+                              # argument that keeps `ReferenceCrew` out of `content/minions/`.
+                              # `describe "the ground"` is where the drawing itself is tested.
+                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
+                              **MineCrew.options, **opts } ])
       .operation(:pit)
   end
 
@@ -208,6 +215,51 @@ RSpec.describe "the mine" do
       expect(op.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg)).to be > 0.0
       expect(op.ledger.fetch(:mass_added)).to be > 0.0
       expect(op.ledger.fetch(:mass_vented)).to be > 0.0
+    end
+  end
+
+  # **A pit whose numbers are identical every match is a pit you learn once.** How fiery a
+  # panel is, how sour the waste runs and how wet the strata is are properties of the ground,
+  # drawn when the match is made — so an overseer has to feel out which colliery they were
+  # given rather than apply a remembered counter-measure.
+  describe "the ground" do
+    def ground(seed, node)
+      ReactorSim::Match
+        .create(id: "g", seed: seed, operations: [ { id: "pit", type: :mine } ])
+        .operation(:pit).state.fetch(:nodes).fetch(node).fetch(:ground)
+    end
+
+    it "gives two matches different ground" do
+      expect(ground(11, :blower)).not_to eq(ground(12, :blower))
+    end
+
+    # **Its own RNG stream per node**, so a fiery pit is not also a wet one — otherwise one
+    # reading would tell a player everything and the variation would buy nothing.
+    it "varies each seep independently of the others" do
+      seeds = (1..12).map { |s| [ ground(s, :blower), ground(s, :goaf_seep) ] }
+      firedamp, blackdamp = seeds.transpose
+
+      expect(firedamp.each_with_index.max[1]).not_to eq(blackdamp.each_with_index.max[1])
+    end
+
+    # Entropy at `initial_state` only, which is what keeps it replayable: the same seed is the
+    # same mine, every time, on any machine.
+    it "is the same mine for the same seed" do
+      expect(ground(7, :seepage)).to eq(ground(7, :seepage))
+    end
+
+    # The waste makes a little carbon monoxide on its own, and how much is the ground's
+    # business too — a sour goaf is a pit where the canary is the only warning there will be.
+    it "varies how sour the old workings are" do
+      sour = (1..10).map do |seed|
+        parcels = ReactorSim::Match
+                  .create(id: "g", seed: seed, operations: [ { id: "pit", type: :mine } ])
+                  .operation(:pit).state.fetch(:nodes).fetch(:goaf).fetch(:parcels)
+        ReactorSim::Parcel.total_kg(parcels.select { |p| p[:resource] == :whitedamp })
+      end
+
+      expect(sour.uniq.length).to be > 1
+      expect(sour.min).to be < sour.max
     end
   end
 

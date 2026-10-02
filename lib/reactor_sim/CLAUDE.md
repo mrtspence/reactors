@@ -84,6 +84,13 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > `gated_by: %i[mining_effectiveness darkvision]`, a missing tag is a **zero**, and a crude kit
 > is a punishing 0.25 × 0.1 against a proper one's 0.8 × 0.75. That spread is the whole reason
 > equipment is worth buying.
+>
+> **A gate can also be satisfied by the ROOM.** A lamp on the wall and a lamp on your belt are
+> the same fact to `darkvision`, so a node that answers `ambient_tags(state, levers)` offers its
+> tags to everybody standing in its place, and `Minion#gate` takes **the better of the two,
+> never the sum** — two lamps do not let you see twice. `Tick#ambient_tags` builds the map from
+> N−1 node state and this tick's lever positions, so it cannot depend on phase order; an
+> operation with no places skips it and every gate stays what the minion carries.
 
 > **`posting` is where somebody has been SENT; `station` is what they are actually working.**
 > `assign_minion` writes the first and names a destination, never a step — which is what lets it

@@ -171,7 +171,10 @@ module DevMatch
     # payload rather than from the table — a raw roster would field somebody the screen has
     # just called unavailable.
     roster = stored_roster(operation_id: operation_id)
-    spec["crew"] = Roster.stringify_crew(available(roster.to_sim)) if roster
+    if roster
+      issued = issue_kit(available(roster.to_sim), operation_id: operation_id)
+      spec["crew"] = Roster.stringify_crew(issued)
+    end
 
     row = stored(operation_id: operation_id)
     return spec unless row
@@ -237,7 +240,26 @@ module DevMatch
     posted = (stored_roster(operation_id: operation_id)&.to_sim || {})
              .slice(*seats, *seats.map(&:to_s))
 
-    available(posted)
+    issue_kit(available(posted), operation_id: operation_id)
+  end
+
+  # **The gear the pit issues to whoever the labour exchange sends.**
+  #
+  # A posting with no `minion:` resolves to `Crew::STANDIN`, and `Crew.resolve` folds whatever
+  # equipment the posting carries whether or not anybody was named — so this needs nothing from
+  # the library. Applied here rather than stored per seat, so raising the standard re-equips
+  # every unfilled seat at once.
+  #
+  # **The seat's own choices win**, because a player who set something on one seat meant it.
+  def issue_kit(crew, operation_id: PRIMARY)
+    kit = stored_roster(operation_id: operation_id)&.standin_kit
+    return crew if kit.nil? || kit.empty?
+
+    crew.to_h do |seat, posting|
+      posting ||= {}
+      named = posting[:minion] || posting["minion"]
+      [ seat, named ? posting : kit.merge(posting) ]
+    end
   end
 
   def available(crew)

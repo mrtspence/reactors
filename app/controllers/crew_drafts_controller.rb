@@ -21,7 +21,7 @@ class CrewDraftsController < ApplicationController
   def create
     @crewing = Crewing.for(owner_id: current_player,
                            operation_id: current_operation.operation_id,
-                           crew: submitted_crew)
+                           crew: submitted_crew, standin: submitted_standin)
 
     render "crews/edit"
   end

@@ -38,6 +38,7 @@ RSpec.describe "blackdamp" do
     ReactorSim::Match
       .create(id: "b", seed: 3,
               operations: [ { id: "pit", type: :mine, loadout: { manriding: :cage_gear },
+                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
                               crew: BlackdampCrew::CREW } ])
       .operation(:pit)
   end
@@ -120,7 +121,7 @@ RSpec.describe "blackdamp" do
       op = worked(ventilation: 0)
       damp = held(op, :pit_bottom, :blackdamp)
 
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       run!(op, 2_000, from: 3_600)
 
       expect(held(op, :pit_bottom, :blackdamp)).to be > damp * 0.5
@@ -134,7 +135,7 @@ RSpec.describe "blackdamp" do
       op = worked(ventilation: 0)
       gas = held(op, :district, :firedamp)
 
-      op.set_control(:naked_lights, 100)
+      op.set_control(:naked_flame, 100)
       run!(op, 2_000, from: 3_600)
 
       expect(held(op, :district, :firedamp)).to be_between(gas * 0.2, gas * 0.9)

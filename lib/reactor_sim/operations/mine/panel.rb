@@ -20,7 +20,10 @@ module ReactorSim
         flame_cap lamp_flame canary
         shaft_speed shaft_supply
         air_quantity district_air
-        sump_level
+        sump_level water_make
+        district_light
+        roof_timber putting
+        cage_speed winding_gear
         coal_raised seam_remaining
       ].freeze
 
@@ -145,11 +148,77 @@ module ReactorSim
 
           # A float on a chain in the sump. Coarse, slow, and the only warning that the pump is
           # not keeping pace with the make of water.
+          #
+          # **A level, not a weight.** Nobody at a pit bottom knows or cares how many kilograms
+          # are standing in the sump; what they know is how far up the chain the float is and
+          # how much is left before it is over the rails and backing up the road. 100% is
+          # `Sump::FLOOD_KG` — the point where the workings start to go — so the needle reads
+          # as distance from disaster rather than as an amount of water.
           sump_level: Diagnostic.new(
             id: :sump_level, label: "Sump",
-            source: Sources::Contents.new(:pit_bottom, :water),
-            filters: [ Filters::Lag.new(3), Filters::Quantize.new(25.0) ],
-            display: Displays::Needle.new(unit: "kg", precision: 0, min: 0.0, max: 2_000.0)
+            source: Sources::Derived.new(:pit_bottom, :flooding),
+            filters: [ Filters::Lag.new(3), Filters::Quantize.new(0.02) ],
+            display: Displays::Needle.new(unit: "%", precision: 0, min: 0.0, max: 100.0,
+                                          convert: :percent)
+          ),
+
+          # **How hard it is coming in**, which is a different question from how much has
+          # arrived — and the one that tells a player what kind of ground they have been given.
+          # The make of water varies per match, so this is how a pit introduces itself.
+          #
+          # Prose, because a deputy reports what the fissure is doing rather than a rate: there
+          # is no instrument on a wet roadway, only somebody who has walked it.
+          water_make: Diagnostic.new(
+            id: :water_make, label: "The Make",
+            source: Sources::Field.new(:seepage, :carried_kg),
+            filters: [ Filters::Average.new(10), Filters::Lag.new(5),
+                       Filters::Bands.new([ 0.04, 0.18, 0.5, 2.0 ]) ],
+            display: Displays::Prose.new([ "barely damp", "weeping steadily",
+                                           "running in", "a strong feeder",
+                                           "pouring in — she will not hold it" ])
+          ),
+
+          # **What the district is lit by, and therefore whether anybody can work in it.**
+          # Hewing is gated on `darkvision`: unlit, a shift at the face wins exactly nothing,
+          # and nothing else on the panel would have said why.
+          district_light: Diagnostic.new(
+            id: :district_light, label: "District Light",
+            source: Sources::Field.new(:sconces, :lit),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 0.05, 0.3, 0.6, 0.9 ]) ],
+            display: Displays::Prose.new([ "dark — nobody can work", "barely enough to see by",
+                                           "working light", "well lit", "bright as a street" ])
+          ),
+
+          # **What the putter is actually shifting**, which is the one job on this panel whose
+          # output you could otherwise only infer from the coal arriving at bank minutes later.
+          # Face to pit bottom, averaged for the same reason the winder's is: a man pushing tubs
+          # is a sequence of trips, not a flow.
+          #
+          # A road that has come in still passes a little — `roof_fall` derates throughput to
+          # 0.12 rather than sealing it — so a needle sitting near zero while somebody is posted
+          # and the lever is open is what a fall looks like from bank.
+          putting: Diagnostic.new(
+            id: :putting, label: "Tubs", source: Sources::Field.new(:tub_road, :carried_kg),
+            filters: [ Filters::Average.new(10), Filters::Lag.new(3),
+                       Filters::Noise.new(0.3, deadband: 0.8) ],
+            display: Displays::Needle.new(unit: "kg/s", precision: 2, min: 0.0, max: 7.0)
+          ),
+
+          # **How much ground is standing on its own**, read off what the roadway has left.
+          #
+          # There is no stock of timber to count — timbering is a lever, not a store — so what a
+          # deputy reports is the state of the ground: whether the bars are taking weight and
+          # whether the road is working. `Roadway` wears on `hewing − timbering`, so this falls
+          # only while a face is being cut faster than it is being supported, which is exactly
+          # the decision the gauge exists to inform.
+          #
+          # Prose and heavily lagged, because it is a walk and a judgement, not a measurement.
+          roof_timber: Diagnostic.new(
+            id: :roof_timber, label: "Roof", source: Sources::Derived.new(:tub_road, :integrity),
+            filters: [ Filters::Lag.new(6), Filters::Noise.new(0.04, deadband: 0.05),
+                       Filters::Bands.new([ 0.3, 0.55, 0.8 ]) ],
+            display: Displays::Prose.new([ "the road is working — get timber in",
+                                           "bars taking weight", "standing well", "newly set" ])
           ),
 
           # What has gone up the shaft this tick, averaged — a winder's output is a cycle rather
@@ -159,6 +228,41 @@ module ReactorSim
             source: Sources::Field.new(:winder, :carried_kg),
             filters: [ Filters::Average.new(12), Filters::Lag.new(2) ],
             display: Displays::Needle.new(unit: "kg/s", precision: 2, min: 0.0, max: 8.0)
+          ),
+
+          # **Is the man-riding gear actually turning**, which nothing on the panel said.
+          #
+          # A cage is a passage rather than a node, so calling it and having it *move* are two
+          # different facts: the lever is set at bank, the speed comes off the line shaft, and a
+          # shift told to ride a cage that is not turning simply takes the ladders instead and
+          # nobody at bank can tell. This is the gauge that closes that gap — at bank, on the
+          # gear itself, which is why it is an honest needle rather than a report.
+          #
+          # Ships with the man-riding fitting, because with nothing fitted there is no gear to
+          # watch and the ladders need no instrument.
+          cage_speed: Diagnostic.new(
+            id: :cage_speed, label: "Man Winding",
+            source: Sources::Derived.new(:cage_drive, :rpm),
+            filters: [ Filters::Lag.new(1), Filters::Noise.new(1.0, deadband: 3.0) ],
+            display: Displays::Needle.new(unit: "rpm", precision: 0, min: 0.0, max: 320.0)
+          ),
+
+          # **What the winding gear has left in it**, and the reason it is on the panel now is
+          # the reason it will matter later: rope goes before anything else in a headframe, and
+          # it goes from wear rather than from an event.
+          #
+          # TODO: first caller of a *rope-specific* failure is the hot-rope mode — a rope that
+          # has been run hard fails differently from gear that has simply worn out, and wants
+          # its own `failure_modes` entry on the winder plus a duty term in `stress_per_second`.
+          # Today this reads the winder's ordinary durability, which is honest but blunt: it
+          # falls with use and says nothing about *why*.
+          winding_gear: Diagnostic.new(
+            id: :winding_gear, label: "Winding Gear",
+            source: Sources::Derived.new(:winder, :integrity),
+            filters: [ Filters::Lag.new(4), Filters::Noise.new(0.03, deadband: 0.04),
+                       Filters::Bands.new([ 0.2, 0.5, 0.8 ]) ],
+            display: Displays::Prose.new([ "the rope is going — stop winding",
+                                           "worn, and showing it", "serviceable", "sound" ])
           ),
 
           # A surveyor's estimate of what is left in the district, and it is a guess.
@@ -181,8 +285,9 @@ module ReactorSim
              }) do |id:, seed:, time_scale: Mine::DEFAULT_TIME_SCALE, state: nil,
                                                  rngs: nil, content: nil,
                                                  chassis: :two_shaft, loadout: {},
-                                                 crew: {}|
+                                                 crew: {}, ground: nil|
       Mine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
+                 ground: ground,
                  time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end
