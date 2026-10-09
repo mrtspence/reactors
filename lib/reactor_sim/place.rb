@@ -16,10 +16,18 @@ module ReactorSim
   # Declared rather than scraped out of passage endpoints, so that a place has somewhere to carry
   # a label, so that a place nothing has been wired to yet is still legal to name, and so that a
   # `Layout` can refuse a passage or a station that names a place nobody declared.
-  Place = Struct.new(:id, :label, :nodes, keyword_init: true) do
-    def initialize(id:, label: nil, nodes: [])
+  # `air:` names **which of its nodes is the air people in it breathe**, and is needed only
+  # where more than one could be. A district holds exactly one gas volume and says nothing; an
+  # engine house holds five — the room, the firebox, the drum, the injector, the steam chest —
+  # and only one of them is a lungful. `Layout` infers it when it is unambiguous and refuses to
+  # guess when it is not, because picking the first declared would be silent and wrong.
+  Place = Struct.new(:id, :label, :nodes, :air, keyword_init: true) do
+    def initialize(id:, label: nil, nodes: [], air: nil)
       super(id: id.to_sym, label: label || id.to_s.tr("_", " ").capitalize,
-            nodes: Array(nodes).map(&:to_sym).uniq.freeze)
+            nodes: Array(nodes).map(&:to_sym).uniq.freeze, air: air&.to_sym)
+      raise Error, "place #{id}: air #{air.inspect} is not one of its nodes" if
+        air && !nodes.map(&:to_sym).include?(air.to_sym)
+
       freeze
     end
 

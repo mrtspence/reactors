@@ -85,7 +85,16 @@ module ReactorSim
     # `break_part` follows, and for the same reason: re-deciding every tick would announce the
     # same injury at the tick rate forever.
     def check(minion, state, hazard)
-      bite = hazard.fetch(:severity).to_f - resistance(minion, hazard)
+      grind(state, hazard.fetch(:severity).to_f - resistance(minion, hazard))
+    end
+
+    # **The accumulation half, with the bite already worked out.** Separate because not every
+    # harm is a blow carrying a severity and a tag: a burn is resisted by a *threshold* the
+    # heat has to get past before there is any bite at all, so by the time one arrives it has
+    # been resisted already and `resistance` must not argue with it a second time.
+    #
+    # Deciding the tier stays here, once, so the two routes in cannot drift apart.
+    def grind(state, bite)
       return [ state, nil ] if bite <= 0.0
 
       remaining = [ state.fetch(:resilience) - bite, 0.0 ].max

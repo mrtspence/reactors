@@ -14,12 +14,22 @@ module ReactorSim
     # The six every archetype declares. Fixed rather than open because the simulation's own
     # machinery reads them and needs a number with a meaning rather than an absence.
     #
-    #   strength      what they bring to a lever       — Minion#rate_multiplier
+    #   strength      strength-to-WEIGHT ratio         — pace, and the root of `force`
     #   toughness     what they shrug off              — the Danger Check
     #   endurance     how slowly they tire             — Fatigue.accrual
-    #   intelligence  what they notice                 — the `observer:` gauge path (reserved)
-    #   dexterity     how finely they can work         — reserved
+    #   intelligence  what they notice                 — the `observer:` gauge path
+    #   dexterity     how finely they can work         — precision work
     #   charisma      how others take them             — reserved
+    #
+    # **`strength` is a RATIO, not an absolute, and 1.0 is a human's.** Below 1.0 means worse
+    # pound-for-pound than a person, which is where most large things sit — strength grows with
+    # cross-section and weight grows with volume, so an ogre is overwhelming because there is half
+    # a tonne of him rather than because he is efficient. It is also why nothing large can carry
+    # its own kind, and that falls out of the arithmetic rather than being a rule.
+    #
+    # What a job actually gets is therefore **derived** from the ratio and the body — see
+    # `DERIVED` and `Minion#force` — and `strength` itself is read directly only where
+    # strength-to-weight is genuinely the question, which is moving your own body: `Minion::PACE`.
     #
     # `dexterity` does NOT replace the `clumsy` tag. How finely somebody works and how often they
     # drop things are two statements about one person.
@@ -30,6 +40,24 @@ module ReactorSim
     # which is a different event from a long shift.
     STATS = %i[strength toughness endurance intelligence dexterity charisma].freeze
 
+    # The body a `strength` of 1.0 is the ratio for. Changing this rescales every derived figure
+    # in the game at once, which is why it lives here rather than beside any one consumer.
+    REFERENCE_MASS_KG = 70.0
+
+    # **What an `effort:` blend may name beyond the six, because mass pays off differently per
+    # job.** Both are 1.0 for a reference human, so a station's declared throughput stays true and
+    # weights still sum to 1.0 meaningfully.
+    #
+    #   force   strength × mass ÷ reference. Pushing a tub, heaving rock, a heavy lever — work
+    #           where friction and leverage decide, and where bulk pays linearly.
+    #   swing   √force. A tool at the end of an arm: a pick can only be swung so fast and bites
+    #           only so deep, so bulk stops paying in proportion. An ogre lands about twice a
+    #           human's work with the same pick, and a *bigger* pick is then the upgrade.
+    #
+    # **A station may still name `strength` directly**, and some should — a more specific caller
+    # wins over a general rule. These are additions to what `effort:` accepts, not a replacement.
+    DERIVED = %i[force swing].freeze
+
     # A stat can be driven to zero and no further. Negative strength would drive a lever *away*
     # from its target, which is not "very weak" — it is a different machine.
     MIN_STAT = 0.0
@@ -38,6 +66,22 @@ module ReactorSim
     # makes a negative contribution mean what it should: the lucky amulet's `clumsy: -0.15`
     # reduces clumsiness toward *not clumsy*, and cannot invent anti-clumsiness below that.
     TAG_RANGE = (0.0..1.0)
+
+    # **Mass is neither a stat nor a tag, and it is never defaulted.**
+    #
+    # Not a stat: stats pass through `Minion#effective`, which multiplies by `Injury.derating`, so
+    # a broken arm would make somebody *lighter*. Mass is a property of the body and nothing about
+    # being hurt changes it. Not a tag either: `TAG_RANGE` is 0..1, and an ogre heavier than a
+    # human cannot be said at all.
+    #
+    # **Absent is an error rather than a default.** It is load-bearing in two formulas — the lift
+    # limit and the burden ratio — and a quiet 70 kg cannot be seen in the content. An archetype
+    # that omits it raises at boot, exactly as one omitting `strength` already does.
+    #
+    # This floor is therefore **only** for a runaway negative offset — enough "slight build" to
+    # reach zero would be a division by zero in `burden`. It never covers an absent declaration;
+    # those are different failures and only one of them is allowed to be quiet.
+    MIN_MASS_KG = 1.0
 
     module_function
 

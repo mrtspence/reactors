@@ -119,5 +119,26 @@ a client.**
    `distortion?` split above — **in the same commit**. A filter missing from that split is one
    nobody can reason about from the spectator view.
 
-`observer:` is reserved for minions and inert for now. `Diagnostic#observer` is the seam for
-"who is reading this gauge"; do not repurpose it.
+## `observer:` names who is reading the gauge, and it is live
+
+An instrument with **no `observer:`** is a dial on a wall: it reads true, which is nearly every
+gauge in the game. One that **names a station** is somebody's word, and two things follow.
+
+- **Nobody posted there means `:offline`**, not a number nobody took. That is what makes
+  posting somebody a decision with a visible consequence.
+- **Whoever is posted drives the distorting filters**, through one `competence:` scalar —
+  `Minion#wits`, gated on `darkvision`, because a reading taken in the dark is not a reading.
+
+A filter opts in with `observed?`, the same shape as `distortion?` and for the same reason: the
+taxonomy lives on the filter, so adding one cannot silently miss a hook somewhere else. Only
+`Misread` declares it today; the other eight take no `competence:` argument at all.
+
+> **`observer:` must name a control point that exists**, and `Operation` refuses a build where
+> it does not. While the seam was inert, five of the steam engine's gauges named posts that
+> were never stations — `:fireman`, `:yardhand` — which read as intent and did nothing. The
+> moment it went live they became instruments nobody could ever man. **A decorative observer
+> is worse than none.**
+
+**Declare it on very few instruments.** If every gauge becomes a person's opinion the panel
+stops being trustworthy at all and the player disengages from instruments entirely, which is
+the opposite of the intent.

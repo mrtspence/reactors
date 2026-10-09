@@ -37,6 +37,33 @@ Top-level files: `tick.rb` (the eight phases, in order), `operation.rb` (config,
 projection, serialisation), `match.rb` (many operations in lockstep), `content.rb`,
 `control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`.
 
+What a person is subject to lives in six pure modules over a state hash they do not own,
+none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
+air), `scorch.rb` (the heat), `peril.rb` (the place, and the hidden margin it spends) and
+`burden.rb` (what they are carrying).
+**A harm that works continuously owes a dwell counter past collapse** — `asphyxia` and
+`burns` — because `Severity.escalate` will not announce the same tier twice and a steady
+grind therefore never reaches `:mortal` on its own.
+
+> **A burden is gear and people, and the arithmetic cannot tell them apart.** `mass_kg` is the
+> body; `worn_kg` is what is hanging off it; a carried person contributes both of theirs. Keeping
+> the two apart is load-bearing — fold equipment into the body and gear makes you *better* at
+> carrying somebody. **Strength decides what you can lift and the mass ratio decides how much it
+> slows you**, which is why a kobold is refused an ogre outright while the same kit costs a kobold
+> three times the pace it costs a human.
+>
+> **Carrying a person is the only burden that stops you resting.** `Fatigue.recovery` returns
+> zero while `carrying` is non-empty, because accrual and recovery *net*: a light casualty
+> produces a small accrual that `BASE_RECOVERY` still beats, so without the gate carrying a
+> kobold out reads as a rest. Measured — a kobold on a half-tired human over a minute is +0.064
+> fatigue with the gate and **−0.068 without it**. Armour you can rest off; a body you cannot.
+
+> **Every die thrown for a person is thrown in `Tick#draw_fates`, in phase 0, unconditionally
+> for everybody.** A conditional draw makes the RNG stream depend on the condition and the
+> divergence surfaces as a snapshot replaying differently, days later, somewhere unrelated.
+> Keeping the count fixed and in one method is what makes it checkable — see
+> [`invariants.md`](../../docs/reference/invariants.md#2-determinism).
+
 ## Events are the other output, and they have one rule
 
 `Event` is what the machine *reported*: a part failing, a fire catching, a drum reaching
@@ -94,7 +121,7 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 
 > **`posting` is where somebody has been SENT; `station` is what they are actually working.**
 > `assign_minion` writes the first and names a destination, never a step — which is what lets it
-> ride an at-least-once log with no dedup table. The walk happens inside the tick, in phase 6d,
+> ride an at-least-once log with no dedup table. The walk happens inside the tick, in phase 6e,
 > and the two fields differ only for as long as it takes. An operation that declares no
 > `passages:` has no geometry, so they are always equal and none of this costs anything.
 >

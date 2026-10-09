@@ -733,10 +733,10 @@ The upgrade rule holds: **an upgrade may reduce a filter, never remove a class o
 Each stage separately shippable and separately reviewable, lettered as the bearings and
 modularisation releases were.
 
-### Stage A — the coupling
+### Stage A — the coupling ✅
 
-Power crossing between two operations. **No mine.** Proved against two steam engines, one driving
-the other's line shaft.
+**Built.** Power crossing between two operations, proved against two steam engines, one driving
+the other's line shaft. **No mine** is involved in any of it.
 
 **The model, and why it is not `τ = P/ω`.** `nodes/CLAUDE.md` is explicit that *"torque is not
 `power ÷ ω`. It is the obvious derivation and it explodes at rest"* — `Nodes::Motor` did it first
@@ -760,23 +760,24 @@ charges the buffer what the shaft measurably gained.
 > consequence is real: a coupled mine runs at its engine's rate, whatever
 > [`tick.md`](../reference/tick.md) says a lone mine might prefer.
 
-Deliverables:
+What landed:
 
-- `Nodes::Export < Load` — a load whose absorbed work is *nameable*, recording `joules_exported`
-  in its own state. One export point per operation, declared rather than inferred from the
-  aggregate ledger.
-- `Nodes::Import` — includes `Rotating`, holds `supply_joules`, declares torque from a linear
+- **No export node.** A `Load` already records `joules_extracted` in its own state, so
+  `Operation#exported_joules` reads that by node id and the coupling names the load directly.
+  The planned `Nodes::Export` would have added a class to rename a field that was already there.
+- `Nodes::Import` — holds `supply_joules`, declares torque from a linear
   motor curve (`τ = rated_torque × (1 − ω/ω_noload)`, floored at zero) scaled by supply
   availability. Full torque at rest, which is correct for a stalled motor and is what keeps it
   finite. A mine labels it "Line Shaft"; the class stays generic.
 - `Match#exchange!` — runs **before any operation steps**, reading every operation's settled N−1
   state, so it cannot depend on the order operations are visited in (invariant 3). Couplings are
   match-level config and must survive `to_h`/`from_h`.
-- `Ledger` gains `joules_imported` on the entry side. `joules_to_work` stays the exit on the
+- `Ledger` carries `joules_imported` on the entry side. `joules_to_work` stays the exit on the
   exporter, so per-operation conservation holds on both sides and a match-level sum cancels.
-- Specs: conservation across the boundary at **mismatched `time_scale`s**; a brownout — starve the
-  exporter and watch the importer's shaft slow rather than stop dead; snapshot round-trip carrying
-  couplings and buffer.
+- `coupling_spec` holds the boundary: conservation across it, each operation's own balance still
+  closed, order-independence, a brownout winding the shaft down rather than stopping it dead, a
+  refusal to couple operations on different clocks, and a snapshot round-trip carrying both the
+  couplings and the unspent supply.
 
 ### Stage B — the spatial model ✅
 
@@ -874,11 +875,12 @@ A fourth, found in play and fixed afterwards:
   which is why the tier comparison in `mine_tech_spec` is measured before anything goes wrong
   and the ignition is a claim of its own.
 
-Owed: blackdamp, whitedamp and **afterdamp** — the mixture that fills a mine after an explosion
-and historically killed more than the blast. The district burns its oxygen and the survivors
-should then be suffocating; today they are merely in a wrecked roadway. Also **coal dust**, which
-is what turns a local ignition into a whole-mine catastrophe, and the buoyancy that makes
-firedamp collect in the roof rather than mixing evenly.
+Blackdamp, whitedamp, **afterdamp** and **coal dust** all landed in the stage F follow-up and
+have specs of their own.
+
+Owed: **buoyancy inside a volume.** A node's parcels mix evenly, so firedamp does not collect in
+the roof and a deputy cannot find it by raising his lamp — which is the historical way the gas
+is read, and the reason a yardstick was part of the job.
 
 ### Stage E — hoisting ✅
 
@@ -903,9 +905,8 @@ they ride. Measured: **150 s on the ladders against 41 s in the cage.**
 > Coal was unaffected, because the winder has five times the capacity the pick can feed it. A
 > drum interlock could be added later; it is not needed for the choice to bite.
 
-Owed: the **man engine** — the tier between ladders and a cage, and the most vivid machine in
-the research — and a separate man-riding shaft, which is what a real colliery bought when shift
-change started costing it coal.
+Owed: a **separate man-riding shaft**, which is what a real colliery bought when shift change
+started costing it coal. The man engine landed as the middle tier.
 
 ### Stage F — hazards and the tech tree ◐
 

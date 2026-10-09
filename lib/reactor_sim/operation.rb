@@ -88,12 +88,16 @@ module ReactorSim
     # be impossible for *this* minion — a narrow crawl they cannot fit through, a ladderway they
     # cannot climb — and walking them into a wall for the rest of the match is worse than saying
     # no. Reachability is per-minion because the gates are.
+    # **A posting may name a lever or a person.** Sending somebody to a person is a *fetch
+    # order* — they walk to wherever that person is and pick them up on arrival — and it needs no
+    # second command shape, because every id in an operation is one flat namespace and
+    # `validate_graph!` refuses duplicates. See `docs/design_sketches/carrying.md` §1.
     def assign_minion(minion_id, station_id)
       minion = @minions[minion_id&.to_sym]
       return false unless minion
 
       station = station_id&.to_sym
-      return false unless station.nil? || @control_points.key?(station)
+      return false unless station.nil? || @control_points.key?(station) || fetchable?(minion, station)
 
       minions = @state.fetch(:minions)
       current = minions.fetch(minion.id)
@@ -105,11 +109,38 @@ module ReactorSim
       true
     end
 
+    # **Put somebody down, here.** Named for the person being set down rather than for whoever is
+    # holding them, which is what makes it per-person — an ogre leaves five in the refuge and
+    # carries the sixth on.
+    #
+    # **Idempotent *and commutative*, which an absolute list would not be.** The ingress is
+    # at-least-once and unordered, so two drops that produce `[B, C]` then `[C]` could arrive
+    # reversed and put B back in somebody's arms. Removing a named element cannot do that however
+    # it is replayed or reordered — "absolute" means the end state is determined, not that the
+    # payload is a whole value. See `docs/design_sketches/carrying.md` §2.
+    def drop_minion(minion_id)
+      id = minion_id&.to_sym
+      return false if id.nil?
+
+      minions = @state.fetch(:minions)
+      carrier, held = minions.find { |_, s| Burden.carried(s).include?(id) }
+      return false if carrier.nil?
+
+      freed = held.merge(carrying: (Burden.carried(held) - [ id ]).freeze)
+      @state = @state.merge(minions: minions.merge(carrier => freed.freeze).freeze).freeze
+      true
+    end
+
     # Is this minion already standing where that posting is worked? Always true without geometry,
     # and true for a control that declares no `place:` — a lever nobody has placed can be worked
     # from wherever they happen to be.
+    # **A fetch order is never "already there", even standing in the same room.** The pickup
+    # happens in phase 6e, so saying they have arrived would set `station` to a person's id —
+    # which `tire` would read as a lever and the panel as a job. One tick's delay, and it is the
+    # same one-hop delay everything else in the engine has.
     def standing_at?(minion, state, station)
       return true unless @layout.spatial?
+      return false if @minions.key?(station)
 
       destination = @layout.place_of(station)
       destination.nil? || destination == minion.place(state)
@@ -129,13 +160,44 @@ module ReactorSim
       control.room_for?(taken)
     end
 
+    # **Can this minion be sent to fetch that one?** Refused for anything that would make the
+    # carry graph deeper than one — `Tick#stow` writes a carried minion's place from their
+    # carrier's in a single lookup, and a chain would make that wrong rather than slow.
+    #
+    # Refusing here and not only in the tick is what gives the player an answer at the moment they
+    # ask. The tick re-checks the load and who already has them, because minutes pass in between.
+    def fetchable?(minion, target)
+      other = @minions[target]
+      return false if other.nil? || other.id == minion.id
+
+      states = @state.fetch(:minions)
+      return false if Burden.carrying?(states.fetch(target, {}))            # cargo cannot carry
+      return false if carried_by(states, minion.id)                        # nor can the carrier
+      return false if carried_by(states, target)                           # already in somebody's arms
+
+      Burden.liftable?(minion, states.fetch(minion.id), @minions, other)
+    end
+
+    # Who is holding this minion, or nil. Returns the id rather than a boolean because both
+    # callers want it: the command path only asks whether, and `crew_view` has to say who.
+    def carried_by(states, id)
+      states.find { |carrier, s| carrier != id && Burden.carried(s).include?(id) }&.first
+    end
+
     def can_reach?(minion, state, station)
       return true unless @layout.spatial?
 
-      destination = @layout.place_of(station)
+      destination = posted_place(station)
       return true if destination.nil?
 
       @layout.reachable?(minion.place(state), destination, @routing.fetch(minion.id, []))
+    end
+
+    # A lever's room, or the room the person named is standing in.
+    def posted_place(station)
+      return @layout.place_of(station) unless @minions.key?(station)
+
+      @state.fetch(:minions).dig(station, :place)
     end
 
     # Which gated passages each minion may use, decided once from tags that cannot change during
@@ -242,12 +304,22 @@ module ReactorSim
         # `travel` is the same argument for a walk that takes minutes: "sent to the far face" is
         # not a state a player should have to take on trust for five minutes, so how far along
         # they are goes on the projection beside where they have got to.
+        # `carried_by` is the half the client cannot work out for itself without scanning every
+        # other crew member, and it is what the *Set down* button hangs on. A carried minion's
+        # travel bar reads their carrier's, because their own is frozen where they were picked up
+        # and would render as somebody stuck in a wall.
+        carrier = carried_by(@state.fetch(:minions), id)
         [ id, { station: minion_state[:station], posting: minion_state[:posting],
                 place: minion_state[:place], injury: minion_state[:injury],
                 fatigue: minion_state[:fatigue], asphyxia: minion_state[:asphyxia],
-                travel: @minions[id]&.journey_fraction(minion_state) || 0.0,
-                remaining_m: minion_state[:remaining] } ]
+                carrying: minion_state[:carrying] || [], carried_by: carrier,
+                travel: journey_of(carrier || id),
+                remaining_m: @state.fetch(:minions).dig(carrier || id, :remaining) } ]
       end.freeze
+    end
+
+    def journey_of(id)
+      @minions[id]&.journey_fraction(@state.fetch(:minions).fetch(id)) || 0.0
     end
 
     # **The feed is curated; the log is complete.** Every event this tick goes to the durable
@@ -369,6 +441,18 @@ module ReactorSim
         raise Error, "minion #{minion.id}: no control point #{station}"
       end
 
+      # **An `observer:` names a station, and the station has to exist.** While the seam was
+      # inert this went unchecked and five of the steam engine's gauges named posts that were
+      # never control points — `:fireman`, `:yardhand` — which read as intent and did nothing.
+      # The moment the seam went live they became gauges that could never be manned and so
+      # were permanently offline. A decorative observer is worse than none.
+      @diagnostics.each_value do |diagnostic|
+        station = diagnostic.observer
+        next if station.nil? || @control_points.key?(station)
+
+        raise Error, "diagnostic #{diagnostic.id}: no control point #{station} to observe it"
+      end
+
       @links.each do |link|
         source = @nodes[link.from_node] or raise Error, "link #{link.id}: no node #{link.from_node}"
         sink   = @nodes[link.to_node]   or raise Error, "link #{link.id}: no node #{link.to_node}"
@@ -450,14 +534,29 @@ module ReactorSim
       # `posting` and `place` are the same trap again, one and two fields along — a posting that
       # comes back as a String never matches the station it names, so the whole shift is
       # permanently walking toward somewhere that does not exist.
+      # **`carrying` is the SEVENTH instance and the first that is a LIST of them.** Every id in
+      # it is a symbol living as a value, so a restored carrier holds a crowd of ghosts: nothing
+      # matches a seat, so the casualty is never put down, never moved, and never noticed — while
+      # the carrier still pays the burden for somebody who is not there.
       minions = state.fetch(:minions, {}).to_h do |id, minion_state|
         [ id, minion_state.merge(station: minion_state[:station]&.to_sym,
                                  posting: minion_state[:posting]&.to_sym,
                                  place: minion_state[:place]&.to_sym,
-                                 injury: minion_state[:injury]&.to_sym).freeze ]
+                                 injury: minion_state[:injury]&.to_sym,
+                                 carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze)
+              .freeze ]
       end
 
-      state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze,
+      # **Sixth instance of the symbols-as-values trap, and the first to reach `controls`** —
+      # until a lever could be got wrong, a control's whole state was two floats. A slip kind
+      # that comes back as a String matches no `case` branch, so the lever silently stops
+      # being mishandled on restore and `slip_at` names a lever nothing can find.
+      controls = state.fetch(:controls, {}).to_h do |id, cp_state|
+        [ id, cp_state.merge(slip: cp_state[:slip]&.to_sym,
+                             slip_at: cp_state[:slip_at]&.to_sym).compact.freeze ]
+      end
+
+      state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze, controls: controls.freeze,
                   minions: minions.freeze, events: state.fetch(:events, [])).freeze
     end
 

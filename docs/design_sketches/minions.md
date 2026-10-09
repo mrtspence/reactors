@@ -402,8 +402,9 @@ long-standing TODO. It was too dangerous to act on while it would have frozen al
 engine's levers; applied only to the two that are somebody's work, "an unmanned shovel moves no
 coal" is simply true.
 
-`stiffness` stays, unused by any shipped control, for a lever that should genuinely take time to
-travel. The other five controls are valves and a valve goes where you put it.
+`stiffness` stays for a lever that should genuinely take time to travel. This engine's other
+five controls are valves and a valve goes where you put it; the mine's valves later took finite
+figures, and effort stations stayed infinite for the reason this section argues.
 
 > **Fatigue belongs here and is the next thing.** Effort is *subjective* exertion — the same lever
 > position costs a day-labourer far more than it costs a strong fireman — so the natural rule is

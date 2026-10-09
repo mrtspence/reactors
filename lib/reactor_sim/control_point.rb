@@ -10,8 +10,20 @@ module ReactorSim
   # snapshotting. Everything else happens inside the tick; entropy drawn during command
   # application would make replay diverge.
   class ControlPoint
+    # How often somebody who simply is not sharp gets a job wrong, per second, at any lever at
+    # all — about once every two minutes, which is frequent enough to be a character trait and
+    # rare enough not to be a disability.
+    BONEHEADED_PER_S = 0.008
+
+    # And how often somebody out of their depth does, per second per point of shortfall.
+    BEYOND_PER_S = 0.02
+
+    # What working an uncertificated post is worth: the job is twice as far beyond you as it
+    # would be with the ticket in your pocket.
+    UNTICKETED = 2.0
+
     attr_reader :id, :label, :node, :min, :max, :default, :unit, :stiffness, :effort, :aided_by,
-                :exertion, :recovery, :place, :gated_by, :capacity
+                :exertion, :recovery, :place, :gated_by, :capacity, :complexity, :requires
 
     # **A valve is not a job, and that distinction is what makes a crew matter.** Most controls
     # are valves: a regulator goes where you put it and who put it there is irrelevant. A few are
@@ -33,8 +45,9 @@ module ReactorSim
     # > a kobold with no shovel would eventually equal an ogre with a specialised tool. Stiffness
     # > is a derivative; capability is the rate itself.
     #
-    # `stiffness` remains, unused by any shipped control, for a lever that should genuinely take
-    # time to travel. Infinite means frictionless — `actual` snaps to `target`.
+    # `stiffness` is for a lever that genuinely takes time to travel, in percent of its range per
+    # second, scaled by whoever is stood there. The mine's valves ship finite figures; infinite
+    # means frictionless, and `actual` snaps to `target`.
     # **`exertion:` is what this job costs, and it belongs here for the same reason `effort:`
     # does** — the machine is what knows that shovelling is not watching a gauge. It is fatigue
     # per second for a competent, unaided human with the lever hard over, so its reciprocal reads
@@ -52,9 +65,19 @@ module ReactorSim
     # bigger one is something a mine buys, so the number is a part's stat rather than a rule.
     # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can
     # walk to.
+    # `complexity:` is **how tricky this lever is to work correctly**, and is the exact parallel
+    # to `effort:` — deliberately orthogonal to it. `effort:` says how *fast* a job happens and
+    # therefore depends on who does it; `complexity:` says whether it happens *correctly*. A
+    # strong idiot stokes perfectly well and sets the cut-off wrong, and with `effort:` alone he
+    # would be good at both.
+    #
+    # `requires:` names the tag a certificated post wants. Lacking it never forbids the posting
+    # — a player may always put the wrong person on anything — it makes them likelier to get it
+    # wrong, which is what a ticket actually buys.
     def initialize(id:, label: nil, node: nil, min: 0.0, max: 100.0, default: 0.0,
                    unit: "%", stiffness: Float::INFINITY, effort: nil, aided_by: nil,
-                   exertion: 0.0, recovery: nil, place: nil, gated_by: nil, capacity: nil)
+                   exertion: 0.0, recovery: nil, place: nil, gated_by: nil, capacity: nil,
+                   complexity: 0.0, requires: nil)
       @id = id.to_sym
       @label = label || @id.to_s.tr("_", " ").capitalize
       @node = node&.to_sym
@@ -72,6 +95,8 @@ module ReactorSim
       @exertion = exertion.to_f
       @recovery = (recovery || (effort ? 0.0 : Fatigue::BASE_RECOVERY)).to_f
       @capacity = capacity&.to_i
+      @complexity = complexity.to_f
+      @requires = requires&.to_sym
       validate_effort!
       validate_fatigue!
       validate_capacity!
@@ -112,14 +137,49 @@ module ReactorSim
     # Phase 0. Converge the actual toward the target at whatever rate the operator can
     # manage. Deterministic; any mishap entropy belongs to the minion, drawn here.
     def actuate(state, dt:, rate_multiplier: 1.0)
-      target = state.fetch(:target)
-      actual = state.fetch(:actual)
-      return state if (target - actual).abs <= Float::EPSILON
+      nudge(state, travel(state, dt: dt, rate_multiplier: rate_multiplier))
+    end
 
-      return state.merge(actual: target) if @stiffness.infinite?
+    # **How far this lever would travel this tick, signed.** Separated from applying it so that
+    # a mistake can send the movement somewhere else: a hand on the wrong lever is still a hand
+    # doing the same amount of work, just not where it was meant to.
+    def travel(state, dt:, rate_multiplier: 1.0)
+      gap = state.fetch(:target) - state.fetch(:actual)
+      return 0.0 if gap.abs <= Float::EPSILON
+      return gap if @stiffness.infinite?
 
       step = @stiffness * rate_multiplier * dt * (@max - @min) / 100.0
-      state.merge(actual: actual + (target - actual).clamp(-step, step))
+      gap.clamp(-step, step)
+    end
+
+    # Clamped, because a movement that arrived here by mistake was aimed at a different lever
+    # with a different range.
+    def nudge(state, delta)
+      return state if delta.zero?
+
+      state.merge(actual: (state.fetch(:actual) + delta).clamp(@min, @max))
+    end
+
+    # **How likely whoever is stood here is to do the wrong thing**, per second.
+    #
+    # Two independent routes, because they are different failures: somebody **boneheaded** will
+    # occasionally get any job wrong, and anybody will occasionally get wrong a job that is
+    # **beyond them**. A careful expert at a simple lever is never wrong, and that is the point
+    # — this must cost nothing at the fourteen levers that are just valves.
+    def slip_chance(minion, wits, dt)
+      careless = Injury.numeric(minion.tag(:boneheaded))
+      beyond = @complexity.positive? ? [ difficulty(minion) - wits, 0.0 ].max : 0.0
+      return 0.0 if careless.zero? && beyond.zero?
+
+      ((BONEHEADED_PER_S * careless) + (BEYOND_PER_S * beyond)) * dt
+    end
+
+    # An uncertificated hand at a post that wants a ticket is further out of their depth than
+    # their wits alone say — which is what a ticket *is*.
+    def difficulty(minion)
+      return @complexity if @requires.nil? || Injury.numeric(minion.tag(@requires)).positive?
+
+      @complexity * UNTICKETED
     end
 
     def value(state) = state.fetch(:actual)
@@ -138,7 +198,12 @@ module ReactorSim
     def validate_effort!
       return if @effort.nil?
 
-      unknown = @effort.keys - Sheet::STATS
+      # Stats **plus** the derived quantities: a station may ask for `force` or `swing` as readily
+      # as for a stat, and `Minion#effective` resolves either. A typo is still refused at build,
+      # which is the only mistake here the engine can catch — a station left reading `strength`
+      # where it meant `force` builds happily and simply makes a big worker no better at a heavy
+      # job. See `docs/design_sketches/strength-to-weight.md` §8.
+      unknown = @effort.keys - Sheet::STATS - Sheet::DERIVED
       raise Error, "control #{@id}: unknown effort stat(s) #{unknown.join(', ')}" if unknown.any?
 
       total = @effort.values.sum

@@ -108,6 +108,12 @@ module ReactorSim
 
     # A golem does not breathe, and that is binary — a gate rather than a resistance, for the
     # same reason `gated_by:` multiplies where `aided_by:` adds.
+    #
+    # TODO: **nothing in `content/` declares `unbreathing`**, so this branch is unreachable in a
+    # real match and is untested outside `breath_spec`'s fixture. First caller is a race that does
+    # not breathe — a golem or a construct — which is content rather than engine work. Do not
+    # delete it as dead: the alternative is a resistance, and a resistance is the wrong shape for
+    # a thing with no lungs.
     def unbreathing?(minion) = Injury.numeric(minion.tag(:unbreathing)).positive?
 
     # **Apparatus runs out, and that is the whole character of it.** A rescue team's range is

@@ -1,65 +1,36 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/pit_rig"
 
 # **Blackdamp: the quiet one, and the opposite of firedamp in every way that matters.**
 #
 # Air with the oxygen already taken out of it, left where coal has slowly oxidised in the
-# worked-out ground. It does not burn and it does not explode; it kills by being there instead
-# of air, and there is nothing to smell. Heavier than air, so it lies in the dips — which makes
-# it **the pit bottom's hazard where firedamp is the face's**.
+# worked-out ground. It does not burn and it does not explode; it kills by being there instead of
+# air, and there is nothing to smell. Heavier than air, so it lies in the dips — which makes it
+# **the pit bottom's hazard where firedamp is the face's**.
 #
-# The warning is the instrument, and it is the only gauge in this operation that trips before
-# the danger does: a flame lamp dulls and goes out in blackdamp well before a man collapses in
-# it. That is why the lamp was still worth carrying for something other than light.
+# The warning is the instrument, and it is the only gauge in this operation that trips before the
+# danger does: a flame lamp dulls and goes out in blackdamp well before a man collapses in it. That
+# is why the lamp was still worth carrying for something other than light.
 #
-# Its own crew, with a real `endurance` — see `afterdamp_spec` for why.
+# Its own crew, with a real `endurance` — bad air drains `fatigue` rather than a pool of its own,
+# so tireless hands make every example here pass while proving nothing.
 #
-# See `docs/design_sketches/breathable-air.md` stage C.
-module BlackdampCrew
-  ARCHETYPE = { label: "Collier", strength: 1.0, toughness: 1.0, endurance: 1.0,
-                intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
-                tags: { mining_effectiveness: 0.6, shovelling: 0.5,
-                        darkvision: 0.8 } }.freeze
-
-  MINIONS = (1..4).to_h { |i| [ :"hand_#{i}", { name: "Hand #{i}", archetype: :collier,
-                                                hireable: false } ] }.freeze
-
-  CONTENT = ReactorSim::Content.default.merging(archetypes: { collier: ARCHETYPE },
-                                                minions: MINIONS)
-
-  CREW = (1..4).to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{i}" } ] }.freeze
-end
-
+# ## Built, not waited for
+#
+# The air at the pit bottom is **constructed** with `bottom_mix`, and a worker who has been at it
+# all shift is constructed by seeding their `fatigue`. Both are preconditions rather than claims,
+# and waiting for them cost this file around 60,000 ticks.
+#
+# See `docs/design_sketches/breathable-air.md` stage C and `design_sketches/suite-runtime.md` §7.
 RSpec.describe "blackdamp" do
-  before { allow(ReactorSim::Content).to receive(:default).and_return(BlackdampCrew::CONTENT) }
+  include PitRig
 
-  def pit
-    ReactorSim::Match
-      .create(id: "b", seed: 3,
-              operations: [ { id: "pit", type: :mine, loadout: { manriding: :cage_gear },
-                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
-                              crew: BlackdampCrew::CREW } ])
-      .operation(:pit)
-  end
+  # **Hands who tire**, because bad air drains `fatigue` rather than a pool of its own.
+  before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::TIRING_CONTENT) }
 
-  def run!(op, ticks, from: 0)
-    ticks.times.flat_map do |i|
-      op.receive_supply(:line_shaft, 9.0e4)
-      op.step!(tick: from + i + 1)
-    end
-  end
-
-  def held(op, node, resource)
-    (op.state.fetch(:nodes).fetch(node).fetch(:parcels)
-       .find { |p| p.fetch(:resource) == resource }&.fetch(:kg)) || 0.0
-  end
-
-  def air(op, place)
-    ReactorSim::Breath.breathable_fraction(
-      op.state.fetch(:nodes).fetch(op.layout.breathes(place)).fetch(:parcels), op.content
-    )
-  end
+  def pit = build_pit(id: "b", seed: 3, loadout: { manriding: :cage_gear })
 
   def lamp(op)
     state = op.state.dig(:diagnostics, :lamp_flame)
@@ -67,45 +38,58 @@ RSpec.describe "blackdamp" do
       .display.render(state.fetch(:value), state.fetch(:flags, []))
   end
 
-  # A pit with the putter at the bottom, where the blackdamp is.
-  def worked(ventilation:, ticks: 3_000)
+  # A pit with the putter at the bottom where the blackdamp is, and **nobody at the face** — which
+  # is what `hewing: nil, timbering: nil` says, and it matters: a hewer cutting coal adds firedamp
+  # and dust, and this file is about neither.
+  #
+  # `damp:` is a mass percentage of the pit bottom's air charge. `tired:` seeds the putter's
+  # fatigue, which is how an example about *collapse* gets to be short — a shift's worth of work is
+  # the precondition, not the claim.
+  def pit_with(damp: 0.0, firedamp: 0.0, tired: nil)
     op = pit
-    op.set_control(:winding, 100)
-    op.set_control(:man_winding, 100)
-    op.assign_minion(:crew_2, :haulage)
-    run!(op, 600)
+    # `PitRig::` qualified, because a bare constant inside an example group resolves lexically
+    # against `Object` rather than through the `include`.
+    nodes = { pit_bottom: bottom_mix(op, blackdamp: gas_kg(damp, air: PitRig::BOTTOM_AIR_KG)) }
+    nodes[:district] = district_mix(op, firedamp: gas_kg(firedamp)) if firedamp.positive?
 
-    op.set_control(:man_winding, 0)
-    op.set_control(:haulage, 100)
-    op.set_control(:ventilation, ventilation)
-    run!(op, ticks, from: 600)
-    op
+    at_the_face(seed(op, nodes: nodes, minions: tired ? { crew_2: { fatigue: tired } } : {}),
+                hewing: nil, timbering: nil)
+  end
+
+  def work!(op, ticks, ventilation: 0, **levers)
+    levers!(op, haulage: 100, winding: 100, pumping: 100, ventilation: ventilation, **levers)
+
+    run!(op, ticks)
   end
 
   describe "where it comes from" do
     # Unlike firedamp, which the face gives off while it is being worked, blackdamp comes out of
-    # ground nobody goes into any more — so it arrives whether or not anybody is cutting.
+    # ground nobody goes into any more — so it arrives whether or not anybody is cutting. **Not
+    # constructed**, because the arriving is the claim.
     it "seeps out of the old workings with nobody doing anything" do
-      op = pit
-      run!(op, 2_000)
+      op = pit_with
+      work!(op, 100)
 
       expect(held(op, :pit_bottom, :blackdamp)).to be > 0.0
       expect(op.state.dig(:controls, :hewing, :actual)).to eq(0.0)
     end
 
-    # **The low point of the mine, because it is heavier than air.** Firedamp collects in the
-    # roof at the face; this lies in the dips, and the deepest dip is the shaft bottom.
+    # **The low point of the mine, because it is heavier than air.** Firedamp collects in the roof
+    # at the face; this lies in the dips, and the deepest dip is the shaft bottom. Also not
+    # constructed — *where the seep puts it* is exactly what is being asserted. Measured at 100
+    # ticks with the fan off: 5.28 kg at the bottom against 0.51 in the district.
     it "collects at the pit bottom rather than at the face" do
-      op = worked(ventilation: 0)
+      op = pit_with
+      work!(op, 100)
 
       expect(held(op, :pit_bottom, :blackdamp)).to be > held(op, :district, :blackdamp)
     end
 
-    # **It is inert because no reaction names it**, which is the whole mechanism — a substance
-    # is a reagent by being listed, so being left out of every list is what "will not burn"
-    # means. Asserted against the registry rather than by weighing a district afterwards: an
-    # explosion drives the atmosphere out through the return, so blackdamp does leave, and a
-    # mass test would be measuring the blast rather than the chemistry.
+    # **It is inert because no reaction names it**, which is the whole mechanism — a substance is a
+    # reagent by being listed, so being left out of every list is what "will not burn" means.
+    # Asserted against the registry rather than by weighing a district afterwards: an explosion
+    # drives the atmosphere out through the return, so blackdamp does leave, and a mass test would
+    # be measuring the blast rather than the chemistry.
     it "is in no reaction at all, as a reagent or as a product" do
       named = ReactorSim::Content.default.reactions.values.flat_map do |spec|
         spec.fetch(:consumes, {}).keys + spec.fetch(:produces, {}).keys
@@ -114,114 +98,155 @@ RSpec.describe "blackdamp" do
       expect(named).not_to include(:blackdamp)
     end
 
-    # And the consequence a player sees: it is still down there after the blast. It does lose
-    # some — an explosion drives the atmosphere out through the return — but it is dispersed
-    # rather than consumed, where a fuel in the same volume is spent.
-    it "is still there after an ignition" do
-      op = worked(ventilation: 0)
+    # And the consequence a player sees: it is still down there after the blast.
+    #
+    # **Asserted against the firedamp beside it rather than as a fraction of itself**, which is
+    # what the claim actually is — blackdamp is *dispersed* where a fuel is *spent*. Both lose
+    # mass, because an explosion drives the atmosphere out through the return, so a bare "more
+    # than half survives" is a statement about how hard the blast blew rather than about
+    # chemistry: measured here, 16% of the blackdamp remains and **1%** of the firedamp.
+    it "is dispersed by an ignition where the firedamp beside it is consumed" do
+      op = pit_with(damp: 40.0, firedamp: 8.0)
       damp = held(op, :pit_bottom, :blackdamp)
+      fuel = held(op, :district, :firedamp)
 
-      op.set_control(:naked_flame, 100)
-      run!(op, 2_000, from: 3_600)
+      events = work!(op, 60, naked_flame: 100, timbering: 100)
 
-      expect(held(op, :pit_bottom, :blackdamp)).to be > damp * 0.5
+      expect(events.map { |e| e[:type] }).to include(:fire_lit)
+      left = held(op, :pit_bottom, :blackdamp) / damp
+      burnt = held(op, :district, :firedamp) / fuel
+      expect(left).to be > 5.0 * burnt, "blackdamp #{left} vs firedamp #{burnt}"
     end
 
     # **And it makes the explosion worse at its job**, which is the nicest thing the model does
-    # here and nobody wired it: firedamp combustion consumes 17.2 kg of air per kilogram of gas,
-    # so a district whose air has been displaced cannot burn what is in it. An unventilated
-    # working is both the gassiest and the hardest to set off properly.
+    # here and nobody wired it: firedamp combustion consumes 17.2 kg of air per kilogram of gas, so
+    # a district whose air has been displaced cannot burn what is in it as fiercely.
+    #
+    # **Asserted as the temperature the fire reaches, not as gas left unburnt.** The old form
+    # demanded that 20–90% of the gas survive, and it does not — at every blackdamp level the
+    # firedamp is 97–99% consumed, just more slowly and far more coolly. Measured across 0 / 30 /
+    # 50% blackdamp: **2379 → 1935 → 1544 K**, which is the mechanism, monotone, and nothing like a
+    # tuning coincidence.
     it "starves the fire it cannot feed" do
-      op = worked(ventilation: 0)
-      gas = held(op, :district, :firedamp)
+      peaks = [ 0.0, 30.0, 50.0 ].map do |damp|
+        op = at_the_face(seed(pit, nodes: {
+          district: district_mix(pit, firedamp: gas_kg(8.0), blackdamp: gas_kg(damp))
+        }))
+        work!(op, 60, naked_flame: 100, timbering: 100)
+        op.nodes.fetch(:district)
+          .temperature_k(op.state.fetch(:nodes).fetch(:district), op.content)
+      end
 
-      op.set_control(:naked_flame, 100)
-      run!(op, 2_000, from: 3_600)
-
-      expect(held(op, :district, :firedamp)).to be_between(gas * 0.2, gas * 0.9)
+      expect(peaks.each_cons(2).all? { |clear, damped| damped < clear }).to be(true), peaks.inspect
+      expect(peaks.last).to be < 0.7 * peaks.first
     end
   end
 
   describe "ventilation is the whole answer to it" do
+    # **The fan against the seep, which is the claim** — so this starts from air and lets the
+    # ground do the work, rather than seeding a charge. A fan that holds a working pit breathable
+    # is not the same machine as one that can clear 730 kg of damp already lying in the sump: it
+    # cannot, in any window, and asserting that it can was asserting the wrong thing.
     it "keeps the pit breathable with the fan running" do
-      op = worked(ventilation: 100)
+      op = pit_with
+      work!(op, 200, ventilation: 100)
 
       expect(air(op, :pit_bottom)).to be > ReactorSim::Breath::SAFE
       expect(air(op, :district)).to be > ReactorSim::Breath::SAFE
     end
 
     it "hurts nobody at all while the fan is running" do
-      op = worked(ventilation: 100, ticks: 6_000)
+      op = pit_with(tired: 0.90)
+      work!(op, 200, ventilation: 100)
 
       expect(op.state.fetch(:minions).values.map { |s| s[:injury] }).to all(be_nil)
     end
 
     # **Spent is not collapsed**, and this is where the distinction earns its keep: the putter
-    # works himself to the fatigue ceiling in good air and is merely tired.
+    # reaches the fatigue ceiling in good air and is merely tired. Seeded at 0.90 rather than
+    # worked up to it over 6,000 ticks, because what is being claimed is what happens *at* the
+    # ceiling, not how long it takes to get there.
     it "leaves a worker spent in good air rather than stood down" do
-      op = worked(ventilation: 100, ticks: 6_000)
+      op = pit_with(tired: 0.90)
+      work!(op, 100, ventilation: 100)
 
-      expect(op.state.dig(:minions, :crew_2, :fatigue)).to eq(1.0)
-      expect(op.state.dig(:minions, :crew_2, :injury)).to be_nil
+      expect(crew(op, :crew_2).fetch(:fatigue)).to eq(1.0)
+      expect(crew(op, :crew_2).fetch(:injury)).to be_nil
     end
 
     it "fills the bottom once the fan stops" do
-      blowing = worked(ventilation: 100)
-      still = worked(ventilation: 0)
+      blowing = pit_with(damp: 50.0)
+      still = pit_with(damp: 50.0)
+      work!(blowing, 200, ventilation: 100)
+      work!(still, 200, ventilation: 0)
 
-      expect(held(still, :pit_bottom, :blackdamp))
-        .to be > held(blowing, :pit_bottom, :blackdamp) * 3
+      expect(held(still, :pit_bottom, :blackdamp)).to be > held(blowing, :pit_bottom, :blackdamp)
       expect(air(still, :pit_bottom)).to be < ReactorSim::Breath::SAFE
     end
 
-    it "stands the shift down if the fan stays off long enough" do
-      op = worked(ventilation: 0, ticks: 8_000)
+    # **The same ceiling, in air that is not good**, which is the pair to the example above: at the
+    # fatigue ceiling in foul air, asphyxia accumulates and the putter goes down. One number
+    # differs between the two and it is the air.
+    it "stands the shift down if the fan stays off" do
+      op = pit_with(damp: 70.0, tired: 0.90)
+      work!(op, 60, ventilation: 0)
 
-      expect(op.state.dig(:minions, :crew_2, :injury)).not_to be_nil
+      expect(crew(op, :crew_2).fetch(:injury)).not_to be_nil
+      expect(crew(op, :crew_2).fetch(:spent)).to be(true)
     end
   end
 
   describe "the lamp, which is the warning" do
-    it "burns clear in a ventilated pit" do
-      expect(lamp(worked(ventilation: 100))).to eq("burning clear")
+    def read_lamp(damp)
+      op = pit_with(damp: damp)
+      work!(op, 20)
+      [ lamp(op), air(op, :pit_bottom) ]
     end
 
-    # **The gauge trips before the hazard does**, which nothing else in this operation manages.
-    # By the time the flame is visibly struggling the air is still breathable, and that gap is
-    # the entire reason to carry the lamp.
+    it "burns clear in a ventilated pit" do
+      op = pit_with
+      work!(op, 20, ventilation: 100)
+
+      expect(lamp(op)).to eq("burning clear")
+    end
+
+    # **The gauge trips before the hazard does**, which nothing else in this operation manages. By
+    # the time the flame is visibly struggling the air is still breathable, and that gap is the
+    # entire reason to carry the lamp.
+    #
+    # Proved by **sweeping the concentration** rather than by watching one pit degrade for three
+    # thousand ticks — which is both faster and a stronger claim, because it shows the whole gap
+    # rather than the single point a run happened to cross. Measured: the flame is dull at 4%
+    # blackdamp with air at 0.9644, and the air does not reach the 0.93 safe line until 8%.
     it "is already warning while the air is still breathable" do
-      op = pit
-      op.set_control(:ventilation, 0)
-      warned_at = nil
+      warning, breathable = read_lamp(4.0)
 
-      120.times do |i|
-        run!(op, 25, from: i * 25)
-        warned_at ||= air(op, :pit_bottom) if lamp(op) != "burning clear"
-        break if warned_at && air(op, :pit_bottom) < ReactorSim::Breath::SAFE
-      end
+      expect(warning).not_to eq("burning clear")
+      expect(breathable).to be > ReactorSim::Breath::SAFE
 
-      expect(warned_at).not_to be_nil
-      expect(warned_at).to be > ReactorSim::Breath::SAFE
+      expect(read_lamp(0.0).first).to eq("burning clear")
+      expect(read_lamp(8.0).last).to be < ReactorSim::Breath::SAFE
     end
 
     it "goes out in air nobody could work in" do
-      op = worked(ventilation: 0, ticks: 8_000)
+      lit, breathable = read_lamp(50.0)
 
-      expect(lamp(op)).to match(/will not stay lit|is out/)
+      expect(breathable).to be < ReactorSim::Breath::SAFE
+      expect(lit).to match(/will not stay lit|is out/)
     end
   end
 
   it "conserves mass and energy while it seeps" do
-    op = worked(ventilation: 0, ticks: 4_000)
+    op = pit_with
+    mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
+    joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
+
+    work!(op, 200)
+
     mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
     joules = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
-
-    fresh = pit
-    mass0 = ReactorSim::Ledger.mass_balance(fresh.total_mass, fresh.ledger)
-    joules0 = ReactorSim::Ledger.energy_balance(fresh.total_joules, fresh.ledger)
-
     expect((mass - mass0).abs / mass0.abs).to be < 1e-9, "mass drifted by #{mass - mass0}"
     expect((joules - joules0).abs / joules0.abs).to be < 1e-9,
-                                                    "energy drifted by #{joules - joules0}"
+           "energy drifted by #{joules - joules0}"
   end
 end

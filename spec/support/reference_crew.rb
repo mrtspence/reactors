@@ -44,8 +44,27 @@ module ReferenceCrew
   # `crew_spec` do — see `fatigue_spec`.
   TIRELESS = 1.0e6
 
-  ARCHETYPE = { label: "Test Hand", strength: 1.0, toughness: 1.0, endurance: TIRELESS,
+  # `mass_kg` is the human reference, and the fixture is deliberately **unequipped**, so
+  # `worn_kg` is zero and `Burden` costs it nothing. That is what keeps a reference machine a
+  # reference machine now that gear has weight: every balance figure in this repository was taken
+  # before mass existed, and an unburdened hand still reproduces all of them.
+  ARCHETYPE = { label: "Test Hand", mass_kg: 70.0,
+                strength: 1.0, toughness: 1.0, endurance: TIRELESS,
                 intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} }.freeze
+
+  # **Every dial at 1.0, and this one tires.** For a spec about a mechanic rather than about a
+  # machine — somebody to stand in a room and have something happen to them. It lives here
+  # because a constant assigned inside an example group lands on `Object`, so two spec files
+  # declaring the same plain stat block silently overwrite each other, and which one wins
+  # depends on the randomised file order.
+  PLAIN_STATS = { strength: 1.0, toughness: 1.0, endurance: 1.0,
+                  intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }.freeze
+
+  # What a person weighs, mirroring the `human` archetype — the reference frame `Burden` is
+  # calibrated against. Here rather than inline in six unit specs, because it is a **content**
+  # figure: if a human stops weighing seventy kilograms, the specs asserting burden ratios should
+  # move with it rather than quietly keep testing the old world.
+  HUMAN_KG = 70.0
 
   # One fixture person per job the steam engine asks for. Separate ids rather than one shared
   # entry, so a spec can hurt one of them without the other changing.
@@ -84,6 +103,14 @@ module ReferenceCrew
   # a spec about the bellows asks for it by name. Measured: donkey 608.8 kPa at t=1600, manned
   # bellows 608.1 at t=3800, unmanned bellows never.
   REFERENCE_LOADOUT = { blower: :donkey_blower }.freeze
+
+  # **The lever positions that raise steam from cold**, which two spec files need and therefore
+  # one of them owns. Draught is real, so nothing raises the first steam without the blower: a
+  # cold stack has no buoyancy and the blastpipe cannot help until the engine already turns.
+  # That handover is why a cold start takes ~3600 ticks and is the single biggest cost in the
+  # suite.
+  LIGHT = { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
+            throttle_open: 0, load_demand: 0 }.freeze
 
   def self.loadout(overrides = {}) = REFERENCE_LOADOUT.merge(overrides || {})
 

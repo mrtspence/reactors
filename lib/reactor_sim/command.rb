@@ -10,6 +10,10 @@ module ReactorSim
   module Command
     SET_CONTROL   = "set_control"
     ASSIGN_MINION = "assign_minion"
+    # Put down whoever `minion_id` names, wherever their carrier is standing. No destination,
+    # because the drop happens where the carrier already is — which is what keeps a rescue inside
+    # the movement rules instead of needing a release lever somewhere.
+    DROP_MINION   = "drop_minion"
 
     Parsed = Struct.new(:type, :operation_id, :control_point_id, :value, :minion_id,
                         keyword_init: true)

@@ -483,9 +483,6 @@ RSpec.describe ReactorSim::Diagnostic do
   # better than the one below, and pinning the numbers would make every balance change a spec
   # failure. Compare `spec/CLAUDE.md` on `damper:`.
   describe "instrument tiers are a real progression", crew: :reference do
-    LIGHT = { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
-              throttle_open: 0, load_demand: 0 }.freeze
-
     # Mean absolute error against the spectator's truth, over a window where the level is being
     # worked up and down — a gauge is only worth anything while the thing it reads is moving.
     def misreading_of(glass)
@@ -497,7 +494,7 @@ RSpec.describe ReactorSim::Diagnostic do
           **ReferenceCrew.options
         )
       )
-      LIGHT.each { |k, v| op.set_control(k, v) }
+      ReferenceCrew::LIGHT.each { |k, v| op.set_control(k, v) }
       errors = []
       (1..2200).each do |t|
         op.set_control(:igniter, 0) if t == 300
@@ -531,7 +528,7 @@ RSpec.describe ReactorSim::Diagnostic do
           **ReferenceCrew.options
         )
       )
-      LIGHT.each { |k, v| op.set_control(k, v) }
+      ReferenceCrew::LIGHT.each { |k, v| op.set_control(k, v) }
       seen = []
       (1..2200).each do |t|
         op.set_control(:igniter, 0) if t == 300

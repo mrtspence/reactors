@@ -311,6 +311,7 @@ export default class extends Controller {
     this.paintTravel(el, crew)
     this.paintFatigue(el, crew)
     this.paintAsphyxia(el, crew)
+    this.paintCarrying(el, crew)
 
     const injury = el.querySelector("[data-minion-injury]")
     if (!injury) return
@@ -320,6 +321,27 @@ export default class extends Controller {
     // A scratch and being carried out are not the same news.
     injury.classList.toggle("text-amber-400", crew.injury === "minor")
     injury.classList.toggle("text-rose-400", Boolean(crew.injury) && crew.injury !== "minor")
+  }
+
+  // Carrying, and being carried — two sides of one fact, painted from opposite ends.
+  //
+  // **The Set down button is on the carried person's row**, which is what makes it per-person:
+  // an ogre holding six kobolds has six rows and six buttons, and no list to pick from. It is
+  // hidden unless somebody is actually holding them, because a control that is nearly always
+  // inert teaches a player to stop looking at it.
+  paintCarrying(el, crew) {
+    const held = Array.isArray(crew.carrying) ? crew.carrying : []
+    const carrying = el.querySelector("[data-minion-carrying]")
+    if (carrying) {
+      carrying.textContent = held.length ? `carrying ${held.map((id) => this.words(id)).join(", ")}` : ""
+      carrying.classList.toggle("hidden", held.length === 0)
+    }
+
+    const drop = el.querySelector("[data-minion-drop]")
+    if (!drop) return
+
+    drop.classList.toggle("hidden", !crew.carried_by)
+    drop.title = crew.carried_by ? `Carried by ${this.words(crew.carried_by)}` : ""
   }
 
   readPlaces() {
@@ -552,6 +574,13 @@ export default class extends Controller {
       minion_id: li.dataset.minionId,
       control_point_id: event.target.value || null
     })
+  }
+
+  // No destination: somebody is set down where their carrier is standing, which is the whole
+  // reason this needs no release lever anywhere in the pit.
+  drop(event) {
+    const li = event.target.closest("[data-minion-id]")
+    this.send({ type: "drop_minion", minion_id: li.dataset.minionId })
   }
 
   reset() {

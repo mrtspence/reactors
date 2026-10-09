@@ -114,6 +114,29 @@ module ReactorSim
     # which reactions can happen inside it.
     def reactions = []
 
+    # **Ways this node's existence hurts people with nothing broken** — tubs going past, a
+    # shaft with no railings. The counterpart to `failure_hazards`, which needs a failure
+    # first. Empty for almost everything, and a fitting removes one by not declaring it.
+    def perils = []
+
+    # How busy this node is, **0..1 and dimensionless**, for a peril that `scales_with:` it —
+    # the activity that both drives the danger and sizes it. Nil where the node has no such
+    # figure, which reads as a peril that is simply always at full strength.
+    #
+    # `dt` is passed because most of what a node carries is a mass *this tick* while its
+    # rating is a rate *per second*: dividing one by the other without it is quietly wrong by
+    # a factor of `dt`, which at the default quarter-second tick understates a busy road
+    # fourfold and reads as a road nobody is working.
+    def activity(_state, _quantity, _dt) = nil
+
+    # **What this node does to keep people safe**, by place: `{ place_id => effectiveness }`.
+    # Railings, a fall arrest, a refuge cut in a roadway side — anything whose entire value is
+    # the accidents that do not happen.
+    #
+    # It can never reach 1.0, because safety equipment is only worth something to somebody
+    # paying enough attention to use it. Buying it buys better odds, never immunity.
+    def safety_equipment = {}
+
     # Derived from the failure MODE, so a node that never included `Wearing` — a `Load`, an
     # `Atmosphere` — answers false without carrying a key it has no use for.
     def broken?(state) = !state.fetch(:failure, nil).nil?

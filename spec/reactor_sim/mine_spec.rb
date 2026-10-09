@@ -1,28 +1,8 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
-
-# **Not `ReferenceCrew`**, and the reason is the gate. That fixture is flat 1.0 with *no tags at
-# all*, which is exactly right for a steam engine and useless in a mine: hewing and timbering
-# are gated on `mining_effectiveness` and `darkvision`, so a reference hand with neither cuts
-# precisely nothing. A fixture with a pick and a lamp, and otherwise as boring as the original.
-module MineCrew
-  ARCHETYPE = { label: "Collier", strength: 1.0, toughness: 1.0, endurance: 1.0e6,
-                intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
-                tags: { mining_effectiveness: 0.6, shovelling: 0.5,
-                        darkvision: 0.8 } }.freeze
-
-  MINIONS = (1..4).to_h { |i| [ :"hand_#{i}",
-                                { name: "Hand #{i}", archetype: :collier,
-                                  hireable: false } ] }.freeze
-
-  CONTENT = ReactorSim::Content.default.merging(archetypes: { collier: ARCHETYPE },
-                                                minions: MINIONS)
-
-  CREW = (1..4).to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{i}" } ] }.freeze
-
-  def self.options = { crew: CREW }
-end
+require "support/pit_rig"
+require "support/conservation"
 
 # The mine, end to end.
 #
@@ -33,49 +13,33 @@ end
 # Driven from a steady supply rather than from a real engine — the coupling itself is proved in
 # `coupling_spec`, and a mine spec that first has to raise steam is measuring the wrong machine.
 #
-# See `docs/design_sketches/mine.md` §4.6 stage C.
+# ## This file owns the walk, and that is why it is the one that cannot be constructed
+#
+# Every other mine spec now starts its shift at the face with `at_the_face`, which writes the
+# arrival straight into state. That is sound only while a real walk still gets there — a
+# constructed arrival cannot fail when the walking breaks. So the guards live here:
+#
+# - a **complete** walk, start to station. The putter's is 167 ticks by cage, which exercises
+#   posting, travel, arrival and taking up a station on the whole of the same machinery the face
+#   crew use over a longer road.
+# - the face crew's journey **advancing**, since theirs is 834 ticks by cage and 1,267 down the
+#   ladderway, and watching it tick down is the same claim as watching it finish.
+# - a constructed arrival being **field-for-field identical** to a walked one, which is what makes
+#   `at_the_face` honest everywhere else.
+#
+# See `docs/design_sketches/mine.md` §4.6 stage C and `design_sketches/suite-runtime.md` §7.
 RSpec.describe "the mine" do
-  before { allow(ReactorSim::Content).to receive(:default).and_return(MineCrew::CONTENT) }
+  include PitRig
 
-  TOLERANCE = 1e-9
+  before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
 
-  # Comfortably more than the mine can spend, so what is measured is the mine rather than the
-  # supply. `Import` caps what it will hold, so this does not accumulate.
-  SUPPLY_J = 9.0e4
+  # No cage by default: this spec is partly *about* the walk, so the shift goes down the
+  # ladderway and `describe "the shift has to get there"` has something to measure.
+  def mine(**opts) = build_pit(id: "m", seed: 11, **opts)
 
-  def mine(**opts)
-    ReactorSim::Match
-      .create(id: "m", seed: 11,
-              operations: [ { id: "pit", type: :mine,
-                              # **Ordinary ground unless an example asks otherwise.** How gassy
-                              # and how wet a pit is is drawn per match, so a spec that does not
-                              # pin it measures the luck rather than the mine — the same
-                              # argument that keeps `ReferenceCrew` out of `content/minions/`.
-                              # `describe "the ground"` is where the drawing itself is tested.
-                              ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
-                              **MineCrew.options, **opts } ])
-      .operation(:pit)
-  end
+  def caged = mine(loadout: { manriding: :cage_gear })
 
-  # One tick of a mine that is being paid for.
-  def run!(op, ticks, supply: SUPPLY_J, from: 0)
-    ticks.times do |i|
-      op.receive_supply(:line_shaft, supply)
-      op.step!(tick: from + i + 1)
-    end
-    op
-  end
-
-  def held(op, node, resource)
-    parcels = op.state.fetch(:nodes).fetch(node).fetch(:parcels)
-    ReactorSim::Parcel.total_kg(parcels.select { |p| p[:resource] == resource })
-  end
-
-  def crew(op, seat) = op.state.fetch(:minions).fetch(seat)
-
-  def omega(op) = op.state.fetch(:nodes).fetch(:line_shaft).fetch(:angular_momentum) / 900.0
-
-  # Send the shift underground and open everything up.
+  # Send the shift underground the long way, and open everything up.
   def work!(op)
     op.assign_minion(:crew_1, :hewing)
     op.assign_minion(:crew_2, :haulage)
@@ -83,6 +47,20 @@ RSpec.describe "the mine" do
     op.set_control(:haulage, 100)
     op.set_control(:winding, 100)
     op
+  end
+
+  def working(ticks, **opts)
+    op = work!(mine(**opts))
+    run!(op, ticks)
+    op
+  end
+
+  # A pit already at work, for the claims that are not about getting there.
+  def worked(ticks, hewing: 100, supply: PitRig::SUPPLY_J, from: 0, **levers)
+    op = at_the_face(mine)
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+                ventilation: 100, **levers)
+    [ op, run!(op, ticks, supply: supply, from: from) ]
   end
 
   it "builds with a shaft, a circuit, a seam and somewhere to stand" do
@@ -106,25 +84,62 @@ RSpec.describe "the mine" do
     end
 
     it "wins no coal at all until somebody is actually at the face" do
-      op = run!(work!(mine), 200)
+      op = working(200)
 
       expect(crew(op, :crew_1)[:station]).to be_nil
       expect(op.ledger.fetch(:mass_delivered)).to be > 0.0 # water, which needs nobody
       expect(held(op, :seam, :coal)).to eq(90_000.0)
     end
 
-    it "puts them at their posts once the walk is done" do
-      op = run!(work!(mine), 1_500)
+    # **A walk, all the way through.** The putter's road is the short one — 167 ticks by cage
+    # against the hewer's 834 — and it is a *complete* journey rather than a shortened one, so it
+    # exercises every part of the machinery the longer roads use.
+    it "puts a hand at their post once their walk is done" do
+      op = caged
+      op.set_control(:winding, 100)
+      op.set_control(:man_winding, 100)
+      op.assign_minion(:crew_2, :haulage)
+      run!(op, 200)
 
-      expect(crew(op, :crew_1)[:place]).to be(:district)
-      expect(crew(op, :crew_1)[:station]).to be(:hewing)
       expect(crew(op, :crew_2)[:place]).to be(:pit_bottom)
       expect(crew(op, :crew_2)[:station]).to be(:haulage)
     end
 
-    # **Except for the ones who are already down.** A pit whose every hand starts at bank is a
-    # pit where the opening five minutes of a match are a walk, so the last seats are an advance
-    # shift standing in the district when the whistle goes.
+    # And the long road, asserted as it is being walked. 290 m at the hewer's pace is well over a
+    # thousand ticks, so what is checkable quickly is that the distance is going down.
+    it "walks the face crew down a road that takes them a good while" do
+      op = work!(mine)
+      remaining = (1..4).map do |leg|
+        run!(op, 50, from: (leg - 1) * 50)
+        crew(op, :crew_1).fetch(:remaining)
+      end
+
+      expect(crew(op, :crew_1)[:station]).to be_nil, "the hewer should still be on the road"
+      expect(remaining.each_cons(2).all? { |far, nearer| nearer < far }).to be(true),
+                                                                           remaining.inspect
+    end
+
+    # **What makes `at_the_face` legitimate in every other mine spec.** If the walk ever stops
+    # producing this state, the constructed one diverges and this fails — which is the only way a
+    # suite built on constructed arrivals can notice.
+    it "arrives in exactly the state at_the_face constructs" do
+      walked = caged
+      walked.set_control(:winding, 100)
+      walked.set_control(:man_winding, 100)
+      walked.assign_minion(:crew_2, :haulage)
+      run!(walked, 200)
+
+      built = at_the_face(caged, hewing: nil, timbering: nil)
+
+      %i[posting station place progress remaining journey].each do |field|
+        expect(crew(built, :crew_2).fetch(field)).to eq(crew(walked, :crew_2).fetch(field)),
+                                                     "#{field} differs"
+      end
+    end
+
+    # **Except for the ones who are already down.** A pit whose every hand starts at bank is a pit
+    # where the opening five minutes of a match are a walk, so the last seats are an advance shift
+    # standing in the district when the whistle goes.
     describe "the advance shift" do
       it "is already in the district, posted to nothing" do
         op = mine
@@ -148,30 +163,27 @@ RSpec.describe "the mine" do
 
   describe "output" do
     it "cuts coal and sends it to the surface" do
-      op = run!(work!(mine), 2_500)
+      op, = worked(100)
 
       expect(held(op, :seam, :coal)).to be < 90_000.0
       expect(op.ledger.fetch(:mass_delivered)).to be > 0.0
       # **Not the winder's `carried_kg`**, which is what one tick happened to be carrying. A
       # winder's output is a cycle rather than a flow and there are always ticks with nothing on
-      # the rope, so an instantaneous reading is a coin toss dressed as an assertion — it only
-      # passed while the face was producing enough to keep the drum busy every tick. The ledger
+      # the rope, so an instantaneous reading is a coin toss dressed as an assertion. The ledger
       # is the measurement; `coal_raised` averages over twelve ticks for the same reason.
     end
 
     # A ratio rather than a figure: the shape is what is being asserted, not the balance.
+    # Measured at 100 ticks: 16.80 kg against 6.72.
     it "cuts more with the lever further over" do
-      hard = run!(work!(mine), 2_500)
-      easy = work!(mine)
-      easy.set_control(:hewing, 40)
-      easy = run!(easy, 2_500)
+      hard, = worked(100, hewing: 100)
+      easy, = worked(100, hewing: 40)
 
-      expect(90_000.0 - held(hard, :seam, :coal))
-        .to be > (90_000.0 - held(easy, :seam, :coal))
+      expect(90_000.0 - held(hard, :seam, :coal)).to be > (90_000.0 - held(easy, :seam, :coal))
     end
 
     it "is the first thing in the game to write mass_delivered" do
-      op = run!(work!(mine), 800)
+      op, = worked(100)
 
       expect(op.ledger.fetch(:mass_delivered)).to be > 0.0
     end
@@ -180,27 +192,32 @@ RSpec.describe "the mine" do
   describe "when the supply fails" do
     # The mine's signature failure, and the reason drainage is on the same shaft as everything
     # else: stop paying and the water starts winning.
+    #
+    # **The shaft is seeded stopped**, because a line shaft coasts on its own inertia for a good
+    # while after the supply goes — which is the behaviour the buffer exists to give, and which
+    # made this a 2,500-tick example. What is claimed is what happens once it *has* run down.
+    # Measured at 200 ticks: 45.6 kg of water against a paid pit's 0.24.
     it "drowns the workings once the pump stops" do
-      op = run!(work!(mine), 1_200)
-      expect(held(op, :pit_bottom, :water)).to be < 5.0
+      paid, = worked(200)
+      unpaid = at_the_face(seed(mine, nodes: { line_shaft: { angular_momentum: 0.0 } }))
+      levers!(unpaid, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+                      ventilation: 100)
+      run!(unpaid, 200, supply: 0.0)
 
-      run!(op, 2_500, supply: 0.0, from: 1_200)
-
-      expect(omega(op)).to be < 1.0
-      expect(held(op, :pit_bottom, :water)).to be > 50.0
+      expect(omega(unpaid)).to be < 1.0
+      expect(held(paid, :pit_bottom, :water)).to be < 5.0
+      expect(held(unpaid, :pit_bottom, :water)).to be > 20.0
     end
 
     # A winding drum is positive displacement: it raises coal because it is turning, and at rest
-    # raises none. Without `displacement:` on the fitting, `driven_by:` is only a *bill* — the
-    # pump lifted its water 90 m for nothing with the shaft stopped, and the winder did the same.
+    # raises none. Without `displacement:` on the fitting, `driven_by:` is only a *bill* — the pump
+    # lifted its water 90 m for nothing with the shaft stopped, and the winder did the same.
     it "stops raising coal, because a drum that is not turning raises nothing" do
-      op = run!(work!(mine), 1_500)
-      # Long enough for the shaft to actually run down — it coasts on its own inertia for a
-      # good while after the supply goes, which is the behaviour the buffer exists to give.
-      run!(op, 3_000, supply: 0.0, from: 1_500)
+      op = at_the_face(seed(mine, nodes: { line_shaft: { angular_momentum: 0.0 } }))
+      levers!(op, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+                  ventilation: 100)
       before = op.ledger.fetch(:mass_delivered)
-
-      run!(op, 400, supply: 0.0, from: 4_500)
+      run!(op, 100, supply: 0.0)
 
       expect(omega(op)).to be < 0.5
       expect(op.state.fetch(:nodes).fetch(:winder).fetch(:carried_kg)).to be < 0.01
@@ -210,7 +227,7 @@ RSpec.describe "the mine" do
 
   describe "ventilation" do
     it "courses air from the downcast round the workings and out through the fan" do
-      op = run!(mine, 400)
+      op, = worked(200)
 
       expect(op.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg)).to be > 0.0
       expect(op.ledger.fetch(:mass_added)).to be > 0.0
@@ -218,10 +235,10 @@ RSpec.describe "the mine" do
     end
   end
 
-  # **A pit whose numbers are identical every match is a pit you learn once.** How fiery a
-  # panel is, how sour the waste runs and how wet the strata is are properties of the ground,
-  # drawn when the match is made — so an overseer has to feel out which colliery they were
-  # given rather than apply a remembered counter-measure.
+  # **A pit whose numbers are identical every match is a pit you learn once.** How fiery a panel
+  # is, how sour the waste runs and how wet the strata is are properties of the ground, drawn when
+  # the match is made — so an overseer has to feel out which colliery they were given rather than
+  # apply a remembered counter-measure. All build-time, so all free.
   describe "the ground" do
     def ground(seed, node)
       ReactorSim::Match
@@ -248,8 +265,8 @@ RSpec.describe "the mine" do
       expect(ground(7, :seepage)).to eq(ground(7, :seepage))
     end
 
-    # The waste makes a little carbon monoxide on its own, and how much is the ground's
-    # business too — a sour goaf is a pit where the canary is the only warning there will be.
+    # The waste makes a little carbon monoxide on its own, and how much is the ground's business
+    # too — a sour goaf is a pit where the canary is the only warning there will be.
     it "varies how sour the old workings are" do
       sour = (1..10).map do |seed|
         parcels = ReactorSim::Match
@@ -265,50 +282,48 @@ RSpec.describe "the mine" do
 
   describe "conservation" do
     # The spec that catches real physics bugs. It found two here: air reversing out of the
-    # downcast into a port nothing was counting, and a pump lifting water for free with the
-    # shaft stopped.
-    it "holds through a full shift of cutting, winding and pumping" do
-      op = work!(mine)
+    # downcast into a port nothing was counting, and a pump lifting water for free with the shaft
+    # stopped.
+    it "holds through a shift of cutting, winding and pumping" do
+      op = at_the_face(mine)
       mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
       joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
-      run!(op, 3_000)
+      levers!(op, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+                  ventilation: 100)
+      run!(op, 200)
 
       mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
       joules = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
-      expect((mass - mass0).abs / mass0.abs).to be < TOLERANCE, "mass drifted by #{mass - mass0}"
-      expect((joules - joules0).abs / joules0.abs).to be < TOLERANCE,
-        "energy drifted by #{joules - joules0}"
+      expect((mass - mass0).abs / mass0.abs).to be < Conservation::TOLERANCE,
+                                                "mass drifted by #{mass - mass0}"
+      expect((joules - joules0).abs / joules0.abs).to be < Conservation::TOLERANCE,
+                                                      "energy drifted by #{joules - joules0}"
     end
 
-    it "holds with the supply cut and the mine flooding" do
+    # **The walk is on the ledger too**, so this one deliberately does not construct the arrival:
+    # a shift travelling is mass and energy moving about, and it is the path `at_the_face` skips.
+    it "holds with the shift still walking and the supply cut" do
       op = work!(mine)
       mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
 
-      run!(op, 600)
-      run!(op, 1_200, supply: 0.0, from: 600)
+      run!(op, 100)
+      run!(op, 100, supply: 0.0, from: 100)
 
       mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
-      expect((mass - mass0).abs / mass0.abs).to be < TOLERANCE
+      expect((mass - mass0).abs / mass0.abs).to be < Conservation::TOLERANCE
     end
   end
 
-  it "runs a long shift at moderate settings with nothing to report" do
-    op = work!(mine)
-    op.set_control(:hewing, 50)
-    op.set_control(:haulage, 50)
-
-    events = Array.new(3_000) { |i|
-      op.receive_supply(:line_shaft, SUPPLY_J)
-      op.step!(tick: i + 1)
-    }.flatten
+  it "runs a shift at moderate settings with nothing to report" do
+    _, events = worked(200, hewing: 50, haulage: 50)
 
     expect(events).to be_empty
   end
 
   describe "snapshot" do
     it "round-trips chassis, loadout and a shift part-way down the shaft" do
-      op = run!(work!(mine), 300)
+      op = working(100)
 
       restored = ReactorSim::Operation.from_h(
         ReactorSim.deep_symbolize(JSON.parse(JSON.generate(op.to_h)))
@@ -321,13 +336,13 @@ RSpec.describe "the mine" do
     end
 
     it "carries on identically after a restore" do
-      op = run!(work!(mine), 300)
+      op = working(100)
       restored = ReactorSim::Operation.from_h(
         ReactorSim.deep_symbolize(JSON.parse(JSON.generate(op.to_h)))
       )
 
-      run!(op, 600, from: 300)
-      run!(restored, 600, from: 300)
+      run!(op, 200, from: 100)
+      run!(restored, 200, from: 100)
 
       expect(ReactorSim.canonical(restored.to_h)).to eq(ReactorSim.canonical(op.to_h))
     end

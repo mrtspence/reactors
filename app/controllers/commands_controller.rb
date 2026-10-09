@@ -49,8 +49,18 @@ class CommandsController < ApplicationController
     case params[:type]
     when ReactorSim::Command::SET_CONTROL   then set_control
     when ReactorSim::Command::ASSIGN_MINION then assign_minion
+    when ReactorSim::Command::DROP_MINION   then drop_minion
     when "resync", "reset_match"            then { "type" => params[:type] }
     end
+  end
+
+  # No destination: somebody is set down where their carrier is standing.
+  def drop_minion
+    return unless params[:minion_id].to_s.match?(CONTROL_ID)
+
+    { "type" => ReactorSim::Command::DROP_MINION,
+      "operation_id" => current_operation.operation_id,
+      "minion_id" => params[:minion_id].to_s }
   end
 
   def set_control

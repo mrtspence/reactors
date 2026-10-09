@@ -114,6 +114,12 @@ a data file where nobody would look when conservation started failing.
   is no local hot spot to light. It means *"the bulk temperature at which this reaction
   sustains itself"*, well below the temperature a match applies to a corner. Set at coal's true
   700 K, a fire can never be lit at all.
+- **A fuel suspended in a volume needs `lean_fraction`.** Firedamp and dust carry a flame only
+  between two concentrations; without a lean limit a trace ignites and then burns every
+  kilogram arriving afterwards, so the room never cools and the fuel's own gauge reads zero
+  for the rest of the match. Both limits are a **share of the volume**, and both are separately
+  opt-in — a fuel bed on a grate must declare neither, because a lump of coal does not stop
+  burning because the firebox is roomy.
 
 ## Materials
 
@@ -144,6 +150,7 @@ turns on. See [`docs/design_sketches/minions.md`](../docs/design_sketches/minion
 # content/archetypes/races.yml — the first baseline layer
 elf:
   label: Elf
+  mass_kg: 60.0        # required, and NOT a stat
   strength: 0.75       # all six are REQUIRED_ARCHETYPE_KEYS
   toughness: 0.7
   endurance: 0.85
@@ -169,11 +176,39 @@ The last two are the delivery tier's, because they are things a player *owns* an
 something the simulation may know about. `Registry#sheet(id)` returns the first two folded.
 
 - **The six stats are fixed; everything else is a tag.** Fixed because the engine reads them and
-  needs a number rather than an absence. `strength` drives actuation; `toughness` drives the
-  Danger Check; `endurance` divides fatigue accrual; `intelligence`, `dexterity` and `charisma`
-  are declared and read by nothing yet.
+  needs a number rather than an absence. `toughness` drives the Danger Check; `endurance` divides
+  fatigue accrual; `intelligence` drives the `observer:` path; `dexterity` is precision work;
+  `charisma` is declared and read by nothing yet.
+- **`strength` is a strength-to-WEIGHT ratio, and 1.0 is a human's.** Below 1.0 means worse
+  pound-for-pound than a person, which is where most large things sit — strength grows with
+  cross-section and weight with volume. So an ogre is **0.65** and overwhelming anyway, because
+  what a job gets is derived from the ratio *and* the body:
+  - `force` = `strength × mass_kg ÷ 70` — pushing a tub, heaving rock, a heavy lever. Ogre 4.6.
+  - `swing` = `√force` — a tool at the end of an arm, where bulk stops paying in proportion.
+    Ogre 2.15, which is why he is about twice a man with the same pick and would need a bigger
+    pick to do better.
+
+  A station names whichever it means in `effort:`, and **`strength` itself stays legal** for the
+  jobs where power-to-weight really is the question. `Minion::PACE` is the clearest of those:
+  moving your own body is exactly a ratio, and an ogre does not walk 4.6× faster than a man.
+  See [`design_sketches/strength-to-weight.md`](../docs/design_sketches/strength-to-weight.md).
+- **`mass_kg` is a seventh field and is neither a stat nor a tag.** Required on an archetype and
+  **raises at boot if absent**; an optional offset on an individual, because not everybody of a
+  race weighs the same. Not a stat, because stats are derated by injury and a broken arm must not
+  make somebody lighter; not a tag, because tags clamp to 0..1. Read by the lift limit and the
+  burden ratio in `Burden` — a quiet default would be invisible here, which is the whole reason it
+  is required. **Equipment and training declare one too**, and theirs is required for the same
+  reason: an item that does not say what it weighs is a free upgrade by omission.
 - **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
   things are two statements about one person.
+- **`clumsy` and `boneheaded` are the same family at opposite ends of the causal chain.**
+  Clumsy makes the *bite* worse once something has gone wrong; boneheaded makes the *mistake*
+  likelier in the first place — pulling the wrong lever is not the same failing as dropping it.
+  Both feed the accident margin; only one feeds the Danger Check.
+- **`intelligence` and `dexterity` are read now**, by `Minion#wits`: how often somebody posted
+  at a gauge is confidently wrong about it, and how often somebody at a certificated post does
+  the wrong thing with it. A tag named by a station's `requires:` — `certificated` — is what a
+  ticket buys, and lacking it never forbids the posting, only makes it likelier to go wrong.
 - **Minion tags are a MAP, not a list**, unlike resource tags — "how well can you see in the dark"
   has a number for an answer. `true` means simply present.
 - **Values ADD across layers, then clamp. Consumers multiply.** Merge adds, use multiplies.

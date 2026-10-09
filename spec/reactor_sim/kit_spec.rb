@@ -26,7 +26,7 @@ RSpec.describe "the kit catalogue" do
     end
 
     it "refuses a slot it does not have, rather than filing it nowhere" do
-      expect { described_class.new(id: :hat, slot: :head) }
+      expect { described_class.new(id: :hat, slot: :head, mass_kg: 0.5) }
         .to raise_error(ReactorSim::Error, /unknown slot :head/)
     end
 
@@ -34,7 +34,8 @@ RSpec.describe "the kit catalogue" do
     # a different kit from the same name — the trap `Parts.register` guards against for exactly
     # the same reason.
     it "refuses to re-register an id that is already taken" do
-      expect { described_class.register(:stokers_shovel, slot: :gear, label: "Impostor") }
+      expect { described_class.register(:stokers_shovel, slot: :gear, label: "Impostor",
+                                       mass_kg: 1.0) }
         .to raise_error(ReactorSim::Error, /already registered/)
     end
 
@@ -87,7 +88,7 @@ RSpec.describe "the kit catalogue" do
     end
 
     it "refuses to re-register an id that is already taken" do
-      expect { described_class.register(:hot_work_ticket, label: "Impostor") }
+      expect { described_class.register(:hot_work_ticket, label: "Impostor", mass_kg: 0.0) }
         .to raise_error(ReactorSim::Error, /already registered/)
     end
 

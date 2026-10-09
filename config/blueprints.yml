@@ -78,6 +78,8 @@ minion:
     materials: {}
   galathas:
     materials: {}
+  throg:
+    materials: {}
 
 # **Priced by the ITEM, not by the (minion, item) pair.** Ownership is per minion — Jim's apron
 # and Elowynne's apron are two separate unlocks with ids `jim/leather_apron` and
@@ -103,6 +105,10 @@ equipment:
   # one that will not fire the district.
   davy_lamp:
     materials: { wrought_iron: 2, bronze: 3 }
+  # Canvas and two poles, so it is nearly free to make — the cost of a stretcher is that the hand
+  # holding it is not holding a pick, which the tool slot charges and no bill needs to.
+  stretcher:
+    materials: { wrought_iron: 1 }
   # Dear, and it should be: a cylinder that will hold pressure is the expensive part, and this
   # is the only kit in the game that buys a minute of somewhere they could not otherwise stand.
   rescue_apparatus:
@@ -137,9 +143,13 @@ training:
     requires: raised_steam_from_cold_alone
   steady_hands:
     materials: {}
+  strong_back:
+    materials: {}
   pit_sense:
     materials: {}
     requires: ran_an_hour_without_blowing_off
+  winding_ticket:
+    materials: {}
 
 part:
   # --- fire -------------------------------------------------------------------------------
@@ -444,3 +454,10 @@ part:
     materials:
       wood: 340
       wrought_iron: 120
+  sparse_manholes:
+    materials:
+      wood: 160
+  whitewashed_manholes:
+    materials:
+      wood: 420
+      stone_dust: 60

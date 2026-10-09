@@ -105,7 +105,10 @@ module ReactorSim
         filters << Filters::Quantize.new(step) if step
 
         Diagnostic.new(
-          id: :boiler_water, label: label, observer: :fireman,
+          # **The fireman's reading, so it is his post that reads it.** With nobody stoking
+          # there is nobody at the glass and the gauge goes dark — which is the price of a
+          # reading being somebody's word rather than a dial on a wall.
+          id: :boiler_water, label: label, observer: :stoking,
           source: Sources::Derived.new(:boiler, :effective_fill),
           filters: filters,
           display: Displays::Needle.new(unit: "%", convert: :percent, precision: 0,
@@ -262,7 +265,7 @@ module ReactorSim
       # more than the wheel does.
       def flywheel_condition
         Diagnostic.new(
-          id: :flywheel_condition, label: "Flywheel Condition", observer: :yardhand,
+          id: :flywheel_condition, label: "Flywheel Condition", observer: :oiling, # the oiler's round is when anybody looks at this
           source: Sources::Derived.new(:flywheel, :integrity),
           filters: [ Filters::Lag.new(12), Filters::Misread.new(chance: 0.12, magnitude: 0.25),
                      Filters::Bands.new([ 0.15, 0.45, 0.75, 0.95 ]) ],
@@ -329,7 +332,7 @@ module ReactorSim
       # fraction of 1.0 and this is calling it "wet" at 0.5.
       def cylinder_water
         Diagnostic.new(
-          id: :cylinder_water, label: "Cylinder", observer: :yardhand,
+          id: :cylinder_water, label: "Cylinder", observer: :oiling, # the oiler's round is when anybody looks at this
           source: Sources::Derived.new(:cylinder, :occupancy),
           filters: [ Filters::Lag.new(4), Filters::Bands.new([ 0.15, 0.5, 0.85 ]) ],
           display: Displays::Prose.new([ "dry", "damp", "wet", "knocking badly" ])
@@ -366,7 +369,7 @@ module ReactorSim
       # position rather than by arithmetic.
       def bearing_temp
         Diagnostic.new(
-          id: :bearing_temp, label: "Main Bearing Temperature", observer: :yardhand,
+          id: :bearing_temp, label: "Main Bearing Temperature", observer: :oiling, # the oiler's round is when anybody looks at this
           source: Sources::Derived.new(:main_bearings, :temperature_k),
           filters: [ Filters::Lag.new(6), Filters::Noise.new(4.0),
                      Filters::Range.new(273.15, 573.15) ],
@@ -384,7 +387,7 @@ module ReactorSim
       # protects.
       def bearing_condition
         Diagnostic.new(
-          id: :bearing_condition, label: "Bearing Condition", observer: :yardhand,
+          id: :bearing_condition, label: "Bearing Condition", observer: :oiling, # the oiler's round is when anybody looks at this
           source: Sources::Derived.new(:main_bearings, :integrity),
           filters: [ Filters::Lag.new(10), Filters::Misread.new(chance: 0.14, magnitude: 0.25),
                      Filters::Bands.new([ 0.2, 0.5, 0.8, 0.97 ]) ],

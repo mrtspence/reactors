@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/conservation"
 
 # **Work crossing between two operations**, which is the first thing that has ever done so.
 #
@@ -14,11 +15,6 @@ require "reactor_sim"
 #
 # See `docs/design_sketches/mine.md` §4.1 and §4.6 stage A.
 RSpec.describe "a coupling between operations" do
-  # Relative to the energy actually being handled, never to the starting balance: a sink starts
-  # empty, so normalising against its opening figure turns a relative tolerance into an absolute
-  # one and fails on ordinary float noise at 1e7 J.
-  TOLERANCE = 1e-9
-
   # A spinning mass with a brake on it — a steam engine with the boiler left off. The brake's
   # absorbed work is what leaves, exactly as the mill drive's does on the real machine.
   ReactorSim::Operations.register(:coupling_source_rig, harness: true) do |id:, seed:, **opts|
@@ -89,7 +85,8 @@ RSpec.describe "a coupling between operations" do
     200.times { match.step! }
 
     drift = match.operations.sum { |op| balance(op) } - start
-    expect(drift.abs / magnitude).to be < TOLERANCE, "match drifted by #{drift} J"
+    expect(drift.abs / magnitude).to be < Conservation::TOLERANCE,
+      "match drifted by #{drift} J"
   end
 
   # Both sides must close independently as well as together: the source pays out through
@@ -103,7 +100,8 @@ RSpec.describe "a coupling between operations" do
 
     match.operations.each do |op|
       drift = balance(op) - before.fetch(op.id)
-      expect(drift.abs / scale(op)).to be < TOLERANCE, "#{op.id} drifted by #{drift} J"
+      expect(drift.abs / scale(op)).to be < Conservation::TOLERANCE,
+        "#{op.id} drifted by #{drift} J"
     end
   end
 

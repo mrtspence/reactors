@@ -52,6 +52,25 @@ been removed from senders, added to receivers, and every node rebalanced to one 
 Optional hooks: `reactions` (array of reaction ids this node hosts) and `broken?(state)`, which
 derives from the `failure` mode rather than from a boolean — see `Wearing` below.
 
+Three more belong to people rather than to physics, and all default to nothing:
+
+- **`perils`** — ways this node hurts whoever is near it with **nothing broken**, the
+  counterpart to `Wearing`'s `failure_hazards`. A haulage road is simply a place where tubs go
+  past. Keyed by `places:`/`stations:` the same way, spent in phase 6d against a hidden
+  renewable margin, and a fitting removes one by not declaring it. See
+  [`concerns/CLAUDE.md`](../../lib/reactor_sim/concerns/CLAUDE.md).
+- **`activity(state, quantity, dt)`** — how busy this node is, **0..1 and dimensionless**, for
+  a peril that `scales_with:` it. `dt` is there because most of what a node carries is a mass
+  *this tick* while its rating is a rate *per second*; dividing one by the other without it is
+  wrong by a factor of `dt` and reads as a machine nobody is working.
+- **`safety_equipment`** — `{ place => effectiveness }`, the chance this node takes an accident
+  in that place and turns it into a near miss. Railings, fall arrests, refuges: a node that is
+  not in the way of anything and whose whole contribution is the place it guards. The best
+  guard in a place wins; they do not stack. Scaled by `Minion#wits` and capped by
+  `Blunder::MOST_EQUIPMENT_SAVES`, so **buying safety never buys immunity**, and a save emits
+  `:minion_near_miss` — a fitting whose only value is the accidents that did not happen is
+  money wasted unless the engine says so.
+
 ---
 
 ## Concerns

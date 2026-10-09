@@ -99,7 +99,7 @@ Anything needing memory is a **filter**, not a source — that is why `Rate` is 
 | `Quantize.new(step)` | Coarse dial increments. |
 | `Bands.new([thresholds])` | Collapses a value to a band index — pair with `Prose`. |
 | `Stick.new(chance:, release_chance:)` | Needle catches and holds. Flags `:stuck`. |
-| `Misread.new(chance:, magnitude:)` | An observer occasionally and confidently wrong. Flags `:misread`. |
+| `Misread.new(chance:, magnitude:, deadband: nil)` | An observer occasionally and confidently wrong. Flags `:misread`. **`deadband:` is opt-in and makes the error hold** until the real quantity has moved that far — once wrong, stay wrong. Without it the filter redraws every tick, which is right where it models a *coarse instrument* rather than a person: try-cocks are vague every time you open them, they do not form a view and stick to it. The only filter that reads `competence:`, and it scales **all three dials** off it — a better reader is wrong less often, by less, and for less long. Scaling only the frequency leaves a careful reader wrong nearly as much of the time as a hopeless one: measured at 13% against 21% for a fourfold difference, which is no mechanic at all |
 | `Average.new(window)` | Mean of the last `window` readings. Flags `:warming_up` until full. |
 | `Rate.new` | Change per simulated second. |
 

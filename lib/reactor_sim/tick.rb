@@ -35,6 +35,19 @@ module ReactorSim
     # condition cannot break order-independence, because tick N-1 is settled and identical for
     # everyone. It is not a licence to reach anywhere: structural relationships are declared
     # (`drives:`, `exhausts_to:`, a link), so what depends on what stays visible.
+    NO_SLIP = { slip: nil, slip_at: nil, slip_for: nil }.freeze
+
+    # **A slip lasts seconds, not a tick.** At a quarter-second tick a single reversed step is
+    # a rounding error nobody could see; held for a few seconds the lever visibly walks the
+    # wrong way and the player swears and re-commands, which is the whole mechanic.
+    SLIP_TICKS = 12
+
+    # Freeze, reverse, or grab the wrong lever entirely. The first two are legible in `actual`
+    # diverging from `target`, which the panel already draws; the third is the funniest and
+    # only became possible with the spatial model, because "which other lever could they have
+    # grabbed" is a question about where they are standing.
+    SLIPS = %i[freeze reverse wrong_lever].freeze
+
     Context = Struct.new(:controls, :dt, :tick, :content, :nodes, :states,
                          keyword_init: true) do
       def node_omega(id) = ask(id, :omega)
@@ -109,7 +122,8 @@ module ReactorSim
 
     # Returns the next state. The operation installs it; nothing is mutated here.
     def call(tick:, dt:)
-      controls = actuate(dt)                                    # phase 0
+      fates = draw_fates                                        # phase 0
+      controls = actuate(dt, fates)                             # phase 0
       read = state.fetch(:nodes)                                # phase 1
       ctx = Context.new(controls: control_values(controls), dt:, tick:, content: content,
                         nodes: nodes, states: read)
@@ -131,8 +145,10 @@ module ReactorSim
       ledger = record_injections(ledger, next_nodes)
       next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx)  # phase 6
       next_minions, hurt_events = endanger(wear_events, ctx)     # phase 6b
+      next_minions, burn_events = scorch(next_minions, next_nodes, ctx)  # phase 6b′
       next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx)  # phase 6c
-      next_minions = travel(next_minions, ctx)                   # phase 6d
+      next_minions, blunder_events = blunder(next_minions, next_nodes, fates, ctx) # phase 6d
+      next_minions, carry_events = travel(next_minions, ctx)     # phase 6e
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
 
       # Phase 8. Note that this hash IS the next state — a key not named here is silently
@@ -143,16 +159,109 @@ module ReactorSim
         diagnostics: next_diagnostics.freeze,
         minions: next_minions.freeze,
         ledger: ledger.freeze,
-        events: (events + wear_events + hurt_events + spent_events).freeze }.freeze
+        events: (events + wear_events + hurt_events + burn_events + spent_events +
+                 blunder_events + carry_events).freeze }.freeze
     end
 
     private
 
-    def actuate(dt)
-      state.fetch(:controls).to_h do |id, cp_state|
+    # Phase 0. **Where the levers actually get to, which is not always where they were sent.**
+    #
+    # Travel and application are separated so a mistake can send one lever's movement to a
+    # different lever. A slip changes `actual` and never `target`: the command log still
+    # carries absolute destinations, still replays identically and still needs no dedup table.
+    # **The mistake is in the execution, not in the instruction**, which is both the honest
+    # model of a real mistake and the only version that leaves invariant 4 intact.
+    def actuate(dt, fates)
+      states = state.fetch(:controls)
+      steps = states.to_h do |id, cp_state|
         [ id, control_points.fetch(id)
-                .actuate(cp_state, dt: dt, rate_multiplier: crew_multiplier(id)).freeze ]
+                .travel(cp_state, dt: dt, rate_multiplier: crew_multiplier(id)) ]
       end
+
+      slips = slips_for(states, fates, dt)
+      moved = misapplied(steps, slips)
+
+      states.to_h do |id, cp_state|
+        [ id, control_points.fetch(id).nudge(cp_state, moved.fetch(id, 0.0))
+                            .merge(slips.fetch(id, NO_SLIP)).compact.freeze ]
+      end
+    end
+
+    def slips_for(states, fates, dt)
+      states.to_h do |id, cp_state|
+        left = cp_state[:slip_for].to_i
+        next [ id, cp_state.slice(:slip, :slip_at).merge(slip_for: left - 1) ] if left.positive?
+
+        [ id, begin_slip(control_points.fetch(id), fates, dt) ]
+      end
+    end
+
+    def begin_slip(control, fates, dt)
+      minion_id = station_index[control.id] or return NO_SLIP
+      minion = minions[minion_id] or return NO_SLIP
+
+      minion_state = state.fetch(:minions).fetch(minion_id)
+      fate = fates[minion_id] or return NO_SLIP
+      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
+      return NO_SLIP if fate.fetch(:slip) >= control.slip_chance(minion, wits, dt)
+
+      kind = SLIPS[(fate.fetch(:kind) * SLIPS.length).floor.clamp(0, SLIPS.length - 1)]
+      victim = kind == :wrong_lever ? within_reach(control, fate.fetch(:victim)) : nil
+      return NO_SLIP if kind == :wrong_lever && victim.nil?
+
+      { slip: kind, slip_at: victim, slip_for: SLIP_TICKS }
+    end
+
+    # **Which other lever they could have grabbed instead** — the ones in the same room, which
+    # is why this waited for geometry. You cannot pull something in another building by
+    # mistake.
+    def within_reach(control, pick)
+      # Empty for a lever standing on its own, and for one placed nowhere at all — in an
+      # operation with no geometry there is no such thing as the lever next to this one.
+      near = reachable.fetch(control.id, [])
+      return nil if near.empty?
+
+      near[(pick * near.length).floor.clamp(0, near.length - 1)]
+    end
+
+    def reachable
+      @reachable ||= control_points.each_value.group_by(&:place).transform_values { |group|
+        group.select(&:lever?).map(&:id)
+      }.each_with_object({}) { |(place, ids), acc|
+        next if place.nil?
+
+        ids.each { |id| acc[id] = (ids - [ id ]).freeze }
+      }
+    end
+
+    # Reads the PREVIOUS tick's lever positions, because phase 0 runs before phase 1 settles
+    # this tick's — and because a gate asking whether somebody can see should not depend on a
+    # light they are about to switch on.
+    def ambient_before
+      @ambient_before ||=
+        ambient_tags(state.fetch(:controls).to_h { |id, s| [ id, control_points.fetch(id).value(s) ] })
+    end
+
+    # Order-independent on purpose: every redirection reads the frozen `steps`, never the
+    # running total, so two minions slipping onto each other's levers cannot depend on which
+    # was visited first.
+    def misapplied(steps, slips)
+      moved = steps.to_h do |id, step|
+        [ id, case slips.dig(id, :slip)
+              when nil then step
+              when :reverse then -step
+              else 0.0
+              end ]
+      end
+
+      slips.each do |id, slip|
+        next unless slip[:slip] == :wrong_lever && slip[:slip_at]
+
+        moved[slip[:slip_at]] = moved.fetch(slip[:slip_at], 0.0) + steps.fetch(id, 0.0)
+      end
+
+      moved
     end
 
     # Who is stood at this lever, and how fast they can work it.
@@ -161,11 +270,11 @@ module ReactorSim
     # has been moved is at the post their state names, not the one they were built with.
     def crew_multiplier(control_point_id)
       minion_id = station_index[control_point_id]
-      # TODO: expedient — an unmanned lever moves at full rate. It should almost certainly not
-      # move at all, but every steam engine lever is frictionless today and discards this
-      # multiplier entirely, so making it 0.0 now would be an untested change to a value
-      # nothing reads. A proper implementation decides what an unattended control does, which
-      # is a game-design question rather than a mechanical one.
+      # **An unattended lever travels at its rated speed, because the overseer is working it.**
+      # Surface plant is the player's own: a colliery's fan, pump and winder are at bank where
+      # no minion is normally posted, so a lever that froze without a body would mean a pit
+      # whose fan could never be started. Posting somebody makes it *faster or slower* than
+      # rated rather than making it possible at all.
       return 1.0 unless minion_id
 
       minions.fetch(minion_id)
@@ -190,7 +299,9 @@ module ReactorSim
     # **Nobody posted means nothing gets done.** An unmanned shovel moves no coal.
     def control_values(controls)
       levers = controls.to_h { |id, s| [ id, control_points.fetch(id).value(s) ] }
-      ambient = ambient_tags(levers)
+      # Kept, because phase 7 asks the same question of an observer that phase 0 asks of a
+      # worker: whether the room lets them see what they are doing.
+      ambient = @ambient = ambient_tags(levers)
 
       controls.to_h do |id, s|
         control = control_points.fetch(id)
@@ -833,8 +944,9 @@ module ReactorSim
         choking = Breath.rate(here, minion, minion_state)
 
         tired = Fatigue.advance(minion, Breath.draw(minion_state, here, minion),
-                                control: control, demand: demand,
-                                dt: ctx.dt, suffocation: choking)
+                                control: control, demand: demand, dt: ctx.dt,
+                                suffocation: choking,
+                                burden: Burden.ratio(minion, minion_state, minions))
         tired, spent = Fatigue.check_spent(tired)
         events << spent_event(minion, control, ctx) if spent
 
@@ -844,6 +956,176 @@ module ReactorSim
       end
 
       [ next_states, events ]
+    end
+
+    # Phase 0. **Every die this tick throws for a person, in one place, drawn unconditionally.**
+    #
+    # Five per minion whether any of them is used or not. A conditional draw makes the RNG
+    # stream depend on the condition, and the divergence that causes does not show up here —
+    # it shows up days later, on a restore, as a replay that quietly differs. Keeping the
+    # count fixed and in one method is what makes that checkable: if this returns five values,
+    # it drew five.
+    #
+    # Each minion draws from their own stream, so no two can race and the order they are
+    # visited in cannot matter.
+    def draw_fates
+      minions.keys.to_h do |id|
+        rng = rngs.fetch(id)
+        [ id, { margin: Blunder.roll(rng), slip: rng.float,
+                kind: rng.float, victim: rng.float, dodge: rng.float } ]
+      end
+    end
+
+    # Phase 6d. **What the people do to themselves**, which is the route into harm that needs
+    # nothing to break first.
+    #
+    # After `tire`, so it reads this tick's fatigue rather than last tick's. The usual argument
+    # that everything must read the frozen N−1 does not apply: that rule constrains what
+    # *nodes* may see of each other, and a minion's fatigue and their margin are one object
+    # being advanced twice in a fixed order. After `endanger` too, so somebody already carried
+    # out by an explosion this tick has no station before their own margin is weighed.
+    def blunder(minions_state, states, fates, ctx)
+      reaching = perils_in_reach(states, ctx.dt)
+      return [ minions_state, [] ] if reaching.empty?
+
+      events = []
+      next_states = minions_state.to_h do |id, minion_state|
+        minion = minions[id]
+        next [ id, minion_state ] if minion.nil?
+
+        [ id, weigh(minion, minion_state, reaching, fates, events, ctx).freeze ]
+      end
+
+      [ next_states, events ]
+    end
+
+    def weigh(minion, minion_state, reaching, fates, events, ctx)
+      mine = reaching.select { |peril, _| peril.reaches?(minion_state[:station], minion_state[:place]) }
+      after, peril = Blunder.advance(mine, minion, minion_state, ctx.dt,
+                                     fates.dig(minion.id, :margin) || 1.0)
+      return after if peril.nil?
+
+      guarded = guarding(minion, minion_state, fates)
+      if guarded
+        events << near_miss_event(minion, minion_state, peril, guarded, ctx)
+        return after
+      end
+
+      hurt, mode = Injury.check(minion, after, { severity: peril.severity, tags: peril.tags })
+      events << blundered_event(minion, hurt, mode, peril, ctx) if mode
+      hurt
+    end
+
+    # **What kept them out of it, or nil.** Safety equipment only helps somebody with the
+    # attention to spare for it, which `Minion#wits` carries along with being able to see what
+    # is coming at all.
+    def guarding(minion, minion_state, fates)
+      fitted = safety_equipment[minion_state[:place]] or return nil
+      effectiveness, source = fitted
+
+      return nil unless Blunder.accident_avoided?(
+        effectiveness,
+        minion.wits(minion_state, ambient: ambient_before[minion_state[:place]]),
+        fates.dig(minion.id, :dodge) || 1.0
+      )
+
+      source
+    end
+
+    # What is fitted where, as `{ place => [effectiveness, node] }`, best guard winning.
+    # Configuration rather than state, so it is worked out once for the whole tick.
+    def safety_equipment
+      @safety_equipment ||= nodes.each_with_object({}) do |(id, node), acc|
+        node.safety_equipment.each do |place, effectiveness|
+          best = acc[place]
+          acc[place] = [ effectiveness.to_f, id ] if best.nil? || effectiveness.to_f > best.first
+        end
+      end
+    end
+
+    # **The player has to be told their safety equipment worked**, or the money they spent on
+    # it is indistinguishable from money they wasted. A fitting whose entire value is the
+    # accidents that did *not* happen is invisible by construction unless the engine says so.
+    #
+    # A `warning`, so it reaches the incident feed rather than only the durable log: a near
+    # miss is the operation telling the player exactly where its next casualty comes from.
+    def near_miss_event(minion, state, peril, source, ctx)
+      Event.build(type: :minion_near_miss, node: minion.id, label: minion.name,
+                  severity: :warning, tick: ctx.tick, cause: peril.id,
+                  detail: { minion: minion.minion, place: state[:place], saved_by: source })
+    end
+
+    # **What every place is doing to the people in it, worked out once rather than once per
+    # person.** Activity rather than time: the danger of a haulage road is not being on it, it
+    # is the tub going past — so running the mine harder runs it more dangerously, and
+    # production and safety become the same dial. That is the central tension of the whole
+    # operation and it is historically exact.
+    def perils_in_reach(states, dt)
+      nodes.each_with_object({}) do |(id, node), acc|
+        node.perils.each do |peril|
+          acc[peril] = if peril.scales_with
+            node.activity(states.fetch(id), peril.scales_with, dt).to_f
+          else
+            1.0
+          end
+        end
+      end
+    end
+
+    # **Reuses `minion_hurt` rather than growing a second type.** The transition is identical —
+    # a Danger Check, a tier, a station possibly cleared — and the engine's job is to report
+    # transitions while the delivery tier composes meaning. `cause:` carries which peril, so
+    # "hurt by machinery" and "hurt by their own bad luck" are still different sentences.
+    def blundered_event(minion, state, mode, peril, ctx)
+      Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
+                  severity: :critical, tick: ctx.tick, mode: mode, cause: peril.id,
+                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
+                            place: state[:place] })
+    end
+
+    # Phase 6b′. **What the heat where somebody is standing does to them.**
+    #
+    # Beside `endanger` rather than inside it, because the two are different shapes: a hazard
+    # is a blow delivered by a part that failed, and heat is a condition of the room that
+    # grinds away for as long as somebody is in it. It grinds `resilience` directly — heat is
+    # not tiredness and does not recover by standing somewhere cooler for a minute.
+    #
+    # **No entropy**, exactly as the Danger Check draws none.
+    def scorch(minions_state, states, ctx)
+      events = []
+      heat = place_gas(states)
+      return [ minions_state, events ] if heat.empty?
+
+      next_states = minions_state.to_h do |id, minion_state|
+        minion = minions[id]
+        next [ id, minion_state ] if minion.nil?
+
+        burned, mode = Scorch.advance(minion, minion_state, heat[minion_state[:place]], ctx.dt)
+        events << burned_event(minion, burned, mode, ctx) if mode
+        [ id, burned.freeze ]
+      end
+
+      [ next_states, events ]
+    end
+
+    # The gas filling each room, once per tick rather than once per person. The same node
+    # `breathable_air` reads, because what you are standing in is what you are breathing.
+    def place_gas(states)
+      return {} if layout.places.empty?
+
+      layout.places.each_with_object({}) do |place, acc|
+        parcels = states.dig(layout.breathes(place), :parcels) or next
+        gas = Scorch.gas(parcels, content) or next
+        acc[place] = gas
+      end
+    end
+
+    def burned_event(minion, state, mode, ctx)
+      Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
+                  severity: :critical, tick: ctx.tick, mode: mode, cause: :burns,
+                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
+                            place: state[:place],
+                            burns: state.fetch(:burns, 0.0).round(3) })
     end
 
     # **The air in each room, once per tick rather than once per person.** Read off the state
@@ -894,7 +1176,7 @@ module ReactorSim
                             asphyxia: state.fetch(:asphyxia, 0.0).round(3) })
     end
 
-    # Phase 6d. Where everybody has got to.
+    # Phase 6e. Where everybody has got to.
     #
     # **Runs after `tire`, and reads no controls**, so who is standing where still comes from the
     # previous tick everywhere it matters — `station_index` and `control_values` are built in
@@ -904,25 +1186,84 @@ module ReactorSim
     #
     # An operation with no passages has no geometry and this is a no-op, which is what leaves the
     # steam engine bit-identical.
+    # **Two passes, and the split is what keeps the phase order-independent.** A carried minion's
+    # place is written by whoever is holding them, and a cross-minion write inside one `to_h` would
+    # be overwritten by the carried minion's own iteration — so which won would depend on hash
+    # order. Pass one walks everybody who can walk; pass two is a pure function of its output.
+    #
+    # Correct only because **a carried minion may not carry**: the graph is exactly one deep, so
+    # stowing is a lookup rather than a traversal. `Operation#assign_minion` enforces that.
     def travel(minions_state, ctx)
-      return minions_state unless layout.spatial?
+      return [ minions_state, [] ] unless layout.spatial?
 
-      minions_state.to_h do |id, minion_state|
+      carried = being_carried(minions_state)
+      events = []
+      walked = minions_state.to_h do |id, minion_state|
         minion = minions[id]
-        next [ id, minion_state ] if minion.nil?
+        next [ id, minion_state ] if minion.nil? || carried.key?(id)
 
-        [ id, walk(minion, minion_state, ctx).freeze ]
+        after = walk(minion, minion_state, ctx)
+        lifted(minion_state, after).each { |got| events << carried_event(minion, got, ctx) }
+        [ id, after.freeze ]
+      end
+
+      [ stow(walked, carried), events ]
+    end
+
+    # Who this minion picked up this tick. A set difference rather than a flag, so it cannot
+    # disagree with the state it describes.
+    def lifted(before, after) = Burden.carried(after) - Burden.carried(before)
+
+    # Who is in somebody's arms, as `{ carried id => carrier id }`. Built from the frozen state at
+    # the top of the phase, so it cannot see pass one's writes.
+    def being_carried(minions_state)
+      minions_state.each_with_object({}) do |(carrier, state), acc|
+        Burden.carried(state).each { |id| acc[id] = carrier }
       end
     end
 
+    # Cargo goes where its carrier got to, and **stops working on the way**: somebody in another
+    # person's arms is not at a lever, so `station` and `posting` are cleared here. Without that a
+    # casualty keeps hewing all the way to the pit bank, and would walk back to the face the moment
+    # they were set down.
+    #
+    # Cleared every tick rather than once at pickup, because this is the single writer of a carried
+    # minion's state and a lone write at pickup would be undone by their own `assign`.
+    #
+    # **Their `progress` and `journey` are left alone**: they are not walking, and clearing them
+    # would throw away a half-finished walk that is still theirs once they are set down.
+    def stow(walked, carried)
+      return walked if carried.empty?
+
+      walked.merge(carried.to_h { |id, carrier|
+        here = walked.dig(carrier, :place) || walked.dig(id, :place)
+        [ id, walked.fetch(id).merge(place: here, station: nil, posting: nil).freeze ]
+      })
+    end
+
+    # **A posting may name a person as well as a station**, which is the whole of the fetch order:
+    # `assign_minion(:crew_2, :crew_1)` sends somebody to wherever `crew_1` is, and the id spaces
+    # cannot collide because every id in an operation is one flat namespace.
     def walk(minion, state, ctx)
-      destination = layout.place_of(minion.posting(state))
+      destination = posted_place(minion, state)
       here = minion.place(state)
       # A posting with no place, or none at all, is worked from wherever they are standing.
-      return arrived(minion, state) if destination.nil? || destination == here
+      return reached(minion, state) if destination.nil? || destination == here
 
       step(minion, embark(minion, state, here, destination), here, destination, ctx)
     end
+
+    # Where a posting resolves to: a lever's room, or whichever room the person named is in now.
+    # Reading the casualty's **frozen** place is what lets a rescuer re-route for free when their
+    # casualty is moved by somebody else.
+    def posted_place(minion, state)
+      posting = minion.posting(state)
+      return layout.place_of(posting) unless minions.key?(posting)
+
+      state_of(posting)&.fetch(:place, nil)
+    end
+
+    def state_of(id) = state.fetch(:minions)[id]
 
     # **`journey` is the high-water mark of how far there was left to go, measured BEFORE this
     # tick's walking** — taken after it, the first tick's strides are missing from the total and
@@ -937,8 +1278,37 @@ module ReactorSim
       state.merge(journey: [ state.fetch(:journey, 0.0), setting_out ].max)
     end
 
-    def arrived(minion, state)
-      state.merge(station: minion.posting(state), progress: 0.0, remaining: 0.0, journey: 0.0)
+    # **Arriving at a person is a pickup; arriving at a lever is taking up a post.** The two are
+    # different enough to be worth the branch: a fetch order is *consumed* on arrival, because
+    # holding somebody is not a job and leaving a minion id in `station` would read as "working
+    # Jim" to the panel and as off-post to `tire`.
+    def reached(minion, state)
+      posting = minion.posting(state)
+      return pick_up(minion, state, posting) if minions.key?(posting)
+
+      state.merge(station: posting, progress: 0.0, remaining: 0.0, journey: 0.0)
+    end
+
+    # Silent on failure, and deliberately. Somebody else having got there first, or a load that
+    # will not fit after all, is a rescuer standing in a district with empty hands — which the
+    # crew screen already shows. An event for it would be a type nothing reads.
+    def pick_up(minion, minion_state, casualty)
+      stood_down = minion_state.merge(posting: nil, station: nil, progress: 0.0,
+                                      remaining: 0.0, journey: 0.0)
+      return stood_down unless liftable?(minion, minion_state, casualty)
+
+      stood_down.merge(carrying: (Burden.carried(minion_state) + [ casualty ]).freeze)
+    end
+
+    # Reads the FROZEN roster for who is already carried, so two rescuers sent to one casualty
+    # cannot both succeed depending on which was visited first. `minion_state` is this carrier's
+    # own hash and `state` is the whole previous tick — naming them apart matters here, because
+    # one of them has a `:minions` key and the other does not.
+    def liftable?(minion, minion_state, casualty)
+      return false if being_carried(state.fetch(:minions)).key?(casualty)
+      return false if Burden.carrying?(state_of(casualty) || {})
+
+      Burden.liftable?(minion, minion_state, minions, minions[casualty])
     end
 
     # One tick's walking, which may cross more than one passage if the stretches are short or the
@@ -946,7 +1316,7 @@ module ReactorSim
     # place, or a mine run at a high `time_scale` would advance one passage per tick however long
     # the tick was.
     def step(minion, state, here, destination, ctx)
-      remaining = minion.pace(state) * ctx.dt
+      remaining = minion.pace(state, burden: Burden.ratio(minion, state, minions)) * ctx.dt
       progress = state.fetch(:progress, 0.0)
 
       while remaining.positive? && here != destination
@@ -991,6 +1361,20 @@ module ReactorSim
     # layout stays deterministic when two ways are equally good.
     def quickest(here, hop, ctx)
       layout.passages_between(here, hop).max_by { |p| p.speed_in(ctx) }
+    end
+
+    # **A rescue reaching its casualty, which the engine did on its own.** The order was given
+    # minutes earlier and somewhere else, so the moment it is fulfilled is a transition worth the
+    # durable record — `:info`, because the crew screen is already showing who is holding whom and
+    # the incident feed is for what has gone wrong.
+    #
+    # Setting somebody down gets no event: the player pressed the button and knows where they were
+    # standing when they did.
+    def carried_event(minion, casualty, ctx)
+      Event.build(type: :minion_carried, node: minion.id, label: minion.name,
+                  severity: :info, tick: ctx.tick, cause: :rescue,
+                  detail: { minion: minion.minion, casualty: casualty,
+                            place: state_of(casualty)&.fetch(:place, nil) })
     end
 
     # The person and the post, the same split `hurt_event` makes: the post outlives whoever was
@@ -1105,9 +1489,24 @@ module ReactorSim
       current = state.fetch(:diagnostics)
 
       diagnostics.to_h do |id, diagnostic|
-        [ id, diagnostic.record(current.fetch(id), nodes, node_states, ctx,
-                                rngs.fetch(id)).freeze ]
+        [ id, diagnostic.record(current.fetch(id), nodes, node_states, ctx, rngs.fetch(id),
+                                competence: reading_competence(diagnostic)).freeze ]
       end
+    end
+
+    # **How well whoever is watching this instrument can read it**, or nil when nobody is.
+    #
+    # `observer:` names a **station**, never a minion, the same rule `endangers:` follows and
+    # for the same reason: a station is fixed by the machine and a roster is the player's. An
+    # instrument that names none is a dial on a wall and reads 1.0 — which is every gauge in
+    # the game but the few where the reading is somebody's word.
+    def reading_competence(diagnostic)
+      station = diagnostic.observer or return 1.0
+      minion_id = station_index[station] or return nil
+      minion = minions[minion_id] or return nil
+
+      minion_state = state.fetch(:minions).fetch(minion_id)
+      minion.wits(minion_state, ambient: @ambient&.fetch(minion_state[:place], nil))
     end
   end
 end

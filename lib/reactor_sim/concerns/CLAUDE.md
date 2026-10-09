@@ -224,6 +224,55 @@ geometry at all — the machine knows which levers sit beside which parts — an
 when volumes arrive. A station's figure is a **weight**; `scales_with:` names a key in the failure
 event's own `detail:` so the size of the event comes from the part rather than from a constant.
 
+## `perils` is the other half: harm with nothing broken
+
+`failure_hazards` answers *"a part broke, who was near it"*. A **peril** answers the half that
+needs no failure at all: the haulage road is simply a place where tubs go past, and sooner or
+later one of them catches somebody. Declared on the node that embodies the danger, keyed by
+`places:` or `stations:` exactly as hazards are, and spent in phase 6d.
+
+- **Peril accrues with ACTIVITY, not time.** The danger is the tub going past, not being on the
+  road — so `scales_with:` reads a 0..1 figure off the node and **running the mine harder runs
+  it more dangerously**. Production and safety are the same dial, which is the operation's
+  central tension and is historically exact.
+- **It spends a hidden, renewable `margin`** (`Blunder`), not durability. A part's durability
+  only ever goes down; a person's margin comes back, which makes a bad hour on the haulage road
+  a reason to move somebody rather than a sentence passed on them.
+- **A tag can select a kind of accident rather than only making one likelier.** `when_tagged:`
+  and `unless_tagged:` let a `hulking` minion get wedged where a small one has room, and the
+  small one be missed by a driver where the ogre would have been seen. Race and kit then matter
+  in both directions at a post rather than ranking on one scale. Keep these rare and reserve
+  them for tags that are already load-bearing, or the table grows combinatorially.
+- **The gating tag's VALUE scales the bite, so the two sides are complementary rather than
+  exclusive.** `Peril#weight_for` multiplies severity by the tag for `when_tagged:` and by
+  `(1 - tag)` for `unless_tagged:`, which means `severity` is the figure for a **fully** tagged
+  creature and anything in between gets some of both. An ogre at `hulking: 0.5` is wedged half as
+  readily as something that fills the roadway and struck by tubs half as often as a kobold.
+  Presence-only gating made a hob and a giant identical, and made anything with a trace of the
+  tag wholly immune to the peril on the other side of it.
+- **There is no `absent_when:`.** A fitting removes a peril by not declaring it — railings are
+  a part, and a fitted part contributes a fragment without the fall in it. That is how every
+  other purchase works and it needs no second rule.
+
+### `safety_equipment` is the other way to buy out of one
+
+A peril nothing can remove — you cannot run a haulage road without tubs on it — is bought down
+instead. A node answers `safety_equipment` with `{ place => effectiveness }` and phase 6d gives
+whoever is in that place a chance to be missed: the accident resolves, the margin is renewed,
+and nobody is hurt.
+
+- **It is not a discount on the risk, because it is gated on attention.** `Minion#wits` scales
+  it, and `wits` is itself gated on being able to see — so a dark roadway takes the value of
+  the refuge with it, and a tired hand gets less out of the same fitting than a fresh one. The
+  equipment is something somebody has to *use*.
+- **Capped at `Blunder::MOST_EQUIPMENT_SAVES`.** Buying safety must never buy immunity, or the
+  road stops being a risk being managed and becomes one that has been closed.
+- **The best guard in a place wins; they do not stack.** Two sets of railings are one railing.
+- **A save emits `:minion_near_miss` at `warning`.** This is not decoration. The entire value
+  of the fitting is accidents that did not happen, so without the event it is indistinguishable
+  from money wasted — and the near miss also tells the player exactly where their next casualty
+  is coming from.
+
 **`failure_damages` is deliberately not an entry in `failure_modes`**, and the reason is the
 rule that everything under `nodes/` is generic: `Nodes::Boiler` cannot name a `:cylinder`,
 because a boiler in another machine has none near it. Which modes exist belongs to the class;

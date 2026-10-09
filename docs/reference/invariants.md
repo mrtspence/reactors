@@ -37,6 +37,25 @@ and also sweeps the source statically.
 - **Entropy may only be drawn in three places:** `initial_state`, phase 0 (`actuate`), and
   phase 7 (`observe`/`Diagnostic#record`). Nowhere else — see rule 4 for why.
 
+> ### Phase 0 is a live entropy draw now, and it was inert for a long time
+>
+> The rule above always permitted it and nothing used it, so for most of this engine's life
+> only `initial_state` and phase 7 actually drew. **`Tick#draw_fates` now throws for every
+> minion on every tick** — a margin of safety, and three values deciding whether somebody at
+> a tricky lever does the wrong thing with it.
+>
+> That makes one discipline load-bearing that was previously theoretical:
+>
+> **Draw a fixed number per minion per tick, unconditionally, and discard what you do not
+> use.** A draw made only when some condition holds makes the whole stream depend on that
+> condition — and the divergence does not show up where you made it. It shows up days later
+> as a snapshot that replays differently, in a part of the match nothing connects to the
+> change. `draw_fates` exists as one method returning one fixed-size hash so the count is
+> checkable by reading it.
+>
+> **Adding or removing a draw there is a replay-breaking change to every existing snapshot.**
+> That is acceptable while nothing durable is stored and must be deliberate afterwards.
+
 ### Symbols as values do not survive JSON
 
 `deep_symbolize` converts **keys** only. A symbol stored as a *value* — a `resource:` inside
@@ -137,6 +156,25 @@ Commands carry absolute values and are safe to deliver twice.
 
 This is what lets the runner commit Kafka offsets *after* snapshotting: redelivery is a
 no-op, so at-least-once delivery needs no dedup table.
+
+### "Absolute" means the END STATE is determined, not that the payload is a whole value
+
+**The ingress is at-least-once *and unordered*, so a command must be commutative as well as
+idempotent.** A whole-value assignment is only safe where one writer owns the whole value, and a
+human pressing buttons is not that writer.
+
+Worked, from `drop_minion`. An ogre is carrying `[A, B, C]` and the player taps twice:
+
+| Form | Taps produce | Arrive reversed | Result |
+|---|---|---|---|
+| Absolute list — `carry(ogre, [ids])` | `[B, C]` then `[C]` | `[C]` then `[B, C]` | **B is back in his arms** |
+| Named removal — `drop_minion(A)`, `drop_minion(B)` | remove A, remove B | remove B, remove A | `[C]` either way ✓ |
+
+So a command that **removes a named element** is absolute in the sense that matters, and a
+command that **assigns a collection** is not — even though the second looks more like a value and
+the first looks more like a step. Prefer naming the thing being changed over sending the new whole.
+
+`set_control` is unaffected: one lever, one scalar, one writer.
 
 Guarded by `spec/reactor_sim/determinism_spec.rb`.
 

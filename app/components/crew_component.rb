@@ -27,4 +27,19 @@ class CrewComponent < ViewComponent::Base
   # than resolved server-side because where somebody is standing is state and arrives on the
   # cable; only the names are chrome.
   def place_labels = @places.to_h { |place| [ place.fetch(:id), place.fetch(:label) ] }.to_json
+
+  # **Who this one could be sent to fetch**, which is everybody but themselves. Offered as part of
+  # the same dropdown that posts somebody to a lever, because a fetch order *is* a posting — the
+  # id spaces cannot collide, so one control still cannot be ambiguous.
+  #
+  # Chrome, not state: who is on the roster is configuration, and whether a given carry would
+  # actually be accepted is the simulation's business. The engine refuses what it cannot do, and
+  # offering an order that comes back refused is better than a dropdown that silently hides the
+  # one person the player is looking for.
+  def rescuable(minion) = minions.reject { |other| other.id == minion.id }
+
+  # **No places, no carrying.** Without geometry everybody is always wherever they are needed, so
+  # there is nobody to go and fetch — and offering the order would put a dozen inert entries in
+  # the steam engine's dropdown.
+  def places_known? = @places.any?
 end

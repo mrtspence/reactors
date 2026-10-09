@@ -356,9 +356,21 @@ So a mine that wants fumbling must ship **finite `stiffness`** on every control 
 fumbled, or the entire mechanic is unreachable and every spec still passes.
 
 This is precisely the trap the progress doc names as *"a tier nothing can reach is a tier that does
-not exist"*. **Verify by driving the real machine**, not by reading the arithmetic. Finite lever
-stiffness is already on the deferred-minion-work list; this promotes it from "nice" to
-"prerequisite".
+not exist"*. **Verify by driving the real machine**, not by reading the arithmetic.
+
+> **Closed.** `Mine::Travel` gives the seven valves figures in percent of range per second — the
+> fan is forty seconds hard over — and `lever_travel_spec` drives the real machine rather than
+> the arithmetic. Effort stations stay infinite deliberately. Three findings worth carrying into
+> the work below:
+>
+> - **The whole path was already built and only the value was missing.** `crew_multiplier`,
+>   `settling?`, `target`/`actual` in the projection and a ghost marker in the console all
+>   existed and were unreachable. Check for that before building anything here.
+> - **An unattended lever travels at its rated speed**, decided rather than defaulted: the fan,
+>   pump and winder are at bank where nobody is posted, so freezing them would be a pit whose
+>   fan could never be started. A body makes a lever faster or slower, never possible at all.
+> - **Nothing in the mine's 123 hazard examples moved.** A forty-second travel is invisible to a
+>   spec that sets a lever and runs for thousands of ticks, which is all of them.
 
 ## Idempotence is not threatened, and it is worth saying why
 
@@ -521,6 +533,25 @@ This gives three things at once:
    someone — the same shape as stone dusting in the mine's tech tree, and the same satisfaction.
 3. **Hazard tags need no engine change.** `%i[fall crush impact]` resist against `fall_resistance`
    etc. through the existing naming convention in `Injury.resistance`.
+
+### `absent_when:` was dropped; there are two mechanisms instead
+
+A fitting that deletes a peril needs no key of its own — **a part that is fitted contributes a
+fragment without the fall in it**, which is how every other purchase in the engine works. So
+railings are a variant of the gantry, not a flag on the hazard.
+
+That only covers perils you can design out. You cannot run a haulage road without tubs on it, so
+the second mechanism buys the remaining risk down rather than removing it: a node answers
+`safety_equipment` with `{ place => effectiveness }` and an accident in that place may resolve as
+a near miss instead. Three rules make it a purchase rather than a discount:
+
+- **Gated on `Minion#wits`**, so it is worth far less to somebody who never saw the tub coming —
+  and because `wits` is itself gated on seeing, an unlit roadway takes the refuge's value with it.
+  Manholes limewashed white are a real tier for exactly this reason.
+- **Capped**, at `MOST_EQUIPMENT_SAVES`. Buying safety must never buy immunity.
+- **It emits.** `:minion_near_miss`, at `warning`. A fitting whose entire value is accidents that
+  did not happen is indistinguishable from money wasted unless the engine says so, and the near
+  miss doubles as the clearest possible warning about where the next casualty comes from.
 
 ## Tags select the accident, not just its likelihood
 
@@ -834,8 +865,28 @@ Everything here comes **after** the mine is playable. Within that:
 
 1. **Misreading (1)** first. Smallest, self-contained, and it immediately makes the flame-cap
    gauge — the mine's signature instrument — do the thing the whole design promised.
-2. **Finite stiffness**, on its own, as a prerequisite. It is already on the deferred list and
-   nothing in (2) or (3) can be observed without it.
+2. ~~**Finite stiffness**, on its own, as a prerequisite.~~ **Done** — see the box in Part 3.
+
+> ### Parts 1–4 are built. What the measurements said
+>
+> - **Misreading (2).** The flame cap is the one mine instrument that names an observer, and
+>   `:timbering` reads it — the post that is in the district and wins no coal, which now has a
+>   second reason to be manned. Wrong on **8.5%** of looks for a deputy, **17.2%** for an
+>   ordinary collier, **62.7%** for a day-labourer. Getting that spread needed competence to
+>   scale *all three* dials rather than only the frequency; scaling frequency alone gave 13%
+>   against 21%, which is no mechanic at all.
+> - **Doing the wrong thing (3).** `winding` is the one certificated post, because overwinding
+>   puts a cage through the headgear. A ticketed engineman **never slips**; the same man
+>   without the ticket slips on 663 of 8,000 ticks and grabs the clutch, the pump, the
+>   ventilation or **the naked flame**; a boneheaded kobold on 1,118.
+> - **The accident model (4).** `Peril` beside `failure_hazards`, spending a hidden renewable
+>   `margin`. Perils scale with the traffic, so the haulage lever is the production dial and
+>   the danger dial at once.
+>
+> Two things the design did not anticipate and both are now rules elsewhere: **`observer:` had
+> already been declared decoratively** on five steam-engine gauges naming posts that were never
+> stations, which turning the seam on made permanently offline; and **phase 0 becoming a live
+> draw** makes the unconditional-draw discipline load-bearing rather than theoretical.
 3. **Doing the wrong thing (2)**.
 4. **The accident model (4)**. Largest, overlaps the reserved probabilistic-injury design, and
    wants its own sketch and review before code.

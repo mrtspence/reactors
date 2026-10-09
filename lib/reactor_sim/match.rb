@@ -206,6 +206,7 @@ module ReactorSim
       case command.type
       when Command::SET_CONTROL   then apply_set_control(command)
       when Command::ASSIGN_MINION then apply_assign_minion(command)
+      when Command::DROP_MINION   then apply_drop_minion(command)
       else false
       end
     end
@@ -215,8 +216,19 @@ module ReactorSim
       return false unless found
 
       # The destination rides on `control_point_id` rather than a member of its own, because a
-      # station IS a control point — a second field would let the two disagree.
+      # station IS a control point — a second field would let the two disagree. **It may also name
+      # a person**, which is a fetch order; the id spaces cannot collide, so one field still
+      # cannot be ambiguous. Renaming it would make every command already in the log unparseable.
       found.assign_minion(command.minion_id, command.control_point_id)
+    end
+
+    # **Names the person being put down, not whoever is holding them.** That is what makes it
+    # per-person and what makes it commutative under an at-least-once, unordered log.
+    def apply_drop_minion(command)
+      found = operation(command.operation_id) if command.operation_id
+      return false unless found
+
+      found.drop_minion(command.minion_id)
     end
 
     def apply_set_control(command)

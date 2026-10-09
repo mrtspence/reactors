@@ -21,15 +21,17 @@ module PassageRig
   TIRELESS = 1.0e6
 
   ARCHETYPES = {
-    walker: { label: "Walker", strength: 1.0, toughness: 1.0, endurance: TIRELESS,
+    # **All three weigh the same and carry nothing**, so `Burden` is identical across them and a
+    # comparison is a comparison of the thing it names.
+    walker: { label: "Walker", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: TIRELESS,
               intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} },
     # Same person, one tag different — so a spec comparing them is comparing the gate and
     # nothing else.
-    wiry: { label: "Wiry", strength: 1.0, toughness: 1.0, endurance: TIRELESS,
+    wiry: { label: "Wiry", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: TIRELESS,
             intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: { wiry: true } },
     # Slower than the other two, and nothing else changed — `pace` blends strength and
     # toughness, so halving both halves the walk.
-    plodder: { label: "Plodder", strength: 0.5, toughness: 0.5, endurance: TIRELESS,
+    plodder: { label: "Plodder", mass_kg: 70.0, strength: 0.5, toughness: 0.5, endurance: TIRELESS,
                intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} }
   }.freeze
 
@@ -88,7 +90,8 @@ ReactorSim::Operations.register(:passage_rig, harness: true) do |id:, seed:, **o
       ReactorSim::Minion.new(id: seat, station: :quarters, place: :bank,
                              name: sheet.fetch(:name), minion: sheet.fetch(:minion),
                              archetype: sheet.fetch(:archetype), stats: sheet.fetch(:stats),
-                             tags: sheet.fetch(:tags))
+                             tags: sheet.fetch(:tags),
+                             mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg))
     }
   )
 end

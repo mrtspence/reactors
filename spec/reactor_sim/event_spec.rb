@@ -143,5 +143,47 @@ RSpec.describe "events" do
       expect(casualties).not_to be_empty
       expect(casualties.map { |e| e[:cause] }.uniq).to all(be_a(Symbol))
     end
+
+    # **A fire reaches the player only if it is severe enough to be an incident**, and
+    # `Operation#incidents` reports `warning` and `critical` alone. Lighting a district read as
+    # `info`, so a gas ignition that burned off the firedamp, drove four fifths of the air out
+    # on thermal expansion and left the roadway at 1300 K put *nothing whatever* on the panel —
+    # the player watched their air vanish with no line to explain it.
+    #
+    # The vessel decides, by its own temperature rating: a firebox is built to burn and rates
+    # itself infinite; a roadway does not. **No supply, so the fan is stopped and the gas
+    # builds** — a lamp in a district the fan is holding at 3% is not an incident and must not
+    # read as one, which is the other half of this and lives in `mine_tech_spec`.
+    it "puts a fire in a place not built for one in front of the player" do
+      op = ReactorSim::Match
+           .create(id: "f", seed: 1,
+                   operations: [ { id: "pit", type: :mine,
+                                   ground: ReactorSim::Operations::Mine::Ground::ORDINARY } ])
+           .operation(:pit)
+      op.set_control(:naked_flame, 100)
+
+      lit = nil
+      2_500.times do |i|
+        events = op.step!(tick: i + 1)
+        next if events.none? { |e| e[:type] == :fire_lit && e[:severity] == :critical }
+
+        lit = { event: events.find { |e| e[:type] == :fire_lit }, reported: op.incidents }
+        break
+      end
+
+      expect(lit).not_to be_nil, "the district never caught"
+      expect(lit.fetch(:event)[:cause]).to be(:naked_flame)
+      expect(lit.fetch(:reported).map { |e| e[:type] }).to include(:fire_lit)
+    end
+
+    # The other half, and the one that would break every match if it went wrong: an engine
+    # lighting its own firebox is the machine working, not an incident. A firebox is built to
+    # burn and rates its temperature as infinite, so nothing alight in one is ever news.
+    it "leaves a firebox lighting as ordinary business" do
+      op = ReactorSim::Match
+           .create(id: "b", seed: 1, operations: [ { id: "eng", type: :steam_engine } ])
+           .operation(:eng)
+      expect(op.nodes.fetch(:firebox).send(:fire_severity)).to be(:info)
+    end
   end
 end

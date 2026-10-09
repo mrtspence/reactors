@@ -143,6 +143,16 @@ require_relative "reactor_sim/injury"
 # Whether the air where somebody is standing will keep them alive. After `fatigue` and `injury`,
 # whose pools it drains; `tick` is the only caller.
 require_relative "reactor_sim/breath"
+# What the heat where somebody is standing does to them. After `injury`, whose resilience it
+# grinds directly rather than draining a pool of its own; `tick` is the only caller.
+require_relative "reactor_sim/scorch"
+# A way a place can hurt somebody with nothing broken, and the hidden margin it spends. After
+# `injury`, whose Danger Check it hands a hazard to; `tick` is the only caller.
+require_relative "reactor_sim/peril"
+# What somebody is carrying — gear and people, one concept — and what it costs their pace and
+# their wind. After `injury`, whose `numeric` and deratings it reads through the minion it is
+# handed; read by `minion` and by `tick`.
+require_relative "reactor_sim/burden"
 require_relative "reactor_sim/minion"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"

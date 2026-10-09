@@ -650,14 +650,18 @@ module ReactorSim
         # beside it is a general idea nothing else has needed yet and a roadway coming in is
         # not. `Tick#hazards_from` only asks whether a node responds to `failure_hazards`, so a
         # subclass answering is enough.
-        def initialize(advanced_by:, supported_by:, endangers: {}, **opts)
+        def initialize(advanced_by:, supported_by:, endangers: {}, perils: [], **opts)
           @advanced_by = advanced_by.to_sym
           @supported_by = supported_by.to_sym
           @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          @perils = perils.freeze
+          # Kept because `activity` divides by it: the road's own rating is the scale its
+          # traffic means anything against.
+          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
           super(**opts)
         end
 
-        attr_reader :failure_hazards
+        attr_reader :failure_hazards, :perils
 
         # **The difference, floored at zero, never the ratio.** A ratio makes a face nobody is
         # working still consume timber to stand still, and a district standing idle does not
@@ -673,6 +677,15 @@ module ReactorSim
         # A fall does not seal a roadway, it chokes it — a few tubs a shift get past over the
         # debris until it is cleared. Never 0.0: a road that passes nothing is a better seal
         # than a sound one, which is the trap `nodes/CLAUDE.md` records for ruptures.
+        # **How busy the road is, 0..1.** What a peril on a haulage road scales with is the
+        # traffic, not the clock — the tub going past is the danger, so a road being worked
+        # flat out is a road that hurts people and an idle one is a corridor.
+        def activity(state, quantity, dt)
+          return nil unless quantity == :tubs
+
+          (state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * dt)).clamp(0.0, 1.0)
+        end
+
         def failure_modes = { roof_fall: { derates: { throughput: 0.12 } } }
 
         def failure_mode(_state, _ctx, _cause) = :roof_fall
@@ -682,6 +695,28 @@ module ReactorSim
                           ctx.controls.fetch(@supported_by, 0.0)).clamp(0.0, 100.0).round(1),
             carried_kg: state.fetch(:carried_kg, 0.0).round(3) }
         end
+      end
+
+      # **Cubbies cut into the roadway side, at intervals, for a man to step into while a set
+      # of tubs goes past.** The mine's instance of safety equipment: it wins no coal, spends
+      # money, and does nothing whatever visible until the day somebody is in one.
+      #
+      # It holds no material and has no ports, which is correct — it is not in the way of
+      # anything, it is a hole in the wall. What it contributes is the place it guards.
+      class Manholes < ReactorSim::Node
+        def initialize(effectiveness:, places:, **opts)
+          @safety_equipment = places.to_h { |place| [ place.to_sym, effectiveness.to_f ] }.freeze
+          super(**opts)
+        end
+
+        attr_reader :safety_equipment
+      end
+
+      def manholes(effectiveness:, label:)
+        # Both ends of the haulage road, because the road runs between them and the tubs go
+        # the whole way: a refuge at one end is no use at the other.
+        Manholes.new(id: :manholes, label: label, effectiveness: effectiveness,
+                     places: %i[pit_bottom district])
       end
 
       def tub_road(max_kg_per_s:)
@@ -702,7 +737,23 @@ module ReactorSim
             roof_fall: { tags: %i[rockfall crush], scales_with: :unsupported,
                          reference: 30.0,
                          places: { pit_bottom: 2.6, district: 1.6 } }
-          }
+          },
+          # **What the road does to people with nothing broken at all**, which is the majority
+          # of what a haulage road ever did to anybody. Both scale with the traffic, so the
+          # haulage lever is the production dial and the danger dial at once.
+          #
+          # The two are **mutually exclusive by build**, which is the point of tag-selected
+          # perils: a big minion gets wedged against the side where a small one would have
+          # room, and a small one is missed by a driver where a big one would have been seen.
+          # Neither is simply better in the road — they are exposed to different accidents.
+          perils: [
+            Peril.new(id: :caught_in_haulage, tags: %i[crush], severity: 2.2,
+                      scales_with: :tubs, places: %i[pit_bottom district]),
+            Peril.new(id: :wedged, tags: %i[crush], severity: 2.6, scales_with: :tubs,
+                      when_tagged: :hulking, places: %i[pit_bottom district]),
+            Peril.new(id: :struck_by_tub, tags: %i[impact], severity: 1.4, scales_with: :tubs,
+                      unless_tagged: :hulking, places: %i[pit_bottom district])
+          ]
         )
       end
 
@@ -848,7 +899,8 @@ module ReactorSim
                      place: underground ? advance.fetch(:place) : place,
                      name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
-                     stats: sheet.fetch(:stats), tags: sheet.fetch(:tags))
+                     stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
+                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg))
         end
       end
 

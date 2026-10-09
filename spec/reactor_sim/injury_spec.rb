@@ -18,6 +18,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     base = { strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
              dexterity: 1.0, charisma: 1.0 }
     ReactorSim::Minion.new(id: :hand, name: "Hand", station: :lever,
+                           mass_kg: ReferenceCrew::HUMAN_KG,
                            stats: base.merge(stats), tags: tags)
   end
 
@@ -254,9 +255,8 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
         id: :rig, type: :test, seed: 1, nodes: [ vessel ],
         control_points: [ ReactorSim::ControlPoint.new(id: :lever, node: :drum) ],
         minions: [ ReactorSim::Minion.new(id: :hand, name: "Hand", station: :lever,
-                                          stats: { strength: 1.0, toughness: 1.0,
-                                                   endurance: 1.0, intelligence: 1.0,
-                                                   dexterity: 1.0, charisma: 1.0 }) ]
+                                          mass_kg: ReferenceCrew::HUMAN_KG,
+                                          stats: ReferenceCrew::PLAIN_STATS) ]
       )
     end
 

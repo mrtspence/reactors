@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/reference_crew"
 
 # **Whether the air where somebody is standing will keep them alive.**
 #
@@ -14,9 +15,6 @@ require "reactor_sim"
 #
 # See `docs/design_sketches/breathable-air.md`.
 RSpec.describe ReactorSim::Breath do
-  STATS = { strength: 1.0, toughness: 1.0, endurance: 1.0,
-            intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }.freeze
-
   def content = ReactorSim::Content.default
 
   def parcels(mix)
@@ -34,7 +32,7 @@ RSpec.describe ReactorSim::Breath do
 
   # Two rooms a short walk apart: the one with the mixture in it, and clean air outside. The
   # walk is what lets an example get somebody out of the bad air without moving the air.
-  def room(mix, tags: {}, stats: STATS)
+  def room(mix, tags: {}, stats: ReferenceCrew::PLAIN_STATS)
     ReactorSim::Operation.new(
       id: :rig, type: :test, seed: 1,
       nodes: [ volume(:room, mix), volume(:outside, { air: 60.0 }) ],
@@ -44,6 +42,7 @@ RSpec.describe ReactorSim::Breath do
       control_points: [ ReactorSim::ControlPoint.new(id: :post, place: :room),
                         ReactorSim::ControlPoint.new(id: :door, place: :outside) ],
       minions: [ ReactorSim::Minion.new(id: :hand, name: "Hand", stats: stats, tags: tags,
+                                        mass_kg: ReferenceCrew::HUMAN_KG,
                                         station: :post, place: :room) ]
     )
   end
@@ -192,7 +191,7 @@ RSpec.describe ReactorSim::Breath do
     # divisor that would make them immune to suffocating, and every spec built on them would
     # pass while proving nothing — the same trap `Minion::PACE` fell into with `TIRELESS`.
     it "still reaches somebody the fixtures made tireless" do
-      op = room(FOUL, stats: STATS.merge(endurance: 1.0e6))
+      op = room(FOUL, stats: ReferenceCrew::PLAIN_STATS.merge(endurance: 1.0e6))
       run!(op, 200)
 
       expect(hand(op)[:fatigue]).to be > 0.0

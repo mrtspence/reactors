@@ -264,7 +264,7 @@ the fire is all-or-nothing — above the line the whole grate burns, below it no
 nothing ever can again, so the only winning move is to leave the igniter on permanently, turning
 a match into a throttle.
 
-Four rules, each of which was got wrong first:
+Five rules, each of which was got wrong first:
 
 - **Only the lit fuel counts, and it caps the FUEL term** — `limit` becomes
   `min(ignited_kg, air/ratio)`, not the finished extent scaled by a fraction. Scaling the
@@ -277,6 +277,14 @@ Four rules, each of which was got wrong first:
 - **The fire remembers the draught.** Air passes *through* a node, so its standing inventory
   is a poor instantaneous signal; see the oscillation note in
   [`../current_progress.md`](../current_progress.md).
+- **A mixture outside its flammability range does not burn at all.** `lean_fraction` and
+  `rich_fraction` are a share of the volume and force **total quench** — not reduced spread —
+  so a fuel suspended in a room carries a flame only between two concentrations. Separately
+  opt-in from the block itself, because a fuel bed on a grate is not a mixture.
+
+  Note what `quench_per_s` alone cannot do: it is multiplied by `max(chill, starved, unlit)`,
+  so in a hot room with air to spare the quench term is **zero whatever figure is written**.
+  A fire that will not go out is almost never a quench that is too low.
 
 Spread is **closed-form logistic**, so it is exact at any `dt` and cannot overshoot. Logistic
 because a fire spreads from its *edges* — and because from exactly zero it stays at zero, which

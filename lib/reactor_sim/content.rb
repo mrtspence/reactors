@@ -345,15 +345,27 @@ module ReactorSim
       # are folded at build by `Crew`, so clamping now would make the order of the layers matter
       # — a penalty floored at zero before a bonus landed would give a different worker from the
       # same kit in a different order. `Sheet.settle` runs once, after all four.
+      # **`mass_kg` is fetched without a default on purpose.** A race that does not say what its
+      # people weigh raises here, at boot, rather than being quietly taken for a human — see
+      # `Sheet::MIN_MASS_KG`. The individual's entry is an *offset* and so is optional: absent
+      # means they weigh what their race weighs.
       def build_sheet(id)
         spec = @minions.fetch(id)
         base = archetype(spec.fetch(:archetype))
         baseline = Sheet::STATS.to_h { |stat| [ stat, base.fetch(stat).to_f ] }
+        mass = base.fetch(:mass_kg) { raise Error, missing_mass(spec) }.to_f
 
         { name: spec.fetch(:name),
           archetype: spec.fetch(:archetype).to_sym,
+          mass_kg: mass + spec.fetch(:mass_kg, 0.0).to_f,
           stats: Sheet.add_stats(baseline, spec.fetch(:stats, {})).freeze,
           tags: Sheet.add_tags(base.fetch(:tags, {}), spec.fetch(:tags, {})).freeze }.freeze
+      end
+
+      def missing_mass(spec)
+        "archetype #{spec.fetch(:archetype).inspect}: no mass_kg. Every race declares what its " \
+          "people weigh, in kilograms — it is read by the lift limit and the burden ratio, and a " \
+          "default would be invisible in the content."
       end
     end
   end

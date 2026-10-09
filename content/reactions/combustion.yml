@@ -138,6 +138,14 @@ firedamp_combustion:
     # because once a flame is in it there is nothing left to do. The asymmetry IS the hazard.
     spread_per_s: 9.00
     quench_per_s: 0.20
+    # **The explosive range, and the reason a pit is not permanently alight.** Methane carries
+    # a flame between about 5% and 15% by volume and does nothing at all either side. Below the
+    # lean figure a naked light burns calmly in gas a lamp can already read — which is what
+    # makes the flame cap worth looking at — and an ignition goes out when it has burnt the
+    # mixture back down through it, rather than settling in to burn every kilogram that seeps
+    # in afterwards.
+    lean_fraction: 0.05
+    rich_fraction: 0.15
   # **A gas explosion in a working with the air already used up does not go out — it goes
   # wrong.** Methane burnt with three-quarters of the oxygen it wants makes carbon monoxide
   # instead of carbon dioxide, which is why the survivors of a firedamp ignition in a badly
@@ -174,6 +182,14 @@ coal_dust_combustion:
     # does not go out, it runs out of roadway.
     spread_per_s: 7.50
     quench_per_s: 0.30
+    # **A dust explosion runs out of cloud, not out of roadway.** Coal dust needs roughly
+    # 50 g/m³ suspended to propagate at all; thinner than that and the flame cannot reach the
+    # next particle. Expressed as a volume share like every other fuel, which for a solid at
+    # 800 kg/m³ is a very small number and still the same idea — 0.05 ÷ 800.
+    #
+    # No rich limit. There is no such thing as a coal dust cloud too thick to burn in any
+    # roadway anybody would survive being in.
+    lean_fraction: 0.0000625
   # **And this is the one that made the rescue parties turn back.** A dust explosion consumes
   # the air of the whole length it runs, so most of it burns in air it has already spent —
   # carbon to CO rather than CO2, which is nine kilojoules a gram instead of thirty-three.

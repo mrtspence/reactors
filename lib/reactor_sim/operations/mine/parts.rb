@@ -11,6 +11,21 @@ module ReactorSim
       # against it, so a fitting's declared duty means "at working speed" rather than "always".
       WORKING_OMEGA = 22.0
 
+      # **How long a lever takes to travel, in percent of its range per second**, before whoever
+      # is working it is taken into account — `Minion#rate_multiplier` scales these, so a strong
+      # hand moves a shutter faster than a spent one.
+      #
+      # Only things somebody physically moves get a figure. `Float::INFINITY` stays right for a
+      # posting, for a margin set before the shift, and for every **effort** station: there the
+      # lever is intent and `capability` already supplies the rate, so a finite travel would
+      # charge the same minion twice and let a kobold eventually equal an ogre.
+      module Travel
+        QUICK = 20.0  # a clutch, thrown in about five seconds
+        STEADY = 8.0  # a winding regulator under a skilled engineman — twelve seconds hard over
+        HEAVY = 2.5   # a fan shutter or a pump throttle: forty seconds, and you feel every one
+        SCONCES = 2.0 # lighting a district one candle at a time, near enough a minute
+      end
+
       # **The three rooms, and which machinery is in each.** A node's place is what decides who a
       # failure reaches: everybody in the district is in the district when it goes up, whatever
       # they were posted to and whether they were posted to anything at all.
@@ -64,8 +79,14 @@ module ReactorSim
             Link.new(from: [ :winder, :outlet ], to: [ :screens, :in ])
           ],
           control_points: [
+            # **The one post in this pit that takes knowing how.** A winding engineman worked
+            # to signals he could not see the meaning of, with men on the rope, and the job
+            # was certificated for exactly that reason — overwinding is how you put a cage
+            # through the headgear. Every other lever here is a valve: it goes where you put
+            # it and who put it there is irrelevant.
             ControlPoint.new(id: :winding, label: "Winding", node: :winder, default: 0.0,
-                             place: :bank)
+                             place: :bank, stiffness: Travel::STEADY,
+                             complexity: 1.1, requires: :certificated)
           ]
         )
       end
@@ -105,7 +126,10 @@ module ReactorSim
             # strong they are, and nobody gets any in the dark.
             ControlPoint.new(id: :hewing, label: "Hewing", node: :pick_line, default: 0.0,
                              place: :district,
-                             effort: { strength: 0.7, dexterity: 0.3 },
+                             # `swing`, not `force`: a pick is a tool at the end of an arm, so
+                             # bulk stops paying in proportion and an ogre is about twice a man
+                             # rather than four times. A scaled-up pick is the upgrade.
+                             effort: { swing: 0.7, dexterity: 0.3 },
                              gated_by: %i[mining_effectiveness darkvision],
                              exertion: exertion)
           ]
@@ -149,7 +173,7 @@ module ReactorSim
           places: [ Place.new(id: :bank, nodes: [ :cage_drive ]) ],
           control_points: [
             ControlPoint.new(id: :man_winding, label: "Man Winding", node: :cage_drive,
-                             default: 0.0, place: :bank)
+                             default: 0.0, place: :bank, stiffness: Travel::STEADY)
           ]
         )
       end
@@ -180,7 +204,7 @@ module ReactorSim
           ],
           control_points: [
             ControlPoint.new(id: :ventilation, label: "Fan", node: :upcast, default: 100.0,
-                             place: :bank)
+                             place: :bank, stiffness: Travel::HEAVY)
           ]
         )
       end
@@ -211,7 +235,7 @@ module ReactorSim
           ],
           control_points: [
             ControlPoint.new(id: :pumping, label: "Pumping", node: :pump, default: 100.0,
-                             place: :bank)
+                             place: :bank, stiffness: Travel::HEAVY)
           ]
         )
       end
@@ -305,7 +329,7 @@ module ReactorSim
             # anybody walks over to turn up. Labelled the same in every tier: to the player it
             # is one lever, and which id it carries is what decides whether it fires the gas.
             ControlPoint.new(id: control_id, label: "Sconces", node: :sconces,
-                             default: 0.0, place: :bank)
+                             default: 0.0, place: :bank, stiffness: Travel::SCONCES)
           ]
         )
       end
@@ -328,6 +352,28 @@ module ReactorSim
                      description: "A proper cut-out with a bench and a water can. Three at a time.",
                      stats: { rest_capacity: 3, recovery_rate: 2.4 }) do |_spec|
         Mine.rest_fragment(capacity: 3, recovery_rate: 2.4, label: "Snap Cabin")
+      end
+
+      # --- manholes -------------------------------------------------------------------------
+      #
+      # **The least interesting purchase in the pit, and the one that saves most lives.** The
+      # haulage road hurts people with nothing broken — a set of tubs goes past and sooner or
+      # later catches somebody — and cutting refuges into its side is the whole answer. It
+      # wins no coal and shows nothing on a gauge.
+      #
+      # **Empty is legal and is where every pit starts**, exactly as the ladderway is: this is
+      # something a player notices they need, usually by reading an event about somebody who
+      # did not have one.
+      Parts.register(:sparse_manholes, kind: :haulage_refuge, label: "Manholes",
+                     description: "Refuges cut every forty yards. Something, if you are quick.",
+                     stats: { refuge_reach: 0.5 }) do |_spec|
+        Fragment.new(nodes: [ Mine.manholes(effectiveness: 0.5, label: "Manholes") ])
+      end
+
+      Parts.register(:whitewashed_manholes, kind: :haulage_refuge, label: "Whitewashed Manholes",
+                     description: "Refuges every twenty yards, limed so they show in a lamp.",
+                     stats: { refuge_reach: 0.85 }) do |_spec|
+        Fragment.new(nodes: [ Mine.manholes(effectiveness: 0.85, label: "Whitewashed Manholes") ])
       end
 
       # **In the district, which is the entire point**, and a control point with no `node:` —
@@ -370,7 +416,11 @@ module ReactorSim
           # quarters by what a slot ACCEPTS and takes the first — a second one would make a
           # rest station decide how many hands the pit can field.
           Slot.new(id: :rest, accepts: :rest_station, label: "Rest Station", group: :crew,
-                   required: true, default: fitted.fetch(:rest))
+                   required: true, default: fitted.fetch(:rest)),
+          # Not required, and defaulted to nothing. A pit that has bought no refuges is the
+          # starting pit, and the first a player hears of it is a man caught in the haulage.
+          Slot.new(id: :manholes, accepts: :haulage_refuge, label: "Manholes", group: :crew,
+                   required: false, default: fitted[:manholes])
         ]
       end
 
@@ -392,7 +442,11 @@ module ReactorSim
                                                 # The road, what moves on it and what the ground
                                                 # is making are the hole itself rather than a
                                                 # fitting, so no part can take these away.
-                                                :roof_timber, :putting, :water_make),
+                                                :roof_timber, :putting, :water_make,
+                                                # Whether the district is on fire. The one
+                                                # reading no fitting may remove, because a pit
+                                                # with nothing bought can still go up.
+                                                :district_fire),
           # Every shaft can be climbed. Only one that has bought the gear can be ridden.
           passages: Mine.passages,
           places: PLACES,
@@ -443,12 +497,12 @@ module ReactorSim
           ],
           control_points: [
             ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0,
-                             place: :bank),
+                             place: :bank, stiffness: Travel::QUICK),
             # **The most boring lever in the game, and the one that decides whether an ignition
             # is an incident or a disaster.** It wins no coal, spends stores that run out, and
             # does nothing whatever until the day the gas goes up.
             ControlPoint.new(id: :stone_dusting, label: "Stone Dusting", node: :dusting_line,
-                             default: 0.0, place: :bank),
+                             default: 0.0, place: :bank, stiffness: Travel::HEAVY),
             # **The two effort stations, and they are underground.** Somebody has to be sent
             # there, which is the whole point of the geometry.
             # **Gated, not merely aided.** An ogre with no pick gets no coal out of a seam
@@ -460,7 +514,10 @@ module ReactorSim
             # crew set it to 1e6. See the traps list.
             ControlPoint.new(id: :haulage, label: "Putting", node: :tub_road, default: 0.0,
                              place: :pit_bottom,
-                             effort: { strength: 0.8, toughness: 0.2 },
+                             # **`force`, because a loaded tub is friction and leverage** — this
+                             # is the job where sheer mass pays most, and where an outrageously
+                             # muscular pixie still shifts nothing.
+                             effort: { force: 0.8, toughness: 0.2 },
                              aided_by: :shovelling, exertion: 9.0e-4),
             # **The third effort station, and the one that produces nothing.** Setting timber
             # wins no coal and raises no water; all it does is stop the roof taking up the slack
@@ -478,7 +535,9 @@ module ReactorSim
             # not come in. Same gates, same scale, real difference.
             ControlPoint.new(id: :timbering, label: "Timbering", node: :tub_road, default: 0.0,
                              place: :district,
-                             effort: { strength: 0.6, dexterity: 0.4 },
+                             # `force`: props and bars are heavy things lifted into place, and
+                             # the dexterity half is setting them true once they are up there.
+                             effort: { force: 0.6, dexterity: 0.4 },
                              gated_by: %i[mining_effectiveness darkvision],
                              exertion: 1.0e-3)
           ]

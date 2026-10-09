@@ -44,6 +44,14 @@ module ReactorSim
       # Only distorting filters draw entropy, which is also why the undistorted pass costs
       # nothing and cannot perturb the RNG stream.
       def distortion? = true
+
+      # Does this model an **observer** fault — a person getting it wrong — rather than an
+      # instrument one? Only these are handed the competence of whoever is watching, as a
+      # second keyword, which is why the other eight need no signature at all.
+      #
+      # The same shape as `distortion?` and for the same reason: the taxonomy lives on the
+      # filter, so adding one cannot silently miss a hook somewhere else.
+      def observed? = false
     end
 
     # Reports what was true `ticks` ago. Stacks on top of the delay already inherent in the
@@ -193,22 +201,64 @@ module ReactorSim
     # failure than a gauge being noisy. Intended to be driven by whoever is on that
     # station once minions land.
     class Misread < Base
-      def initialize(chance:, magnitude:)
+      # `chance` is how often a **competent** reader gets it wrong; whoever is actually posted
+      # scales it.
+      #
+      # `deadband` is how far the real quantity has to move before they look again and form a
+      # fresh opinion. **Opt-in, and nil means no hold** — a redraw every tick, which is right
+      # where this models a *coarse instrument* rather than a person: try-cocks are vague
+      # every time you open them, they do not form a view and stick to it. Only a gauge that
+      # is somebody's word wants the hold.
+      def initialize(chance:, magnitude:, deadband: nil)
         super()
         @chance = chance.to_f
         @magnitude = magnitude.to_f
+        @deadband = deadband&.to_f
         freeze
       end
 
-      def initial_state(_rng) = { wrong_by: 0.0 }
+      def initial_state(_rng) = { wrong_by: 0.0, anchor: nil }
 
-      def apply(_state, value, rng, _ctx)
-        return Result.new(state: { wrong_by: 0.0 }, value: value) if rng.float >= @chance
+      # **Once wrong, stay wrong.** Redrawing every tick makes an incompetent observer merely
+      # jittery, and jitter is a tell a player can read straight through — whereas somebody
+      # who cannot really tell forms a belief and reports it steadily. A gas reading sitting
+      # confidently at 2% while the district climbs through 6% is the failure that kills a
+      # shift, and it needs the reading to hold while the truth moves underneath it.
+      #
+      # Holding also keeps the delta protocol compressing: a held value reports no change.
+      #
+      # **Competence scales all three dials off one number, and it has to.** Making only the
+      # *chance* depend on it leaves a careful reader wrong nearly as much of the time as a
+      # hopeless one, because each error lasts just as long and is just as large — measured at
+      # 13% against 21% for a fourfold difference, which is no mechanic at all. A better reader
+      # is wrong less often, by less, and for less long; one `slack` term carries all of it.
+      def apply(state, value, rng, _ctx, competence: 1.0)
+        slack = 1.0 / (competence.positive? ? competence : Float::MIN)
+        anchor = state.fetch(:anchor, nil)
+        return Result.new(state: state, value: value + state.fetch(:wrong_by),
+                          flags: [ :misread ]) if holding?(state, anchor, value, slack)
 
-        wrong_by = rng.noise(@magnitude)
-        Result.new(state: { wrong_by: wrong_by }, value: value + wrong_by,
+        return Result.new(state: { wrong_by: 0.0, anchor: nil }, value: value) if
+          rng.float >= chance(slack)
+
+        wrong_by = rng.noise(@magnitude * slack)
+        Result.new(state: { wrong_by: wrong_by, anchor: value }, value: value + wrong_by,
                    flags: [ :misread ])
       end
+
+      def observed? = true
+
+      private
+
+      # A wrong belief survives until the real quantity has moved further than the error that
+      # produced it, so a big mistake outlives a small one.
+      def holding?(state, anchor, value, slack)
+        return false if @deadband.nil? || anchor.nil? || state.fetch(:wrong_by).zero?
+
+        (value - anchor).abs <= @deadband * slack
+      end
+
+      def chance(slack) = (@chance * slack).clamp(0.0, 1.0)
     end
 
     # Rate of change per simulated second. A source cannot do this because it needs memory

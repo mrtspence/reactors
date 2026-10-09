@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/reference_crew"
 
 # **Where a hazard reaches, and why.**
 #
@@ -15,9 +16,6 @@ require "reactor_sim"
 #
 # See `docs/design_sketches/breathable-air.md` §5.
 RSpec.describe ReactorSim::Place do
-  STATS = { strength: 1.0, toughness: 1.0, endurance: 1.0,
-            intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }.freeze
-
   # A drum that ruptures early and hard, so nobody has to boil a real boiler to find out who it
   # reaches. `stress_rate:` is what makes a `Vessel` fail at all.
   #
@@ -50,9 +48,11 @@ RSpec.describe ReactorSim::Place do
       control_points: [ ReactorSim::ControlPoint.new(id: :lever, node: :drum,
                                                      place: :engine_room) ],
       minions: [
-        ReactorSim::Minion.new(id: :driver, name: "Driver", stats: STATS,
+        ReactorSim::Minion.new(id: :driver, name: "Driver", stats: ReferenceCrew::PLAIN_STATS,
+                               mass_kg: ReferenceCrew::HUMAN_KG,
                                station: :lever, place: :engine_room),
-        ReactorSim::Minion.new(id: :passer, name: "Passer", stats: STATS, place: standing)
+        ReactorSim::Minion.new(id: :passer, name: "Passer", mass_kg: ReferenceCrew::HUMAN_KG,
+                               stats: ReferenceCrew::PLAIN_STATS, place: standing)
       ]
     )
   end

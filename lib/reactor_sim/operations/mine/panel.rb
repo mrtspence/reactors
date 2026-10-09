@@ -21,7 +21,7 @@ module ReactorSim
         shaft_speed shaft_supply
         air_quantity district_air
         sump_level water_make
-        district_light
+        district_light district_fire
         roof_timber putting
         cage_speed winding_gear
         coal_raised seam_remaining
@@ -45,11 +45,20 @@ module ReactorSim
           # The upgrade path is the historical one: a better lamp reduces the `Stick`, a
           # methanometer eventually removes the `Noise`. **Neither may ever remove the `Bands`**
           # — a number here would be a different game.
+          # **And it is somebody's word, so it is the one instrument that names an observer.**
+          # `:timbering` because that post is in the district and produces nothing: the hands
+          # at the face are cutting, and the man setting props is the one with time to hold a
+          # lamp up into the roof. It also gives the only station in the mine that wins no coal
+          # a second reason to be manned — pull the timberman and you lose the gas reading
+          # entirely, which is a decision rather than a tax.
           flame_cap: Diagnostic.new(
-            id: :flame_cap, label: "Flame Cap",
+            id: :flame_cap, label: "Flame Cap", observer: :timbering,
             source: Sources::Fraction.new(:district, :firedamp),
             filters: [ Filters::Lag.new(6), Filters::Noise.new(0.35, deadband: 0.5),
                        Filters::Stick.new(chance: 0.02, release_chance: 0.25),
+                       # A band and a bit, so being wrong means reading the wrong *phrase* —
+                       # the only thing a player ever sees of this gauge.
+                       Filters::Misread.new(chance: 0.02, magnitude: 1.2, deadband: 1.2),
                        Filters::Bands.new([ 0.8, 2.0, 3.0, 5.0 ]) ],
             display: Displays::Prose.new([ "no cap on the lamp", "a trace of gas",
                                            "a cap, plainly", "a tall cap — clear the district",
@@ -176,6 +185,24 @@ module ReactorSim
             display: Displays::Prose.new([ "barely damp", "weeping steadily",
                                            "running in", "a strong feeder",
                                            "pouring in — she will not hold it" ])
+          ),
+
+          # **Nobody could mistake an ignition, so the panel must not be quieter than the
+          # place.** An event is a transition and a player who looked away for ten seconds
+          # while the roadway caught would have nothing else to tell them.
+          #
+          # Read off the **heat** rather than off what is alight, because a firedamp flash is
+          # over in about five ticks — it burns the mixture back down through its own lean
+          # limit and goes out — while what it leaves behind is a roadway at two thousand
+          # kelvin that nobody can go into for minutes. The heat is both the thing you would
+          # notice and the thing that is still true when you look up.
+          district_fire: Diagnostic.new(
+            id: :district_fire, label: "Fire",
+            source: Sources::Derived.new(:district, :temperature_k),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 320.0, 400.0, 700.0, 1_200.0 ]) ],
+            display: Displays::Prose.new([ "no smell of burning", "warm, and smoke in the return",
+                                           "hot — something has gone up", "the workings are alight",
+                                           "an inferno; nobody is going down there" ])
           ),
 
           # **What the district is lit by, and therefore whether anybody can work in it.**

@@ -1,64 +1,38 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/pit_rig"
 
 # **The cage: buying your way out of the walk.**
 #
-# The spatial model made distance expensive; this is the purchase that makes it cheaper, and it
-# is the reason the whole thing was worth building. A ladderway is free and awful. A cage is
-# quick and hangs off the same line shaft as the fan, the pump and the winder — so calling it
-# takes something away from all three.
+# The spatial model made distance expensive; this is the purchase that makes it cheaper, and it is
+# the reason the whole thing was worth building. A ladderway is free and awful. A cage is quick and
+# hangs off the same line shaft as the fan, the pump and the winder — so calling it takes something
+# away from all three.
 #
 # Its own crew for the same reason `firedamp_spec` has one: these examples time journeys, and a
 # day-labourer's pace turns every figure into a measurement of the labour exchange.
 #
+# **The journeys here are real and timed, not constructed**, because the time *is* the claim — and
+# they are cheap because the post being timed is the putter's, at the near end of the road. The
+# ladderway takes 600 ticks, the man engine 281 and the cage 167, which is the whole tech tree
+# inside one short window. (The face posts are 1,267 and 834 and would say nothing more.)
+#
 # See `docs/design_sketches/mine.md` §4.6 stage E.
-module CageCrew
-  ARCHETYPE = { label: "Collier", strength: 1.0, toughness: 1.0, endurance: 1.0e6,
-                intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
-                # `darkvision` because hewing and timbering are **gated** on light, not merely
-                # aided by it: a fixture with no lamp cuts exactly nothing, which is the design
-                # and a poor way to measure a cage.
-                tags: { mining_effectiveness: 0.6, shovelling: 0.5,
-                        darkvision: 0.8 } }.freeze
-
-  MINIONS = (1..4).to_h { |i| [ :"hand_#{i}",
-                                { name: "Hand #{i}", archetype: :collier,
-                                  hireable: false } ] }.freeze
-
-  CONTENT = ReactorSim::Content.default.merging(archetypes: { collier: ARCHETYPE },
-                                                minions: MINIONS)
-
-  CREW = (1..4).to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{i}" } ] }.freeze
-end
-
 RSpec.describe "the cage" do
-  before { allow(ReactorSim::Content).to receive(:default).and_return(CageCrew::CONTENT) }
+  include PitRig
 
-  SUPPLY_J = 9.0e4
+  before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
 
   def pit(manriding: :cage_gear)
-    op = ReactorSim::Match
-         .create(id: "c", seed: 3,
-                 operations: [ { id: "pit", type: :mine,
-                                 loadout: { manriding: manriding || :none },
-                                 ground: ReactorSim::Operations::Mine::Ground::ORDINARY,
-                                 crew: CageCrew::CREW } ])
-         .operation(:pit)
+    op = build_pit(id: "c", seed: 3, loadout: { manriding: manriding || :none })
     op.set_control(:winding, 100)
     op
   end
 
-  def run!(op, ticks, from: 0, supply: SUPPLY_J)
-    ticks.times do |i|
-      op.receive_supply(:line_shaft, supply)
-      op.step!(tick: from + i + 1)
-    end
-    op
-  end
-
-  # Ticks until `seat` is actually working `station`, or nil.
-  def ticks_to_arrive(op, seat, station, limit: 6_000, supply: SUPPLY_J)
+  # Ticks until `seat` is actually working `station`, or nil. The limit is a ceiling rather than a
+  # duration: the putter's longest road is the ladderway's 600.
+  def ticks_to_arrive(op, seat, station, limit: 800, supply: PitRig::SUPPLY_J)
     op.assign_minion(seat, station)
     limit.times do |i|
       op.receive_supply(:line_shaft, supply)
@@ -68,23 +42,10 @@ RSpec.describe "the cage" do
     nil
   end
 
-  def rpm(op)
-    op.state.fetch(:nodes).fetch(:line_shaft).fetch(:angular_momentum) / 900.0 * 60 /
-      (2 * Math::PI)
-  end
-
-  def gas_pct(op)
-    parcels = op.state.fetch(:nodes).fetch(:district).fetch(:parcels)
-    total = parcels.sum { |p| p.fetch(:kg) }
-    return 0.0 unless total.positive?
-
-    (parcels.find { |p| p.fetch(:resource) == :firedamp }&.fetch(:kg) || 0.0) / total * 100.0
-  end
-
   describe "the man-riding slot" do
-    # **Where every mine starts.** Man riding is its own slot rather than a property of the
-    # winder, because raising coal and raising men are different machines — a man engine winds
-    # no coal at all. Empty is legal and means the ladders.
+    # **Where every mine starts.** Man riding is its own slot rather than a property of the winder,
+    # because raising coal and raising men are different machines — a man engine winds no coal at
+    # all. Empty is legal and means the ladders.
     it "leaves a mine with nothing fitted to its ladders" do
       op = pit(manriding: nil)
 
@@ -99,8 +60,8 @@ RSpec.describe "the cage" do
       expect(op.layout.passages.map(&:label)).to include("Cage")
     end
 
-    # The tier between ladders and a cage, and the machine the research is fondest of: at
-    # Tresavean it cut the journey from an hour to twenty-four minutes.
+    # The tier between ladders and a cage, and the machine the research is fondest of: at Tresavean
+    # it cut the journey from an hour to twenty-four minutes.
     it "offers a man engine between the two" do
       rod = pit(manriding: :man_engine)
 
@@ -111,8 +72,8 @@ RSpec.describe "the cage" do
   end
 
   describe "riding it" do
-    # The ladderway is always there, so fitting a cage takes nothing away — it only adds a
-    # faster way that has to be called for.
+    # The ladderway is always there, so fitting a cage takes nothing away — it only adds a faster
+    # way that has to be called for.
     it "leaves them on the ladders while nobody calls it" do
       bare = ticks_to_arrive(pit(manriding: nil), :crew_1, :haulage)
       idle = ticks_to_arrive(pit, :crew_1, :haulage)
@@ -120,7 +81,7 @@ RSpec.describe "the cage" do
       expect(idle).to eq(bare)
     end
 
-    # The whole tech tree in one assertion: each tier is quicker than the last.
+    # The whole tech tree in one assertion: each tier is quicker than the last. 600 / 281 / 167.
     it "gets them down quicker the better the gear is" do
       ladders = ticks_to_arrive(pit(manriding: nil), :crew_1, :haulage)
 
@@ -148,26 +109,41 @@ RSpec.describe "the cage" do
   end
 
   describe "what it costs" do
-    # **The men-or-air choice**, which is where the cost actually landed. The cage is on the
-    # same line shaft as the fan, so calling it slows the shaft and the fan slows with it — and
-    # the district gets gassier while the shift is being wound. Historically exact: a winding
-    # engine and a fan competed for the same boiler.
-    it "loads the line shaft" do
-      idle = run!(pit, 3_000)
-
+    # **The men-or-air choice**, which is where the cost actually landed. The cage is on the same
+    # line shaft as the fan, so calling it slows the shaft and the fan slows with it — and the
+    # district gets gassier while the shift is being wound. Historically exact: a winding engine
+    # and a fan competed for the same boiler.
+    def idle_and_busy(ticks)
+      idle = pit
       busy = pit
       busy.set_control(:man_winding, 100)
-      run!(busy, 3_000)
+      run!(idle, ticks)
+      run!(busy, ticks)
+      [ idle, busy ]
+    end
+
+    # Measured at 50 ticks: 177.15 rpm against 143.19.
+    it "loads the line shaft" do
+      idle, busy = idle_and_busy(50)
 
       expect(rpm(busy)).to be < rpm(idle)
     end
 
+    # **The mechanism, measured where it happens.** A slower shaft is a slower fan, so the air
+    # crossing the upcast falls the moment the cage is called — 2.619 kg/tick to 1.686, a third of
+    # the ventilation gone — and the gas in the district follows from that rather than the other
+    # way round.
     it "takes air away from the workings while it runs" do
-      idle = run!(pit, 4_000)
+      idle, busy = idle_and_busy(50)
 
-      busy = pit
-      busy.set_control(:man_winding, 100)
-      run!(busy, 4_000)
+      expect(busy.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg))
+        .to be < idle.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg) * 0.8
+    end
+
+    # And the consequence a player reads off a gauge, which needs a little longer because the gas
+    # has to accumulate against the weaker fan: 0.573% against 0.606% at 200 ticks.
+    it "leaves the district gassier for having wound the shift" do
+      idle, busy = idle_and_busy(200)
 
       expect(gas_pct(busy)).to be > gas_pct(idle)
     end
@@ -194,12 +170,12 @@ RSpec.describe "the cage" do
     mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
     joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
-    run!(op, 3_000)
+    run!(op, 200)
 
     mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
     joules = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
     expect((mass - mass0).abs / mass0.abs).to be < 1e-9, "mass drifted by #{mass - mass0}"
     expect((joules - joules0).abs / joules0.abs).to be < 1e-9,
-      "energy drifted by #{joules - joules0}"
+           "energy drifted by #{joules - joules0}"
   end
 end

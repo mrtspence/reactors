@@ -46,12 +46,37 @@
             <span class="block h-full w-0 bg-rose-500 transition-all duration-300"
                   data-minion-asphyxia></span>
           </span>
+          <%# Who this one is carrying, filled from the projection. %>
+          <span class="text-[10px] uppercase tracking-wide text-sky-400 hidden"
+                data-minion-carrying></span>
         </span>
+
+        <%# **The drop button lives on the CARRIED person's row, not the carrier's.** That is what
+            makes it per-person with no new control: an ogre holding six kobolds gets six rows,
+            each with its own button, and "put this one down" needs no list to pick from.
+
+            Hidden unless somebody is actually holding them, because a button that is almost
+            always inert teaches a player to ignore that corner of the screen. %>
+        <button type="button" data-minion-drop data-action="console#drop"
+                class="hidden shrink-0 text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5
+                       bg-sky-900 text-sky-200 ring-1 ring-sky-700 hover:bg-sky-800">
+          Set down
+        </button>
         <select class="bg-slate-900 text-slate-200 text-xs rounded px-1 py-0.5 ring-1 ring-slate-700"
                 data-minion-station data-action="change->console#assign">
           <option value="">— stood down —</option>
           <% stations.each do |station| %>
             <option value="<%= station.fetch(:id) %>"><%= station.fetch(:label) %></option>
+          <% end %>
+          <%# A fetch order, in the same control as every other posting: go to this person and
+              pick them up. Only rendered where there is geometry — without places nobody is ever
+              anywhere else, so there is nothing to go and get. %>
+          <% if places_known? %>
+            <optgroup label="Go and carry">
+              <% rescuable(minion).each do |other| %>
+                <option value="<%= other.id %>"><%= other.name %></option>
+              <% end %>
+            </optgroup>
           <% end %>
         </select>
       </li>

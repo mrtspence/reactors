@@ -214,8 +214,11 @@ module ReactorSim
     # standing here breathes is what the room holds.
     def derive_breathes(nodes)
       @declared.keys.to_h do |place_id|
-        holders = @declared.fetch(place_id).nodes.filter_map { |id| nodes[id] }
-                           .select { |node| breathable_volume?(node) }
+        place = @declared.fetch(place_id)
+        next [ place_id, place.air ] if place.air
+
+        holders = place.nodes.filter_map { |id| nodes[id] }
+                       .select { |node| breathable_volume?(node) }
         [ place_id, holders.first&.id ]
       end
     end
@@ -255,8 +258,11 @@ module ReactorSim
       @declared.each_value do |place|
         holders = place.nodes.filter_map { |id| nodes[id] }.select { |n| breathable_volume?(n) }
         raise Error, "place #{place.id} has no air: nothing in it holds gas" if holders.empty?
-        raise Error, "place #{place.id} holds gas in more than one node: " \
-                     "#{holders.map(&:id).join(', ')}" if holders.length > 1
+        next if place.air
+
+        raise Error, "place #{place.id} holds gas in more than one node " \
+                     "(#{holders.map(&:id).join(', ')}) and does not say which is its air" if
+          holders.length > 1
       end
     end
 
