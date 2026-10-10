@@ -117,14 +117,19 @@ module PitRig
   # **`progress`, `remaining` and `journey` are zeroed deliberately.** They are what a walk leaves
   # behind, and a minion seeded as "arrived" while still carrying a part-finished journey is a
   # state the tick will try to continue.
-  def at_the_face(op, hewing: :crew_1, haulage: :crew_2, timbering: :crew_3)
+  def at_the_face(op, **posts) = seed(op, minions: at_the_face_minions(op, **posts))
+
+  # **The patches alone**, for a caller that has to seed through something other than a bare
+  # operation — `Constructed#seed_match`, when a digest or replay example needs the match's own
+  # copy to carry the arrival too.
+  def at_the_face_minions(op, hewing: :crew_1, haulage: :crew_2, timbering: :crew_3)
     posted = { hewing => :hewing, haulage => :haulage, timbering => :timbering }
              .reject { |seat, _| seat.nil? }
 
-    seed(op, minions: posted.to_h { |seat, station|
+    posted.to_h do |seat, station|
       [ seat, { posting: station, station: station, place: post_place(op, station),
                 progress: 0.0, remaining: 0.0, journey: 0.0 } ]
-    })
+    end
   end
 
   # **A volume holding exactly the mixture you ask for**, with the percentages taken by MASS of

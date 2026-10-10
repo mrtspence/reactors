@@ -2,6 +2,7 @@
 
 require "reactor_sim"
 require "json"
+require "support/engine_rig"
 require "support/reference_crew"
 
 # The Danger Check, and the ladder a hurt minion climbs.
@@ -14,6 +15,8 @@ require "support/reference_crew"
 # Assertions are on the TIER rather than on tuned numbers, for the same reason the failure specs
 # assert modes rather than pressures: the curve is a sweep and will move.
 RSpec.describe ReactorSim::Injury, crew: :reference do
+  include EngineRig
+
   def worker(stats: {}, tags: {})
     base = { strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
              dexterity: 1.0, charisma: 1.0 }
@@ -190,21 +193,36 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
                         loadout: ReferenceCrew.loadout(fusible_plug: nil),
                         crew: { crew_1: { minion: :test_hand_a } } } ]
       )
-      op = match.operation(:eng)
-      # **Deploy the shift, or there is no fire to burst anything.** Crew start in the quarters
-      # now, so posting somebody to the firehole is the opening move — and it is also what puts
-      # them in range of the drum when it goes, which is the whole point of this example.
+      # **A crown-sheet explosion, built rather than boiled down to.** With no plug fitted, 400 kg
+      # of water, the feed shut and a shell already worked, the drum lets go in a handful of ticks
+      # — where the old form of this ran up to 7,000 waiting for 2,000 kg to boil away.
+      #
+      # Both figures are load-bearing and `crown_sheet_spec` records why: 400 kg and not less
+      # because severity scales with the water left to flash (an emptier drum seam-splits), and a
+      # worn shell because the erosion rate is that spec's claim rather than this one's.
+      #
+      # **Seeded through the MATCH**, because the snapshot example below fingerprints `match.to_h`
+      # — seeding the operation alone leaves the match holding the cold engine.
+      engine_op = match.operation(:eng)
+      seeded = seed_match(match, :eng,
+                          nodes: at_work_nodes(engine_op, water: 400.0)
+                                   .merge(boiler: body(engine_op, :boiler, EngineRig::DRUM_K,
+                                                       water: 400.0, steam: EngineRig::DRUM.fetch(:steam))
+                                                    .merge(durability: 20.0)))
+      op = seeded.operation(:eng)
+      # **Deploy the shift, or there is nobody in range of the drum when it goes.** Crew start in
+      # the quarters, so posting somebody to the firehole is the opening move — and it is also
+      # what puts them beside the boiler, which is the whole point of this example.
       op.assign_minion(:crew_1, :stoking)
-      { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 0 }
-        .each { |k, v| op.set_control(k, v) }
+      { damper_open: 85, stoking: 70, feed: 0, igniter: 0, blower: 0,
+        throttle_open: 60, load_demand: 80 }.each { |k, v| op.set_control(k, v) }
 
       events = []
-      (1..7_000).each do |t|
-        op.set_control(:igniter, 0) if t == 300
-        events.concat(match.step!)
+      20.times do
+        events.concat(seeded.step!)
         break if events.any? { |e| e[:type] == :minion_hurt }
       end
-      [ match, events.select { |e| e[:type] == :minion_hurt } ]
+      [ seeded, events.select { |e| e[:type] == :minion_hurt } ]
     end
 
     it "hurts the same people the same way from the same seed" do

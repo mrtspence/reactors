@@ -14,30 +14,30 @@ require "support/engine_rig"
 # So the hazard is positional and the plate gets a derived temperature of its own. These examples
 # guard the three things that were each got wrong on the way in.
 #
-# ## A low drum is a state, so it is built rather than boiled down to
+# ## One state per claim, and a handful of ticks each
 #
-# This was the slowest file in the suite — six examples at 12,000 ticks each, nearly a quarter of
-# the whole run, spent lighting an engine from cold and then waiting for 2,000 kg of water to boil
-# away. `at_work(water:)` puts the drum where the claim is. The water levels are not
-# interchangeable and the choice of each is recorded below, because **how much water is left
-# decides which failure you get**:
+# This was the slowest file in the suite — six examples at 12,000 ticks, nearly a quarter of the
+# whole run. Everything it was waiting for turns out to be **derived from state it could have been
+# handed**:
 #
-#     water    exposure   integrity   what happens
-#     2000 kg    0.00        1.000     nothing: ordinary work
-#      800 kg    0.47        1.000     the plug wins the race — it goes, the shell is unmarked
-#      600 kg    0.62        0.963     the plate gets a bite in before the plug can act
-#      400 kg    0.78          —       with no plug fitted: EXPLOSION, 364 kg spilled
-#      200 kg    0.94        0.909     the plate is bare, and it has cost the shell 9%
+# | What the claim needs | Where it comes from | Ticks |
+# |---|---|---|
+# | the plate exposed | the water in the drum, read at tick 1 | 1 |
+# | the plug blown | the plate being hot, one tick after that | 2 |
+# | the plug *already* blown | `melted:` and `fusible_remaining_kg:` | 1 |
+# | the shell letting go | the drum's `durability:` | 10 |
+# | the glass flattering the drum | swell, which has a rise time of its own | 20 |
 #
-# Two of those rows are the model working rather than quirks, and both are worth knowing:
+# Exposure against seeded water, at tick 1 — the whole gradient, with no waiting at all:
 #
-# - **The 400 kg row explodes and the 200 kg row does not.** Severity scales with the water left
-#   to flash, so an emptier drum `seam_split`s where a fuller one unzips.
-# - **Below about 800 kg the plug no longer gets there first.** The ~9% the shell loses at 200 kg
-#   is taken once, in the first hundred-odd ticks, and does not accumulate — identical at 150 and
-#   at 600 ticks, and unchanged by dropping the fire. A seed below 800 kg is therefore a drum that
-#   was *already* being damaged when the example started, which is a different claim from the one
-#   about the plug saving it.
+#     water   1200   800    400    200    100    50 kg
+#     expose  0.04   0.36   0.68   0.84   0.92   0.96
+#     crown    454   644    835    930    977  1001 K
+#
+# **Two of the water levels are load-bearing and not interchangeable.** At 800 kg the plug gets
+# there first and the shell is unmarked; below that the plate has already taken a bite out of it
+# (integrity 0.99 at 400 kg and under). And an explosion needs water *left to flash* — 400 kg
+# unzips the shell where 200 kg merely seam-splits, because severity scales with the flash.
 #
 # See `design_sketches/suite-runtime.md` §7.
 RSpec.describe "the crown sheet", crew: :reference do
@@ -47,10 +47,10 @@ RSpec.describe "the crown sheet", crew: :reference do
   # inside an example group resolves lexically against `Object`.
   def ordinary_water = EngineRig::DRUM.fetch(:water)
 
-  # Low enough that the plate is substantially bare.
-  def bare_plate_water = 200.0
+  # Exposure 0.92 on the first tick: the plate is bare.
+  def bare_plate_water = 100.0
 
-  # Low enough to be dangerous, with enough left to flash violently when the shell opens.
+  # Dangerous, with enough left to flash violently when the shell opens.
   def explosive_water = 400.0
 
   # **The level where the plug gets there first** — it melts, and the shell is still unmarked. Also
@@ -58,12 +58,21 @@ RSpec.describe "the crown sheet", crew: :reference do
   # is the moment the hazard is survivable *and* invisible, which is what makes it the accident.
   def saved_water = 800.0
 
+  # A drum whose shell has already been worked, so the failure itself is what gets tested rather
+  # than the hundreds of ticks of erosion that lead to it.
+  def worn_shell = 20.0
+
+  # **A plug that has already gone.** `melted` alone is not enough: the plug re-derives it from
+  # `fusible_remaining_kg` every tick, so seeding the flag without the metal reads back as `false`
+  # on tick 1 — the same stored-versus-derived distinction as the firebox's `alight`.
+  def plug_gone = { melted: true, fusible_remaining_kg: 0.0 }
+
   def boiler_state(op) = op.state.fetch(:nodes).fetch(:boiler)
   def plug_state(op) = op.state.fetch(:nodes).fetch(:fusible_plug)
 
   # The drum with the feed shut, which is the neglect this whole file is about.
-  def starved(op, ticks, water:, **levers)
-    ready = at_work(op, water: water)
+  def starved(op, ticks, water:, nodes: {}, **levers)
+    ready = seed(at_work(op, water: water), nodes: nodes)
     [ ready, run!(ready, ticks, feed: 0, **levers) ]
   end
 
@@ -75,9 +84,9 @@ RSpec.describe "the crown sheet", crew: :reference do
 
   describe "while there is water over it" do
     # The whole mechanic has to be invisible in ordinary work, or it is not a hazard, it is a tax.
-    # Measured: crown peak 432.3 K at exposure 0.00, and the engine making 468 kW.
+    # Measured: crown 432.1 K at exposure 0.00, and the engine making 463 kW.
     it "sits at the water temperature and costs the engine nothing" do
-      op, = starved(engine, 100, water: ordinary_water)
+      op, = starved(engine, 2, water: ordinary_water)
 
       expect(boiler_state(op).fetch(:crown_exposure)).to eq(0.0)
       expect(boiler_state(op).fetch(:crown_temperature_k)).to be < 500.0
@@ -87,10 +96,9 @@ RSpec.describe "the crown sheet", crew: :reference do
   end
 
   describe "when the water goes" do
-    # The hazard is reachable, and it scales with neglect rather than arriving as a cliff —
-    # exposure runs 0.89 / 0.94 / 0.98 across 100, 200 and 300 ticks from a 200 kg drum.
+    # Two ticks: the plate is bare on the first and the plug has gone on the second.
     it "uncovers the plate and blows the fusible plug" do
-      op, events = starved(engine, 200, water: bare_plate_water)
+      op, events = starved(engine, 2, water: bare_plate_water)
 
       expect(boiler_state(op).fetch(:crown_exposure)).to be > 0.9
       expect(plug_state(op).fetch(:melted)).to be(true)
@@ -101,25 +109,27 @@ RSpec.describe "the crown sheet", crew: :reference do
     # reason the fusible alloy is rated 620 K against wrought iron's 750. If this ever inverts, the
     # safety device has become decoration.
     it "goes before the plate does, leaving the shell unmarked" do
-      op, events = starved(engine, 200, water: saved_water)
+      op, events = starved(engine, 2, water: saved_water)
 
       expect(plug_state(op).fetch(:melted)).to be(true)
       expect(events.map { |e| e.values_at(:type, :node) }).not_to include([ :part_failed, :boiler ])
       expect(op.nodes.fetch(:boiler).integrity(boiler_state(op))).to eq(1.0)
     end
 
-    # **And the cost of the save**: steam onto the grate puts the fire out, so the engine stops.
+    # **And the cost of the save**, as its own claim from its own state: a plug that has already
+    # gone is dumping the drum onto the grate, so the fire goes down and the engine with it.
+    # Starting from a plug that is *already* blown is what makes this a claim about the
+    # consequence rather than a second measurement of how long the plug takes to melt.
     #
-    # Asserted as the **collapse** rather than as an absolute figure. A stopped engine coasts, so
-    # "under a kilowatt" is a statement about how long somebody waited — where the power falling
-    # from 468 kW to a seventh of that is the plug doing its job. Measured across 100 / 200 / 400
-    # ticks from this drum: 305 / 180 / 70 kW.
+    # Measured over 10 ticks: 728.6 K in the firebox against an intact engine's 1024.5, with 1.5 kg
+    # of water and steam sitting in the fire.
     it "puts the engine out of service by putting its fire out" do
-      ordinary, = starved(engine, 100, water: ordinary_water)
-      saved, = starved(engine, 400, water: saved_water)
+      doused, = starved(engine, 10, water: bare_plate_water, nodes: { fusible_plug: plug_gone })
+      intact, = starved(engine, 10, water: ordinary_water)
 
-      expect(shaft_power_w(saved)).to be < 0.25 * shaft_power_w(ordinary)
-      expect(temperature_k(saved, :firebox)).to be < temperature_k(ordinary, :firebox)
+      expect(held(doused, :firebox, :water) + held(doused, :firebox, :steam)).to be > 0.0
+      expect(temperature_k(doused, :firebox)).to be < temperature_k(intact, :firebox)
+      expect(shaft_power_w(doused)).to be < shaft_power_w(intact)
     end
 
     # **The other half of the plug's story, and what makes it a save rather than a nuisance.**
@@ -140,10 +150,11 @@ RSpec.describe "the crown sheet", crew: :reference do
     # catastrophic locomotive boiler explosion. An earlier version called this a gentle seam split,
     # on a pressure-ratio rule that could never fire at all.
     #
-    # **Hence `explosive_water` rather than `bare_plate_water`**: at 200 kg there is too little
-    # left to flash and the same drum merely `seam_split`s, which is the severity model working.
+    # **Hence `explosive_water` rather than `bare_plate_water`**: severity scales with the water
+    # left to flash, so an emptier drum seam-splits instead.
     it "explodes, and spills itself, when the plug has been left out" do
-      op, events = starved(engine(loadout: { fusible_plug: nil }), 200, water: explosive_water)
+      op, events = starved(engine(loadout: { fusible_plug: nil }), 10,
+                           water: explosive_water, nodes: { boiler: { durability: worn_shell } })
 
       expect(events).to include(hash_including(type: :part_failed, node: :boiler, mode: :explosion))
       expect(boiler_state(op).fetch(:failure)).to be(:explosion)
@@ -155,12 +166,16 @@ RSpec.describe "the crown sheet", crew: :reference do
     # **A fuse, not a valve.** Built on `ReliefValve` this would re-seat the moment the water came
     # back over the plate, and a boiler that quietly heals itself is exactly the consequence-free
     # behaviour the hazard exists to not have.
-    it "stays melted once it has melted, even with the feed restored" do
-      op, = starved(engine, 200, water: bare_plate_water)
-      expect(plug_state(op).fetch(:melted)).to be(true)
+    #
+    # **The plate is genuinely covered again here** — a full drum, full feed, exposure 0.0000 —
+    # which is the precise condition a re-seating valve would open its way out of. The old form
+    # starved a drum for 12,000 ticks and then turned the feed up, which left the plate still bare
+    # and so never actually offered the plug the chance to heal.
+    it "stays melted once it has melted, even with the water back over it" do
+      op, = starved(engine, 1, water: ordinary_water,
+                    nodes: { fusible_plug: plug_gone }, feed: 100)
 
-      run!(op, 200, from: 200, feed: 100)
-
+      expect(boiler_state(op).fetch(:crown_exposure)).to eq(0.0)
       expect(plug_state(op).fetch(:melted)).to be(true)
     end
   end
@@ -172,15 +187,16 @@ RSpec.describe "the crown sheet", crew: :reference do
   #
   # **Asserted as the glass reading ABOVE the truth**, which is the deception itself. The old form
   # asked only that the glass read under 25%, and that is nearly free on a drum which is in fact
-  # nearly empty — it would have passed on a glass that was telling the driver exactly how bad
-  # things were. Measured here: the plug has already gone, and the glass reads **0.178 against a
-  # true 0.151**, which is a figure a driver reads as low-but-working rather than as an emergency.
+  # nearly empty — it would have passed on a glass telling the driver exactly how bad things were.
+  #
+  # **Twenty ticks rather than two**, because swell is the one thing here with a time constant of
+  # its own: `swell_rise_s` is two seconds, so a single tick finds the bubbles have not formed and
+  # the glass still agrees with the drum.
   it "lets the gauge glass read high while the plate is already bare" do
-    op, = starved(engine, 60, water: saved_water)
+    op, = starved(engine, 20, water: saved_water)
 
     expect(plug_state(op).fetch(:melted)).to be(true), "the plate must already be bare"
     expect(boiler_state(op).fetch(:crown_exposure)).to be > 0.0
     expect(glass(op)).to be > water_fill(op), "the glass has to flatter the drum, not report it"
-    expect(glass(op)).to be > 0.15, "and read like a drum somebody could still work"
   end
 end

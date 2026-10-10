@@ -210,6 +210,59 @@ and `blackdamp_spec`'s long-broken "starves the fire" example turned out to be a
 quantity entirely — it demanded that 20–90% of the gas survive, where 97–99% is consumed at every
 level and what displacement actually does is make the fire **cooler** (2379 → 1935 → 1544 K).
 
+### "A handful of ticks" is the real target, and most claims reach it
+
+Cutting a 12,000-tick example to 200 feels like success and is not. **If an example still needs
+hundreds of ticks, something in it is still being waited for** — so find what, and seed that too.
+Pushed to the end, almost everything turns out to be derived from state that could have been
+handed over:
+
+| File | Before | After | Max ticks |
+|---|---|---|---|
+| `crown_sheet_spec` | 935 s | **1.2 s** | 20 |
+| `injury_spec` | 156 s | **0.3 s** | 20 |
+| `diagnostic_spec` | 117 s (2 examples) | **2.5 s** (45) | **0** |
+| `event_spec` | ~35 s | **4.2 s** | 50 |
+| `carrying_spec` | ~119 s | **12.2 s** | ~460 |
+
+Three findings from doing it, all of which made the test better rather than merely faster:
+
+1. **Two claims in one example is what forces the long window.** The diagnostic tiers bundled *a
+   drum's reading swells* with *a coarse instrument distorts a moving reading*. The first is the
+   boiler's and belongs in `crown_sheet_spec`; the second is the **filter chain's**, and a filter
+   chain does not care where its numbers came from — so it takes a synthetic signal and costs
+   **no ticks at all**. Splitting them also exposed that the tiers differ in filter *parameters*
+   rather than classes, and that the signal is a **fraction, not a percentage** — fed percentages,
+   every chain clamps on its `Range(0.0, 1.25)` and all three read identically.
+2. **Seed the state, then seed its consequence separately.** "Out of service without destroying the
+   boiler" was the plug melting *and* the fire going out. A plug seeded **already blown** tests the
+   consequence instead of re-measuring the melt. Note `melted:` alone is not enough — the plug
+   re-derives it from `fusible_remaining_kg` every tick, the same stored-versus-derived trap as the
+   firebox's `alight`.
+3. **A long run can be hiding a weaker claim.** "Stays melted with the feed restored" starved a drum
+   for 12,000 ticks and then opened the feed — which left the plate still bare, so it never offered
+   the plug the chance to re-seat it was supposed to refuse. Seeded into a *full* drum at exposure
+   0.0000 it is the condition a `ReliefValve` would actually heal under.
+
+### Achievements must not cost an integration test each
+
+`event_pipeline_spec` raised steam from cold for 1,700 ticks so that a `ProgressionDigest` could be
+handed real records. Most of what that bought is available in **thirty** ticks from a constructed
+engine, because the transitions are edge-triggered: `fire_lit`, `steam_raised` and `heater_engaged`
+are announced on the tick the engine first reads its own state (with one pulse of the igniter for
+the pilot). What it should never have bought is an *achievement* unlock.
+
+**Whether a sequence of records earns an award is a rule about record ordering**, and
+`progression_digest_spec` already takes synthetic records for exactly that reason. One integration
+test per achievement does not scale, and the cold-start award is the proof: 1,700 ticks were being
+spent to discover that three records arrived in the right order — and the example got the answer
+backwards first, because disqualification is **windowed**, so the pilot that lights every real fire
+falls outside the interval it would otherwise forfeit. Three records are the whole test.
+
+The event *budget* claim improved too. "Fewer than twenty records" says the window was short;
+**the count not moving between a 30-tick window and a 400-tick one** says the records are
+transitions, which is the property the design actually rests on. Measured: four, and four.
+
 ### Measuring the wrong quantity is the other trap
 
 A fast spec makes it cheap to measure something adjacent to the claim. Draught was first measured

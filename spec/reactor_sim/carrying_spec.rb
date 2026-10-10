@@ -200,30 +200,28 @@ RSpec.describe ReactorSim::Burden do
   describe "a rescue" do
     before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
 
-    # Somebody at the face, and somebody at bank who can be sent to fetch them.
+    # Somebody underground, and somebody at bank who can be sent to fetch them.
     #
-    # **The walk is real here and stays real**, where the rest of the mine's specs construct the
-    # arrival: a rescue *is* travel — a carrier walking to a casualty and back — so there is no
-    # precondition to build, only the mechanic. And the replay example cannot seed in any case,
-    # since `Constructed#seed` returns an operation detached from its `Match`.
+    # **The carrier's journey is real and stays real** — a rescue *is* travel, so there is nothing
+    # to construct there, only the mechanic. What is constructed is the **casualty's** arrival,
+    # which is a precondition and used to cost 900 ticks of watching a hewer walk.
     #
-    # **A method rather than a constant**: a constant assigned inside an example group resolves
-    # lexically against `Object`, so two spec files naming one overwrite each other silently and
-    # which wins depends on the randomised file order.
-    def settle_ticks = 900
-
-    def pit_with_a_casualty = man(build_pit(id: "c", seed: 3, loadout: { manriding: :cage_gear }))
+    # **And the casualty is put at the pit bottom rather than the face**, which is the same claim
+    # over a road a fifth as long: fetched on tick 168 and home at +292, against 835 and more than
+    # 1,500 from the district. Note the carry back is slower than the walk out either way, because
+    # carrying somebody is a burden — which is the point of the whole file.
+    def pit_with_a_casualty
+      casualty(build_pit(id: "c", seed: 3, loadout: { manriding: :cage_gear }))
+    end
 
     # The tick number is tracked here rather than read back off the operation, which does not keep
     # one — and it has to keep counting across calls, or the replay example steps two runs through
     # different tick numbers and the digests cannot match.
-    def man(op)
-      op.set_control(:winding, 100)
-      op.set_control(:man_winding, 100)
-      op.assign_minion(:crew_1, :hewing)
+    def casualty(op)
+      ready = at_the_face(op, hewing: nil, haulage: :crew_1, timbering: nil)
+      levers!(ready, winding: 100, man_winding: 100, haulage: 100)
       @tick = 0
-      step_on!(op, settle_ticks)
-      op
+      ready
     end
 
     def step_on!(op, ticks = 1)
@@ -232,7 +230,7 @@ RSpec.describe ReactorSim::Burden do
       events
     end
 
-    def walk_until(op, limit: 4_000)
+    def walk_until(op, limit: 600)
       events = []
       limit.times do
         events.concat(step_on!(op))
@@ -245,7 +243,7 @@ RSpec.describe ReactorSim::Burden do
 
     it "fetches somebody, carries them out, and puts them down where it is told" do
       op = pit_with_a_casualty
-      expect(crew_of(op, :crew_1)[:place]).to be(:district)
+      expect(crew_of(op, :crew_1)[:place]).to be(:pit_bottom)
 
       expect(op.assign_minion(:crew_2, :crew_1)).to be(true)
       events = walk_until(op) { |o| crew_of(o, :crew_2)[:carrying].any? }
@@ -288,10 +286,18 @@ RSpec.describe ReactorSim::Burden do
 
     # **Both halves of the protocol, which is why `drop_minion` names the person and not the
     # carrier.** The command log is at-least-once and unordered, so redelivery has to be a no-op.
+    # **Seeded through the MATCH**, because `digest` fingerprints the match's own copy of its
+    # operations — seeding the operation alone would leave the match holding a pit whose casualty
+    # never went underground, and the digests would then agree about the wrong thing.
     it "replays bit for bit with a fetch and a drop delivered twice" do
       digests = Array.new(2) do
-        match = build_match(id: "c", seed: 3, loadout: { manriding: :cage_gear })
-        op = man(match.operation(:pit))
+        built = build_match(id: "c", seed: 3, loadout: { manriding: :cage_gear })
+        match = seed_match(built, :pit,
+                           minions: at_the_face_minions(built.operation(:pit), hewing: nil,
+                                                        haulage: :crew_1, timbering: nil))
+        op = match.operation(:pit)
+        levers!(op, winding: 100, man_winding: 100, haulage: 100)
+        @tick = 0
 
         2.times { op.assign_minion(:crew_2, :crew_1) }
         walk_until(op) { |o| crew_of(o, :crew_2)[:carrying].any? }

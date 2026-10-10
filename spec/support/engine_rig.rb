@@ -93,22 +93,27 @@ module EngineRig
   # **An engine that has been at work**, every figure measured off one that had been. Keyword
   # overrides move the one thing an example is about and leave the rest alone — `fire_k: 320.0`
   # for a dead fire, `ash: 300.0` for a banked grate, `rpm: 0.0` for a standing engine.
-  def at_work(op, fire_k: FIRE_K, drum_k: DRUM_K, rpm: RPM, ash: FIRE.fetch(:ash),
-              ignited: IGNITED_KG, water: DRUM.fetch(:water), **extra)
-    seed(op, nodes: {
-           # `alight` is deliberately not seeded: the firebox derives it every tick from the
-           # ignited mass, so it is not in a fresh node's state and `seed` refuses it.
-           firebox: body(op, :firebox, fire_k, **FIRE.merge(ash: ash))
-             .merge(ignition: { coal_combustion: { kg: ignited, oxidiser_kg: OXIDISER_KG } }),
-           boiler: body(op, :boiler, drum_k, **DRUM.merge(water: water)),
-           steam_chest: body(op, :steam_chest, CHEST_K, **CHEST),
-           cylinder: body(op, :cylinder, CYLINDER_K, **CYLINDER),
-           flywheel: spin(op, rpm),
-           **wall(op, :boiler_tubes, TUBES_K),
-           **wall(op, :throttle, THROTTLE_K),
-           **wall(op, :flue, FLUE_K),
-           **extra
-         })
+  def at_work(op, **options) = seed(op, nodes: at_work_nodes(op, **options))
+
+  # **The patches alone**, for a caller that has to seed through something other than a bare
+  # operation — `Constructed#seed_match`, when a digest or replay example needs the match's own
+  # copy to carry the state too.
+  def at_work_nodes(op, fire_k: FIRE_K, drum_k: DRUM_K, rpm: RPM, ash: FIRE.fetch(:ash),
+                    ignited: IGNITED_KG, water: DRUM.fetch(:water), **extra)
+    {
+      # `alight` is deliberately not seeded: the firebox derives it every tick from the ignited
+      # mass, so it is not in a fresh node's state and `seed` refuses it.
+      firebox: body(op, :firebox, fire_k, **FIRE.merge(ash: ash))
+        .merge(ignition: { coal_combustion: { kg: ignited, oxidiser_kg: OXIDISER_KG } }),
+      boiler: body(op, :boiler, drum_k, **DRUM.merge(water: water)),
+      steam_chest: body(op, :steam_chest, CHEST_K, **CHEST),
+      cylinder: body(op, :cylinder, CYLINDER_K, **CYLINDER),
+      flywheel: spin(op, rpm),
+      **wall(op, :boiler_tubes, TUBES_K),
+      **wall(op, :throttle, THROTTLE_K),
+      **wall(op, :flue, FLUE_K),
+      **extra
+    }
   end
 
   # Set the levers and turn the handle. **Tens of ticks, not thousands** — what used to need

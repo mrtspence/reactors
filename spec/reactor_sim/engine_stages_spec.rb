@@ -56,7 +56,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     # run" is quietly an engine in trouble. Asserted here so the seed cannot drift into it.
     it "leaves the cylinder relief valve shut, as an ordinary run must" do
       op = at_work(engine)
-      run!(op, 40)
+      run!(op, 20)
 
       compression = op.nodes.fetch(:cylinder)
                       .compression_pressure_pa(node_state(op, :cylinder), op.content)
@@ -78,7 +78,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
   describe "the fire" do
     it "will not light a cold firebox without the igniter" do
       cold = at_work(engine, fire_k: 320.0, ignited: 0.0)
-      run!(cold, 40, igniter: 0)
+      run!(cold, 20, igniter: 0)
 
       expect(node_state(cold, :firebox).dig(:ignition, :coal_combustion, :kg)).to be_within(1e-9).of(0.0)
       expect(temperature_k(cold, :firebox)).to be < 400.0
@@ -86,7 +86,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
 
     it "keeps burning once it is alight, with no igniter at all" do
       op = at_work(engine)
-      run!(op, 40, igniter: 0)
+      run!(op, 20, igniter: 0)
 
       expect(node_state(op, :firebox).dig(:ignition, :coal_combustion, :kg)).to be > 0.1
       expect(temperature_k(op, :firebox)).to be > 900.0
@@ -95,7 +95,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "burns fuel and leaves ash behind" do
       op = at_work(engine, ash: 0.0)
       bunker = op.telemetry.fetch(:bunker)[:kg]
-      run!(op, 60)
+      run!(op, 30)
 
       expect(held(op, :firebox, :ash)).to be > 0.0
       expect(held(op, :firebox, :flue_gas)).to be > 0.0
@@ -107,8 +107,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "chokes when the damper is shut" do
       open = at_work(engine)
       shut = at_work(engine)
-      run!(open, 100, damper_open: 85)
-      run!(shut, 100, damper_open: 0)
+      run!(open, 20, damper_open: 85)
+      run!(shut, 20, damper_open: 0)
 
       expect(temperature_k(shut, :firebox)).to be < temperature_k(open, :firebox)
     end
@@ -134,8 +134,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "clears when somebody rakes the ashpan out" do
       raked = at_work(engine, ash: 300.0)
       banked = at_work(engine, ash: 300.0)
-      run!(raked, 100, raking: :crew_2, ash_raking: 100)
-      run!(banked, 100, ash_raking: 100)
+      run!(raked, 20, raking: :crew_2, ash_raking: 100)
+      run!(banked, 20, ash_raking: 100)
 
       expect(held(raked, :firebox, :ash)).to be < held(banked, :firebox, :ash)
       expect(reaction_throttle(raked)).to be > reaction_throttle(banked)
@@ -191,7 +191,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "burns the donkey's own fuel and leaves the bunker alone" do
       op = at_work(engine(loadout: { blower: :donkey_blower }))
       before = held(op, :donkey_tank, :fuel_oil)
-      run!(op, 60, blower: 100)
+      run!(op, 30, blower: 100)
 
       expect(held(op, :donkey_tank, :fuel_oil)).to be < before
       expect(node_state(op, :donkey).fetch(:angular_momentum)).to be > 0.0
@@ -209,8 +209,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "draws less up a cold stack than up a hot one" do
       lit = at_work(engine)
       dead = at_work(engine, fire_k: 300.0, ignited: 0.0)
-      run!(lit, 100, blower: 0)
-      run!(dead, 100, blower: 0, stoking: 0)
+      run!(lit, 20, blower: 0)
+      run!(dead, 20, blower: 0, stoking: 0)
 
       expect(temperature_k(dead, :flue)).to be < temperature_k(lit, :flue)
       expect(draught_kg(dead)).to be < draught_kg(lit)
@@ -228,8 +228,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       gains = %i[blastpipe_chimney plain_chimney].map do |chimney|
         standing = at_work(engine(loadout: { chimney: chimney }), rpm: 0.0)
         working = at_work(engine(loadout: { chimney: chimney }))
-        run!(standing, 100, blower: 0, throttle_open: 0, load_demand: 0)
-        run!(working, 100, blower: 0)
+        run!(standing, 20, blower: 0, throttle_open: 0, load_demand: 0)
+        run!(working, 20, blower: 0)
 
         draught_kg(working) / draught_kg(standing)
       end
@@ -250,6 +250,9 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       lit = at_work(engine, drum_k: 400.0)
       out = at_work(engine, drum_k: 400.0, fire_k: 300.0, ignited: 0.0)
       was = [ drum_joules(lit), drum_joules(out) ]
+      # **Forty, not twenty.** Heat crossing into a 2-tonne drum is a rate, so the gap between a
+      # lit fire and a dead one takes a little while to open: at 20 ticks it is 4.5× and this asks
+      # for 5. One of the two windows in this file that is a time constant rather than a wait.
       run!(lit, 40)
       run!(out, 40, stoking: 0)
 
@@ -262,7 +265,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       full = at_work(engine, drum_k: 400.0)
       bare = at_work(engine(loadout: { boiler_tubes: nil }), drum_k: 400.0)
       was = [ drum_joules(full), drum_joules(bare) ]
-      [ full, bare ].each { |op| run!(op, 40) }
+      [ full, bare ].each { |op| run!(op, 20) }
 
       expect(drum_joules(full) - was.first).to be > 1.3 * (drum_joules(bare) - was.last)
       expect(bare.nodes).not_to have_key(:boiler_tubes)
@@ -282,7 +285,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "wire-draws: the further it is shut, the further the chest falls below the drum" do
       drops = [ 100, 60, 20 ].map do |lever|
         op = at_work(engine)
-        run!(op, 40, throttle_open: lever)
+        run!(op, 20, throttle_open: lever)
         chest_drop_pa(op)
       end
 
@@ -293,7 +296,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "fills the chest higher the further it is opened" do
       pressures = [ 20, 60, 100 ].map do |lever|
         op = at_work(engine)
-        run!(op, 40, throttle_open: lever)
+        run!(op, 20, throttle_open: lever)
         pressure_pa(op, :steam_chest)
       end
 
@@ -325,7 +328,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "makes more power the further the throttle is opened" do
       powers = [ 20, 40, 60, 100 ].map do |lever|
         op = at_work(engine)
-        run!(op, 40, throttle_open: lever)
+        run!(op, 20, throttle_open: lever)
         shaft_power_w(op)
       end
 
@@ -335,7 +338,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
 
     it "puts the fire's heat on the ledger as shaft work" do
       op = at_work(engine)
-      run!(op, 40)
+      run!(op, 20)
 
       expect(op.ledger.fetch(:joules_added)).to be > 0.0
       expect(op.ledger.fetch(:joules_to_work)).to be > 0.0
@@ -350,7 +353,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     #
     # Measured: the wheel lets go at 417.7 rpm against a limit of 413.5, inside 20 ticks.
     it "bursts when the load is thrown off" do
-      events = at_work(engine).then { |op| run!(op, 40, throttle_open: 100, stoking: 80, load_demand: 0) }
+      events = at_work(engine).then { |op| run!(op, 20, throttle_open: 100, stoking: 80, load_demand: 0) }
       burst = failures_of(events, :flywheel).first
 
       expect(burst).not_to be_nil, "the wheel survived having the load taken off"
@@ -363,7 +366,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     # it is a legitimate way to run — hot, loud, and inside the wheel's limit.
     it "survives full throttle as long as the mill is taking the power" do
       op = at_work(engine)
-      events = run!(op, 40, throttle_open: 100, stoking: 80, load_demand: 90)
+      events = run!(op, 20, throttle_open: 100, stoking: 80, load_demand: 90)
 
       expect(events.select { |e| e[:type] == :part_failed }).to be_empty
       expect(rpm(op)).to be > 100.0
@@ -374,10 +377,10 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     # turning at 2,364 rpm and making 3.97 MW six hundred ticks later.
     it "stops turning and stops making power once it has burst" do
       op = at_work(engine)
-      events = run!(op, 40, throttle_open: 100, stoking: 80, load_demand: 0)
+      events = run!(op, 20, throttle_open: 100, stoking: 80, load_demand: 0)
       expect(failures_of(events, :flywheel)).not_to be_empty
 
-      run!(op, 40, from: 40, throttle_open: 100, stoking: 80, load_demand: 0)
+      run!(op, 20, from: 40, throttle_open: 100, stoking: 80, load_demand: 0)
 
       expect(node_state(op, :flywheel).fetch(:failure)).to be(:burst)
       expect(rpm(op)).to be_within(1e-9).of(0.0)
@@ -388,7 +391,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "puts the wrecked wheel's energy on the ledger" do
       op = at_work(engine)
       before = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
-      run!(op, 40, throttle_open: 100, stoking: 80, load_demand: 0)
+      run!(op, 20, throttle_open: 100, stoking: 80, load_demand: 0)
       after = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
       expect(op.ledger.fetch(:joules_to_friction)).to be > 0.0
@@ -409,7 +412,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
 
       [ 440.0, 460.0, 480.0 ].each do |seeded_k|
         op = at_work(engine, drum_k: seeded_k, rpm: 0.0)
-        events = run!(op, 60, throttle_open: 0, load_demand: 0, stoking: 80)
+        events = run!(op, 30, throttle_open: 0, load_demand: 0, stoking: 80)
 
         expect(events.map { |e| e[:type] }).to include(:blew_off)
         expect(pressure_pa(op, :boiler)).to be_within(0.02 * setting).of(setting)
@@ -423,7 +426,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "lets the drum run away with no safety valve fitted, up toward the shell's rating" do
       fitted = at_work(engine, drum_k: 460.0, rpm: 0.0)
       stripped = at_work(engine(loadout: { safety_valve: nil }), drum_k: 460.0, rpm: 0.0)
-      [ fitted, stripped ].each { |op| run!(op, 60, throttle_open: 0, load_demand: 0, stoking: 80) }
+      [ fitted, stripped ].each { |op| run!(op, 30, throttle_open: 0, load_demand: 0, stoking: 80) }
 
       expect(pressure_pa(stripped, :boiler)).to be > 1.5 * pressure_pa(fitted, :boiler)
       expect(pressure_pa(stripped, :boiler))
@@ -446,7 +449,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     # hard-pulling engine at a safe level into permanent carryover.
     it "leaves an engine held at a steady throttle dry, however hard it is working" do
       op = at_work(engine)
-      run!(op, 100, throttle_open: 100, stoking: 80)
+      run!(op, 20, throttle_open: 100, stoking: 80)
 
       expect(op.nodes.fetch(:boiler).swell_fraction(node_state(op, :boiler))).to be < 0.05
       expect(occupancy(op)).to be < 0.1
@@ -493,8 +496,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     it "drains it through the cocks, at the price of the steam that goes with it" do
       shut = at_work(engine, rpm: 0.0, cylinder: body(engine, :cylinder, 292.0))
       open = at_work(engine, rpm: 0.0, cylinder: body(engine, :cylinder, 292.0))
-      shut_peak = peak_occupancy(shut, 100, cylinder_cocks: 0)
-      open_peak = peak_occupancy(open, 100, cylinder_cocks: 100)
+      shut_peak = peak_occupancy(shut, 40, cylinder_cocks: 0)
+      open_peak = peak_occupancy(open, 40, cylinder_cocks: 100)
 
       expect(open_peak).to be < shut_peak
       expect(rpm(open)).to be < rpm(shut)
@@ -512,7 +515,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       wet = body(engine, :cylinder, 360.0, water: 6.0, steam: 0.4)
       ends = [ 0, 5, 60 ].map do |lever|
         op = at_work(engine, rpm: 0.0, cylinder: wet)
-        peak_occupancy(op, 100, throttle_open: lever)
+        peak_occupancy(op, 40, throttle_open: lever)
         occupancy(op)
       end
 
@@ -536,8 +539,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
                .compression_pressure_pa(node_state(fitted, :cylinder), fitted.content))
         .to be > fitted.nodes.fetch(:cylinder_relief).relief_pressure_pa
 
-      kept = run!(fitted, 60, cylinder_cocks: 0)
-      lost = run!(stripped, 60, cylinder_cocks: 0)
+      kept = run!(fitted, 30, cylinder_cocks: 0)
+      lost = run!(stripped, 30, cylinder_cocks: 0)
 
       expect(failures_of(kept, :cylinder)).to be_empty
       expect(failures_of(lost, :cylinder).map { |e| e.fetch(:mode) }).to include(:blown_head)
@@ -573,7 +576,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
         before_mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
         before_joules = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
-        run!(op, 100, **levers)
+        run!(op, 20, **levers)
 
         expect((ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger) - before_mass).abs /
                before_mass.abs).to be < 1e-9
@@ -588,7 +591,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
   describe "the atmospheric chassis" do
     it "runs on a boiler pressure the high-pressure engine could not use" do
       watt = at_work(engine(chassis: :atmospheric), drum_k: 380.0, rpm: 10.0)
-      run!(watt, 60, throttle_open: 70, load_demand: 60)
+      run!(watt, 30, throttle_open: 70, load_demand: 60)
 
       expect(rpm(watt)).to be > 5.0, "the atmospheric engine never turned"
       expect(pressure_pa(watt, :boiler)).to be < 2.5 * ReactorSim::Units::STANDARD_PRESSURE_PA
@@ -596,7 +599,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
 
     it "holds its condenser below atmospheric, which is what drives it" do
       watt = at_work(engine(chassis: :atmospheric), drum_k: 380.0, rpm: 10.0)
-      run!(watt, 60, throttle_open: 70, load_demand: 60)
+      run!(watt, 30, throttle_open: 70, load_demand: 60)
 
       expect(pressure_pa(watt, :condenser)).to be < ReactorSim::Units::STANDARD_PRESSURE_PA
     end

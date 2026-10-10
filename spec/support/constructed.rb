@@ -41,17 +41,42 @@ module Constructed
   # so naming one reaction's `ignition` keeps the others.
   #
   # **The operation it returns is detached from any `Match` that built it**, because it is rebuilt
-  # from a snapshot rather than mutated. So a replay or digest example — which steps an operation
-  # and then asks `match.digest` — cannot seed: the match still holds the original. Those examples
-  # keep the real run, which is right anyway, since a digest over a constructed state would be
-  # proving the snapshot path rather than the replay.
+  # from a snapshot rather than mutated — so an example that steps an operation and then asks
+  # `match.digest` would read the original. Use `seed_match` for those.
   def seed(op, nodes: {}, minions: {})
     snapshot = ReactorSim.deep_symbolize(op.to_h)
 
-    patch_section(snapshot, :nodes, nodes, op)
-    patch_section(snapshot, :minions, minions, op)
+    patch_operation(snapshot, nodes, minions, op)
 
     ReactorSim::Operation.from_h(snapshot)
+  end
+
+  # The same, one level up: seed one operation's state inside a **match** and hand back a rebuilt
+  # match whose operation carries it.
+  #
+  # This is what a replay or digest example needs, because `match.digest` fingerprints the match's
+  # own copy of its operations — so seeding the operation alone leaves the match holding the state
+  # the example was trying to skip past.
+  #
+  # `build_patches` is given the live operation and returns `[nodes, minions]`, because the patch
+  # helpers need the node objects (`body` reads `heat_capacity`) and those live on the operation
+  # rather than in the snapshot.
+  def seed_match(match, operation_id, nodes: {}, minions: {})
+    id = operation_id.to_sym
+    op = match.operation(id) || raise(ArgumentError, "no operation #{id.inspect} in this match")
+    snapshot = ReactorSim.deep_symbolize(match.to_h)
+
+    index = snapshot.fetch(:operations).index { |o| o.fetch(:id).to_sym == id }
+    raise ArgumentError, "no operation #{id.inspect} in the snapshot" if index.nil?
+
+    patch_operation(snapshot.fetch(:operations).fetch(index), nodes, minions, op)
+
+    ReactorSim::Match.from_h(snapshot)
+  end
+
+  def patch_operation(snapshot, nodes, minions, op)
+    patch_section(snapshot, :nodes, nodes, op)
+    patch_section(snapshot, :minions, minions, op)
   end
 
   def patch_section(snapshot, section, patches, op)
