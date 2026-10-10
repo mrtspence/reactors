@@ -3,6 +3,7 @@
 require "reactor_sim"
 require "json"
 require "support/loop_rig"
+require "support/pit_rig"
 
 # The durable record's contract. See docs/design_sketches/event_system.md.
 #
@@ -108,6 +109,28 @@ RSpec.describe "events" do
   end
 
   describe "what an event carries" do
+    include PitRig
+
+    # The mine examples below run `PitRig`'s collier, whose archetype only exists in that
+    # content. It is `Content.default` *merged*, so the `loop_rig` examples in this group see
+    # exactly the resources they did before.
+    before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
+
+    # **A pit whose posted crew are one tick from an accident.** Every mine example in this group
+    # wants a casualty or a fire, and both used to be reached by running thousands of ticks —
+    # which measures `peril_spec`'s and `district_fire_spec`'s claims rather than this file's.
+    # **0.005 and not 0.05**, which is worth recording: `PitRig`'s collier is a plain 1.0 hand
+    # where `peril_spec`'s is clumsy and green, so the road closes the last of their margin far
+    # more slowly — at 0.05 it mends faster than it spends and nobody is ever hurt. A margin seed
+    # belongs to the hand it is seeded on.
+    def pit_on_the_brink
+      pit = build_pit(id: "h", seed: 5, loadout: { manriding: :cage_gear })
+      brink = %i[crew_1 crew_2 crew_3].to_h { |seat| [ seat, { margin: 0.005 } ] }
+      at_the_face(seed(pit, minions: brink)).tap do |op|
+        levers!(op, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100)
+      end
+    end
+
     it "identifies the part by node and mode rather than by a type per part" do
       match = ReactorSim::Match.create(id: "c", seed: 7, time_scale: 4.0,
                                        operations: [ { id: "rig", type: :loop_rig } ])
@@ -121,6 +144,67 @@ RSpec.describe "events" do
       # The engine's clock is the tick. A wall-clock stamp is forbidden here anyway, but it is
       # also the wrong clock: `tick` is the one replay and the projection already agree on.
       expect(failure.keys).not_to include(:at, :timestamp, :produced_at_ms)
+    end
+
+    # **`cause:` is a top-level field and every casualty owes one**, because that is where the
+    # feed reads it: put it inside `detail:` and the line reads "unknown" beside a dead minion,
+    # which is the one thing it must never say. A `minion_hurt` names the kind of harm
+    # (`asphyxia`, a hazard tag) rather than the part, which rides along as `by:`.
+    # **The casualty is built rather than waited for.** A hidden margin takes thousands of ticks
+    # to spend down on a haulage road, and how long that takes is `peril_spec`'s claim — what is
+    # wanted here is simply somebody hurt, with a `cause:` on the record. Seeding the posted
+    # crew's margin on the brink reaches the crossing on tick 131.
+    it "says what hurt somebody, not merely that something did" do
+      op = pit_on_the_brink
+      to_a_person = %i[minion_hurt minion_spent]
+
+      casualties = run!(op, 50).select { |e| to_a_person.include?(e[:type]) }
+
+      expect(casualties).not_to be_empty
+      expect(casualties.map { |e| e[:cause] }.uniq).to all(be_a(Symbol))
+    end
+
+    # **A fire reaches the player only if it is severe enough to be an incident**, and
+    # `Operation#incidents` reports `warning` and `critical` alone. Lighting a district read as
+    # `info`, so a gas ignition that burned off the firedamp, drove four fifths of the air out
+    # on thermal expansion and left the roadway at 1300 K put *nothing whatever* on the panel —
+    # the player watched their air vanish with no line to explain it.
+    #
+    # The vessel decides, by its own temperature rating: a firebox is built to burn and rates
+    # itself infinite; a roadway does not. **No supply, so the fan is stopped and the gas
+    # builds** — a lamp in a district the fan is holding at 3% is not an incident and must not
+    # read as one, which is the other half of this and lives in `mine_tech_spec`.
+    # **The district is built gassy rather than left to seep**, because where the explosive band
+    # lies is `district_fire_spec`'s claim and getting there by seepage is what made this 2,500
+    # ticks. 8% by mass is comfortably inside it, so the flame catches within a handful.
+    it "puts a fire in a place not built for one in front of the player" do
+      pit = build_pit(id: "f", seed: 1, loadout: { manriding: :cage_gear })
+      op = at_the_face(seed(pit, nodes: { district: district_mix(pit, firedamp: gas_kg(8.0)) }))
+      levers!(op, naked_flame: 100, ventilation: 0, hewing: 0, haulage: 100,
+                  timbering: 100, winding: 100, pumping: 100)
+
+      lit = nil
+      20.times do |i|
+        events = run!(op, 1, from: i)
+        next if events.none? { |e| e[:type] == :fire_lit && e[:severity] == :critical }
+
+        lit = { event: events.find { |e| e[:type] == :fire_lit }, reported: op.incidents }
+        break
+      end
+
+      expect(lit).not_to be_nil, "the district never caught"
+      expect(lit.fetch(:event)[:cause]).to be(:naked_flame)
+      expect(lit.fetch(:reported).map { |e| e[:type] }).to include(:fire_lit)
+    end
+
+    # The other half, and the one that would break every match if it went wrong: an engine
+    # lighting its own firebox is the machine working, not an incident. A firebox is built to
+    # burn and rates its temperature as infinite, so nothing alight in one is ever news.
+    it "leaves a firebox lighting as ordinary business" do
+      op = ReactorSim::Match
+           .create(id: "b", seed: 1, operations: [ { id: "eng", type: :steam_engine } ])
+           .operation(:eng)
+      expect(op.nodes.fetch(:firebox).send(:fire_severity)).to be(:info)
     end
   end
 end

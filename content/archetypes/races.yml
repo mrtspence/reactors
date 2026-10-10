@@ -33,8 +33,24 @@
 # wind. It is also the axis heavy kit is priced against, which is how "this armour tires me"
 # becomes something the three equipment slots can say.
 #
+# ## `mass_kg` is a seventh required field, and it is not a stat
+#
+# What a body weighs, in kilograms. **Required, with no default**, because it is read by the lift
+# limit and by the burden ratio and a quiet 70 kg would be invisible in the content — a race that
+# omits it raises at boot.
+#
+# It is not one of the six because stats pass through `Minion#effective`, which derates them by
+# injury: a broken arm would otherwise make somebody lighter. An individual in `content/minions/`
+# may offset it — not everybody of a race weighs the same — and that offset is optional, because
+# absent means "weighs what their race weighs".
+#
+# **`mass_kg` is not `hulking`, and neither is derived from the other.** This is weight; `hulking`
+# is *dimensions*, and it gates the `wedged` peril because a big frame jams in a narrow roadway. A
+# tall thin thing and a dense small thing are different problems.
+#
 # Anything else goes in `tags:`, which is open on purpose so a new trait costs a line here rather
-# than a schema change. See docs/design_sketches/minions.md §4.
+# than a schema change. See docs/design_sketches/minions.md §4 and
+# docs/design_sketches/carrying.md §3.
 #
 # **`dexterity` does not replace `clumsy`, and the two are not the same statement.** Dexterity is
 # how well somebody can do fine work when it goes right; `clumsy` is how often it goes wrong. A
@@ -51,6 +67,7 @@
 
 human:
   label: Human
+  mass_kg: 70.0
   strength: 1.0
   toughness: 1.0
   endurance: 1.0
@@ -63,7 +80,11 @@ human:
 # mine; it is declared now because a race's traits are not contingent on somewhere to use them.
 elf:
   label: Elf
-  strength: 0.75
+  mass_kg: 60.0
+  # Good pound-for-pound and simply smaller: "less back" was always a statement about size, and
+  # saying it as a ratio is what makes an elf a light quick worker rather than a weak one.
+  # `force` 0.73 — a little under a human, because there is a little less of them.
+  strength: 0.85
   toughness: 0.7
   endurance: 0.85
   intelligence: 1.25
@@ -76,11 +97,57 @@ elf:
 # made of. Good in the dark, hopeless at everything else, and `clumsy` is not flavour: the Danger
 # Check reads it directly, so a kobold is not merely weak, they are more likely to be hurt. That
 # is the whole point of being forced to field one.
+#
+# **Weak but not useless, and `endurance` is where that line is drawn.** It is a divisor in
+# `Fatigue.accrual` and enters no capability blend, so it buys staying power and not one gram of
+# extra coal — a kobold still hews badly, for longer. At 0.7 one was spent inside a minute at a
+# working station, which made a shift of them a screen of bars filling rather than a decision.
+# The other end of the market from the kobold, and the race the tag-selected perils were designed
+# for: `hulking` was read by the haulage road's `wedged` peril for a release with nothing in
+# content declaring it, so the whole "a tag selects a *kind* of accident" mechanic was proven only
+# by a spec fixture.
+#
+# **Half a tonne, and that is the interesting number rather than the strength.** `Burden` measures
+# a load against the frame shifting it, so an ogre carries several kobolds out of a district at a
+# modest cost and nothing can carry an ogre. He is also the only race that cannot be moved by the
+# rescue mechanic, which is a real consequence of a real figure rather than a rule.
+#
+# **No `darkvision`, deliberately.** He needs a lamp like a human does, so five times the strength
+# buys nothing at a face nobody has lit — the gate multiplies.
+ogre:
+  label: Ogre
+  mass_kg: 500.0
+  # **Below a human's, and that is the whole character of the race.** `strength` is a ratio now,
+  # so this says an ogre is worse pound-for-pound than the man beside him — strength grows with
+  # cross-section, weight with volume — and is overwhelming anyway because there is half a tonne
+  # of him. `force` comes out at 4.6 humans. It is also why nothing can carry an ogre, including
+  # another ogre with much to spare, and that is arithmetic rather than a rule.
+  strength: 0.65
+  toughness: 1.5
+  endurance: 1.0
+  intelligence: 0.5
+  dexterity: 0.5
+  charisma: 0.6
+  tags:
+    # Valued rather than `true`, and `Peril#weight_for` reads the value: half-way to filling a
+    # roadway means wedged half as readily as something that fills it, and still struck by a tub
+    # half as often as a kobold would be. Presence alone would make a hob and a giant identical.
+    hulking: 0.5
+    # Absent-minded and a bit slow rather than the dimmest thing in the world — this is the
+    # *mistake* end of the family, where `clumsy` is the *consequence* end.
+    boneheaded: 0.25
+    clumsy: 0.25
+
 kobold:
   label: Kobold
-  strength: 0.35
+  mass_kg: 25.0
+  # **Small AND scrawny, which takes both numbers to say.** The ratio is below a human's and the
+  # body is a third of one, so `force` is 0.25 — a quarter of a man at anything that is really
+  # about shifting weight. They stay useful at a pick (`swing` 0.5, because a tool caps what bulk
+  # buys) and cannot shift a loaded tub, which is the right shape for the bottom of the market.
+  strength: 0.7
   toughness: 0.4
-  endurance: 0.7
+  endurance: 1.4
   intelligence: 0.3
   dexterity: 0.6
   charisma: 0.2
@@ -88,3 +155,8 @@ kobold:
     darkvision: 0.5
     clumsy: 0.3
     skittish: true
+    # **`clumsy` and `boneheaded` are the same family at opposite ends of the causal chain.**
+    # Clumsy makes the *bite* worse once something has gone wrong; boneheaded makes the
+    # *mistake* likelier in the first place. A kobold at a lever that takes knowing how will
+    # occasionally pull the wrong one, which is not the same failing as dropping it.
+    boneheaded: 0.5

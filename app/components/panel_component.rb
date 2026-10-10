@@ -23,5 +23,9 @@ class PanelComponent < ViewComponent::Base
   # Everywhere a person can be posted, which is a longer list than the levers: the crew quarters
   # is somewhere to stand with nothing to set.
   def stations = @panel.fetch(:stations)
+
+  # Chrome, like every other label here: an operation's rooms are fixed at build. Empty for one
+  # with no geometry, which is what keeps "where are they" off the steam engine's console.
+  def places = @panel.fetch(:places, [])
   attr_reader :minions
 end

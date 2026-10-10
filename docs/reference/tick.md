@@ -9,7 +9,15 @@ delegates to it and installs the result atomically.
 
 `dt` is **simulated** seconds — `ReactorSim::DT (0.25) × operation.time_scale`. Wall-clock is
 always 4 Hz; `time_scale` is how fast the world runs relative to that, per operation. A steam
-engine uses 1.0; a mine would use much more.
+engine uses 1.0; an operation running alone may use much more.
+
+> **Coupled operations must share a `time_scale`**, and `Match#validate_couplings!` refuses to
+> build a match where they do not. Work crossing between operations is energy, and energy per
+> *tick* means nothing unless both sides agree what a tick is worth: at 40× an operation lives 10
+> simulated seconds per tick against 0.25 at 1.0, so it would need forty times the joules to run
+> the same machines and would be starved in exactly that proportion — while the supplier's own
+> instruments read correct throughout. Scaling the transfer to compensate would mint energy. Two
+> operations joined by a shaft are in the same world at the same time.
 
 ---
 
@@ -17,8 +25,8 @@ engine uses 1.0; a mine would use much more.
 
 | # | Phase | What it does | May draw entropy? |
 |---|---|---|---|
-| 0 | `actuate` | Levers travel toward their targets, at the rate their minion can manage | **yes** |
-| 1 | read | Freeze tick N−1, build the `Context` every node sees | no |
+| 0 | `draw_fates` → `actuate` | **Every die thrown for a person this tick**, then levers travelling toward their targets at the rate their minion can manage — and not always to the lever they were aimed at, because somebody out of their depth at a tricky post freezes, pulls it backwards, or grabs a different one in the same room | **yes** |
+| 1 | read | Freeze tick N−1, build the `Context` every node sees. `ctx.controls` is not the lever positions: an **effort** station's value is its position scaled by what the person posted there can manage, gates included — and a gate may be met by the **room** as well as by the person, which is `Tick#ambient_tags` (light on the roadway against a lamp on a belt; the better of the two, never the sum) | no |
 | 2 | `plan` | Every node declares intent, independently, against N−1 | no |
 | 3 | settle | One pure function over every claim — mass, heat, momentum | no |
 | 4a | `advect` | Granted parcels cross a whole **path**, carrying their energy. Returns what was *delivered* per inlet, which is what the walls left of it | no |
@@ -29,9 +37,12 @@ engine uses 1.0; a mine would use much more.
 | 5 | `react` | Ignition spreads, then chemistry (scaled by the node's `reaction_throttle`), then phase change — local to each node | no |
 | — | `record_injections` | Everything injected or extracted goes on the ledger | no |
 | 6 | `stress` | Durability, overload, failure events | no |
-| 6b | `endanger` | What a failure does to the **people** near it: a Danger Check per minion, against the station they are standing at | no |
-| 6c | `tire` | What the **work** does to the people doing it: fatigue accrues on `intent ÷ capability`, recovery nets against it | no |
-| 7 | `observe` | Instruments sample; their filters advance | **yes** |
+| 6b | `endanger` | What a failure does to the **people** near it: a Danger Check per minion, against both the **place** they are standing in and the station they are posted to. Severity adds where both reach them | no |
+| 6b′ | `scorch` | What the **heat** of the room does to the people in it: resilience ground away at a rate set by the gas's volumetric heat capacity and how far it is past what that person tolerates. The gas phase only — you stand beside water, not in it — and a threshold rather than a multiplier, so below somebody's rating it costs exactly nothing | no |
+| 6c | `tire` | What the **work** does to the people doing it, and what the **air** does to them: fatigue accrues on `intent ÷ capability`, recovery and suffocation net against it. Pinned at the ceiling in bad air is the collapse, and the clock from there to a mortal injury runs here | no |
+| 6d | `blunder` | **What the people do to themselves**, which is the route into harm that needs nothing to break first. A hidden `margin` of safety, spent by the **perils of the place** in proportion to how hard it is being worked, and mended only where no peril reaches at all — a lull between tubs is not recovery. Crossing zero is an accident, and the peril that fires is whichever took most of it; `safety_equipment` fitted in that place may turn it into a `:minion_near_miss` instead | no |
+| 6e | `travel` | Where the people have got to, in **two passes**. One: everybody who can walk moves toward the place their `posting` is worked, at their own `pace` less whatever they are carrying, by the **quickest passage that is actually running**. Two: anybody being carried is *stowed* — their place written from their carrier's, their station and posting cleared. Also keeps `remaining` and `journey`, which are how far there is left to go and how far there was to go at the farthest point of this walk — a panel divides them for a progress bar. A posting may name **a person** rather than a lever, which is a fetch order and becomes a pickup on arrival. A no-op in an operation that declares no passages | no |
+| 7 | `observe` | Instruments sample; their filters advance. An instrument that names an `observer:` is **somebody's word**: it reads through whoever is posted at that station and goes `:offline` when nobody is | **yes** |
 | 8 | publish | Freeze the new state, return this tick's events | no |
 
 Entropy is confined to phases 0 and 7 (plus `initial_state`). That is what makes projection
@@ -44,6 +55,20 @@ all wear is settled, never inside it, so two parts failing on the same tick hurt
 whatever order they were visited in. It reads the failure events rather than the nodes, which is
 also what lets a hazard's severity scale with how big the event actually was.
 
+**Phase 6b′ grinds `resilience` directly rather than draining a pool of its own**, because heat
+is not tiredness and does not recover by standing somewhere cooler for a minute. It is beside
+`endanger` rather than inside it because the two are different shapes: a hazard is a blow
+delivered by a part that failed, and heat is a condition of the room that keeps working for as
+long as somebody is in it.
+
+> **A steady harm needs a dwell to be able to kill.** Grinding resilience to zero proposes
+> `:severe`, every bite after proposes `:severe` again, and `Severity.escalate` rightly refuses
+> to announce the same injury twice — so nothing ever reaches `:mortal` without a bite of
+> `Injury::MORTAL_BITE`, which no steady hazard grows. `Breath` counts `asphyxia` past the
+> collapse and `Scorch` counts `burns`, both for this reason. Anything added here that harms
+> continuously owes the same counter, or it produces a minion who is permanently stood down in
+> a furnace and never dies.
+
 **Phase 6c draws no entropy either, and it runs after 6b rather than at phase 0** — which is where
 a long-standing `TODO` said it belonged. Three reasons: the effort actually demanded this tick is
 settled at phase 1, so phase 0 would charge people for last tick's levers; `endanger` already
@@ -51,6 +76,23 @@ writes `minions`, and a second writer would need a merge rule between them; and 
 out in 6b has `station: nil` on **this** tick and must stop working on this tick, not the next.
 The TODO's premise — that accrual would sit alongside the actuation entropy it draws — was simply
 wrong, because it draws none.
+
+**Phase 6d grinds the accident margin, and it runs after `tire` so it reads this tick's fatigue
+rather than last tick's.** The usual rule that everything must read the frozen N−1 constrains what
+*nodes* may see of each other; a minion's fatigue and their margin are one object being advanced
+twice in a fixed order. Running after `endanger` matters too: somebody already carried out by an
+exploding boiler this tick has no station before their own margin is weighed.
+
+**Phase 6e runs last of the five and reads no controls at all.** Who is standing where is built in
+phase 0 from the *previous* tick (`station_index`, `control_values`), so a minion who arrives in 6e
+takes up their post on the **next** tick — the same one-hop delay everything else in the engine
+has, and what keeps arrival from depending on phase order. It runs after `tire` so a minion carried
+out in 6b has already had their posting cancelled and does not get up and resume the walk.
+
+> **Geometry is opt-in, and that is what kept this from touching anything.** An operation that
+> declares no `passages:` has an empty `Layout`, `travel` returns immediately, and `assign_minion`
+> sets `station` the moment the command lands exactly as it always did. The steam engine did not
+> acquire a walk to the firehole.
 
 > **Fatigue is a runaway, and it has a closed form.** `capability` contains `(1 - fatigue)`, so
 > tiring raises the load, which tires faster. Integrating `(1-f)²df = K dt` gives
@@ -108,10 +150,17 @@ who has been reassigned is at the post their state names. It is read in two diff
 > zero — but it means a spec that runs a machine has to post somebody first.
 
 **Phase 0 — how fast a lever travels.** `actuate` takes `rate_multiplier: crew_multiplier(id)`,
-so a lever with a finite `stiffness` moves at `stiffness × rate_multiplier × dt`. Every shipped
-control keeps the default `Float::INFINITY`, which snaps `actual` to `target` and discards the
-multiplier before it is read — so **this path is currently inert on every machine**, and is kept
-for a lever that should genuinely take time to travel.
+so a lever with a finite `stiffness` moves at `stiffness × rate_multiplier × dt`, where
+`stiffness` is percent of the lever's range per second. The mine's valves ship finite figures —
+the fan is forty seconds hard over — and everything else keeps the default `Float::INFINITY`,
+which snaps `actual` to `target` and discards the multiplier before it is read.
+
+**An unattended lever travels at its rated speed**, deliberately: surface plant is the overseer's
+own, and a colliery's fan, pump and winder are at bank where nobody is normally posted. Posting
+somebody makes a lever faster or slower than rated, never possible at all.
+
+**Effort stations stay frictionless on purpose.** There the lever is intent and `capability`
+already supplies the rate, so a finite travel would charge the same minion twice.
 
 **`control_values` — what comes of the lever.** This is the live path, and it is not phase 0: it
 runs wherever a control becomes the number a node reads.
@@ -124,8 +173,13 @@ A control declares itself an **effort station** with a weighted stat blend, and 
 reads is then `lever × capability`, where capability is the blend × kit × condition:
 
 ```ruby
-ControlPoint.new(id: :stoking, effort: { strength: 0.75, dexterity: 0.25 }, aided_by: :shovelling)
+ControlPoint.new(id: :stoking, effort: { swing: 0.75, dexterity: 0.25 }, aided_by: :shovelling)
 ```
+
+**A blend may name the six stats and two derived quantities.** `strength` is a strength-to-weight
+*ratio*, so a job that wants absolute output asks for `force` (`strength × mass ÷ 70`) or for
+`swing` (`√force`, where a tool caps what bulk buys). All three are 1.0 for a reference human, so
+every weight set still sums to 1.0 against the same baseline.
 
 > **The lever is the player's intent; the crew supplies the rate.** An earlier design gave weak
 > minions a finite `stiffness` instead, which models the *derivative* — a kobold would take longer

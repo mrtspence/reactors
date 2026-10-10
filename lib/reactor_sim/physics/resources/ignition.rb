@@ -51,7 +51,7 @@ module ReactorSim
         ignited = [ ignition.fetch(:kg, 0.0) + seed_kg, fuel_kg ].min
         return { kg: 0.0, oxidiser_kg: oxidiser } if ignited <= Parcel::EPSILON
 
-        net = net_rate(spec, ignited, oxidiser, temperature_k, dt, content)
+        net = net_rate(spec, ignited, oxidiser, temperature_k, dt, content, parcels)
 
         kg = if net.positive?
           spread(ignited, fuel_kg, net, dt)
@@ -77,12 +77,14 @@ module ReactorSim
       # Starvation is measured against what the lit fuel would actually burn this tick, not
       # against zero. A fire with a hundred times the air it needs is not "less starved" than
       # one with ten times; both are simply breathing.
-      def net_rate(spec, ignited_kg, oxidiser_kg, temperature_k, dt, content)
+      def net_rate(spec, ignited_kg, oxidiser_kg, temperature_k, dt, content, parcels)
         min_k = spec.fetch(:min_temperature_k, 0.0).to_f
         chill = min_k.positive? ? (1.0 - (temperature_k / min_k)).clamp(0.0, 1.0) : 0.0
 
         demand = oxidiser_demand(spec, ignited_kg, dt, content)
         starved = demand.positive? ? (1.0 - (oxidiser_kg / demand)).clamp(0.0, 1.0) : 0.0
+
+        unlit = carries_flame?(spec, parcels, content) ? 0.0 : 1.0
 
         # Starvation cuts both ways: a fire cannot spread into fuel it has no air to burn, so
         # spread is scaled down as well as quench scaled up. Without that, `net` bottoms out at
@@ -91,8 +93,47 @@ module ReactorSim
         #
         # Chill only ever adds to quench. A cold firebox draws heat out of a flame; it does not
         # stop the flame reaching the next lump.
-        (rate(spec, :spread_per_s) * (1.0 - starved)) -
-          (rate(spec, :quench_per_s) * [ chill, starved ].max)
+        (rate(spec, :spread_per_s) * (1.0 - starved) * (1.0 - unlit)) -
+          (rate(spec, :quench_per_s) * [ chill, starved, unlit ].max)
+      end
+
+      # **A mixture outside its flammability range will not carry a flame however hot the room
+      # is.** Methane burns between about 5% and 15% by volume and does nothing whatever either
+      # side of that, which is the entire reason a flame lamp is an instrument: the cap is
+      # readable long before the mixture will carry a front.
+      #
+      # Opt-in, so a fuel bed declares no range and is untouched — **a fire on a grate is not a
+      # mixture**, and a lump of coal does not stop burning because the firebox is roomy.
+      #
+      # **By volume, never by mass**, for the same reason `Breath` is: firedamp is 0.668 kg/m³
+      # against air's 1.225, so kilograms understate it by half.
+      def carries_flame?(spec, parcels, content)
+        limits = spec[:ignition]
+        lean = limits && limits[:lean_fraction]
+        rich = limits && limits[:rich_fraction]
+        return true if lean.nil? && rich.nil?
+
+        share = fuel_fraction(spec, parcels, content)
+        return false if lean && share < lean.to_f
+        return false if rich && share > rich.to_f
+
+        true
+      end
+
+      # The fuel's share of the volume it is suspended in.
+      def fuel_fraction(spec, parcels, content)
+        fuels = spec.fetch(:consumes).keys.select { |r| fuel?(r, content) }
+        return 0.0 if fuels.empty?
+
+        total = 0.0
+        fuel = 0.0
+        parcels.each do |parcel|
+          volume = Parcel.volume_m3(parcel, content)
+          total += volume
+          fuel += volume if fuels.include?(parcel.fetch(:resource))
+        end
+
+        total.positive? ? fuel / total : 0.0
       end
 
       # The oxidiser this tick's burn would consume if nothing held it back.

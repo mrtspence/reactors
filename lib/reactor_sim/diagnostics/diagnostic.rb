@@ -56,16 +56,21 @@ module ReactorSim
     # cheap and, crucially, draws NO entropy, because only distorting filters ever do.
     #
     # This is also the only method here allowed to draw at all. Reading is a pure lookup.
-    def record(state, nodes, states, ctx, rng)
+    # **`competence:` is nil when this instrument is somebody's report and nobody is making
+    # it.** An instrument that declares no `observer:` is a dial on a wall: the player reads
+    # it themselves, it is always 1.0, and nothing here changes. One that names a station is a
+    # deputy's word, so with nobody posted there is no reading at all — offline, rather than a
+    # fabricated number nobody took. That is what makes posting somebody a real decision.
+    def record(state, nodes, states, ctx, rng, competence: 1.0)
       reading = @source.sample(nodes, states, ctx.content)
-      unless reading.available
+      unless reading.available && !competence.nil?
         return state.merge(truth: nil, value: nil, flags: [ :offline ].freeze, available: false)
       end
 
       filters, value, flags = run_chain(state.fetch(:filters), reading.value, rng, ctx,
-                                        distortions: true)
+                                        distortions: true, competence: competence)
       truth_filters, truth, = run_chain(state.fetch(:truth_filters), reading.value, nil, ctx,
-                                        distortions: false)
+                                        distortions: false, competence: competence)
 
       { filters: filters, truth_filters: truth_filters, truth: truth, value: value,
         flags: flags, available: true }
@@ -95,14 +100,18 @@ module ReactorSim
     private
 
     # Returns [filter_states, value, flags]. A skipped filter keeps its state untouched.
-    def run_chain(filter_states, value, rng, ctx, distortions:)
+    def run_chain(filter_states, value, rng, ctx, distortions:, competence: 1.0)
       flags = []
 
       next_states = @filters.each_with_index.map do |filter, index|
         current = filter_states.fetch(index)
         next current if !distortions && filter.distortion?
 
-        result = filter.apply(current, value, rng, ctx)
+        result = if filter.observed?
+          filter.apply(current, value, rng, ctx, competence: competence)
+        else
+          filter.apply(current, value, rng, ctx)
+        end
         value = result.value
         flags.concat(result.flags) if distortions
         result.state.freeze

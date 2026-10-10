@@ -18,9 +18,17 @@ module DevMatch
   # (`Match.create(operations: [...])`, advanced in lockstep); only the delivery tier assumed
   # one, in four places.
   #
-  # A second engine is deliberately the same kind as the first: two machines side by side, one
-  # run against the other, is what testing a change actually looks like.
-  OPERATIONS = { engine: :steam_engine, engine_b: :steam_engine }.freeze
+  # An engine and the mine it sells power to, which is the game's premise made concrete: the
+  # first machine's only customer is the second, and the second cannot turn a wheel without it.
+  OPERATIONS = { engine: :steam_engine, pit: :mine }.freeze
+
+  # **What makes the pair a chain rather than two machines in a window.** The engine's `:load`
+  # is what it sells; the mine's `:line_shaft` is what every driven fitting in it hangs off, so
+  # a fan, a pump and a winder all slow together when the engine house stops paying attention.
+  #
+  # Declared at both ends rather than inferred, because an operation may have several loads and
+  # only one of them is sold.
+  COUPLINGS = [ { from: [ :engine, :load ], to: [ :pit, :line_shaft ] } ].freeze
 
   # Where `/` lands. The first machine, not the only one.
   PRIMARY = OPERATIONS.keys.first
@@ -38,6 +46,26 @@ module DevMatch
       Operation.provision(match_id: ID, operation_id: operation_id, kind: kind,
                           owner_id: DevPlayer::ID)
     end
+
+    retire_machines_no_longer_in_the_match!
+  end
+
+  # **A row for a machine this match no longer runs is a link to a crash.** The navigation is
+  # built from these rows, so a leftover one offers a console for something `kind_of` cannot
+  # answer for — and every screen behind it raises rather than 404s.
+  #
+  # Dropped rather than hidden, and logged loudly, for the same reason `stored_parts` drops a
+  # part the catalogue has forgotten: a silently ignored row is one somebody spends an afternoon
+  # on. Ownership goes with it, which is only safe because this is the dev match and its one
+  # player owns everything — a real lobby retires a machine without forgetting who held it.
+  def retire_machines_no_longer_in_the_match!
+    stale = Operation.in_match(ID).reject { |row| OPERATIONS.key?(row.operation_id.to_sym) }
+    return if stale.empty?
+
+    Rails.logger.warn(
+      "dev_match: retiring #{stale.map(&:operation_id).join(', ')} — no longer in the match"
+    )
+    stale.each(&:destroy)
   end
 
   def operation_ids = OPERATIONS.keys
@@ -51,10 +79,25 @@ module DevMatch
   #
   # The env var is the fallback rather than the source: a stored loadout carries its own chassis,
   # because a loadout built against one frame means nothing on the other.
-  def default_chassis = ENV.fetch("REACTOR_VARIANT", "high_pressure").to_sym
+  # **Per kind, never global.** `REACTOR_VARIANT` names a steam engine frame, and a match holds
+  # machines that are not steam engines — asking a mine for `:high_pressure` takes the whole
+  # match down at boot, because `Assembly` is right to refuse a frame the machine does not have.
+  #
+  # So the env var applies where it means something and every other machine falls back to the
+  # first frame its own type offers. Asked of the registry rather than by naming a module, which
+  # is how a third machine becomes a registration rather than a branch here.
+  # `REACTOR_VARIANT` still defaults to `high_pressure`, which is a steam engine's word and is
+  # deliberate: it is the frame the engine's skill gradient was measured on, and dropping it
+  # silently moves the one machine anybody has tuned onto a different one.
+  def default_chassis(operation_id: PRIMARY)
+    offered = ReactorSim::Operations.chassis_for(kind_of(operation_id))
+    wanted = ENV.fetch("REACTOR_VARIANT", "high_pressure").to_sym
+
+    offered.include?(wanted) ? wanted : offered.first
+  end
 
   def chassis(operation_id: PRIMARY)
-    stored(operation_id: operation_id)&.chassis_sym || default_chassis
+    stored(operation_id: operation_id)&.chassis_sym || default_chassis(operation_id: operation_id)
   end
 
   # The persisted loadout, or nil if nobody has been to the outfitting screen yet.
@@ -128,7 +171,10 @@ module DevMatch
     # payload rather than from the table — a raw roster would field somebody the screen has
     # just called unavailable.
     roster = stored_roster(operation_id: operation_id)
-    spec["crew"] = Roster.stringify_crew(available(roster.to_sim)) if roster
+    if roster
+      issued = issue_kit(available(roster.to_sim), operation_id: operation_id)
+      spec["crew"] = Roster.stringify_crew(issued)
+    end
 
     row = stored(operation_id: operation_id)
     return spec unless row
@@ -153,7 +199,7 @@ module DevMatch
   # back to what is stored, which is what a cold boot wants.
   def build(specs: {})
     ReactorSim::Match.create(
-      id: ID, seed: SEED, time_scale: time_scale,
+      id: ID, seed: SEED, time_scale: time_scale, couplings: COUPLINGS,
       operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}) }
     )
   end
@@ -194,7 +240,26 @@ module DevMatch
     posted = (stored_roster(operation_id: operation_id)&.to_sim || {})
              .slice(*seats, *seats.map(&:to_s))
 
-    available(posted)
+    issue_kit(available(posted), operation_id: operation_id)
+  end
+
+  # **The gear the pit issues to whoever the labour exchange sends.**
+  #
+  # A posting with no `minion:` resolves to `Crew::STANDIN`, and `Crew.resolve` folds whatever
+  # equipment the posting carries whether or not anybody was named — so this needs nothing from
+  # the library. Applied here rather than stored per seat, so raising the standard re-equips
+  # every unfilled seat at once.
+  #
+  # **The seat's own choices win**, because a player who set something on one seat meant it.
+  def issue_kit(crew, operation_id: PRIMARY)
+    kit = stored_roster(operation_id: operation_id)&.standin_kit
+    return crew if kit.nil? || kit.empty?
+
+    crew.to_h do |seat, posting|
+      posting ||= {}
+      named = posting[:minion] || posting["minion"]
+      [ seat, named ? posting : kit.merge(posting) ]
+    end
   end
 
   def available(crew)
@@ -259,8 +324,15 @@ module DevMatch
   #
   # Where each of them is STANDING is not configuration: `station` is state, it changes when a
   # player reassigns someone, and it arrives on the projection. Do not read it from here.
+  #
+  # **Memoised per ROSTER, exactly as `panel` is per loadout.** Keyed on the operation alone it
+  # answers a question it was not asked: the entry survives for the life of the process, so a
+  # player who posts a crew keeps being shown the one it happened to hold first — which is every
+  # seat filled by the labour exchange, because that is what a fresh dev match starts as.
   def crew(operation_id: PRIMARY)
-    (@crews ||= {})[operation_id.to_sym] ||=
-      build.operation(operation_id.to_sym).minions.values.freeze
+    id = operation_id.to_sym
+    posted = stored_crew(operation_id: id)
+
+    (@crews ||= {})[[ id, posted ]] ||= build.operation(id).minions.values.freeze
   end
 end

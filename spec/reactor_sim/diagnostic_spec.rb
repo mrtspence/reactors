@@ -482,35 +482,78 @@ RSpec.describe ReactorSim::Diagnostic do
   # Asserts the **ordering**, never the figures: the point is that each tier is measurably
   # better than the one below, and pinning the numbers would make every balance change a spec
   # failure. Compare `spec/CLAUDE.md` on `damper:`.
+  # **Two claims that were one run, and neither of them needs an engine.**
+  #
+  # This group used to light a boiler and work its feed for 2,200 ticks per glass, which bundled
+  # two unrelated facts: that a drum's *reading* moves and swells, and that a coarse instrument
+  # distorts a moving reading more than a fine one. The first is the boiler's and lives in
+  # `crown_sheet_spec`, where the swelled reading is asserted against the true fill. The second is
+  # the **filter chain's**, and a filter chain does not care where its numbers came from — so it
+  # is fed a synthetic level here and the whole group costs no ticks at all.
+  #
+  # The tiers differ in their *parameters* rather than their classes, which is why the chains have
+  # to be measured rather than listed:
+  #
+  #     try_cocks           Lag(1)  Noise(0.020)  Range  Quantize(0.10)
+  #     gauge_glass         Lag(1)  Noise(0.025)  Range
+  #     reflex_gauge_glass  Lag(1)  Noise(0.006)  Range
+  #
+  # **The signal is a FRACTION, not a percentage**, which the `Range(0.0, 1.25)` in every chain is
+  # the giveaway for: a signal in percent is clamped to 1.25 at every sample, every tier then reads
+  # the same clamped number, and all three come out identical. That cost a measurement.
+  #
+  # And it is a **gentle** ramp, which is not a convenience: a reading slammed up and down punishes
+  # the plain glass's *lag* as hard as it punishes the cocks' coarseness, and the difference being
+  # measured disappears. At 0.01 per tick the cocks are 2.15× worse; at the real drum's ~0.003 they
+  # are 2.25×; and under a hard regulator slam, measured on a live engine, only 1.2×.
   describe "instrument tiers are a real progression", crew: :reference do
-    LIGHT = { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
-              throttle_open: 0, load_demand: 0 }.freeze
+    # A level being worked between a quarter and a half full, at the rate a real drum moves —
+    # measured on a working engine, about 0.003 of its fill per tick.
+    def worked_level(rate: 0.002, samples: 100, from: 0.25)
+      up = (0...samples).map { |i| from + (i * rate) }
+      (up + up.reverse) * 2
+    end
 
-    # Mean absolute error against the spectator's truth, over a window where the level is being
-    # worked up and down — a gauge is only worth anything while the thing it reads is moving.
-    def misreading_of(glass)
-      # Deployed, because crew start in the quarters: an undeployed engine never raises steam,
-      # the water level never moves, and a gauge that reads a still level cannot be wrong.
-      op = ReferenceCrew.deploy!(
-        ReactorSim::Operations::SteamEngine.build(
-          id: :e, seed: 7, loadout: ReferenceCrew.loadout(water_glass: glass),
-          **ReferenceCrew.options
-        )
-      )
-      LIGHT.each { |k, v| op.set_control(k, v) }
-      errors = []
-      (1..2200).each do |t|
-        op.set_control(:igniter, 0) if t == 300
-        op.set_control(:throttle_open, 60) if t == 1200
-        op.set_control(:feed, (t / 200).even? ? 90 : 0) if t > 1200
-        op.step!(tick: t)
-        next unless t > 1200
+    def chain_for(glass)
+      ReactorSim::Operations::SteamEngine
+        .build(id: :e, seed: 7, loadout: { water_glass: glass })
+        .diagnostics.fetch(:boiler_water).filters
+    end
 
-        read = op.project(viewer: :player, tick: t).gauges[:boiler_water]
-        truth = op.project(viewer: :spectator, tick: t).gauges[:boiler_water]
-        errors << (read - truth).abs.to_f if read && truth
+    # Run a signal through a chain, exactly as `Diagnostic#record` does — twice, because the
+    # spectator's pass skips the filters that only make the reading worse (`distortion?`) and the
+    # difference between the two passes IS the misreading.
+    def read_through(filters, signal, seed:, distortions: true)
+      rng = ReactorSim::Rng.stream(seed, :glass)
+      used = distortions ? filters : filters.reject(&:distortion?)
+      states = used.map { |filter| filter.initial_state(rng) }
+
+      signal.map do |raw|
+        value = raw
+        states = used.each_with_index.map do |filter, i|
+          result = filter.apply(states.fetch(i), value, rng, nil)
+          value = result.value
+          result.state
+        end
+        value
       end
-      errors.sum / errors.length
+    end
+
+    # Mean absolute error against the undistorted pass, **pooled across seeds**. A `Noise` offset
+    # is one draw held until the value moves past its deadband, so a single seed measures how
+    # lucky that draw was: seed by seed the cocks come out between 1.95× and 2.29× worse than the
+    # glass, which straddles the threshold this asserts.
+    def misreading_of(glass, seeds: 1..5)
+      filters = chain_for(glass)
+      signal = worked_level
+
+      pooled = seeds.flat_map do |seed|
+        read = read_through(filters, signal, seed: seed)
+        truth = read_through(filters, signal, seed: seed, distortions: false)
+        read.zip(truth).map { |r, t| (r - t).abs }
+      end
+
+      pooled.sum / pooled.length
     end
 
     it "orders try-cocks worse than a glass, and a plain glass worse than a reflex one" do
@@ -525,23 +568,9 @@ RSpec.describe ReactorSim::Diagnostic do
     # The downgrade has to be coarse rather than dead. One distinct reading across the whole
     # window is a brick, and that is exactly what 25% steps produced.
     it "leaves try-cocks coarse rather than motionless" do
-      op = ReferenceCrew.deploy!(
-        ReactorSim::Operations::SteamEngine.build(
-          id: :e, seed: 7, loadout: ReferenceCrew.loadout(water_glass: :try_cocks),
-          **ReferenceCrew.options
-        )
-      )
-      LIGHT.each { |k, v| op.set_control(k, v) }
-      seen = []
-      (1..2200).each do |t|
-        op.set_control(:igniter, 0) if t == 300
-        op.set_control(:throttle_open, 60) if t == 1200
-        op.set_control(:feed, (t / 200).even? ? 90 : 0) if t > 1200
-        op.step!(tick: t)
-        seen << op.project(viewer: :player, tick: t).gauges[:boiler_water] if t > 1200
-      end
+      seen = read_through(chain_for(:try_cocks), worked_level, seed: 1)
 
-      expect(seen.compact.uniq.length).to be > 1
+      expect(seen.uniq.length).to be > 1
     end
 
     # **No upgrade removes the lie.** The swell that lifts the reading exactly when a hard pull

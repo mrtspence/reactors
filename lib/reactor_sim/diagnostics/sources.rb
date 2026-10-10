@@ -55,6 +55,9 @@ module ReactorSim
         # gauge glass shows and why a swelling boiler reads high. See `Nodes::Boiler`.
         effective_fill: :with_content,
         contents_kg: :state_only,
+        # How close a sump is to the mark where it stops being wet and starts being flooded.
+        # A fraction rather than a weight, because that is what a float on a chain reports.
+        flooding: :with_content,
         # Rotation and wear. All state-only, because none of them need to know what the
         # node is holding — a flywheel's speed does not depend on the weather.
         omega: :state_only,
@@ -130,6 +133,36 @@ module ReactorSim
         state = states[@node] or return Reading.missing
         parcel = state.fetch(:parcels, []).find { |p| p.fetch(:resource) == @resource }
         Reading.of(parcel ? parcel.fetch(:kg) : 0.0)
+      end
+    end
+
+    # What **fraction** of a node's contents is one substance, as a percentage.
+    #
+    # `Contents` in kilograms is the wrong reading wherever the total can move: a district
+    # holding 30 kg of firedamp is comfortable with the fan running and lethal without it,
+    # because the air went with the fan. Concentration is the quantity that means one thing in
+    # both cases — and it is the quantity every damp is described in, because it is what a
+    # flame responds to.
+    #
+    # Zero contents reads as zero rather than as unavailable: a node that holds nothing has
+    # none of anything, which is a true answer rather than a missing one.
+    class Fraction < Base
+      def initialize(node, resource)
+        super()
+        @node = node.to_sym
+        @resource = resource.to_sym
+        freeze
+      end
+
+      def sample(_nodes, states, _content)
+        state = states[@node] or return Reading.missing
+
+        parcels = state.fetch(:parcels, [])
+        total = parcels.sum { |p| p.fetch(:kg) }
+        return Reading.of(0.0) unless total.positive?
+
+        parcel = parcels.find { |p| p.fetch(:resource) == @resource }
+        Reading.of((parcel ? parcel.fetch(:kg) : 0.0) / total * 100.0)
       end
     end
 

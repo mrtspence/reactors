@@ -29,6 +29,10 @@ class Incident < ApplicationRecord
       { run_id: record.fetch("run_id"), operation_id: record.fetch("operation_id").to_s,
         tick: record.fetch("tick"), seq: record.fetch("seq"),
         type: record.fetch("type").to_s, node: record["node"]&.to_s,
+        # **What it was called and what did it.** The feed renders `label` and falls back to
+        # `node`, so dropping it made a backfilled line read `crew_8` where the live one read
+        # the person's name — and with no `cause`, every backfilled line ended in "unknown".
+        label: record["label"]&.to_s, cause: record["cause"]&.to_s,
         mode: record["mode"]&.to_s, severity: record.fetch("severity").to_s,
         detail: record["detail"] || {},
         created_at: Time.current, updated_at: Time.current },
@@ -47,7 +51,8 @@ class Incident < ApplicationRecord
     reported = ReactorSim::Operation::REPORTED_SEVERITIES.map(&:to_s)
 
     for_run(run_id).where(severity: reported).newest_first.limit(limit).reverse.map do |row|
-      { type: row.type, node: row.node, mode: row.mode, severity: row.severity,
+      { type: row.type, node: row.node, label: row.label, cause: row.cause,
+        mode: row.mode, severity: row.severity,
         tick: row.tick, detail: row.detail }.compact
     end
   end

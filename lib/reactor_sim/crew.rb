@@ -48,7 +48,7 @@ module ReactorSim
       minion_id = (posting[:minion] || STANDIN).to_sym
       sheet = content.sheet(minion_id)
 
-      stats, tags = fold(sheet, posting)
+      stats, tags, mass, worn = fold(sheet, posting)
       stats, tags = Sheet.settle(stats, tags)
 
       { minion: minion_id,
@@ -57,6 +57,10 @@ module ReactorSim
         name: posting[:name] || sheet.fetch(:name),
         archetype: sheet.fetch(:archetype),
         stats: stats, tags: tags,
+        # Floored here rather than in `fold`, for the reason `Sheet.settle` is: clamping between
+        # layers would make their order matter. Only the frame has a floor — a minion wearing
+        # nothing genuinely carries nothing.
+        mass_kg: [ mass, Sheet::MIN_MASS_KG ].max, worn_kg: [ worn, 0.0 ].max,
         training: training_ids(posting).freeze,
         equipment: equipment_ids(posting).freeze }.freeze
     end
@@ -112,23 +116,34 @@ module ReactorSim
       id == :none ? nil : id
     end
 
+    # **Mass folds into two piles, and merging them would invert the mechanic.** `mass_kg` is the
+    # body doing the work; `worn_kg` is what is hanging off it. Summing equipment into the body
+    # would make a loaded minion *better* at carrying — a bigger frame rather than a heavier one —
+    # so layers one to three feed the frame and layer four feeds the load.
+    #
+    # An item's own field is still `mass_kg`, because a pick's mass is its mass. Which pile it
+    # lands in is the fold's business, not the item's.
     def fold(sheet, posting)
       stats = sheet.fetch(:stats)
       tags  = sheet.fetch(:tags)
+      mass  = sheet.fetch(:mass_kg)
+      worn  = 0.0
 
       training_ids(posting).each do |id|
         course = Training.fetch(id)
         stats = Sheet.add_stats(stats, course.stats)
         tags  = Sheet.add_tags(tags, course.tags)
+        mass += course.mass_kg
       end
 
       equipment_ids(posting).each do |slot, id|
         item = fitted(slot, id)
         stats = Sheet.add_stats(stats, item.stats)
         tags  = Sheet.add_tags(tags, item.tags)
+        worn += item.mass_kg
       end
 
-      [ stats, tags ]
+      [ stats, tags, mass, worn ]
     end
 
     def training_ids(posting) = Array(posting[:training]).map(&:to_sym)

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "support/engine_rig"
 require "support/reference_crew"
 
 # The whole chain, end to end: a real engine run, through the envelope the producer puts round
@@ -21,37 +22,46 @@ require "support/reference_crew"
 # a snapshot; a spec that does must use the hook, since `Operation.from_h` resolves against
 # `Content.default` and never sees a `content:` argument.
 RSpec.describe "the event pipeline" do
+  include EngineRig
+
   let(:owner) { "pipeline-tester" }
   let(:run_id) { "run-pipeline" }
 
-  # The real lighting procedure. A cold engine cannot be switched on, and the transitions this
-  # is about only exist because of that.
-  def raise_steam(ticks: 1_700)
+  # **A working engine, and the transitions come off it in thirty ticks.**
+  #
+  # This used to light a cold engine and run it for 1,700 ticks, which was by far the most
+  # expensive thing in the file — and it was buying transitions that an engine *at work* emits
+  # just as truthfully. `fire_lit`, `steam_raised` and `heater_engaged` are edge-triggered, so a
+  # constructed engine announces them on the tick it first reads its own state.
+  #
+  # **One pulse of the igniter**, because `heater_engaged` is the pilot and a seeded engine's fire
+  # is already alight — without the pulse that record never appears.
+  #
+  # What this file does NOT do any more is pay for a cold start to watch an *achievement* unlock.
+  # Whether a given sequence of records earns a given award is the digest's business and is tested
+  # there against synthetic records, one example per rule — see `progression_digest_spec`. An
+  # achievement that needed an integration test apiece would make the suite unusable, which is
+  # the whole reason the digest takes records rather than an operation.
+  def working_engine(ticks: 30)
     match = ReactorSim::Match.create(
       id: "p", seed: 42,
       operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure,
                       loadout: ReferenceCrew.loadout,
                       content: ReferenceCrew::CONTENT }.merge(ReferenceCrew.options) ]
     )
-    op = match.operation(:eng)
-    # The opening move of a match: crew start in the quarters, so a cold start with nobody sent
-    # to the shovel raises no steam at all.
+    seeded = seed_match(match, :eng, nodes: at_work_nodes(match.operation(:eng)))
+    op = seeded.operation(:eng)
+    # The opening move of a match: crew start in the quarters, so an engine with nobody sent to
+    # the shovel makes nothing whatever of its fire.
     ReferenceCrew.deploy!(op)
-    { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 45,
-      throttle_open: 0, load_demand: 0 }.each { |k, v| op.set_control(k, v) }
+    EngineRig::WORKING.each { |id, value| op.set_control(id, value) }
 
     events = []
-    (1..ticks).each do |t|
-      op.set_control(:igniter, 0) if t == 300
-      op.set_control(:load_demand, 90) if t == 1_150
-      if t == 1_200
-        op.set_control(:throttle_open, 100)
-        op.set_control(:stoking, 80)
-      end
-      op.set_control(:blower, 0) if t == 1_600
-      events.concat(match.step!)
+    ticks.times do |i|
+      op.set_control(:igniter, i.zero? ? 100 : 0)
+      events.concat(seeded.step!)
     end
-    [ match, events ]
+    [ seeded, events ]
   end
 
   # Exactly what `EventProducer#fact` puts on the wire, round-tripped through JSON — because
@@ -64,22 +74,29 @@ RSpec.describe "the event pipeline" do
     end
   end
 
-  describe "a cold start carried all the way through" do
-    # One run, shared across the group: raising steam from cold is ~1700 ticks and is by far the
-    # most expensive thing in this file. Safe in `before(:all)` because it touches no database —
+  describe "a working engine carried all the way through" do
+    # One run, shared across the group. Safe in `before(:all)` because it touches no database —
     # it is pure simulation, which is the whole point of that boundary.
-    before(:all) { @match, @events = raise_steam }
+    before(:all) { @match, @events = working_engine }
 
     it "emits the transitions the achievements are written against" do
       expect(@events.map { |e| e[:type] }.uniq)
         .to include(:fire_lit, :heater_engaged, :steam_raised)
     end
 
+    # §3 of the sketch: **nothing that happens every tick may be an event.** Against four
+    # broadcasts a second, anything approaching the tick rate means an accumulation has been
+    # mistakenly modelled as a transition.
+    #
+    # **Asserted as invariance rather than as a budget**, which is the property itself: a count
+    # under twenty says the window was short, where a count that does not move between a thirty-
+    # tick window and a four-hundred-tick one says the records are transitions. Measured: four
+    # events at 30 ticks and the same four at 120.
     it "stays a handful of records, not a stream — the budget the whole design rests on" do
-      # §3 of the sketch: nothing that happens every tick may be an event. Against four
-      # broadcasts a second, anything approaching the tick rate here means an accumulation has
-      # been mistakenly modelled as a transition.
+      _, longer = working_engine(ticks: 400)
+
       expect(@events.length).to be < 20
+      expect(longer.length).to eq(@events.length)
     end
 
     it "awards a full head of steam once the records reach the digest" do
@@ -91,23 +108,13 @@ RSpec.describe "the event pipeline" do
       expect(Achievement.earned?(:first_full_head_of_steam, owner_id: owner)).to be(true)
     end
 
-    # **This assertion is the one that found the bug, and it found it by being wrong.** It was
-    # written expecting the reference start to be *refused* the cold-start achievement, because
-    # the procedure holds the igniter in to tick 300. It passed the award instead — and the
-    # reason is that the igniter fires at tick 1 and the fire catches at tick 2, so the only
-    # heater event fell outside its own window. See `Achievement`'s note: the pilot is how a
-    # cold fire is lit at all, so "without the pilot" was never expressible.
-    #
-    # Redefined as a clean cold start, the reference procedure earns it, which is right: it is
-    # the textbook start, and it is what gates the first instrument upgrade.
-    it "awards a clean cold start to a run that never relit the pilot" do
-      digest = ProgressionDigest.new(owner_id: owner, logger: Logger.new(File::NULL))
-
-      awarded = on_the_wire(@match, @events).flat_map { |record| digest.call(record) }
-
-      expect(awarded).to include(:raised_steam_from_cold_alone)
-    end
-
+    # `raised_steam_from_cold_alone` is **not** asserted here any more, and deliberately. It is an
+    # extent fact — `fire_lit` opens it, `steam_raised` closes it, `heater_engaged` disqualifies it
+    # — so what decides it is the *order of the records*, not how long an engine took to make
+    # them. Paying 1,700 ticks to find out whether three records arrived in the right order is the
+    # thing that cannot scale: one integration test per achievement and the suite is unusable.
+    # It lives in `progression_digest_spec`, against synthetic records, with the ordering
+    # subtlety that made it surprising written down beside it.
     # **Asserts the WIRING, deliberately not the outcome.** Whether a given blast kills a given
     # worker is a balance question and every constant behind it is a pre-sweep guess, so an
     # end-to-end "Jim dies" example would fail the day the numbers are tuned — for a reason
@@ -125,21 +132,35 @@ RSpec.describe "the event pipeline" do
                         crew: { crew_1: { minion: :test_hand_a } },
                         content: ReferenceCrew::CONTENT } ]
       )
-      op = match.operation(:eng)
+      # **The drum is built on the edge of letting go**, rather than fired for 7,000 ticks until
+      # it does. With no plug fitted, 400 kg of water, the feed shut and a shell already worked,
+      # the crown sheet fails in a handful of ticks. Both figures belong to `crown_sheet_spec`,
+      # which records why neither is arbitrary: severity scales with the water left to flash, and
+      # the erosion rate is that spec's claim rather than this one's.
+      #
+      # **Seeded through the MATCH**, because `on_the_wire` reads `match.id` and the records have
+      # to come off the same match the state is in.
+      engine_op = match.operation(:eng)
+      seeded = seed_match(match, :eng,
+                          nodes: at_work_nodes(engine_op, water: 400.0)
+                                   .merge(boiler: body(engine_op, :boiler, EngineRig::DRUM_K,
+                                                       water: 400.0,
+                                                       steam: EngineRig::DRUM.fetch(:steam))
+                                                    .merge(durability: 20.0)))
+      op = seeded.operation(:eng)
       # Deploy the shift: crew start in the quarters, so nobody is at the firehole — and nobody
       # is near the drum when it lets go — until they are sent.
       op.assign_minion(:crew_1, :stoking)
-      { igniter: 100, blower: 100, damper_open: 85, stoking: 70, feed: 0 }
-        .each { |k, v| op.set_control(k, v) }
+      { igniter: 0, blower: 0, damper_open: 85, stoking: 70, feed: 0,
+        throttle_open: 60, load_demand: 80 }.each { |k, v| op.set_control(k, v) }
 
       events = []
-      (1..7_000).each do |t|
-        op.set_control(:igniter, 0) if t == 300
-        events.concat(match.step!)
+      20.times do
+        events.concat(seeded.step!)
         break if events.any? { |e| e[:type] == :minion_hurt }
       end
 
-      hurt = on_the_wire(match, events).find { |r| r["type"] == "minion_hurt" }
+      hurt = on_the_wire(seeded, events).find { |r| r["type"] == "minion_hurt" }
 
       expect(hurt).not_to be_nil, "nobody was hurt, so this proves nothing"
       expect(hurt["node"]).to eq("crew_1")

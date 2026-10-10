@@ -1,0 +1,562 @@
+# frozen_string_literal: true
+
+module ReactorSim
+  module Operations
+    module Mine
+      # How deep the shaft is. Every lift in the mine is measured against it, so it lives here
+      # rather than being repeated in three fittings that could disagree.
+      SHAFT_DEPTH_M = 90.0
+
+      # What the line shaft turns at when the supply is healthy. Driven fittings are rated
+      # against it, so a fitting's declared duty means "at working speed" rather than "always".
+      WORKING_OMEGA = 22.0
+
+      # **How long a lever takes to travel, in percent of its range per second**, before whoever
+      # is working it is taken into account — `Minion#rate_multiplier` scales these, so a strong
+      # hand moves a shutter faster than a spent one.
+      #
+      # Only things somebody physically moves get a figure. `Float::INFINITY` stays right for a
+      # posting, for a margin set before the shift, and for every **effort** station: there the
+      # lever is intent and `capability` already supplies the rate, so a finite travel would
+      # charge the same minion twice and let a kobold eventually equal an ogre.
+      module Travel
+        QUICK = 20.0  # a clutch, thrown in about five seconds
+        STEADY = 8.0  # a winding regulator under a skilled engineman — twelve seconds hard over
+        HEAVY = 2.5   # a fan shutter or a pump throttle: forty seconds, and you feel every one
+        SCONCES = 2.0 # lighting a district one candle at a time, near enough a minute
+      end
+
+      # **The three rooms, and which machinery is in each.** A node's place is what decides who a
+      # failure reaches: everybody in the district is in the district when it goes up, whatever
+      # they were posted to and whether they were posted to anything at all.
+      #
+      # What is deliberately placeless is as load-bearing as what is placed. The seam is coal in
+      # the ground and the strata is the water behind it — **rock is not a room**, and neither is
+      # the dust still in the seam.
+      #
+      # **The shafts and roads are conduits *between* rooms and belong to neither**, which is the
+      # rule that decides the haulage road: it runs from the face to the pit bottom, so a fall in
+      # it reaches both and is in neither. Putting it in the district instead made the roof miss
+      # the putter, who is the person it was most likely to kill. The day somebody should stand
+      # in a roadway, it becomes a place of its own rather than joining one of these.
+      #
+      # A fitting places what it installs, so the truth is the assembled layout rather than this
+      # list:
+      #
+      #     ruby -Ilib -e 'require "reactor_sim"
+      #       op = ReactorSim::Operations::Mine.build(id: "m", seed: 1)
+      #       puts op.nodes.keys.reject { |n| op.layout.place_of_node(n) }.inspect'
+      PLACES = [
+        Place.new(id: :bank, label: "Pit Bank",
+                  nodes: %i[atmosphere screens winder line_shaft upcast drainage dust_store]),
+        Place.new(id: :pit_bottom, label: "Pit Bottom", nodes: %i[pit_bottom pump]),
+        Place.new(id: :district, label: "The District",
+                  nodes: %i[district pick_line dust_line blower])
+      ].freeze
+
+      # ---------------------------------------------------------------- winding
+
+      Parts.register(:steam_whim, kind: :winder, label: "Steam Whim",
+                     description: "A drum, a rope, and a kibble. One load at a time.",
+                     provides: %i[winder], instruments: %i[coal_raised winding_gear],
+                     stats: { max_kg_per_s: 2.2 }) do |_spec|
+        Mine.winding_fragment(max_kg_per_s: 2.2)
+      end
+
+      Parts.register(:cage_winder, kind: :winder, label: "Cage Winder",
+                     description: "Guided cage on wire rope. Takes tubs by the deck.",
+                     provides: %i[winder], instruments: %i[coal_raised winding_gear],
+                     stats: { max_kg_per_s: 7.0 }) do |_spec|
+        Mine.winding_fragment(max_kg_per_s: 7.0)
+      end
+
+      def self.winding_fragment(max_kg_per_s:)
+        Fragment.new(
+          nodes: [ Mine.winder(max_kg_per_s: max_kg_per_s, lift_m: SHAFT_DEPTH_M,
+                               rated_omega: WORKING_OMEGA) ],
+          links: [
+            Link.new(from: [ :pit_bottom, :coal_out ], to: [ :winder, :inlet ]),
+            Link.new(from: [ :winder, :outlet ], to: [ :screens, :in ])
+          ],
+          control_points: [
+            # **The one post in this pit that takes knowing how.** A winding engineman worked
+            # to signals he could not see the meaning of, with men on the rope, and the job
+            # was certificated for exactly that reason — overwinding is how you put a cage
+            # through the headgear. Every other lever here is a valve: it goes where you put
+            # it and who put it there is irrelevant.
+            ControlPoint.new(id: :winding, label: "Winding", node: :winder, default: 0.0,
+                             place: :bank, stiffness: Travel::STEADY,
+                             complexity: 1.1, requires: :certificated)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- winning
+
+      # **Hand picks are the bottom of the tree and the thing every other tier is measured
+      # against.** A hewer lying on his side with a short-handled pick, which is how nearly all
+      # of it was got for nearly all of the period.
+      Parts.register(:hand_picks, kind: :cutting, label: "Hand Picks",
+                     description: "Short-handled picks and wedges. A hewer and his own back.",
+                     provides: %i[pick_line],
+                     stats: { max_kg_per_s: 1.4 }) do |_spec|
+        Mine.cutting_fragment(max_kg_per_s: 1.4, exertion: 1.2e-3)
+      end
+
+      # Gillott & Copley's 1868 disc cutter and its descendants: a machine that undercuts the
+      # seam so the coal comes down under its own weight. Four times the coal, and **it does not
+      # tire**, which is the part that actually changes the shift — a hewer is spent in twenty
+      # minutes and a cutter is not.
+      Parts.register(:coal_cutter, kind: :cutting, label: "Coal Cutter",
+                     description: "A rail-mounted disc that undercuts the seam. Loud, and tireless.",
+                     provides: %i[pick_line],
+                     stats: { max_kg_per_s: 5.6 }) do |_spec|
+        Mine.cutting_fragment(max_kg_per_s: 5.6, exertion: 3.0e-4)
+      end
+
+      def self.cutting_fragment(max_kg_per_s:, exertion:)
+        Fragment.new(
+          nodes: [ Mine.pick_line(max_kg_per_s: max_kg_per_s) ],
+          links: [
+            Link.new(from: [ :seam, :out ], to: [ :pick_line, :inlet ]),
+            Link.new(from: [ :pick_line, :outlet ], to: [ :district, :coal_in ])
+          ],
+          control_points: [
+            # Gated, not merely aided: an ogre with no pick gets no coal out of a seam however
+            # strong they are, and nobody gets any in the dark.
+            ControlPoint.new(id: :hewing, label: "Hewing", node: :pick_line, default: 0.0,
+                             place: :district,
+                             # `swing`, not `force`: a pick is a tool at the end of an arm, so
+                             # bulk stops paying in proportion and an ogre is about twice a man
+                             # rather than four times. A scaled-up pick is the upgrade.
+                             effort: { swing: 0.7, dexterity: 0.3 },
+                             gated_by: %i[mining_effectiveness darkvision],
+                             exertion: exertion)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- man riding
+
+      # **Its own slot, because raising coal and raising men are different machines.** A man
+      # engine winds no coal at all, and a colliery that bought one bought it precisely so that
+      # shift change would stop costing it winding time. Optional: with nothing fitted there are
+      # still the ladders, which is where every mine starts.
+
+      # A reciprocating rod down the shaft with steps on it: you ride twelve feet, step off onto
+      # a sollar, wait, and step on again. Slower than a cage and far cheaper to turn — at
+      # Tresavean it cut the journey from an hour to twenty-four minutes and put a fifth on the
+      # shift's output.
+      Parts.register(:man_engine, kind: :manriding, label: "Man Engine",
+                     description: "Stepped rods and sollars. You ride it twelve feet at a time.",
+                     provides: %i[cage_drive], instruments: %i[cage_speed],
+                     stats: { speed_m_s: 1.8, max_torque: 520.0 }) do |_spec|
+        Mine.manriding_fragment(speed_m_s: 1.8, max_torque: 520.0, label: "Man Engine")
+      end
+
+      # Quick, and it costs the whole mine while it runs.
+      Parts.register(:cage_gear, kind: :manriding, label: "Cage",
+                     description: "Guided cage and safety catches. Quick, and heavy on the shaft.",
+                     provides: %i[cage_drive], instruments: %i[cage_speed],
+                     stats: { speed_m_s: 4.2, max_torque: 1_600.0 }) do |_spec|
+        Mine.manriding_fragment(speed_m_s: 4.2, max_torque: 1_600.0, label: "Cage")
+      end
+
+      def self.manriding_fragment(speed_m_s:, max_torque:, label:)
+        Fragment.new(
+          nodes: [ Mine.cage_drive(max_torque: max_torque, rated_omega: WORKING_OMEGA) ],
+          drive_links: [ DriveLink.new(a: :line_shaft, b: :cage_drive, stiffness: 2.2e3) ],
+          passages: [ Mine.cage_passage(speed_m_s: speed_m_s, rated_omega: WORKING_OMEGA,
+                                        label: label) ],
+          # The gear it brings stands at bank. A fitting names only what it installs; the room
+          # is the chassis's and the two declarations are unioned.
+          places: [ Place.new(id: :bank, nodes: [ :cage_drive ]) ],
+          control_points: [
+            ControlPoint.new(id: :man_winding, label: "Man Winding", node: :cage_drive,
+                             default: 0.0, place: :bank, stiffness: Travel::STEADY)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- ventilation
+
+      Parts.register(:waddle_fan, kind: :fan, label: "Waddle Fan",
+                     description: "Open-running, no casing. Cheap, and it shows.",
+                     provides: %i[upcast], instruments: %i[air_quantity],
+                     stats: { head_pa: 2_200.0 }) do |_spec|
+        Mine.fan_fragment(head_pa: 2_200.0)
+      end
+
+      Parts.register(:guibal_fan, kind: :fan, label: "Guibal Fan",
+                     description: "Spiral casing, shuttered discharge, evasee chimney.",
+                     provides: %i[upcast], instruments: %i[air_quantity],
+                     stats: { head_pa: 5_200.0 }) do |_spec|
+        Mine.fan_fragment(head_pa: 5_200.0)
+      end
+
+      def self.fan_fragment(head_pa:)
+        Fragment.new(
+          nodes: [ Mine.upcast(head_pa: head_pa, rated_omega: WORKING_OMEGA) ],
+          links: [
+            Link.new(from: [ :district, :air_out ], to: [ :return_road, :inlet ]),
+            Link.new(from: [ :return_road, :outlet ], to: [ :upcast, :inlet ]),
+            Link.new(from: [ :upcast, :outlet ], to: [ :atmosphere, :exhaust ])
+          ],
+          control_points: [
+            ControlPoint.new(id: :ventilation, label: "Fan", node: :upcast, default: 100.0,
+                             place: :bank, stiffness: Travel::HEAVY)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- drainage
+
+      Parts.register(:sinking_set, kind: :pump, label: "Sinking Set",
+                     description: "A small set on the sump. Keeps pace with an ordinary make of water.",
+                     provides: %i[pump], instruments: %i[sump_level],
+                     stats: { max_kg_per_s: 14.0 }) do |_spec|
+        Mine.pump_fragment(max_kg_per_s: 14.0, efficiency: 0.5)
+      end
+
+      Parts.register(:cornish_set, kind: :pump, label: "Cornish Set",
+                     description: "Heavy lift gear. Expensive to turn, and it holds the water down.",
+                     provides: %i[pump], instruments: %i[sump_level],
+                     stats: { max_kg_per_s: 26.0 }) do |_spec|
+        Mine.pump_fragment(max_kg_per_s: 26.0, efficiency: 0.68)
+      end
+
+      def self.pump_fragment(max_kg_per_s:, efficiency:)
+        Fragment.new(
+          nodes: [ Mine.pump(max_kg_per_s: max_kg_per_s, lift_m: SHAFT_DEPTH_M,
+                             efficiency: efficiency, rated_omega: WORKING_OMEGA) ],
+          links: [
+            Link.new(from: [ :pit_bottom, :water_out ], to: [ :pump, :inlet ]),
+            Link.new(from: [ :pump, :outlet ], to: [ :drainage, :in ])
+          ],
+          control_points: [
+            ControlPoint.new(id: :pumping, label: "Pumping", node: :pump, default: 100.0,
+                             place: :bank, stiffness: Travel::HEAVY)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- the crew
+
+      # **The lamp cabin is at bank**, which is where a shift starts and where the walk starts
+      # from. Found by what the slot accepts, so the mine gets `crew_capacity` and an origin
+      # without reimplementing either.
+      Parts.register(:lamp_cabin, kind: :crew_quarters, label: "Lamp Cabin",
+                     description: "Where lamps are issued and tallies are taken. Two shifts.",
+                     stats: { crew_capacity: 10, recovery_rate: 2.0 }) do |_spec|
+        Fragment.new(
+          control_points: [
+            ControlPoint.new(id: :quarters, label: "Lamp Cabin", place: :bank,
+                             recovery: Fatigue::BASE_RECOVERY * 2.0)
+          ]
+        )
+      end
+
+      Parts.register(:pit_head_baths, kind: :crew_quarters, label: "Pit Head Baths",
+                     description: "Lamps, lockers and hot water. Somewhere worth resting.",
+                     stats: { crew_capacity: 14, recovery_rate: 3.0 }) do |_spec|
+        Fragment.new(
+          control_points: [
+            ControlPoint.new(id: :quarters, label: "Pit Head Baths", place: :bank,
+                             recovery: Fatigue::BASE_RECOVERY * 3.0)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- lighting
+
+      # **What the district is lit by, and it is a purchase rather than a standing order.**
+      #
+      # Hewing is gated on `darkvision`, and a gate is a zero when it is missing — so light is
+      # the difference between a shift that wins coal and one that stands in the dark being
+      # paid. The tree is the real one, and every step is a genuine trade:
+      #
+      #   tallow candles   dim, free to run, and an open flame in a gassy room
+      #   oil flares       twice the light, the same open flame
+      #   gauze lanterns   Davy gauze on the roadway: safe, and you can see less by it
+      #   electric lamps   the best light there is, and it hangs off the same shaft as the fan
+      #
+      # A pit starts with candles, which is why the first upgrade a player reaches for is
+      # usually the one that makes the district brighter *and* keeps it lethal.
+      Parts.register(:tallow_candles, kind: :lighting, label: "Tallow Candles",
+                     description: "Candles on nails down the roadway. An open flame, in a pit.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 0.35 }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.35, control_id: :naked_flame)
+      end
+
+      Parts.register(:oil_flares, kind: :lighting, label: "Oil Flares",
+                     description: "Open oil flares on brackets. You can see; so can the gas.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 0.75 }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.75, control_id: :naked_flame)
+      end
+
+      # **The first tier that is not an ignition source**, because its lever is not the one the
+      # district's igniter names. Dimmer than the flares it replaces, which is the trade.
+      Parts.register(:gauze_lanterns, kind: :lighting, label: "Gauze Lanterns",
+                     description: "Davy gauze on the roadway side. Safe, and you see less by it.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 0.5 }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.5, control_id: :safe_light)
+      end
+
+      # Hung off the same line shaft as the fan, the pump and the winder — so the best light in
+      # the mine is also one more thing competing for the supply, and a brownout puts the
+      # district dark with the shift still in it.
+      Parts.register(:electric_lamps, kind: :lighting, label: "Electric Lamps",
+                     description: "A dynamo off the line shaft. The best light there is, while the shaft turns.",
+                     provides: %i[sconces], instruments: %i[district_light],
+                     stats: { illumination: 1.0, max_torque: 210.0 }) do |_spec|
+        Mine.lighting_fragment(illumination: 1.0, control_id: :safe_light,
+                               max_torque: 210.0, rated_omega: WORKING_OMEGA)
+      end
+
+      def self.lighting_fragment(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0)
+        Fragment.new(
+          nodes: [ Mine.sconces(illumination: illumination, control_id: control_id,
+                                max_torque: max_torque, rated_omega: rated_omega) ],
+          # Only a powered tier hangs off the shaft. The rest are a flame on a bracket.
+          drive_links: rated_omega.positive? ?
+            [ DriveLink.new(a: :line_shaft, b: :sconces, stiffness: 1.4e3) ] : [],
+          places: [ Place.new(id: :district, nodes: [ :sconces ]) ],
+          control_points: [
+            # **At bank**, because it is a standing order to the shift rather than something
+            # anybody walks over to turn up. Labelled the same in every tier: to the player it
+            # is one lever, and which id it carries is what decides whether it fires the gas.
+            ControlPoint.new(id: control_id, label: "Sconces", node: :sconces,
+                             default: 0.0, place: :bank, stiffness: Travel::SCONCES)
+          ]
+        )
+      end
+
+      # **Somewhere to sit down without walking out**, which is the whole of it.
+      #
+      # The lamp cabin is at bank, and bank is a shaft and four hundred metres of roadway away
+      # from the face — so resting a spent hewer cost the round trip and the player simply never
+      # did it. A cut-out in the roadway side is the historical answer and the cheap one.
+      #
+      # **`capacity:` is the mechanic and the upgrade path.** A manhole takes one man; whether a
+      # second may be sent is `Operation#assign_minion`'s refusal, not a rule here.
+      Parts.register(:refuge_hole, kind: :rest_station, label: "Refuge Hole",
+                     description: "A manhole cut in the roadway side. Room for one, and no more.",
+                     stats: { rest_capacity: 1, recovery_rate: 1.4 }) do |_spec|
+        Mine.rest_fragment(capacity: 1, recovery_rate: 1.4, label: "Refuge Hole")
+      end
+
+      Parts.register(:snap_cabin, kind: :rest_station, label: "Snap Cabin",
+                     description: "A proper cut-out with a bench and a water can. Three at a time.",
+                     stats: { rest_capacity: 3, recovery_rate: 2.4 }) do |_spec|
+        Mine.rest_fragment(capacity: 3, recovery_rate: 2.4, label: "Snap Cabin")
+      end
+
+      # --- manholes -------------------------------------------------------------------------
+      #
+      # **The least interesting purchase in the pit, and the one that saves most lives.** The
+      # haulage road hurts people with nothing broken — a set of tubs goes past and sooner or
+      # later catches somebody — and cutting refuges into its side is the whole answer. It
+      # wins no coal and shows nothing on a gauge.
+      #
+      # **Empty is legal and is where every pit starts**, exactly as the ladderway is: this is
+      # something a player notices they need, usually by reading an event about somebody who
+      # did not have one.
+      Parts.register(:sparse_manholes, kind: :haulage_refuge, label: "Manholes",
+                     description: "Refuges cut every forty yards. Something, if you are quick.",
+                     stats: { refuge_reach: 0.5 }) do |_spec|
+        Fragment.new(nodes: [ Mine.manholes(effectiveness: 0.5, label: "Manholes") ])
+      end
+
+      Parts.register(:whitewashed_manholes, kind: :haulage_refuge, label: "Whitewashed Manholes",
+                     description: "Refuges every twenty yards, limed so they show in a lamp.",
+                     stats: { refuge_reach: 0.85 }) do |_spec|
+        Fragment.new(nodes: [ Mine.manholes(effectiveness: 0.85, label: "Whitewashed Manholes") ])
+      end
+
+      # **In the district, which is the entire point**, and a control point with no `node:` —
+      # somewhere to stand, not something to set.
+      def self.rest_fragment(capacity:, recovery_rate:, label:)
+        Fragment.new(
+          control_points: [
+            ControlPoint.new(id: :rest, label: label, place: :district, capacity: capacity,
+                             recovery: Fatigue::BASE_RECOVERY * recovery_rate)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- slots
+
+      # Declaration order is the panel's lever order. Ordered by where the work is — bank first,
+      # then underground — rather than by the order the graph happens to resolve in.
+      def self.slots(spec)
+        fitted = spec.fetch(:parts)
+
+        [
+          Slot.new(id: :cutting, accepts: :cutting, label: "Cutting", group: :face,
+                   required: true, default: fitted.fetch(:cutting)),
+          Slot.new(id: :winder, accepts: :winder, label: "Winder", group: :shaft,
+                   required: true, default: fitted.fetch(:winder)),
+          # **Empty is where every mine starts**, and there are still the ladders. Nothing has
+          # to be bypassed, because nothing downstream depends on it: a man-riding fitting only
+          # ever *adds* a faster way through a shaft that could always be climbed.
+          Slot.new(id: :manriding, accepts: :manriding, label: "Man Riding", group: :shaft,
+                   required: false, default: nil, when_empty: :omit),
+          Slot.new(id: :lighting, accepts: :lighting, label: "Lighting", group: :face,
+                   required: true, default: fitted.fetch(:lighting)),
+          Slot.new(id: :fan, accepts: :fan, label: "Fan", group: :air,
+                   required: true, default: fitted.fetch(:fan)),
+          Slot.new(id: :pump, accepts: :pump, label: "Pump", group: :water,
+                   required: true, default: fitted.fetch(:pump)),
+          Slot.new(id: :quarters, accepts: :crew_quarters, label: "Lamp Cabin", group: :crew,
+                   required: true, default: fitted.fetch(:quarters)),
+          # **Not `:crew_quarters`, and it matters.** `Assembly#crew_capacity` finds the
+          # quarters by what a slot ACCEPTS and takes the first — a second one would make a
+          # rest station decide how many hands the pit can field.
+          Slot.new(id: :rest, accepts: :rest_station, label: "Rest Station", group: :crew,
+                   required: true, default: fitted.fetch(:rest)),
+          # Not required, and defaulted to nothing. A pit that has bought no refuges is the
+          # starting pit, and the first a player hears of it is a man caught in the haulage.
+          Slot.new(id: :manholes, accepts: :haulage_refuge, label: "Manholes", group: :crew,
+                   required: false, default: fitted[:manholes])
+        ]
+      end
+
+      # What no slot owns: the hole in the ground itself, the air in it, the coal in the seam and
+      # the water behind it. A mine without a fan is a legal thing to build; a mine without a
+      # shaft is not a mine.
+      #
+      # **Its gauges are supplied rather than named**, for the same reason its nodes are: they
+      # read fixtures, so no part can take them away. Pulled from the catalogue rather than
+      # rebuilt here, so a gauge has one definition wherever it arrives from.
+      # `spec[:ground]` pins every seep at one multiplier instead of drawing one. Nil — a real
+      # match — draws, which is the point of the whole mechanism; a spec measuring the machine
+      # passes `Ground::ORDINARY`.
+      def self.fixtures(spec)
+        ground = spec[:ground]
+        Fragment.new(
+          diagnostics: Mine.catalogue.values_at(:flame_cap, :lamp_flame, :canary, :shaft_speed,
+                                                :shaft_supply, :district_air, :seam_remaining,
+                                                # The road, what moves on it and what the ground
+                                                # is making are the hole itself rather than a
+                                                # fitting, so no part can take these away.
+                                                :roof_timber, :putting, :water_make,
+                                                # Whether the district is on fire. The one
+                                                # reading no fitting may remove, because a pit
+                                                # with nothing bought can still go up.
+                                                :district_fire),
+          # Every shaft can be climbed. Only one that has bought the gear can be ridden.
+          passages: Mine.passages,
+          places: PLACES,
+          nodes: [
+            Mine.atmosphere, Mine.line_shaft(rated_torque_nm: 5.4e3, rated_omega: WORKING_OMEGA),
+            Mine.downcast, Mine.pit_bottom, Mine.main_road, Mine.district, Mine.return_road,
+            Mine.seam(kg: 90_000.0, firedamp_kg: 4_000.0),
+            Mine.dust_source(kg: 3_000.0),
+            # Deep enough that it never runs dry: a pit does not stop making blackdamp.
+            Mine.goaf(kg: 20_000.0, sour: (Mine::OldWorkings::ORDINARY_SOUR if ground)),
+            Mine.goaf_seep(conductance: 1.8e-5, ground: ground),
+            Mine.blower(conductance: 2.5e-4, ground: ground),
+            Mine.dust_line(max_kg_per_s: 0.30),
+            Mine.dust_store(kg: 6_000.0), Mine.dusting_line(max_kg_per_s: 0.55),
+            Mine.tub_road(max_kg_per_s: 6.0), Mine.screens,
+            # 18 kg/s through a broken fissure, against a sinking set's 14 and a Cornish set's
+            # 26 — so the starting pump is overwhelmed by an inrush and the upgrade is what
+            # holds it. That gap is the reason to buy the better set.
+            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0, ground: ground),
+            Mine.drainage
+          ],
+          links: [
+            # Air: down the downcast, round the workings. The return side comes with the fan.
+            Link.new(from: [ :atmosphere, :intake ], to: [ :downcast, :inlet ]),
+            Link.new(from: [ :downcast, :outlet ], to: [ :pit_bottom, :air_in ]),
+            Link.new(from: [ :pit_bottom, :air_out ], to: [ :main_road, :inlet ]),
+            Link.new(from: [ :main_road, :outlet ], to: [ :district, :air_in ]),
+            # Coal: out of the seam, into the district, along the road. The shaft comes with the
+            # winder.
+            # Gas out of the seam and into the workings, continuously. Nothing controls it.
+            Link.new(from: [ :seam, :gas_out ], to: [ :blower, :inlet ]),
+            Link.new(from: [ :blower, :outlet ], to: [ :district, :gas_in ]),
+            # Blackdamp out of the old workings and into the lowest point in the mine.
+            Link.new(from: [ :goaf, :out ], to: [ :goaf_seep, :inlet ]),
+            Link.new(from: [ :goaf_seep, :outlet ], to: [ :pit_bottom, :damp_in ]),
+            # Dust off the pick, and the limestone that answers it.
+            Link.new(from: [ :dust_source, :out ], to: [ :dust_line, :inlet ]),
+            Link.new(from: [ :dust_line, :outlet ], to: [ :district, :dust_in ]),
+            Link.new(from: [ :dust_store, :out ], to: [ :dusting_line, :inlet ]),
+            Link.new(from: [ :dusting_line, :outlet ], to: [ :district, :stone_in ]),
+            # Coal out of the seam comes with the cutting fitting, whichever one is fitted.
+            Link.new(from: [ :district, :coal_out ], to: [ :tub_road, :inlet ]),
+            Link.new(from: [ :tub_road, :outlet ], to: [ :pit_bottom, :coal_in ]),
+            # Water: in through the strata, downhill to the pit bottom. The lift comes with the
+            # pump.
+            Link.new(from: [ :strata, :out ], to: [ :seepage, :inlet ]),
+            Link.new(from: [ :seepage, :outlet ], to: [ :pit_bottom, :water_in ])
+          ],
+          control_points: [
+            ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0,
+                             place: :bank, stiffness: Travel::QUICK),
+            # **The most boring lever in the game, and the one that decides whether an ignition
+            # is an incident or a disaster.** It wins no coal, spends stores that run out, and
+            # does nothing whatever until the day the gas goes up.
+            ControlPoint.new(id: :stone_dusting, label: "Stone Dusting", node: :dusting_line,
+                             default: 0.0, place: :bank, stiffness: Travel::HEAVY),
+            # **The two effort stations, and they are underground.** Somebody has to be sent
+            # there, which is the whole point of the geometry.
+            # **Gated, not merely aided.** An ogre with no pick gets no coal out of a seam
+            # however strong they are, and nobody gets any in the dark — so these two multiply
+            # and a missing one is a zero. It is the single biggest reason to spend anything on
+            # equipment, and the reason a kobold's innate darkvision is worth something.
+            # **Not `endurance`**, however much putting is an endurance job — it is a divisor in
+            # `Fatigue.accrual` and enters no capability blend, which is what lets the reference
+            # crew set it to 1e6. See the traps list.
+            ControlPoint.new(id: :haulage, label: "Putting", node: :tub_road, default: 0.0,
+                             place: :pit_bottom,
+                             # **`force`, because a loaded tub is friction and leverage** — this
+                             # is the job where sheer mass pays most, and where an outrageously
+                             # muscular pixie still shifts nothing.
+                             effort: { force: 0.8, toughness: 0.2 },
+                             aided_by: :shovelling, exertion: 9.0e-4),
+            # **The third effort station, and the one that produces nothing.** Setting timber
+            # wins no coal and raises no water; all it does is stop the roof taking up the slack
+            # behind a face that is being cut. Against a crew of four and four other jobs, that
+            # is the triage: the post whose whole output is *nothing going wrong* is the one
+            # nobody can spare somebody for.
+            #
+            # `node: :tub_road` because that is what it supports — the lever is read by the
+            # roadway's own wear, not by anything that moves material.
+            # **Gated exactly as hewing is, and that is not a detail.** `Roadway` wears on
+            # `hewing − timbering`, and a difference between two levers only means anything if
+            # both are measured the same way. Gating one multiplicatively (×0.48 for a decent
+            # kit) while the other was merely aided (×1.6) put them on scales three times
+            # apart, so any timbering at all covered any amount of cutting and the roof could
+            # not come in. Same gates, same scale, real difference.
+            ControlPoint.new(id: :timbering, label: "Timbering", node: :tub_road, default: 0.0,
+                             place: :district,
+                             # `force`: props and bars are heavy things lifted into place, and
+                             # the dexterity half is setting them true once they are up there.
+                             effort: { force: 0.6, dexterity: 0.4 },
+                             gated_by: %i[mining_effectiveness darkvision],
+                             exertion: 1.0e-3)
+          ]
+        )
+      end
+
+      # Reachability, checked against the real resolved paths.
+      ROUTES = [
+        { from: :atmosphere, to: :district, carrying: :gas,
+          as: "no route for fresh air to reach the workings" },
+        { from: :district, to: :atmosphere, carrying: :gas,
+          as: "the workings have no return — nothing carries the foul air away" },
+        { from: :seam, to: :screens, carrying: :solid,
+          as: "no route for coal to reach the surface" },
+        { from: :strata, to: :drainage, carrying: :liquid,
+          as: "no route for water out of the sump — the mine will drown" }
+      ].freeze
+
+      ADVISORIES = [].freeze
+    end
+  end
+end

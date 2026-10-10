@@ -27,8 +27,13 @@ module ReactorSim
           return [ parcels, 0.0 ]
         end
 
-        consumes = spec.fetch(:consumes)
         held = parcels.to_h { |p| [ p.fetch(:resource), p ] }
+        unless Array(spec[:alternatives]).empty?
+          return cascade(spec, parcels, held, temperature_k: temperature_k, dt: dt,
+                                             content: content, ignited_fuel_kg: ignited_fuel_kg)
+        end
+
+        consumes = spec.fetch(:consumes)
 
         # How far the reaction could possibly go, set by whichever reagent runs out first.
         #
@@ -57,6 +62,127 @@ module ReactorSim
       end
 
       def fuel?(resource, content) = content.tags(resource).include?(:fuel)
+
+      # --- pathways -----------------------------------------------------------------------
+      #
+      # **What a reaction does when it cannot get enough of one reagent.** A fire with air to
+      # spare burns clean; the same fire with half the air it wants burns all of its fuel
+      # anyway and makes carbon monoxide doing it. That is not the reaction going slower — it
+      # is a different reaction, and the supply of one named reagent decides how much of each
+      # happens.
+      #
+      # `limited_by:` names that reagent and `alternatives:` lists the cheaper ways out,
+      # ordered most-of-it-first. The top-level `consumes`/`produces` is the preferred pathway,
+      # so **a reaction declaring no alternatives never reaches any of this** and computes
+      # exactly as it did before pathways existed.
+      #
+      # See `docs/design_sketches/reaction-pathways.md`.
+      def cascade(spec, parcels, held, temperature_k:, dt:, content:, ignited_fuel_kg:)
+        gate = spec.fetch(:limited_by).to_sym
+        wanted = demand(spec, held, gate, dt, content, ignited_fuel_kg)
+        return [ parcels, 0.0 ] if wanted <= Parcel::EPSILON
+
+        shares = allocate(pathways(spec), gate, wanted, held[gate]&.fetch(:kg) || 0.0, held)
+        return [ parcels, 0.0 ] if shares.empty?
+
+        shares.reduce([ parcels, 0.0 ]) do |(acc, released), (pathway, extent)|
+          [ apply_stoichiometry(pathway, acc, extent, temperature_k, content),
+            released + (-pathway.fetch(:enthalpy_j_per_unit, 0.0).to_f * extent) ]
+        end
+      end
+
+      # The preferred pathway first, then the declared alternatives. Each is a whole reaction
+      # in its own right — `consumes`, `produces`, `enthalpy_j_per_unit` — so `apply_stoichiometry`
+      # takes one without knowing it came from a list.
+      def pathways(spec)
+        [ spec ] + Array(spec[:alternatives])
+      end
+
+      # **How far the reaction would go if the gated reagent were free**, which is what makes a
+      # starved fire burn its fuel rather than bank it. Every reagent BUT the gate caps this,
+      # the lit mass caps the fuel exactly as it does for a single-pathway reaction, and the
+      # same closed form turns a ceiling into a rate.
+      def demand(spec, held, gate, dt, content, ignited_fuel_kg)
+        caps = spec.fetch(:consumes).filter_map do |resource, ratio|
+          next if resource == gate
+
+          available = held[resource]&.fetch(:kg) || 0.0
+          available = [ available, ignited_fuel_kg ].min if ignited_fuel_kg &&
+                                                            fuel?(resource, content)
+          available / ratio.to_f
+        end
+
+        limit = caps.min
+        return 0.0 if limit.nil? || limit <= Parcel::EPSILON
+
+        limit * (1.0 - Math.exp(-spec.fetch(:rate_per_s).to_f * dt))
+      end
+
+      # **Spend the scarce reagent on the cleanest pathway that can still afford the rest.**
+      #
+      # For one boundary this is exact and needs no tuning: with `a₁` and `a₂` per unit and `A`
+      # available, the split that spends `A` precisely is `x·a₁ + (E−x)·a₂ = A`, which is what
+      # the `headroom` line solves. Plentiful supply puts everything on the first pathway;
+      # supply below even the last pathway's appetite caps the extent, which is what a
+      # single-pathway reaction has always done.
+      #
+      # Returns `[[pathway, extent], ...]`, skipping pathways that got nothing.
+      def allocate(pathways, gate, wanted, supply, held)
+        shares = []
+
+        # `next` rather than `break`: a `break` inside `filter_map` discards everything already
+        # accumulated and hands back nil, which reads as "nothing reacted" for the commonest
+        # case of all — the first pathway taking the lot.
+        pathways.each_with_index do |pathway, i|
+          next if wanted <= Parcel::EPSILON
+
+          cost = ratio_of(pathway, gate)
+          extent = affordable(cost, cheapest(pathways, i + 1, gate), wanted, supply)
+          extent = [ extent, extra_reagent_cap(pathway, pathways.first, held) ].min
+          next if extent <= Parcel::EPSILON
+
+          wanted -= extent
+          supply -= extent * cost
+          shares << [ pathway, extent ]
+        end
+
+        shares
+      end
+
+      # What this pathway may take, given that whatever it leaves behind still has to be paid
+      # for by the cheapest pathway after it. `nil` means there is nothing after it, so it is
+      # the last resort and simply takes what the supply allows.
+      def affordable(cost, fallback, wanted, supply)
+        return cost.positive? ? [ wanted, supply / cost ].min : wanted if fallback.nil?
+        return wanted if cost <= fallback
+
+        headroom = supply - (wanted * fallback)
+        [ [ headroom / (cost - fallback), 0.0 ].max, wanted ].min
+      end
+
+      def cheapest(pathways, from, gate)
+        rest = pathways[from..] or return nil
+        return nil if rest.empty?
+
+        rest.map { |pathway| ratio_of(pathway, gate) }.min
+      end
+
+      def ratio_of(pathway, resource) = pathway.fetch(:consumes)[resource].to_f
+
+      # **A pathway may name a reagent the preferred one does not** — water gas is carbon and
+      # steam rather than carbon and less air — and then its own supply caps it, so a pathway
+      # whose extra reagent is absent simply cannot run and the cascade falls through.
+      #
+      # > **TODO: first caller is the gasworks** (water gas, producer gas). Nothing in the game
+      # > declares an extra reagent today, so this branch is **untested outside `pathway_spec`**
+      # > and you are the first to run it for real. Treat a surprise as a gap in
+      # > `docs/design_sketches/reaction-pathways.md` rather than as a bug in your content.
+      def extra_reagent_cap(pathway, preferred, held)
+        extras = pathway.fetch(:consumes).reject { |r, _| preferred.fetch(:consumes).key?(r) }
+        return Float::INFINITY if extras.empty?
+
+        extras.map { |r, ratio| (held[r]&.fetch(:kg) || 0.0) / ratio.to_f }.min
+      end
 
       # Products carry the ENTHALPY the reactants had, not their temperature.
       #

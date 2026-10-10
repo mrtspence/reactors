@@ -22,11 +22,19 @@ class Roster < ApplicationRecord
     end
   end
 
+  # **What the pit issues to whoever turns up**, in the same shape as one seat's posting and
+  # through the same symbolising, because it is merged into unfilled seats and a half-converted
+  # one would be a slot that quietly emptied itself.
+  def standin_kit
+    (standin || {}).to_h { |key, value| [ key.to_sym, symbolise(key, value) ] }
+  end
+
   # Upserted, because the crew form is idempotent by construction: it submits the whole roster
   # every time, exactly as a command does.
-  def self.fit(match_id:, operation_id:, crew:)
+  def self.fit(match_id:, operation_id:, crew:, standin: nil)
     record = find_or_initialize_by(match_id: match_id.to_s, operation_id: operation_id.to_s)
     record.crew = crew.to_h { |role_id, posting| [ role_id.to_s, stringify(posting) ] }
+    record.standin = stringify(standin) if standin
     record.save!
     record
   end

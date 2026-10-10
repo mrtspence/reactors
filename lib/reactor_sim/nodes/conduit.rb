@@ -36,7 +36,7 @@ module ReactorSim
                      stack_height_m: 0.0, head_pa: 0.0, head_control_id: nil,
                      blast_from: nil, blast_pa_per_kg_per_s: 0.0,
                      driven_by: nil, lift_m: 0.0, efficiency: 1.0, rated_omega: nil,
-                     delivers_to: nil,
+                     delivers_to: nil, displacement: false,
                      heat_capacity: 1.0e4, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, control_id: nil,
                      rangeability: 1.0, material: nil,
@@ -75,6 +75,16 @@ module ReactorSim
         # Where the hydraulic half of the bill lands. Defaults to this fitting, which heats what
         # it is blowing or pumping — see `drag_conductances`.
         @delivers_to = (delivers_to || id).to_sym
+        # **A fan at rest is a hole; a pump at rest is a closed valve.** `driven_by:` alone is a
+        # BILL — it charges a shaft for work the stream already did — and for a fan that is the
+        # whole story, because air goes through a stopped fan perfectly well and only the head
+        # is lost. A bucket pump, a winding drum or a screw conveyor moves material *because* it
+        # is turning, and at rest moves none: without this a mine pump lifted its water 120 m
+        # for nothing with the line shaft stationary.
+        #
+        # Opt-in, so every fitting that does not ask for it is bit-identical — the engine's
+        # donkey blower included.
+        @displacement = displacement && !driven_by.nil?
         @heat_capacity = heat_capacity.to_f
         @ambient_conductance = ambient_conductance.to_f
         @ambient_k = ambient_k.to_f
@@ -123,7 +133,17 @@ module ReactorSim
       # Consequence: **a ruptured conduit with no breach wired next to it does nothing**, which
       # is deliberate — it puts the spill somewhere it can be sized and pointed.
       def throughput_kg(state, ctx)
-        port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx) * derating(state, :throughput)
+        port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx) * derating(state, :throughput) *
+          displacement_fraction(ctx)
+      end
+
+      # What a positive-displacement fitting shifts, as a fraction of its rating: it is
+      # proportional to speed, and zero at rest. One for everything else.
+      def displacement_fraction(ctx)
+        return 1.0 unless @displacement
+        return 1.0 unless @rated_omega&.positive?
+
+        (ctx.node_omega(@driven_by).to_f / @rated_omega).clamp(0.0, 1.0)
       end
 
       # A fan or a pump: pressure this conduit supplies of its own, independent of temperature.

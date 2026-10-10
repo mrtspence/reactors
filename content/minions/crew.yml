@@ -57,6 +57,16 @@ galathas:
   tags:
     clumsy: 0.2
 
+# The first ogre, and deliberately the plainest possible one: everything his race gives him and a
+# little more in the arms. An individual who adds nothing but a stat offset is worth having in
+# content precisely because it shows the layer working — the race is doing all the interesting
+# work here, and Throg is still not quite the same worker as the next ogre hired.
+throg:
+  name: Throg Bigfist
+  archetype: ogre
+  stats:
+    strength: 0.1
+
 # --- the last resort --------------------------------------------------------------------
 #
 # **`hireable: false`, and that single field is the whole of what makes this different.** The

@@ -357,6 +357,7 @@ crossing the boundary is declared.
 |---|---|---|
 | `joules_added` | in | Burners, heaters, fission |
 | `joules_from_reactions` | in | Chemical energy released by combustion etc. |
+| `joules_imported` | in | **Shaft work arriving from another operation** — the entry side of somebody else's `joules_to_work`. The only line whose counterpart sits on a different operation's books, so the two cancel in a match-level balance while each operation still closes on its own. Written by `Operation#receive_supply` at the tick barrier, never inside a tick |
 | `mass_added` | in | Feedstock arriving from outside |
 | `joules_to_ambient` | out | Waste heat through the walls |
 | `joules_to_friction` | out | Bearing drag, belt slip |
@@ -365,7 +366,7 @@ crossing the boundary is declared.
 | `mass_vented` | out | Deliberate discharge — what reaches `Atmosphere`'s `:exhaust` inlet |
 | `mass_spilled` | out | Leak or failure — what reaches `Atmosphere`'s `:spill` inlet, which is where a `Nodes::Breach` discharges |
 | `mass_consumed` | out | Used up doing its job and not recoverable — lubricant flung off a journal and burnt on it. Reported by the node, not through a port |
-| `mass_delivered` | out | **Material that left because the operation did its job** — water lifted out of a mine, ore sent up the shaft. The only productive mass exit, and the counterpart of `joules_to_work`; without it an operation whose *output* is material reads as one that is leaking |
+| `mass_delivered` | out | **Material that left because the operation did its job** — water lifted out of a mine, ore sent up the shaft. The only productive mass exit, and the counterpart of `joules_to_work`; without it an operation whose *output* is material reads as one that is leaking. Written by `Nodes::Delivery`, its first and only writer |
 
 The hash also carries `ambient_k` — the environment's temperature, config rather than a flow.
 It is what `settle_ambient` relaxes toward.
@@ -413,8 +414,24 @@ sums those into the ledger after phase 5:
 | `mass_consumed` | `mass_consumed` |
 | `mass_delivered` | `mass_delivered` |
 
-`Nodes::Vessel` (heater), `Nodes::Load` (work) and `Nodes::Atmosphere` (boundary crossings)
-are the examples to copy.
+`Nodes::Vessel` (heater), `Nodes::Load` (work), `Nodes::Atmosphere` (boundary crossings) and
+`Nodes::Delivery` (output) are the examples to copy.
+
+> **Book every port's receipts, not the interesting ones.** `Atmosphere` counted `:exhaust` and
+> `:spill` and not `:intake` — but `:intake` is an *outlet* and a link is two-way, so an operation
+> whose draught falls away pushes air back up the way it came. That arrived at a port nothing was
+> counting, into a node that resets to baseline every tick: **24 kg destroyed over 3000 ticks**,
+> drifting steadily, and invisible to every existing spec because nothing else in the game had
+> ever reversed its intake. A mine with its fan stopped does it immediately.
+
+> **`joules_imported` is the exception and is deliberately not in that table.** It is written by
+> `Operation#receive_supply` from `Match#exchange!`, at the tick barrier — outside any tick, like
+> a command — because the energy comes from *another operation* rather than from a node's own
+> behaviour. A node cannot report it, since no node in this operation was party to it.
+>
+> The buffer it lands in (`Nodes::Import`'s `supply_joules`) is counted by
+> `Operation#total_joules` alongside `joules` and parcel enthalpy. Leave it out and an exchange
+> reads as creation on one side and destruction on the other.
 
 > **Report gross crossings, never a before/after delta.** A delta is the NET of everything
 > that happened in the tick, and at a boundary the two directions cancel: `Atmosphere` used to

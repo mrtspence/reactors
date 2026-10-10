@@ -66,9 +66,11 @@ module ReactorSim
           options: { chassis: chassis, loadout: assembly.loadout, crew: roster },
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
+          places: [ engine_house(fragment) ],
           control_points: fragment.control_points,
           diagnostics: assembly.diagnostics,
-          minions: crew_for(roster, content || Content.default, station: assembly.crew_origin)
+          minions: crew_for(roster, content || Content.default, station: assembly.crew_origin,
+                            place: :engine_house)
         )
       end
 
@@ -1063,13 +1065,14 @@ module ReactorSim
       # is already the conduit carrying fuel to the firebox. Ids are shared across nodes, levers,
       # instruments and crew because they key one rng table, so that collision would hand two
       # components the same stream — hence `crew_1`, which cannot collide with machinery.
-      def crew_for(roster, content, station:)
+      def crew_for(roster, content, station:, place:)
         roster.map do |seat, posting|
           sheet = Crew.resolve(posting, content: content)
 
-          Minion.new(id: seat, station: station, name: sheet.fetch(:name),
+          Minion.new(id: seat, station: station, place: place, name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
-                     stats: sheet.fetch(:stats), tags: sheet.fetch(:tags))
+                     stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
+                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg))
         end
       end
     end

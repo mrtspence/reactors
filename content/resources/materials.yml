@@ -70,6 +70,18 @@ bronze:
   tensile_strength_pa: 250.0e6
   max_temperature_k: 700
 
+# Windings and cable. Soft and weak as structure, which is why nothing is *built* from it —
+# it is here because anything electrical is mostly copper by cost, and the mine's electric
+# lighting is the first fitting that is.
+copper:
+  tags: [solid, metal, conductor]
+  density_kg_per_m3: 8960
+  specific_heat_j_per_kg_k: 385
+  tensile_strength_pa: 210.0e6
+  # Annealed copper loses its temper long before it melts, and a winding that has annealed is
+  # a winding that has shorted.
+  max_temperature_k: 650
+
 # Softer still, and low-melting — which is the whole reason a hot box destroys itself so
 # quickly once the oil stops arriving.
 babbitt:

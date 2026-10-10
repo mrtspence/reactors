@@ -25,8 +25,8 @@ either. If reading drew noise, how many people happened to be watching would cha
 
 ## Sources — stateless, pure
 
-`Field`, `Flag`, `Derived`, `Level`, `Contents`, `Durability`, `Broken`, `Aggregate`. A snapshot; the
-palette is the truth:
+`Field`, `Flag`, `Derived`, `Level`, `Contents`, `Fraction`, `Durability`, `Broken`, `Aggregate`. A
+snapshot; the palette is the truth:
 
 ```sh
 grep -oP '^\s{4}class \K\w+' lib/reactor_sim/diagnostics/sources.rb   # sources
@@ -41,6 +41,12 @@ where a gauge author looks before reaching for a quantity.
 
 A source that cannot read reports unavailable and the diagnostic flags `:offline`, rather than
 reporting a fabricated zero.
+
+**`Contents` is kilograms and `Fraction` is a percentage, and which one you want is a real
+question.** Wherever the *total* can move, kilograms mean different things at different times: a
+district holding 30 kg of firedamp is comfortable with the fan running and lethal without it,
+because the air went with the fan. Concentration is the quantity that means one thing in both
+cases — and for a damp it is also the quantity a flame actually responds to.
 
 **Anything needing memory is a filter, not a source.** That is why `Rate` is a filter.
 
@@ -113,5 +119,26 @@ a client.**
    `distortion?` split above — **in the same commit**. A filter missing from that split is one
    nobody can reason about from the spectator view.
 
-`observer:` is reserved for minions and inert for now. `Diagnostic#observer` is the seam for
-"who is reading this gauge"; do not repurpose it.
+## `observer:` names who is reading the gauge, and it is live
+
+An instrument with **no `observer:`** is a dial on a wall: it reads true, which is nearly every
+gauge in the game. One that **names a station** is somebody's word, and two things follow.
+
+- **Nobody posted there means `:offline`**, not a number nobody took. That is what makes
+  posting somebody a decision with a visible consequence.
+- **Whoever is posted drives the distorting filters**, through one `competence:` scalar —
+  `Minion#wits`, gated on `darkvision`, because a reading taken in the dark is not a reading.
+
+A filter opts in with `observed?`, the same shape as `distortion?` and for the same reason: the
+taxonomy lives on the filter, so adding one cannot silently miss a hook somewhere else. Only
+`Misread` declares it today; the other eight take no `competence:` argument at all.
+
+> **`observer:` must name a control point that exists**, and `Operation` refuses a build where
+> it does not. While the seam was inert, five of the steam engine's gauges named posts that
+> were never stations — `:fireman`, `:yardhand` — which read as intent and did nothing. The
+> moment it went live they became instruments nobody could ever man. **A decorative observer
+> is worse than none.**
+
+**Declare it on very few instruments.** If every gauge becomes a person's opinion the panel
+stops being trustworthy at all and the player disengages from instruments entirely, which is
+the opposite of the intent.

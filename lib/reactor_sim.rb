@@ -89,6 +89,12 @@ require_relative "reactor_sim/physics/relaxation"
 require_relative "reactor_sim/graph/port"
 require_relative "reactor_sim/graph/link"
 require_relative "reactor_sim/graph/path"
+# A space that nodes and people are in. Before `graph/passage`, whose `Layout` validates every
+# passage endpoint and every station against the declared places.
+require_relative "reactor_sim/place"
+# The fourth kind of edge: a way between two places that PEOPLE use, and the layout built from
+# them. Build-time only — the routing tables are computed once, never searched in a tick.
+require_relative "reactor_sim/graph/passage"
 require_relative "reactor_sim/graph/intent"
 require_relative "reactor_sim/graph/arbiter"
 
@@ -110,7 +116,11 @@ require_relative "reactor_sim/nodes/bearing"
 # A small engine carrying its own rotor, so a fitting can be driven by something other than the
 # main drivetrain — which is what a blower on a black start needs.
 require_relative "reactor_sim/nodes/motor"
+# A shaft turned from outside this operation — the receiving end of another operation's work.
+require_relative "reactor_sim/nodes/import"
 require_relative "reactor_sim/nodes/atmosphere"
+# Where an operation's output goes, and the only writer of `mass_delivered`.
+require_relative "reactor_sim/nodes/delivery"
 require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 require_relative "reactor_sim/nodes/fusible_plug"
@@ -130,6 +140,19 @@ require_relative "reactor_sim/kit"
 require_relative "reactor_sim/crew"
 # `Wearing` for people. Before `minion`, which rolls its hidden resilience at initial_state.
 require_relative "reactor_sim/injury"
+# Whether the air where somebody is standing will keep them alive. After `fatigue` and `injury`,
+# whose pools it drains; `tick` is the only caller.
+require_relative "reactor_sim/breath"
+# What the heat where somebody is standing does to them. After `injury`, whose resilience it
+# grinds directly rather than draining a pool of its own; `tick` is the only caller.
+require_relative "reactor_sim/scorch"
+# A way a place can hurt somebody with nothing broken, and the hidden margin it spends. After
+# `injury`, whose Danger Check it hands a hazard to; `tick` is the only caller.
+require_relative "reactor_sim/peril"
+# What somebody is carrying — gear and people, one concept — and what it costs their pace and
+# their wind. After `injury`, whose `numeric` and deratings it reads through the minion it is
+# handed; read by `minion` and by `tick`.
+require_relative "reactor_sim/burden"
 require_relative "reactor_sim/minion"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"
@@ -154,3 +177,7 @@ require_relative "reactor_sim/match"
 require_relative "reactor_sim/operations/steam_engine/definition"
 require_relative "reactor_sim/operations/steam_engine/parts"
 require_relative "reactor_sim/operations/steam_engine/panel"
+
+require_relative "reactor_sim/operations/mine/definition"
+require_relative "reactor_sim/operations/mine/parts"
+require_relative "reactor_sim/operations/mine/panel"

@@ -21,10 +21,18 @@ RSpec.describe "operator identity", type: :request do
 
   def console(operation_id) = console_path(match_id: DevMatch::ID, operation_id: operation_id)
 
+  # **Whatever lever that machine actually has.** The claim is about which operation a command
+  # reaches, not about which lever — and the match holds machines of different kinds, so a
+  # hardcoded `feed` would be asserting something about the steam engine by accident.
   def lever(operation_id)
+    control = DevMatch.panel(operation_id: operation_id).fetch(:controls).first.fetch(:id)
     post("/matches/#{DevMatch::ID}/operations/#{operation_id}/commands",
-         params: { type: "set_control", control_point_id: "feed", value: 10 })
+         params: { type: "set_control", control_point_id: control.to_s, value: 10 })
   end
+
+  # The second machine, whichever it is. Named through `DevMatch` rather than spelled out, so
+  # changing what the match runs does not silently turn this into a one-machine test.
+  def other_operation = DevMatch.operation_ids.last
 
   # Somebody else's machine, in the same match this player is in.
   def someone_elses
@@ -100,14 +108,15 @@ RSpec.describe "operator identity", type: :request do
 
     # The point of the hatch: two machines, driven from two consoles, by one person.
     it "drives two operations independently in one match" do
-      lever(:engine)
-      lever(:engine_b)
+      lever(DevMatch::PRIMARY)
+      lever(other_operation)
 
       expect(producer).to have_received(:produce).with(
-        match_id: DevMatch::ID, command: hash_including("operation_id" => "engine")
+        match_id: DevMatch::ID,
+        command: hash_including("operation_id" => DevMatch::PRIMARY.to_s)
       )
       expect(producer).to have_received(:produce).with(
-        match_id: DevMatch::ID, command: hash_including("operation_id" => "engine_b")
+        match_id: DevMatch::ID, command: hash_including("operation_id" => other_operation.to_s)
       )
     end
 

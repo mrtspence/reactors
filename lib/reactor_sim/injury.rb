@@ -85,7 +85,16 @@ module ReactorSim
     # `break_part` follows, and for the same reason: re-deciding every tick would announce the
     # same injury at the tick rate forever.
     def check(minion, state, hazard)
-      bite = hazard.fetch(:severity).to_f - resistance(minion, hazard)
+      grind(state, hazard.fetch(:severity).to_f - resistance(minion, hazard))
+    end
+
+    # **The accumulation half, with the bite already worked out.** Separate because not every
+    # harm is a blow carrying a severity and a tag: a burn is resisted by a *threshold* the
+    # heat has to get past before there is any bite at all, so by the time one arrives it has
+    # been resisted already and `resistance` must not argue with it a second time.
+    #
+    # Deciding the tier stays here, once, so the two routes in cannot drift apart.
+    def grind(state, bite)
       return [ state, nil ] if bite <= 0.0
 
       remaining = [ state.fetch(:resilience) - bite, 0.0 ].max
@@ -93,6 +102,18 @@ module ReactorSim
 
       proposed = tier(bite, remaining, state.fetch(:initial_resilience))
       worsened = Severity.escalate(state.fetch(:injury), proposed, ORDER)
+      return [ state, nil ] if worsened.nil? || worsened == state.fetch(:injury)
+
+      [ apply_mode(state, worsened), worsened ]
+    end
+
+    # **Harm that is not a blow**, and so has no bite to resist. Nothing about being tough helps
+    # you breathe, so routing suffocation through `check` would let `resistance` argue with a
+    # thing it has no say in. The escalation rule is still the shared one, which is what keeps a
+    # minion from being announced as collapsed twice, or as severely hurt after being mortally
+    # so. Returns `[next_state, mode_or_nil]`, a mode only on a transition, exactly as `check`.
+    def succumb(state, mode)
+      worsened = Severity.escalate(state.fetch(:injury), mode, ORDER)
       return [ state, nil ] if worsened.nil? || worsened == state.fetch(:injury)
 
       [ apply_mode(state, worsened), worsened ]
@@ -109,9 +130,13 @@ module ReactorSim
     # Being carried out clears the station, which is the whole mechanical consequence of a severe
     # injury: whatever that lever needed doing stops being done, and somebody else has to be
     # moved onto it.
+    #
+    # **It clears the posting too, or they get up and walk there again.** Where there is geometry
+    # a posting is a standing order that the travel phase keeps acting on, so leaving it set
+    # would have a stretchered minion resume their journey on the next tick.
     def apply_mode(state, mode)
       state = state.merge(injury: mode)
-      MODES.dig(mode, :stood_down) ? state.merge(station: nil) : state
+      MODES.dig(mode, :stood_down) ? state.merge(station: nil, posting: nil) : state
     end
 
     # What this injury leaves of a stat, 0..1. Returns 1.0 for an unhurt minion, so callers can

@@ -6,8 +6,8 @@ require "rails_helper"
 RSpec.describe Incident do
   def record(tick: 10, seq: 0, severity: "critical", type: "part_failed", run: "run-a")
     { "run_id" => run, "operation_id" => "engine", "tick" => tick, "seq" => seq,
-      "type" => type, "node" => "flywheel", "mode" => "burst", "severity" => severity,
-      "detail" => { "rpm" => 311.7 } }
+      "type" => type, "node" => "flywheel", "label" => "Flywheel", "cause" => "overspeed",
+      "mode" => "burst", "severity" => severity, "detail" => { "rpm" => 311.7 } }
   end
 
   # `type` is an ordinary column here. Rails would otherwise read it as the single-table
@@ -73,6 +73,17 @@ RSpec.describe Incident do
 
     it "says nothing about a run it has never seen" do
       expect(described_class.backfill("nobody")).to be_empty
+    end
+
+    # **History has to read the same as live.** The feed renders `label` and falls back to
+    # `node`, and prints `cause` or the word "unknown" — so a row that drops either makes a
+    # reconnected console show `crew_8` where it had shown the person's name, and "unknown"
+    # beside every casualty in the match.
+    it "carries what it was called and what did it" do
+      described_class.record!(record)
+
+      expect(described_class.backfill("run-a").first)
+        .to include(label: "Flywheel", cause: "overspeed")
     end
   end
 end

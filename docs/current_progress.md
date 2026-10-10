@@ -12,14 +12,19 @@ who can be equipped, trained and hurt.
 
 ```
 DONE      simulation engine (lib/reactor_sim)     — physics, graph, diagnostics
-DONE      one playable operation                  — the steam engine, two variants
+DONE      two playable operations                 — the steam engine, and the mine
 DONE      infrastructure                          — Postgres, Redpanda, topics, gems
 DONE      the delivery tier                       — runner, Kafka wiring, web tier, panel
 DONE      minions                                 — individuals, kit, training, injury, the IL
 DONE      the durable record                      — match.events, incidents, progression, awards
 DONE      fatigue                                 — endurance, station exertion, recovery, spent
-NOT DONE  match lifecycle, snapshots + recovery, auth, movement
+DONE      movement                                — places, passages, travel, the cage
+DONE      operations couple                       — work crossing the boundary, engine → mine
+NOT DONE  match lifecycle, snapshots + recovery, auth
 ```
+
+Movement is built but **only the mine uses it**: the steam engine declares no places, so its crew
+is everywhere and nowhere. `Minion#place` is nil-accepting for exactly that reason.
 
 You can play it. What is missing is everything around a match rather than inside one: a match
 still has no real beginning or end (`DevMatch` stands in), a crash loses the run, and there are
@@ -287,7 +292,109 @@ third operation, never back into the engine.
 
 ## What to do next
 
-**The minion release is built — all seven stages, 2026-09-16.** Design and findings in
+**The mine is built and playable**, stages A–E complete and F partial; three playthroughs' worth
+of feedback is folded in. What remains is sequenced in
+[`design_sketches/mine-follow-ups.md`](design_sketches/mine-follow-ups.md), whose own order is:
+
+1. ~~**Finite `stiffness`**, as a prerequisite rather than a feature.~~ **Done.** The mechanism
+   was built and inert — every lever `Float::INFINITY`, `crew_multiplier` computed and thrown
+   away, `settling?` read by nobody, the console's ghost marker never shown. The mine's seven
+   valves now ship real figures (`Mine::Travel`), so phase 0 is reachable and a lever can be
+   caught mid-travel. `lever_travel_spec` holds it.
+2. ~~**Misreading a gauge.**~~ **Done.** An observer fault rather than an instrument fault:
+   `observer:` names who is reading, and one `slack` term scales all three dials off their
+   competence, so the gradient is 8.5% / 17.2% / 62.7% wrong across deputy, hand and kobold.
+   The flame cap finally does what the design promised. **`observer:` is now validated at
+   build** — five steam-engine gauges named people who were not stations, which turned them
+   permanently offline the moment the seam went live.
+3. ~~**Doing the wrong thing**~~ and ~~**the accident model**~~. **Done.** Phase 6d `blunder`
+   spends a hidden renewable margin against the perils of a place, and `safety_equipment` —
+   the mine's instance is manholes — buys an accident down to a `:minion_near_miss` rather
+   than removing it. Two bugs made the whole thing inert for its first build and both are in
+   the traps list: the re-roll was not a rising edge, and recovery was gated on a quiet tick
+   rather than on a safe place.
+4. ~~**Carrying somebody out.**~~ **Done, and it went further than Part 6 imagined.** A carrier
+   is posted to a *person* rather than a lever — which needs no new command, because every id in
+   an operation is one flat namespace — picks them up on arrival, and `drop_minion` sets them
+   down wherever the carrier is standing. Phase 6e is two passes so the cross-minion write stays
+   order-independent. The larger half is that it forced **mass** into the sheet, and once mass
+   existed the gear somebody is wearing became a burden by the same arithmetic: *lighter* kit is
+   now a real upgrade axis, and a small race wants small tools. See
+   [`design_sketches/carrying.md`](design_sketches/carrying.md).
+
+Still owed on the mine itself: a separate man-riding shaft, buoyancy inside a volume so firedamp
+collects in the roof, and the advance shift as a fitting rather than a chassis constant.
+
+### The suite's shape changed: construct the state, do not wait for it
+
+**Specs do not wait for ticks any more.** State is a plain hash and the engine is deterministic, so
+a precondition is **built** and only the ticks that decide a claim are run. Findings, rigs and the
+three ways a constructed state can be a lie are in
+[`design_sketches/suite-runtime.md`](design_sketches/suite-runtime.md) §7.
+
+Converted so far: `district_fire_spec` + `ignition_rig` (both flammability limits in 0.55 s, where
+reaching one arbitrary point by seepage took ~2,400 ticks), and `engine_stages_spec` +
+`engine_rig` — the steam engine one stage at a time, which took `steam_engine_spec` from 38 runs of
+up to 7,200 ticks to **nothing over 100 ticks**, with more coverage than before.
+
+Two rules that came out of it and are worth applying to the mine specs next:
+
+- **A composite is not a separate claim.** A whole startup is the sum of its stage claims, so
+  running one re-proves each slice at a hundred times the price. The *only* thing kept as a
+  whole-machine run is that a cold machine can be brought to life at all — a fixture starting from
+  a hot engine cannot fail when the path to a hot engine breaks.
+- **A fast spec makes it cheap to measure the wrong quantity.** Draught was first read as the air a
+  firebox *holds*, which is a stock: a dead fire consumes nothing, so it accumulates 6.3 kg against
+  a working fire's 0.98 and reads as six times the draught.
+
+**The mine is converted too.** `at_the_face` writes the shift's arrival straight into state, and
+`district_mix`/`bottom_mix` fill a volume with exactly the mixture a claim needs — so the walk (up
+to 2,000 ticks) and the make (two to twelve thousand) are both gone. Ten files, **135 examples**,
+with the same claims and several that are now stronger:
+
+| Was | Now |
+|---|---|
+| `mine_tech_spec`'s inundation: 6 × 12,000 ticks | a part-worn fissure, 150 ticks |
+| `blackdamp_spec`'s lamp warning: a 120-step degradation loop | a concentration sweep — the lamp warns at 4% while the air is still breathable at 0.9644 |
+| `dust_spec`'s stone dusting: 8,000-tick ignitions | the whole suppression curve — 1963 K bare, 733 K at 130 kg, **293 K and nothing fired** at 400 |
+| `roof_spec`'s gradient: 6,000 ticks to a fall | `integrity` after 200 — 1.000 / 0.911 / 0.821 |
+
+`blackdamp_spec`'s "starves the fire it cannot feed" — the one example that was failing — is fixed,
+and reframed: it demanded that 20–90% of the gas survive, which it does not at any blackdamp level
+(97–99% is consumed). What the displacement actually does is make the fire **cooler**: 2379 → 1935
+→ 1544 K across 0 / 30 / 50% blackdamp.
+
+**Two claims could not be made short and were restated rather than faked:**
+
+- **The ventilation tier** is an equilibrium between fan throughput and the ground's make, which
+  takes thousands of ticks to settle. It is now tested by its **sign**: seed the district at a
+  working concentration and see which side of `Breath::SAFE` each fan settles it on. On the
+  gassiest ground the waddle lands at 0.92479 and the Guibal at 0.93081.
+- **A rupture or a roof fall is erosion, not a bang.** Seeding a part-worn part tests the failure;
+  the erosion rate belongs to the node that owns it (`Inrush#stress_per_second`, `Roadway`).
+
+`slip_spec` is converted too, and it needed neither a constructed state nor a long sample — it
+needed **two things that were simply wrong**. Its 3,000-tick settle bought nothing (`:winding` is a
+bank post and the shift starts at bank; all it did was let fatigue drift, which is a different
+experiment) and its lever reversed on a **400-tick cycle**, so a sample shorter than that never
+moved the lever and `target` only ever took one value. At a 50-tick cycle, 400 ticks of sample:
+12 examples in 49 s, up from 10 examples in minutes. The extra two came free — a `boneheaded: 1.0`
+hand fumbles a plain valve 13 times in 200 ticks where the 0.5 kobold fumbles it not at all, so the
+gate demonstrably reads the tag's **level** and not its presence.
+
+**Still on the old pattern: `peril_spec` only.** Seeding a thin `margin` reaches the first accident
+in 200 ticks (a poor hand at `margin: 0.05` takes three), so the lever exists — but its
+rate-comparison examples ("saves more often the better it is", "never saves everybody") are
+*statistical*, and a sample short enough to be fast produced no accidents at all for the ogre and
+safety-gear fixtures. **Size the sample before converting it**; a half-converted version would
+leave those claims weaker than they are now.
+
+> **Nothing in the game resists `crush`, `impact`, `rockfall` or `fall`.** The convention is
+> there — a hazard tag `:x` is resisted by a minion tag `:x_resistance` — and no kit declares
+> one, so every road and roof accident lands at full severity on everybody. Reported, not
+> fixed: it wants a pass over `kit.rb` rather than an engine change.
+
+**The minion release landed 2026-09-16.** Design and findings in
 [`design_sketches/minions.md`](design_sketches/minions.md). Individuals rather than jobs, equipment
 in three slots, training, injury through a Danger Check, and a crew that is load-bearing on the
 machine's output. What landed:
@@ -304,9 +411,451 @@ machine's output. What landed:
 - **Effort stations replaced `stiffness`** — the lever is intent, the crew supplies the rate. A
   locomotive cannot be run by day-labourers; a competent human reproduces the tuned machine.
 
-**Movement and the spatial model are the release after**, deliberately. The mine's release
-sequence is in [`design_sketches/mine.md`](design_sketches/mine.md) §4.6: the inter-operation
-shaft first, the spatial model second, both provable on a rig before a mine exists.
+## The mine, as it was designed
+
+[`design_sketches/mine.md`](design_sketches/mine.md) settles what operation two is: a **single-seam,
+bord-and-pillar shaft colliery** in its fan-ventilated era (c. 1870–1910). Two shafts, cage winding,
+a mechanical fan, a sump and pump, three or four districts. Full-size in every respect **except
+headcount** — a crew of 12–20 against a mine built to historical scale, because the crew-management
+UI is one `<select>` per minion and twenty is the edge of usable. It is correspondingly
+undermanned and less productive, which is the one dial that is cheap to turn later.
+
+Three decisions the sketch takes:
+
+- **Power arrives as an imported shaft** — a real rotating body the pump and fan couple to via
+  `driven_by:`, fed at match level from the upstream operation's `joules_to_work`. This is the
+  first thing that has ever crossed between two operations and it is genuinely new architecture:
+  nothing couples operations today, `DriveLink` validates against one operation's own nodes, and
+  per-operation `time_scale` means the exchange must integrate in joules per *simulated* second or
+  repeat the 40×-too-slow fatigue error. **Its own sketch before code.**
+- **Space is volume nodes on the existing graph** — roadways and districts as real volumes,
+  roadway conduits between them. One topology carries men, material, air and water; every
+  historical ventilation control (door, regulator, overcast, brattice) is already expressible as a
+  `Conduit` with a conductance.
+- **Coal goes outward to a third operation**, never back into the engine. A two-node loop that
+  sustains itself has no reason for a third player.
+
+Release order is §4.6, lettered A–F. **Stage A is done.** `Nodes::Import` is a shaft turned from
+outside the operation: it carries its own rotor, spends a `supply_joules` buffer that
+`Match#exchange!` fills at the tick barrier, and takes its torque from `Motor`'s governed curve
+with the combustion removed — **from a held state, never from `power ÷ ω`**, which is the trap
+`Motor` paid for first. Pumps and fans name it in `driven_by:` and cannot tell where the torque
+came from. Couplings name an operation and a node at **both** ends, and `exchange!` reads every
+source before writing any sink, so what crosses cannot depend on the order operations are visited
+in. `joules_imported` is the entry side of the supplier's `joules_to_work`, so each operation's
+books close on their own and the two cancel across the match.
+
+> **Two findings, both from building it rather than from the sketch.**
+>
+> **Coupled operations must share a `time_scale`.** The sketch claimed the buffer decoupled the
+> two clocks; it smooths jitter and cannot bridge a rate. At 40× an operation lives 10 simulated
+> seconds per tick against 0.25 at 1.0, so it needs forty times the joules to run the same
+> machines and is starved in exactly that proportion — while the supplier's instruments read
+> correct throughout. Scaling the transfer would mint energy, so `validate_couplings!` refuses
+> instead. **A coupled mine runs at its engine's rate.**
+>
+> **A tolerance relative to the opening balance degenerates on a fresh operation.** A sink starts
+> with no energy, so normalising drift against its starting figure turns a relative tolerance into
+> an absolute one — and 3.7e-9 J of ordinary float noise on 1e7 J of throughput fails it. Normalise
+> against the energy actually handled.
+
+The measured brownout is the reason this is a shaft rather than a number on a ledger: cut the
+supply and the line shaft **holds its equilibrium for ~880 ticks** on what is already in hand,
+then coasts down on windage. A switch could not do that.
+
+**Stage B is done too, and minion position is real.** `Passage` is the fourth kind of edge — a way
+**people** use, beside material, heat and momentum — and `Layout` is where everything is, both
+build-time only, with routing tables computed once per distinct capability set rather than searched
+in a tick. A `ControlPoint` now declares the `place:` it stands in; a minion carries `posting`
+(where they have been sent), `place` (where they are) and `progress` (how far along). Phase **6d
+`travel`** walks them, at a `pace` that runs through `capability`, so fatigue and injury slow a
+walk exactly as they slow a shovel.
+
+`assign_minion` still names a **destination and never a step** — replayed mid-journey it changes
+nothing, which is what keeps the at-least-once log safe. A posting this particular minion cannot
+reach is **refused** rather than attempted, because the gates are per-minion: a crawl somebody
+cannot fit through has no route for them and walking them into it for the rest of the match is
+worse than saying no.
+
+> **Geometry is opt-in, and that is what kept this from touching anything.** An operation
+> declaring no `passages:` has an empty `Layout`, `travel` returns immediately, and `assign_minion`
+> sets `station` the moment the command lands exactly as it always did. The steam engine did not
+> acquire a walk to the firehole.
+
+One finding, now in the traps list: **`endurance` must never enter a capability blend.**
+`Minion::PACE` was written as endurance-weighted because walking a mine is an endurance job, and
+`ReferenceCrew::TIRELESS` — which is 1e6 precisely *because* endurance enters no blend — promptly
+walked the reference crew at seven hundred thousand times human pace. Everything arrived in one
+tick and it read as the travel phase not being wired up.
+
+**Stage C is done, and the mine exists.** `Operations::Mine` — a single-seam bord-and-pillar
+colliery on a two-shaft frame, 17 nodes, 7 levers, 7 gauges, four slots (winder, fan, pump, lamp
+cabin) and a `two_shaft` chassis. The five subsystems are all wired: a hewer cutting a seam that
+**depletes**, a haulage road, a winder, a sump the water runs downhill into, and an air circuit
+from the downcast round the workings and out through the fan. `Nodes::Delivery` is the first and
+only writer of `mass_delivered`.
+
+**Winning coal needed no new node.** The seam is a block of coal in a `Vessel` and the hewer's
+lever is a `Conduit` drawing out of it — exactly the stoker's line on the engine. It also makes a
+worked-out district a real thing rather than a rule.
+
+Measured on a competent crew and a steady supply: the shaft holds 202 rpm and visibly loads to
+198.9 when the mine starts working; a hand reaches the pit bottom at **150 s** and the face at
+**317 s**; coal cuts at the pick's full 1.4 kg/s. Cut the supply and the pump stops, the winder
+stops, and the sump starts filling. **Conservation is exact** — energy drift 0, mass drift 1e-7
+on 1.6e6 kg.
+
+> **Three bugs, all found by the conservation spec, all in the traps list now.** A driven fitting
+> is a bill rather than a gate, so the pump lifted water for free with the shaft stopped and the
+> mine could never drown. `Atmosphere` booked two of its three ports, so air reversing out of a
+> stopped downcast was destroyed unledgered. And an uncapped supply buffer let the shaft bank
+> 355 MJ, which made it a battery rather than a rope.
+
+**Stage D is done, and the mine is dangerous.** Firedamp is a resource with a `damp` tag and a
+real combustion reaction — 55.5 MJ/kg, `rate_per_s` an order of magnitude past any fuel bed, and
+an ignition block that is almost pure spread with almost no quench, because the asymmetry *is*
+the hazard. The seam carries gas alongside the coal and a **blower** vents it continuously, with
+no lever: the mine gives off gas whether anybody is watching, and the only question is whether
+enough air is going past.
+
+**Dilution needed no new machinery.** The air circuit already carried gas, so the fan clears the
+district and stopping it lets the gas build — measured, ~1.7% running and settling, against a
+climb through 5% and on to 17% with the fan off.
+
+`Sources::Fraction` is new and gives concentration rather than kilograms, because kilograms mean
+different things with the fan on and off — the air went with the fan. The **flame cap** reads it
+through lag, noise, a sticky needle and bands, into prose: *"no cap on the lamp"* through *"a
+tall cap — clear the district"*. A number there would be a different game.
+
+Ignition is whatever the district is **lit** by, and lighting is a fitting: a tier that is an
+open flame declares the lever the district's igniter names and a safe tier does not, so with
+gauze lanterns or electric lamps the district never lights however gassy it gets. With a flame
+it does, the district ruptures at 480 K, and `endangers:` carries the blast to the hewer at the
+face **and the putter at the pit bottom**. Conservation holds exactly through
+ignition and rupture.
+
+> **The fan was badly undersized and the ventilation mechanic did not work because of it.** A
+> real colliery moves ~170 kg/s of air; this one moved 2.8, so the fan could not clear what the
+> seam gave off and the gas built at the same rate whether it ran or not. Head went from 480 Pa
+> to 2.2 kPa. **The lever was wired correctly the whole time** — it was the sizing that made it
+> look inert, which is the same class of mistake as a tier nothing can reach.
+
+Deliberately **not** in stage D, and owed: **afterdamp**, the mixture that fills a mine after an
+explosion and killed more than the blast did — the district burns its oxygen and the survivors
+should then be suffocating, where today they are merely in a wrecked roadway. Also **coal dust**,
+which turns a local ignition into a whole-mine catastrophe, and the buoyancy that makes firedamp
+collect in the roof rather than mixing evenly. Still owed from stage C: the cage (stage E), and
+light/tool **gating** of the hewer's output, which the sketch wants multiplicative
+(`mining_effectiveness × darkvision`) and which today is an ordinary additive `aided_by:`. Travel
+distances are a guess and want a sweep.
+
+**Stage E is done, and the walk can be bought off.** `Passage` can be **powered** —
+`control_id:` scales it by a lever, `driven_by:`/`rated_omega:` by a shaft — so a cage nobody has
+called, or one whose supply has failed, is not a slow way down but *no* way down. `Fragment`
+carries passages, so the cage arrives with the `cage_winder` fitting; the ladderway is a fixture,
+because every shaft can be climbed and only a mine that has bought the gear can be ridden. Two
+places can be joined more than once now, so `Tick#quickest` takes the fastest way **running** —
+uncalled the shift takes the ladders, called they ride. Measured: **150 s climbing against 41 s
+in the cage.**
+
+> **The tradeoff is men-or-AIR, not men-or-coal, and the numbers decided that rather than the
+> sketch.** The plan was a drum interlock: one thing at a time. What the model produced is better
+> and more historically exact — the cage hangs off the same line shaft as the fan and the pump,
+> so calling it drags the shaft from 178 to 131 rpm and the fan slows with it: **air 10.3 → 5.6
+> kg/s, and the district from 1.86% to 3.30% gas** while the shift is being wound. Winding
+> engines and fans really did compete for one boiler. Coal was untouched, because the winder has
+> five times the capacity the pick can feed it.
+
+**Stage F is part built: roof falls and the man-riding tiers.** `Mine::Roadway` is a `Conduit`
+subclass whose wear is driven by **ground opened faster than it is supported** — `hewing −
+timbering`, floored at zero, so a face nobody is cutting does not fall in. A `:timbering` effort
+station is the third job underground and **the only one that produces nothing**, which against
+four hands and five posts is the triage the whole operation exists to create.
+
+Measured: fully timbered never falls; half-supported falls at 754 s with a minor and a severe;
+wholly unsupported falls at **336 s and kills the putter**. Severity scales with how far the face
+had run ahead. That is the gradient the operations guide asks every machine for — a setting that
+survives indefinitely, one that produces more and then destroys the machine, and a band between.
+
+**Man riding is its own slot now**, which is what it should always have been: a man engine winds
+no coal, so making it a winder tier was wrong. Ladders (nothing fitted) → `man_engine` at 1.8 m/s
+→ `cage_gear` at 4.2, and empty is where every mine starts.
+
+**The rest of F landed in a follow-up pass**, closing three of the loose ends.
+
+**Light and tools are a gate now, not a bonus.** `ControlPoint#gated_by:` multiplies where
+`aided_by:` adds, so a missing tag is a **zero** — an ogre with no pick gets no coal out of a
+seam however strong they are, and nobody gets any in the dark. Measured over 500 s at the face:
+no kit **0 kg**, crude pick and hand lamp 167 kg, proper pick and Davy lamp 298 kg. Two new
+items back it: `miners_tools` and the `davy_lamp`, which is the one that carries **no
+`open_flame`** — the entire point of it.
+
+**Inundation** is `Mine::Inrush`, a fissure that gives way on how hard the face is being driven,
+so a district nobody is working never breaks into anything. Sized for the inrush and throttled
+down while sound, because a `derates: { throughput: }` above 1.0 cannot beat the narrowest port
+on the path. At 18 kg/s it overwhelms a sinking set's 14 and is held by a Cornish set's 26.
+Measured: breaks through at t+7473 driving flat out, sump takes 12.5 tonnes.
+
+**Cutting is a slot** — `hand_picks` at 1.4 kg/s against `coal_cutter` at 5.6, and the cutter's
+real value is that it does not tire (`exertion` 1.2e-3 → 3.0e-4), so the seat it frees is worth
+more than the coal it adds.
+
+> **Two traps, and the second is the interesting one.** Every figure sized against a lever is
+> really sized against `capability`, because `ctx.controls` carries the *worked* value — so
+> hewing's switch from aided to gated silently invalidated three numbers nothing had touched.
+> And `Roadway` wears on `hewing − timbering`: gating one while the other was merely aided put
+> them on scales 3× apart, so any timbering at all covered any amount of cutting and **the roof
+> became unbreakable**. A difference between two levers only means anything if both are measured
+> the same way.
+
+**Coal dust and stone dusting landed after that**, which closes the last of stage F bar one.
+`coal_dust` and `stone_dust` are resources tagged **`dust`** — neither `gas` nor `solid`, and
+that single decision is what makes the mechanic work. Tags govern *transport* and never what can
+react, so dust burns in the district's air while no conduit in the mine will carry it. Tagged
+`solid` it would ride out on the tubs with the coal; tagged `gas` the fan would sweep it away,
+and **settled dust is the entire hazard** — it lies on the ledges for months, and a pit
+ventilated to the standard of the day could still be destroyed by what was in its roadways.
+
+Measured: **0 kg of dust with nobody at the face, 244 kg cutting flat out, and identical with
+the fan running and with it stopped.** Then Senghenydd — fan running, gas cleared to 0.01 kg: the
+firedamp alone cannot do it and the dust consumes every kilogram of itself carrying the
+explosion, a mortal and a minor. Dusted to 91% inert, 152 kg is left unburned and the worst
+injury is a severe.
+
+> **`reaction_throttle` had to become per-reaction**, and that is an engine change rather than a
+> mine one. A node can host two reactions choked by different things: stone dust inerts the coal
+> dust and does nothing whatever to the gas. Throttled alike, a dusted district sat at **ambient**
+> through a naked light in 12% firedamp — stone dusting silently cancelling the entire gas
+> hazard, which is neither the history nor the design. `Vessel` ignores the new argument; only
+> the district reads it.
+
+Still owed: **afterdamp** — the district burns its oxygen and the survivors should be
+suffocating rather than merely standing in a wrecked roadway. It needs a *continuous* hazard
+rather than a failure-triggered one, which the engine has no mechanism for yet, so it wants its
+own pass. **Designed, not built**, in
+[`design_sketches/breathable-air.md`](design_sketches/breathable-air.md): `air` takes a
+`breathable` tag, every other gas asphyxiates by displacement, and `flue_gas` is already the
+product of firedamp combustion — so afterdamp needs no new content at all. The engine work is a
+second hazard source in phase 6b (**ambient perils**) and a suffocation term in `Fatigue.advance`;
+bad air drains fatigue, being pinned at the ceiling *in bad air* is the injury, and the clock from
+`severe` to `mortal` is what makes rescue worth doing.
+
+> **That sketch also settles a core design tension, and it is larger than the air.** Hazards keyed
+> by **station** say somebody was hurt because of the job they were doing. A fireman is not: he is
+> hurt because he was standing next to a boiler when it let go, and an unmanned machine can still
+> kill somebody walking past, which the station key cannot say at all.
+
+**Stage A is built: places are first class** (`place.rb`, `Layout`, `Fragment#places`,
+`Tick::Exposure`, `place_spec` — 11 examples). A `Place` owns nodes, a node's `endangers:` may key
+by `places:`, `stations:` or both, and phase 6b resolves a minion against each. What it buys is
+the passer-by: somebody holding no lever, standing in the district, hurt anyway — and the man just
+carried off his post, who is still in the room. The mine's roof fall and district rupture both
+moved to place keys.
+
+- **Places are declared, not scraped**, and unioned by id — the chassis owns the pit bank, and
+  fitting a cage puts its drive there without the fitting knowing what else is in the room.
+- **Four build-time refusals**, because for a hazard system silence must never be the safe
+  answer: a place naming a node that does not exist, a node two places claim, and a passage
+  endpoint or station in a place nobody declared. All four caught real mistakes within minutes of
+  existing — the first one was in the mine's own fixtures (`cage_drive` is a fitting's node, not
+  the chassis's) and two more were in `place_spec`'s own rig.
+- **Both keys stay legal**, which is the migration. The steam engine declares no places, keys by
+  station, and is bit-identical. Its retrofit — boiler house, footplate, yard — waits on the
+  lessons the mine teaches rather than on a guess, and the question it will answer is whether a
+  place is the right granularity for a machine you stand *on* rather than *in*.
+
+**Stage B is built: breathable air** (`breath.rb`, a suffocation term in `Fatigue.advance`,
+`Injury.succumb`, `breath_spec` — 17 examples, `afterdamp_spec`). **Afterdamp arrived with no new
+content at all**, which was the whole bet: `air` gained a `breathable` tag, `flue_gas` was
+already what firedamp and coal dust leave behind, and the only thing that had ever been missing
+was anybody asking whether the people standing in the result could breathe.
+
+- **Volume, not mass.** Firedamp is 0.668 kg/m³ against air's 1.225, so kilograms make methane
+  look half as dangerous as it is — and it is displacement that suffocates.
+- **Bad air drains `fatigue`**, which buys the graded effect for free: somebody works worse
+  before they drop, recovers by walking out, and `minion_spent` fires first as a warning about
+  a district rather than about a person. `endurance` is the clock, clamped — see the traps list,
+  where a divisor turned out to be as dangerous as a blend.
+- **Pinned at the ceiling *in bad air* is the collapse**, and the conjunction matters: a stoker
+  flat out also reaches the ceiling and is merely spent. From there an `asphyxia` counter runs
+  to a mortal injury and **drains again in clean air**, so fixing the ventilation is the revival
+  and there is nothing else to build for it.
+- **A room's air is its own volume, never a pipe crossing it** — derived from place membership,
+  so the fan and the blower are correctly ignored. A place with no air, or with two volumes in
+  it, refuses the build.
+- Measured: a ventilated district sits at 0.95 breathable; a naked light takes it to **0.247**,
+  and the pit bottom to 0.84. The pit bottom then clears and the district does not, so the same
+  event kills at the face and only stands somebody down two hundred metres away. That is the
+  argument for places, in one measurement.
+
+> **Two behaviours nobody wrote, both from putting bad air in the fatigue pool rather than in a
+> pool of its own.**
+>
+> **Whether a collapsed man dies is decided by arithmetic, not by a rule.** Once stood down he
+> recovers at `BASE_RECOVERY` while the air drains him at whatever the air is doing. In the
+> district suffocation outpaces recovery, fatigue stays pinned, the clock fills, he dies; in
+> milder air recovery wins, fatigue falls off the ceiling and the clock runs *backwards*. There
+> is no rule for that anywhere.
+>
+> **A badly ventilated district produces less coal.** `dust_spec` caught it: the fan-off case
+> made 1.9% less dust, and the reason is that its hewer cannot breathe properly, so he cuts
+> less. Dust **per kilogram cut** is identical to six decimal places with the fan on and off —
+> so the fan still removes no dust, which is what that example exists to prove, and the example
+> now says so in the only way that survives the confound. Ventilation paying for itself in
+> output, with nothing wired to make it, is the best argument yet that the air belongs in the
+> fatigue pool.
+
+**Apparatus is metered.** `rescue_apparatus` is the first kit that lets anybody walk *into* bad
+air, and `respirator_air` (9,600 ticks — forty minutes) is what stops that being free. The
+remainder lives in `state[:minions][…][:apparatus]`, is spent every tick the air is foul whether
+or not that tick needed it, and **an empty set is no protection at all** — no taper, because
+there is no half a breath. `respirator:` alone is inert, which is what the two placeholder
+declarations turned out to be.
+
+**Stage C is built: blackdamp** (`blackdamp` resource, `goaf` + `goaf_seep`, the `lamp_flame`
+gauge, `blackdamp_spec`). Firedamp's opposite in every way: it seeps from worked-out ground with
+nobody cutting, it does not burn, there is nothing to smell, and it kills by being there instead
+of air.
+
+- **It is the pit bottom's hazard where firedamp is the face's**, and that is achieved by
+  *where it is wired* rather than by modelling buoyancy. "Heavier than air, lies in the dips"
+  becomes "vented into the lowest volume". A hazard whose whole character is where it collects
+  can be placed instead of simulated.
+- **It is inert because no reaction names it.** A substance is a reagent by being listed, so
+  being left out of every list is the entire mechanism — asserted against the registry, not by
+  weighing a district after a blast.
+- **The lamp is the first gauge in the game that trips before the danger does.** Firedamp is
+  read off what the flame *gains*; blackdamp off what it *loses*. Bands are measured, not
+  derived — a ventilated pit bottom settles at 2.2% and `Breath::SAFE` falls near 6.4%, so a
+  clear flame has to reach past the first and a dull one arrive before the second.
+- Tuned by measurement, and the first two attempts were wrong in the same direction: at
+  1.5e-4 conductance **a fully ventilated pit killed its own putter**, which is a broken mine
+  rather than a hazard. At 1.8e-5 the fan holds the bottom at 0.968 and the face at 0.94, and
+  with the fan off the bottom creeps to severe over about twenty-five simulated minutes.
+- **The fan tier now buys breathable air, which is what it historically bought.** Measured over
+  a worked shift: the waddle clears `Breath::SAFE` by 0.006 and the Guibal by 0.022 — both
+  survivable, one with room to be unlucky in. That is the Guibal's real claim, and it was
+  unmeasurable before blackdamp existed because nothing consumed the margin.
+
+> **An unventilated working is the gassiest and the hardest to set off properly**, which nobody
+> wired. Firedamp combustion consumes 17.2 kg of air per kilogram of gas, so a district whose
+> air blackdamp has displaced cannot burn what is in it — an ignition there took only 40% of
+> the firedamp. Two spec assertions died finding this out: both tried to prove "blackdamp does
+> not burn" by weighing a district after a blast, and were measuring, in turn, the explosion
+> venting the atmosphere out through the return and then the explosion starving. **The claim is
+> a registry claim** — a substance is a reagent by being listed — and that is how it is asserted
+> now, with the starvation promoted to an example of its own.
+
+**Reaction pathways, and whitedamp with them** —
+[`design_sketches/reaction-pathways.md`](design_sketches/reaction-pathways.md). A reaction may
+declare `limited_by:` and an ordered `alternatives:` list, and then running short of that one
+reagent **changes what it makes rather than how fast it goes**. A fire with half the air it
+wants burns all its fuel anyway and produces carbon monoxide doing it.
+
+- **The split needs no constant.** With `a₁` and `a₂` per unit and `A` available,
+  `x·a₁ + (E−x)·a₂ = A` has one answer. `pathway_spec` checks kilograms against that equation
+  rather than against a measurement.
+- **A reaction declaring no alternatives never enters any of it**, which is what protects
+  `rate_per_s` — it sits on a measured plateau for every shipped fuel. `steam_engine_spec` is
+  46/46 and the digest did not move.
+- **Pathways are alternative fates for the same kilogram of fuel**, enforced at boot: every
+  pathway consumes the same quantity of everything but `limited_by:`. Otherwise their extents
+  are not commensurable and splitting one between them means nothing.
+- **Whitedamp is the only damp the mine *makes* rather than receives**, and measurably so:
+  the same ignition in the same district produces **4.8 kg at a poisoned 1.65%** with the fan
+  off and **exactly zero** with it on. That causation is the argument for pathways over a seep
+  — a source node would have reproduced the gas and lost the reason for it.
+- It kills without displacing anything (`toxic_fraction: 0.0015`), which is the first client
+  for `Breath.poisoned?` — **written in the breathable-air release and never called until
+  now**. Wired in `Tick#breathability`, where poisoned air collapses to zero.
+- The two after-gases are a deliberate pair: afterdamp is hundreds of kilograms, kills by
+  displacement and takes hours to clear; whitedamp is five kilograms, kills by poison and the
+  fan sweeps it in **250 s**.
+- **The canary** is the third lamp-less reading on the panel and the only warning there is —
+  firedamp is read off what a flame gains, blackdamp off what it loses, and a lamp burns
+  perfectly well in air that is killing you. Three states, no number, no `Noise` and no
+  `Stick`: a bird is not an instrument you can knock out of true.
+
+Still open, and deliberately: a collapsed minion cannot be carried out (the counterplay is the
+fan), apparatus cannot be refilled and nobody husbands it, **a pathway may name a reagent the
+preferred one does not and that seam ships under-tested** (water gas is the case it exists for;
+`pathway_spec` is its only coverage), and **the steam engine's firebox has no starved pathway
+yet** — deliberately much later, since a banked fire quietly gassing a boiler house is a change
+to an operation people already know and it wants the places retrofit first.
+
+**What the first playthrough of the mine changed.** All five were about the walk being invisible
+or the shift being too small to absorb it:
+
+- **The panel says where somebody is and how far along.** `crew_view` carries `place`, `travel`
+  (nought to one across the whole walk) and `remaining_m`; `Operation#panel` carries `places:`,
+  which is **empty for an operation with no geometry** so the steam engine's console is
+  unchanged. A bar drawn from `progress` alone would have run backwards at every place — hence
+  `journey`, the high-water mark of how far there was left to go.
+- **`Layout` carries a distance beside every first step**, so `route_metres` is a lookup rather
+  than a search. Geometry, not duration: a cage and a ladderway are the same ninety metres.
+- **The pit fields ten**, up from four, and **the last three start in the district** posted to
+  nothing (`Mine::ADVANCE_SHIFT`). A pit whose every hand starts at bank spends the opening five
+  minutes on a walk while the engine house is still raising steam. Its fitted version is
+  follow-up 7.
+- **The fitting screens switch machines.** Reaching the second operation's crew or outfitting
+  meant going back through its console first.
+- **`DevMatch.crew` is memoised per ROSTER**, not per operation — keyed on the operation alone it
+  survived the life of the process, so a player who posted a crew kept being shown the one it
+  happened to hold first. The machine had the right people; the screen did not. Same bug shape as
+  the panel cache, one level down.
+
+**What the second playthrough changed.** Four gauges, one new station kind, and a labour market
+that was not worth turning up to:
+
+- **Four instruments the mine was flying without.** `putting` (what the putter is shifting),
+  `roof_timber` (the road's own integrity, which is what "is there enough timber in" means when
+  timbering is a lever and not a store), `cage_speed` (is the man-riding gear actually turning
+  — a cage is a *passage*, so calling it and it moving were two facts with one reading between
+  them), and `winding_gear` (what the rope has left; the seam for hot-rope failure).
+- **`ControlPoint#capacity`**, and `assign_minion` refuses past it — counted over `posting`, so
+  the second man sent to a one-man hole is turned away at the order rather than after walking
+  the district. The first user is the mine's **refuge hole**: somewhere to rest *in the
+  district*, because the lamp cabin is at bank and resting a spent hewer cost the round trip.
+- **A kobold's `endurance` is 1.4, not 0.7.** It divides fatigue accrual and enters no
+  capability blend, so it buys staying power and not a gram of coal: a day-labourer still hews
+  badly, now for 99 s flat out rather than under a minute.
+- **The pit owns the gear.** Equipment blueprints are scoped to the standin as well, one kit for
+  the whole roster, issued to every unfilled seat. Training deliberately is not — you can hand
+  somebody a lamp at the gate, not four years at the face. Without it a day-labourer was a hewer
+  with no pick and no light, which `gated_by:` scores at exactly zero however many you field.
+
+**What the third playthrough changed: the room can meet a gate, and no two pits are alike.**
+
+- **District lighting is a fitting with four tiers, and `naked_lights` is gone.** Light was a
+  `gated_by:` term that only a *carried* lamp could satisfy, so the lever that ignited the
+  district bought nothing at all — a pure trap. Now a node answers `ambient_tags` and
+  `Minion#gate` takes **the better of what you carry and what the room gives**, never the sum.
+  Measured, same hewer, 120 ticks: dark **0 kg**, tallow candles **11.8**, oil flares **25.2**,
+  gauze lanterns **16.8**, electric lamps **24.1**. The trade is real in both directions —
+  flares are the brightest flame and still fire the gas at t845 unventilated, while the two
+  safe tiers **never** do, and the electric tier reads 0.81 of its rating because it is hanging
+  off the same shaft as the fan.
+  > **The igniter names the lever, not the fitting.** `heater_control_id: :naked_flame`, and a
+  > safe tier declares `:safe_light` instead — `run_heater` reads `fetch(id, 0.0)`, so a lever
+  > nobody declared is zero. Neither may be called `:sconces`: that is the node, and ids are
+  > one flat namespace.
+- **`Mine::Ground` draws the ground per match** — firedamp, blackdamp and water each from their
+  own RNG stream, plus the goaf's whitedamp share. Seed 2 is fiery, dry and sweet; seed 3 is
+  fiery, dry and has **978 kg of carbon monoxide** standing in the waste. **The ordinary make
+  varies and the catastrophe does not**: `Inrush` scales its seep and leaves the breach alone,
+  or a dry pit's inundation stops being the moment the pump tier decides.
+- **The sump reads as a level, not a weight.** `Sump::FLOOD_KG` is the mark where water is over
+  the rails and backing up the road, and the needle is a percentage of it — distance from
+  disaster rather than an amount of water. Beside it, **The Make**: prose off the seepage's own
+  throughput, which is how a pit introduces itself now that no two are alike.
+
+Then
+[`design_sketches/mine-follow-ups.md`](design_sketches/mine-follow-ups.md): **minion-caused
+accidents**, a second route into harm that does not begin with a part breaking. Misread gauges
+(phase 7, driven by `observer:`, which `Filters::Misread` has been waiting for), fumbled levers
+(phase 0, whose own comment already reserves itself for *"any mishap entropy"* — but which needs
+**finite `stiffness`** first, or none of it can fire), and a hidden **renewable margin** spent in
+activity-driven bursts, which leaves `Injury` untouched.
 
 Steps 1–4 of the original vertical slice are **done** — the prototype is playable in a browser.
 What remains, in dependency order:
@@ -354,9 +903,25 @@ What remains, in dependency order:
    deliberately untouched by the fatigue release for this reason.
 
    Build nothing before then that assumes every injury originates in a part failing.
-7. **Auth**, then the rest of the deferred minion work (the `observer` gauge path, finite lever
-   stiffness for a control that should genuinely take time to travel), then the failure modes
-   from `design_sketches/boiler.md`, then Chemical Vats.
+
+   **A proposed shape now exists** in
+   [`design_sketches/mine-follow-ups.md`](design_sketches/mine-follow-ups.md) §4, as part of the
+   mine's minion-caused accidents: a hidden **renewable margin** — `Wearing`'s *other* route into
+   failure, the one `Injury` never borrowed, except that a person's margin comes back where a
+   part's durability does not. Rolled from a deliberately **wide** spread, spent in **bursts tied
+   to how hard a place is being worked** rather than as a per-second drip, recovered by safe work
+   and rest, and re-rolled whenever it refills so a lucky worker cannot be identified as one.
+
+   Fatigue scales the accrual and nothing else, so it lands on incidence exactly as the distinction
+   above demands, and **`Injury` itself needs no change**: the accident produces a hazard phase 6b
+   already consumes, and the Danger Check still throws no dice.
+
+   Three properties that shape is chosen for: production and danger become the same dial; a
+   badly-suited worker burns through in minutes while a well-suited one at hazardous work still
+   carries a ~1-in-100 tail; and a worker run low is not condemned, they need taking off that post.
+7. **Auth**, then the rest of the deferred minion work (the `observer` gauge path), then the
+   failure modes from `design_sketches/boiler.md`, then Chemical Vats. Finite lever stiffness
+   is done — the mine's valves ship it and `lever_travel_spec` holds the phase.
 
 **Frictional bearings, and the load's integrator goes first.** Designed in
 [`design_sketches/bearings.md`](design_sketches/bearings.md): a bearing is a **modelled friction
@@ -1197,6 +1762,66 @@ documented where they matter and collected here because the collection is worth 
   40 and were **40× too slow** — a fireman finished raising steam 4.3% tired, and nothing would
   ever have tired anybody. Nothing announces this: the numbers look reasonable and the mechanic
   is simply inert.
+- **Tune an accident rate per SHIFT, not per person.** A mine carries ten seats and puts five
+  or six of them somewhere dangerous, so the frequency the player experiences is five or six
+  times the one any individual carries. A figure that reads perfectly reasonable per-person —
+  "a poor hand is in trouble inside seven minutes" — is a casualty every minute at the table.
+  **Pick the shift-level frequency first and divide by how many people are exposed.** Same
+  error as the clock trap above, different denominator; it is why `Blunder`'s figures are
+  quoted against a whole shift and not against one man.
+- **A content field that is read by arithmetic must be REQUIRED, not defaulted.** `mass_kg` is
+  read by the lift limit and the burden ratio, so a default would be a load-bearing number that
+  cannot be seen in the content — and the first person to add a race or a tool would ship a
+  weightless one without noticing. It raises at boot instead (`base.fetch(:mass_kg)` with no
+  default, and a required keyword on `Equipment`/`Training`), which `ruby -Ilib -e 'require
+  "reactor_sim"'` already checks. **A floor is not a default**: `Sheet::MIN_MASS_KG` catches a
+  runaway negative *offset* and must never stand in for an absent declaration.
+- **Netting terms cannot fix a gate, and adding one looks like it did.** `Fatigue` nets accrual
+  against recovery, so adding a `burden:` accrual term for carrying somebody still left a light
+  casualty reading as a *rest* — `BASE_RECOVERY` simply beat it. Measured: a kobold on a
+  half-tired human was **−0.068 fatigue per minute** with the term alone and **+0.064** once
+  `recovery` returned zero while carrying. **Ask whether the quantity should be reduced or
+  switched off**; if the smallest case has the wrong sign, you need a gate.
+- **A threshold that ends an episode must be a rising EDGE, or the starting state satisfies it
+  every tick.** `Blunder` re-rolls the accident margin when it fills back up, written as
+  `margin >= margin_full` — which is also true of everybody who has never spent anything. So
+  every quiet tick re-rolled the margin back to full, no exposure ever accumulated, and the
+  haulage road became a corridor nobody could be hurt on. Nothing failed: the state looked
+  healthy, the events were simply absent. **Compare the value before and after, and clamp the
+  pool at its ceiling so the edge stays an edge.** Ask of any `>=` that means "has reached":
+  is it also true at `initial_state`?
+- **Recovery belongs to being somewhere safe, not to a quiet moment somewhere dangerous.**
+  Gating the same margin's recovery on "nothing was spent this tick" hands it back during the
+  gaps between tubs, which on bursty traffic is most of the ticks — six times what the road
+  takes. Gate recovery on **whether anything reaches you**, not on whether it bit.
+- **A mass carried THIS TICK is not a rate per second, and dividing one by the other is
+  wrong by a factor of `dt`.** A node's `carried_kg` is what crossed it this tick; its
+  `max_kg_per_s` is a rating. `Node#activity` divided them directly and reported a haulage
+  road running at 3.6% of capacity when it was running at 14% — so the perils keyed to it
+  never fired and the accident model looked inert. **At the default quarter-second tick the
+  error is fourfold and it looks exactly like a mechanic that is simply tuned low**, which is
+  the dangerous part: the obvious response is to raise a constant until something happens.
+  Check the units before the number.
+- **A die drawn only sometimes makes the whole stream depend on the condition.** Phase 0 now
+  throws for every minion every tick, and the discipline is to draw a **fixed number
+  unconditionally and discard what is unused**. A conditional draw does not fail where you
+  made it — it fails days later, as a snapshot that replays differently somewhere unrelated.
+  `Tick#draw_fates` is one method returning one fixed-size hash precisely so the count can be
+  checked by reading it, and adding a draw there breaks replay for every existing snapshot.
+- **A constant inside a `describe` block is not scoped to it.** Ruby blocks open no constant
+  scope, so a bare `STATS` in a spec lands on `Object` and the last file *loaded* wins. Three
+  spec files declared one — two a Hash of stats, one the Array of their names — so
+  `Minion.new(stats: STATS)` got an Array and died with `no implicit conversion of Symbol into
+  Integer`, in some file orders and not others. It passed alone and in every pair. **Name a
+  spec constant for its file.**
+- **A rate multiplied by a gate is not a rate you can tune.** `Ignition`'s quench term is
+  `quench_per_s × max(chill, starved, unlit)`, so in a district at 1300 K with the fan running
+  both `chill` and `starved` are zero and **the quench figure does nothing at all** — 300.0
+  behaves exactly like 0.30. A fire that would not go out looked like a quench that was too
+  low and was really a missing flammability limit: with no `lean_fraction`, a 1% mixture
+  ignited and then burnt every kilogram that seeped in afterwards, holding the roadway at
+  1300 K and pinning its own firedamp gauge at zero. **Read what multiplies a constant before
+  changing the constant.**
 - **A rate whose denominator contains its own output is three times faster than it reads.**
   Fatigue accrues on `intent ÷ capability` and `capability` contains `(1 - fatigue)`, so
   `df/dt = K/(1-f)²`. That integrates to `t = (1 - (1-f)³)/3K`, so **time-to-spent is `1/3K`, not
@@ -1219,6 +1844,70 @@ documented where they matter and collected here because the collection is worth 
   fixture that only changes when somebody changes it on purpose. The same rule covers outcomes:
   "the drum lets go and Jim dies" asserts the balance pass, where "a real injury carries the
   person and the verdict" asserts the wiring. **Shape does not move with balance; outcomes do.**
+- **A driven fitting is a BILL, not a gate — and for half of them that is wrong.**
+  `Conduit#driven_by:` charges a shaft for work the stream already did, and
+  `drag_conductances` returns `{}` the moment the shaft stops, so a fitting with no power
+  passes its full rating **for free**. Correct for a fan, which really is a hole when it is not
+  turning. Completely wrong for a bucket pump or a winding drum, which move material *because*
+  they turn: the first mine's sump pump lifted water **90 m for nothing** with the line shaft
+  stationary, at the full seepage rate, forever — so the mine could never drown and the one
+  failure the whole operation is built around was arithmetically unreachable. `displacement:
+  true` adds the missing term. **It reads as a balance problem**, not a bug: the pump simply
+  looked very good.
+- **Book every port's receipts, not just the interesting ones.** `Atmosphere` counted
+  `:exhaust` and `:spill` and not `:intake` — but `:intake` is an *outlet* and a link is
+  two-way, so an operation whose draught falls away pushes air back up the way it came. It
+  arrived at a port nothing counted, in a node that resets to baseline every tick: **24 kg
+  destroyed over 3000 ticks**, steadily, and invisible to every spec because nothing in the
+  game had ever reversed its intake before a mine stopped its fan.
+- **A supply buffer is not a battery.** `Nodes::Import` holds bought work to absorb the
+  one-tick lag between an exporter paying out and a shaft spending, and with no cap a
+  lightly-loaded operation banks everything it is sent — **355 MJ** after an hour on the first
+  mine, enough to run for hours with the supply cut. `holds_seconds:` bounds it and the
+  overflow is booked to `joules_to_friction`, because it has already left the supplier's books
+  as `joules_to_work` and declining to count it would destroy it between two sets of books that
+  each look correct.
+- **`ctx.controls` carries the WORKED value of an effort lever, not its position**, so any
+  figure sized against 0–100 is out by whoever is standing there — and every such figure moves
+  again whenever `capability` changes. Three numbers in the mine had to follow hewing's switch
+  from `aided_by:` (×1.6 with a decent kit) to `gated_by:` (×0.48): the roadway's wear rate, the
+  inrush's, and the hazard's `reference:`. None of them was touched by that change and all three
+  were wrong afterwards — the roof stopped coming in at all, and every fall landed in one
+  severity band.
+- **A difference between two levers only means anything if both are measured the same way.**
+  `Roadway` wears on `hewing − timbering`. Gating one multiplicatively while the other was
+  merely aided put them on scales 3× apart, so *any* timbering covered *any* amount of cutting
+  and the roof became unbreakable. Gate both or aid both; never one of each.
+- **A rate is meaningless without the scale it is against — check the pool before picking the
+  rate.** `Wearing::DEFAULT_DURABILITY_RANGE` is **850–1150**, not 0–1, so a wear rate written
+  as a plausible-looking `9.0e-3` per second took **2% off a roadway in 1500 s** and the roof
+  could not have come in inside a day's play. The gradient was visibly correct at every setting
+  — timbering clearly helped — which is what makes it nasty: it reads as a balance decision
+  rather than as a figure that is off by two orders of magnitude. The same shape as the
+  `time_scale` trap below, one denominator along.
+- **`endurance` must never enter a capability blend**, however obviously a job depends on
+  stamina. It is a *divisor* in `Fatigue.accrual` and enters no blend, which is precisely what
+  lets `ReferenceCrew::TIRELESS` set it to **1e6** to make a reference hand tireless without
+  moving a single throughput baseline. `Minion::PACE` was written as `{ endurance: 0.7,
+  strength: 0.3 }` because walking a mine is an endurance job — and the reference crew promptly
+  walked at **seven hundred thousand times** human pace, arriving everywhere in one tick. Every
+  travel figure read as instantaneous and it looked like the travel phase was not wired up at
+  all. `PACE` is strength and toughness for this reason, not because those are the better
+  physiology.
+
+  **A divisor is not safe either, and `Breath` is where that showed.** Suffocation divides by
+  endurance, which is the right stat — and unclamped, a reference hand at 1e6 is *immune to
+  suffocating*, so every spec built on them passes while proving nothing. There are only two
+  answers: keep the stat out, or clamp the range at the point of use. `Breath::RESERVE` clamps
+  to `0.5..2.0`, because an oxygen reserve genuinely varies between people by about a factor of
+  two and never by more — so the clamp is physiology rather than a workaround for a fixture.
+  **Any new consumer of `endurance` has to pick one of those two on purpose.**
+- **A hook built ahead of its caller is invisible unless it says so.** `Breath.poisoned?`
+  shipped with `toxic_fraction:` in its signature, no substance declaring one, and no marking
+  — inert for a whole release, and findable only because the same person happened to build its
+  consumer. It survived; the next one will be deleted as dead code or reimplemented beside
+  itself. **Mark every seam `TODO:` with the name of its first caller**, say that it is
+  untested, and name it for what it is for. The rule is in the root `CLAUDE.md`.
 - **Content is global and is never snapshotted.** `Operation.from_h` rebuilds through the
   registered builder with no `content:`, so a restored match always resolves against
   `Content.default` — a registry injected at build does not exist after a round trip, and the
@@ -1306,7 +1995,17 @@ documented where they matter and collected here because the collection is worth 
   `max_kg_per_s` does not apply to a conduit that declares a `conductance:`, so any rate beside
   one is inert — set it to three different values and the results are byte-identical at every
   setting. **Before tuning a constant, check it is on the path that decides the thing**; that
-  three-value sweep is the cheapest possible test. The same shape applies to the cocks'
+  three-value sweep is the cheapest possible test.
+  **It bit a second time on the mine's firedamp blower**, which was written as `max_kg_per_s:
+  0.05` beside `conductance: 0.02` and passed **4.2 kg a tick against a 0.0125 kg rating** —
+  filling a district to 65% gas in three minutes with the fan making no difference whatever.
+  The tell was that the two figures disagreed by three orders of magnitude and the *larger* one
+  won; the symptom read as "the ventilation model does not work".
+  And its mirror image, from the fix: **taking the conductance away does not leave the cap in
+  charge, it leaves nothing in charge.** A rate-driven path between two *passive* holders moves
+  nothing at all, because a passive vessel declares no intent and there is nothing to drive it.
+  Emission went from far too much to exactly zero. If both ends are passive, the restriction has
+  to be a conductance. The same shape applies to the cocks'
   `drain_kg_per_s`, which is inert across 0.25 → 4.0.
 
   **Delete a dead constant rather than documenting it as dead.** A number left in place with a

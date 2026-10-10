@@ -43,6 +43,7 @@ Diagnostic.new(
 | `Derived.new(node, quantity)` | Something the node computes |
 | `Level.new(node)` | How full, 0–100 |
 | `Contents.new(node, resource)` | kg of one substance inside a mixture |
+| `Fraction.new(node, resource)` | **percentage** of a node's contents that is one substance. Wherever the total can move, kilograms mean different things at different times — a district holding 30 kg of firedamp is comfortable with the fan on and lethal with it off, because the air went with the fan. A concentration means one thing in both cases, and for a damp it is what a flame responds to. Empty contents read 0, not unavailable |
 | `Durability.new(node)` | Remaining durability, absolute |
 | `Broken.new(node)` | 1.0 / 0.0 — feeds a lamp |
 | `Aggregate.new([sources], operation: :sum \| :max \| :min)` | One number across many nodes |
@@ -50,8 +51,8 @@ Diagnostic.new(
 `Derived` accepts only the quantities in `Sources::Derived::SIGNATURES` — a snapshot, and
 `ruby -Ilib -e 'require "reactor_sim"; puts ReactorSim::Sources::Derived::SIGNATURES.keys'`
 is the truth: `temperature_k`, `pressure_pa`, `contents_volume`, `room_m3`, `occupancy`,
-`compression_pressure_pa`, `effective_fill`, `contents_kg`, `omega`, `rpm`, `rim_speed`,
-`kinetic_joules`,
+`compression_pressure_pa`, `effective_fill`, `contents_kg`, `flooding`, `omega`, `rpm`,
+`rim_speed`, `kinetic_joules`,
 `stress_fraction`, `integrity`.
 **Add new ones there** with the right arity (`:with_content` or `:state_only`) or the source
 will not build — it raises at construction rather than reading nothing at runtime.
@@ -98,7 +99,7 @@ Anything needing memory is a **filter**, not a source — that is why `Rate` is 
 | `Quantize.new(step)` | Coarse dial increments. |
 | `Bands.new([thresholds])` | Collapses a value to a band index — pair with `Prose`. |
 | `Stick.new(chance:, release_chance:)` | Needle catches and holds. Flags `:stuck`. |
-| `Misread.new(chance:, magnitude:)` | An observer occasionally and confidently wrong. Flags `:misread`. |
+| `Misread.new(chance:, magnitude:, deadband: nil)` | An observer occasionally and confidently wrong. Flags `:misread`. **`deadband:` is opt-in and makes the error hold** until the real quantity has moved that far — once wrong, stay wrong. Without it the filter redraws every tick, which is right where it models a *coarse instrument* rather than a person: try-cocks are vague every time you open them, they do not form a view and stick to it. The only filter that reads `competence:`, and it scales **all three dials** off it — a better reader is wrong less often, by less, and for less long. Scaling only the frequency leaves a careful reader wrong nearly as much of the time as a hopeless one: measured at 13% against 21% for a fourfold difference, which is no mechanic at all |
 | `Average.new(window)` | Mean of the last `window` readings. Flags `:warming_up` until full. |
 | `Rate.new` | Change per simulated second. |
 
@@ -182,9 +183,23 @@ PlayerView(tick:, operation_id:, viewer:, gauges:, flags:, controls:, incidents:
 `controls` reports `{ target:, actual: }` per lever, so a client can show a valve that is
 still travelling.
 
-`crew` reports `{ station:, injury: }` per minion — **only what changes.** A minion's name, job
-and race are configuration and reach the client once with the panel; where they are standing and
-what has happened to them are state.
+`crew` reports **only what changes** per minion. A minion's name, job and race are configuration
+and reach the client once with the panel; where they are standing and what has happened to them
+are state:
+
+| Field | What it is |
+|---|---|
+| `posting` | Where they have been **sent**. What the crew dropdown binds to |
+| `station` | What they are actually working. Nil for the whole of a walk |
+| `place` | Which room they are in. Nil in an operation with no geometry |
+| `travel` | Nought to one across the walk they were sent on, zero when standing still |
+| `remaining_m` | Metres still to walk |
+| `fatigue`, `asphyxia` | The two bars: what the work is doing to them, and what the air is |
+| `injury` | The mode, or nil |
+
+`op.panel` carries the matching chrome — `stations:` (everywhere a person can stand, a longer
+list than the levers) and `places:` (every room's label, **empty for an operation with no
+geometry**, which is what keeps "where are they" off the steam engine's console).
 
 It exists because the console's crew dropdown could *send* an assignment with no source of truth
 to display one, so it rendered at its first option whatever the real posting was, and a
@@ -209,6 +224,16 @@ A failure event carries more than the fact of it, and the panel is expected to u
 | `escalated_from` | present only when the part was already broken and got worse |
 | `damaged` | node ids this failure took with it, or absent |
 | `detail` | per-part forensics: rpm at burst, occupancy, pressure |
+
+**A casualty carries the same two, and `cause:` is top level for both.** `minion_hurt` and
+`minion_spent` name the kind of harm — `asphyxia`, `exhaustion`, or the hazard tag that reached
+them — with the part that delivered it riding along in `detail[:by]`. Put `cause` inside
+`detail` and the feed reads "unknown" beside a dead minion, which is the one thing it must never
+say.
+
+**The durable row carries `label` and `cause` as columns**, because the feed renders `label` and
+falls back to `node`. A backfilled line missing them reads `crew_8` where the live one read the
+person's name, so history and live disagree — see `Incident`.
 
 **Lead with `mode`, not `cause`.** What a part became decides what the operator does next; what
 broke it is history. The console led with the cause for a while and buried the one fact that

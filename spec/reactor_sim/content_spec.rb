@@ -6,11 +6,12 @@ require "reactor_sim"
 # and an unbalanced reaction quietly creates matter every time it fires. Validation is
 # eager and loud for exactly that reason — a bad content file should never reach a tick.
 RSpec.describe ReactorSim::Content do
-  # A complete archetype, so a spec about one thing does not have to spell out six stats it
-  # does not care about. Every one of them is required, deliberately — see `STATS`.
+  # A complete archetype, so a spec about one thing does not have to spell out six stats and a
+  # mass it does not care about. Every one of them is required, deliberately — see `STATS` and
+  # `Sheet::MIN_MASS_KG`.
   def human
-    { label: "Human", strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
-      dexterity: 1.0, charisma: 1.0 }
+    { label: "Human", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: 1.0,
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }
   end
 
   describe "validation" do

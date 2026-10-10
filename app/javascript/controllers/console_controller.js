@@ -30,6 +30,23 @@ export default class extends Controller {
   // says `supersedes` and does not wait this out.
   static FOREIGN_RUN_GRACE_MS = 2000
 
+  // **Two deadlines, because silence means different things before and after the first
+  // message.**
+  //
+  // A subscription that has never delivered anything is one that never took — and it cannot be
+  // waited out, because the runner publishes at 4 Hz and a resync forces a full view at once,
+  // so a working stream answers almost immediately. That is the navigation case, and it has to
+  // be caught in a moment rather than in a quarter of a minute: somebody tabbing to watch a
+  // friend's pit and back cannot come home to a console that has been unattended for fifteen
+  // seconds.
+  //
+  // Once it has spoken, silence is ordinary — unchanged ticks are skipped by design, so a cold
+  // machine says nothing for long stretches. `ViewBroadcaster::FULL_VIEW_TICKS` puts a floor
+  // under it at 10 s, and only past that does quiet mean broken.
+  static HANDSHAKE_MS = 1500
+  static STALE_MS = 15000
+  static WATCHDOG_MS = 250
+
   connect() {
     this.state = { gauges: {}, flags: {}, controls: {}, crew: {}, tick: null }
     this.runId = null
@@ -54,15 +71,69 @@ export default class extends Controller {
       this.crew.set(el.dataset.minionId, el)
     })
 
+    // Place id to label, rendered with the panel. An operation with no geometry ships an empty
+    // map, and every lookup below then misses — which is the intended nil.
+    this.places = this.readPlaces()
+
+    // **Turbo keeps this page as it looked when you left it.** Coming back, it paints that
+    // snapshot instantly — a full panel of readings that are minutes old and indistinguishable
+    // from live ones. Misreading an instrument is the whole subject of this game, so a stale
+    // number shown as current is the one thing the console must never do; blank them on the way
+    // out and the restored page says "—" until a real view lands.
+    this.blankOnCache = () => this.blankReadouts()
+    document.addEventListener("turbo:before-cache", this.blankOnCache)
+
+    this.live = true
+    // **Deferred by a microtask so the console we are replacing has already let go.**
+    //
+    // Turbo swaps the whole body in one mutation batch, and Stimulus makes no promise that the
+    // outgoing controller's `disconnect` runs before the incoming one's `connect`. When both
+    // name the same operation the cable identifiers are identical, so a teardown arriving late
+    // cancels the subscription this page has just made — and the panel is then live-looking and
+    // deaf. A microtask runs after every connect and disconnect in that batch and before the
+    // browser does anything else, so this costs no visible time.
+    queueMicrotask(() => this.live && this.subscribe())
+    this.watchdog = setInterval(() => this.checkStream(), this.constructor.WATCHDOG_MS)
+  }
+
+  disconnect() {
+    this.live = false
+    document.removeEventListener("turbo:before-cache", this.blankOnCache)
+    this.subscription?.unsubscribe()
+    this.subscription = null
+    if (this.timer) clearTimeout(this.timer)
+    if (this.watchdog) clearInterval(this.watchdog)
+  }
+
+  subscribe() {
+    // Never two at once. Turbo can connect a controller against a cached page and then again
+    // against the real one, and a leftover subscription would go on consuming the stream
+    // this one is being judged by.
+    this.subscription?.unsubscribe()
+    this.lastMessageAt = Date.now()
+    this.speaking = false
+
     this.subscription = consumer.subscriptions.create(
       {
         channel: "OperationChannel",
         match_id: this.matchIdValue,
-        operation_id: this.operationIdValue
+        operation_id: this.operationIdValue,
+        // **The nonce is what stops one console cancelling another's subscription.**
+        //
+        // Action Cable keys subscriptions by *identifier*, which is the JSON of these params —
+        // so two consoles naming the same operation are the same key on the server, and an
+        // unsubscribe from the one being torn down removes whichever is registered there,
+        // which by then is the new one. Navigating away and back is how you arrange that, and
+        // the result is a panel that looks live and receives nothing.
+        //
+        // The channel reads `match_id` and `operation_id` and ignores the rest; `stream_from`
+        // names the stream itself, so an extra param changes nothing but the key.
+        nonce: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
       },
       {
         connected: () => {
           this.setStatus("live", "text-emerald-300")
+          this.lastMessageAt = Date.now()
           // Ask for a full view immediately rather than waiting up to 10s for the periodic
           // one. Goes over HTTP like every other command, so it stays on the ordered path.
           this.resync()
@@ -74,14 +145,42 @@ export default class extends Controller {
     )
   }
 
-  disconnect() {
-    this.subscription?.unsubscribe()
-    if (this.timer) clearTimeout(this.timer)
+  // **The one failure the protocol cannot heal on its own.**
+  //
+  // A full view every 10 s makes a stale tab, a missed message or a bad merge recover with no
+  // client cooperation — but only while messages are *arriving*. A subscription that was torn
+  // down and never replaced receives nothing, notices nothing, and reads "live" over a panel of
+  // dashes for as long as the tab is open. Navigating between two consoles is how you get
+  // there, because that is when subscriptions are made and dropped in pairs.
+  //
+  // Resubscribing rather than resyncing, deliberately: a resync is a request whose answer comes
+  // back over the very cable being doubted.
+  checkStream() {
+    const deadline = this.speaking ? this.constructor.STALE_MS : this.constructor.HANDSHAKE_MS
+    if (Date.now() - this.lastMessageAt < deadline) return
+
+    this.setStatus("reconnecting", "text-amber-300")
+    this.subscribe()
+  }
+
+  // Every gauge back to "—". A reading nobody can vouch for has to look like one.
+  blankReadouts() {
+    for (const el of this.instruments.values()) this.paintInstrument(el, undefined, [])
   }
 
   // --- incoming ------------------------------------------------------------
 
   apply(message) {
+    // Any message at all means the cable is alive right now.
+    this.lastMessageAt = Date.now()
+
+    // **A backfill is not proof the stream is flowing**, and treating it as proof is how a dead
+    // console waits the full fifteen seconds instead of one and a half. It is `transmit`ted
+    // directly to the subscription the moment it is accepted, so even a subscription that is
+    // about to be cancelled delivers exactly one — which would promote it to "running" and then
+    // never speak again. Only a view, which arrives by broadcast, says the stream itself works.
+    if (message.kind !== "backfill") this.speaking = true
+
     // History, sent once on subscribe from the durable log. It arrives BEFORE any view, so it
     // is handled before the tick-regression check below — which would otherwise have nothing
     // to compare against and does not apply to it anyway.
@@ -200,12 +299,19 @@ export default class extends Controller {
   paintMinion(el, crew) {
     if (!crew) return
 
+    // **Bound to `posting`, not `station`.** Somebody walking to the far face has been sent
+    // there and has not arrived; binding the control to where they currently stand would blank
+    // the dropdown for the whole journey and read as the order having been lost.
     const select = el.querySelector("[data-minion-station]")
     if (select && document.activeElement !== select) {
-      select.value = crew.station || ""
+      select.value = crew.posting || ""
     }
 
+    this.paintPlace(el, crew)
+    this.paintTravel(el, crew)
     this.paintFatigue(el, crew)
+    this.paintAsphyxia(el, crew)
+    this.paintCarrying(el, crew)
 
     const injury = el.querySelector("[data-minion-injury]")
     if (!injury) return
@@ -215,6 +321,76 @@ export default class extends Controller {
     // A scratch and being carried out are not the same news.
     injury.classList.toggle("text-amber-400", crew.injury === "minor")
     injury.classList.toggle("text-rose-400", Boolean(crew.injury) && crew.injury !== "minor")
+  }
+
+  // Carrying, and being carried — two sides of one fact, painted from opposite ends.
+  //
+  // **The Set down button is on the carried person's row**, which is what makes it per-person:
+  // an ogre holding six kobolds has six rows and six buttons, and no list to pick from. It is
+  // hidden unless somebody is actually holding them, because a control that is nearly always
+  // inert teaches a player to stop looking at it.
+  paintCarrying(el, crew) {
+    const held = Array.isArray(crew.carrying) ? crew.carrying : []
+    const carrying = el.querySelector("[data-minion-carrying]")
+    if (carrying) {
+      carrying.textContent = held.length ? `carrying ${held.map((id) => this.words(id)).join(", ")}` : ""
+      carrying.classList.toggle("hidden", held.length === 0)
+    }
+
+    const drop = el.querySelector("[data-minion-drop]")
+    if (!drop) return
+
+    drop.classList.toggle("hidden", !crew.carried_by)
+    drop.title = crew.carried_by ? `Carried by ${this.words(crew.carried_by)}` : ""
+  }
+
+  readPlaces() {
+    const section = this.element.querySelector("[data-crew-places]")
+    if (!section) return {}
+
+    try {
+      return JSON.parse(section.dataset.crewPlaces) || {}
+    } catch {
+      return {}
+    }
+  }
+
+  // Which room they are standing in. Appended to the seat line rather than given one of its
+  // own, because it is the same kind of fact — who this is — and a crew of ten wants the rows
+  // short.
+  paintPlace(el, crew) {
+    const place = el.querySelector("[data-minion-place]")
+    if (!place) return
+
+    const label = crew.place ? this.places[crew.place] : null
+    place.textContent = label ? ` · ${label}` : ""
+  }
+
+  // Ordered somewhere and not there yet. `posting` set with no `station` is exactly that state,
+  // so it needs no extra field on the wire — and an operation with no geometry never enters it,
+  // because arrival is the same instant as the order.
+  //
+  // **The bar is what makes a five-minute walk legible.** `travel` is the fraction of the way
+  // they were sent, so it fills once across the whole journey rather than resetting at the pit
+  // bottom, and the metres left ride along as the tooltip.
+  paintTravel(el, crew) {
+    const travel = el.querySelector("[data-minion-travel]")
+    if (!travel) return
+
+    const walking = Boolean(crew.posting) && !crew.station
+    travel.textContent = walking ? "on the road" : ""
+    travel.classList.toggle("hidden", !walking)
+
+    const wrap = el.querySelector("[data-minion-travel-bar]")
+    if (!wrap) return
+
+    wrap.classList.toggle("hidden", !walking)
+    const progress = typeof crew.travel === "number" ? crew.travel : 0
+    const bar = wrap.querySelector("[data-minion-progress]")
+    if (bar) bar.style.width = `${Math.round(Math.min(Math.max(progress, 0), 1) * 100)}%`
+
+    const left = crew.remaining_m
+    wrap.title = typeof left === "number" ? `${Math.round(left)} m to go` : "On the road"
   }
 
   // A spent worker mans nothing at all — capability is exactly zero — so the bar filling is the
@@ -228,6 +404,21 @@ export default class extends Controller {
     bar.classList.toggle("bg-slate-400", fatigue < 0.5)
     bar.classList.toggle("bg-amber-400", fatigue >= 0.5 && fatigue < 0.85)
     bar.classList.toggle("bg-rose-400", fatigue >= 0.85)
+  }
+
+  // **A rescue timer, not a status.** Somebody down in bad air is being lost at a rate the
+  // player can still do something about — restore the ventilation and it runs backwards — so
+  // the bar has to be visible before it finishes. Hidden while it is zero, which is every
+  // crew member on almost every tick.
+  paintAsphyxia(el, crew) {
+    const wrap = el.querySelector("[data-minion-asphyxia-bar]")
+    if (!wrap) return
+
+    const asphyxia = typeof crew.asphyxia === "number" ? crew.asphyxia : 0
+    wrap.classList.toggle("hidden", asphyxia <= 0)
+
+    const bar = wrap.querySelector("[data-minion-asphyxia]")
+    if (bar) bar.style.width = `${Math.round(Math.min(Math.max(asphyxia, 0), 1) * 100)}%`
   }
 
   paintInstrument(el, value, flags) {
@@ -383,6 +574,13 @@ export default class extends Controller {
       minion_id: li.dataset.minionId,
       control_point_id: event.target.value || null
     })
+  }
+
+  // No destination: somebody is set down where their carrier is standing, which is the whole
+  // reason this needs no release lever anywhere in the pit.
+  drop(event) {
+    const li = event.target.closest("[data-minion-id]")
+    this.send({ type: "drop_minion", minion_id: li.dataset.minionId })
   }
 
   reset() {

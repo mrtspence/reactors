@@ -37,6 +37,33 @@ Top-level files: `tick.rb` (the eight phases, in order), `operation.rb` (config,
 projection, serialisation), `match.rb` (many operations in lockstep), `content.rb`,
 `control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`.
 
+What a person is subject to lives in six pure modules over a state hash they do not own,
+none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
+air), `scorch.rb` (the heat), `peril.rb` (the place, and the hidden margin it spends) and
+`burden.rb` (what they are carrying).
+**A harm that works continuously owes a dwell counter past collapse** — `asphyxia` and
+`burns` — because `Severity.escalate` will not announce the same tier twice and a steady
+grind therefore never reaches `:mortal` on its own.
+
+> **A burden is gear and people, and the arithmetic cannot tell them apart.** `mass_kg` is the
+> body; `worn_kg` is what is hanging off it; a carried person contributes both of theirs. Keeping
+> the two apart is load-bearing — fold equipment into the body and gear makes you *better* at
+> carrying somebody. **Strength decides what you can lift and the mass ratio decides how much it
+> slows you**, which is why a kobold is refused an ogre outright while the same kit costs a kobold
+> three times the pace it costs a human.
+>
+> **Carrying a person is the only burden that stops you resting.** `Fatigue.recovery` returns
+> zero while `carrying` is non-empty, because accrual and recovery *net*: a light casualty
+> produces a small accrual that `BASE_RECOVERY` still beats, so without the gate carrying a
+> kobold out reads as a rest. Measured — a kobold on a half-tired human over a minute is +0.064
+> fatigue with the gate and **−0.068 without it**. Armour you can rest off; a body you cannot.
+
+> **Every die thrown for a person is thrown in `Tick#draw_fates`, in phase 0, unconditionally
+> for everybody.** A conditional draw makes the RNG stream depend on the condition and the
+> divergence surfaces as a snapshot replaying differently, days later, somewhere unrelated.
+> Keeping the count fixed and in one method is what makes it checkable — see
+> [`invariants.md`](../../docs/reference/invariants.md#2-determinism).
+
 ## Events are the other output, and they have one rule
 
 `Event` is what the machine *reported*: a part failing, a fire catching, a drum reaching
@@ -76,6 +103,60 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > the opening move of a match. Jobs are derived, never declared: they are exactly the control
 > points with `effort:`. When there are more of those than seats, something is always
 > unattended, which is the point.
+
+> **`aided_by:` adds and `gated_by:` multiplies, and the difference is a design decision rather
+> than an arithmetic one.** A shovel makes shovelling better and its absence makes it merely
+> unaided. A pick and a lamp are not like that: an ogre with no pick gets no coal out of a seam
+> however strong they are, and nobody gets any in the dark. So hewing declares
+> `gated_by: %i[mining_effectiveness darkvision]`, a missing tag is a **zero**, and a crude kit
+> is a punishing 0.25 × 0.1 against a proper one's 0.8 × 0.75. That spread is the whole reason
+> equipment is worth buying.
+>
+> **A gate can also be satisfied by the ROOM.** A lamp on the wall and a lamp on your belt are
+> the same fact to `darkvision`, so a node that answers `ambient_tags(state, levers)` offers its
+> tags to everybody standing in its place, and `Minion#gate` takes **the better of the two,
+> never the sum** — two lamps do not let you see twice. `Tick#ambient_tags` builds the map from
+> N−1 node state and this tick's lever positions, so it cannot depend on phase order; an
+> operation with no places skips it and every gate stays what the minion carries.
+
+> **`posting` is where somebody has been SENT; `station` is what they are actually working.**
+> `assign_minion` writes the first and names a destination, never a step — which is what lets it
+> ride an at-least-once log with no dedup table. The walk happens inside the tick, in phase 6e,
+> and the two fields differ only for as long as it takes. An operation that declares no
+> `passages:` has no geometry, so they are always equal and none of this costs anything.
+>
+> `graph/passage.rb` carries both halves: `Passage` is the fourth kind of edge (a way **people**
+> use, beside material, heat and momentum) and `Layout` is where everything is. **Both are
+> build-time only** — routing tables are computed once per distinct capability set, never
+> searched in a tick, which is the same discipline `Path.resolve` follows.
+
+> **`air` is the only substance tagged `breathable`, and every other gas asphyxiates by taking
+> up the room it was in.** That is the whole of `breath.rb`, and it is why afterdamp needed no
+> content at all: firedamp combustion consumes 17.2 kg of air per kilogram of gas and hands back
+> `flue_gas`, so a district that has just burnt is a district nobody can breathe in. A new gas
+> nobody thought about is therefore dangerous by omission rather than safe by omission, which is
+> the only direction a hazard tag may fail in.
+>
+> Measured by **volume**, never by mass — firedamp is 0.668 kg/m³ against air's 1.225, and it is
+> displacement that suffocates. Bad air drains `fatigue` rather than a pool of its own, so
+> somebody works worse before they drop and recovers by walking out; `endurance` is already its
+> divisor, **clamped by `Breath::RESERVE`** so the tireless reference crew is not immune.
+>
+> **Apparatus runs out, and a set with no air left is no protection at all** — no taper, because
+> there is no half a breath. `respirator:` is how well it filters, `respirator_air:` is how many
+> ticks it holds, and the two go together: `respirator` alone is inert. It is spent every tick
+> the air is foul, whether or not that tick needed it, and walking out is the only way to stop.
+> That is what makes a rescue a race rather than a decision.
+
+> **A hazard belongs to a place, not to a job.** `place.rb` declares the spaces, and a node
+> belongs to one: a node's `endangers:` may key by `places:`, by `stations:` or by both, and
+> phase 6b looks a minion up in each. The station key says somebody was hurt *because of the work
+> they were doing*, which is false of nearly everything — a boiler letting go hurts whoever is in
+> the engine room, including the visitor with no job and the man just stood down from his post,
+> and misses the fireman who left two minutes ago. Prefer `places:` for anything that fills a
+> room; keep `stations:` for the genuinely hands-on, and for an operation with no geometry, which
+> has only stations to name. Both keys are walked by `injury_spec`, because a declaration in the
+> namespace nobody looks up is a hazard that silently hurts nobody.
 
 `injury.rb` is `Concerns::Wearing` for people, and the copied shape is deliberate while the
 vocabulary is not: a part has `durability` and a `failure`, a person has `resilience` and an
@@ -140,7 +221,8 @@ you rearrange:
 ## Serialisation traps
 
 - **Symbols as *values* do not survive JSON.** `deep_symbolize` converts keys only. Resource
-  ids inside parcels, flags inside instrument state, a minion's `station`, a loadout's part
+  ids inside parcels, flags inside instrument state, a minion's `station`, **`posting` and
+  `place`** beside it, a loadout's part
   ids, **a node's `failure` mode**, **every field of an `Event`**, and now **every id in a
   roster** (who is filling a job, what they have been trained in, what is in each of their three
   equipment slots) all broke this way. `Crew.normalise` handles the roster, at the single point

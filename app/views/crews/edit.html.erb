@@ -6,7 +6,11 @@
     preview, where one here survives and simply re-scans. %>
 <div class="mx-auto max-w-3xl p-4 text-slate-200">
   <header class="mb-4">
-    <h1 class="text-lg font-semibold">Crew</h1>
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-semibold">Crew</h1>
+      <div class="grow"></div>
+      <%= render "shared/machine_switcher", route: :edit_crew_path %>
+    </div>
     <p class="text-sm text-slate-400">
       Who stands where, and what they have with them. An empty post is not an empty post —
       the labour exchange will send somebody, and you will not enjoy it.
@@ -42,17 +46,55 @@
                                  operation_id: params[:operation_id]),
                   method: :patch, data: { outfit_target: "form" },
                   authenticity_token: form_authenticity_token do %>
+      <%# **The pit's own gear, not anybody's.** Every seat nobody is posted to is filled by the
+          labour exchange, and whoever turns up is issued from this rack — so one decision here
+          equips all of them, and raising the standard re-equips them at once. A day-labourer
+          with no pick and no light hews exactly nothing, because both are gates. %>
+      <% if @crewing.standin_kit_offered? %>
+        <section class="rounded-lg bg-slate-800/40 ring-1 ring-slate-700 border-l-2
+                        border-l-amber-700/60 p-3 mb-3">
+          <header class="flex items-baseline justify-between mb-2">
+            <h2 class="text-sm font-medium">Labour Exchange</h2>
+            <span class="text-[11px] uppercase tracking-wide text-slate-500">
+              issued to every empty seat
+            </span>
+          </header>
+
+          <div class="grid grid-cols-3 gap-2">
+            <% ReactorSim::Equipment::SLOTS.each do |slot| %>
+              <div>
+                <label class="block text-[11px] uppercase tracking-wide text-slate-400 mb-1"
+                       for="standin_<%= slot %>"><%= slot %></label>
+                <select name="standin[<%= slot %>]" id="standin_<%= slot %>"
+                        class="w-full bg-slate-900 text-slate-200 text-xs rounded px-2 py-1 ring-1 ring-slate-700"
+                        data-action="change->outfit#preview">
+                  <option value="">— nothing —</option>
+                  <% @crewing.standin_equipment(slot).each do |item| %>
+                    <option value="<%= item.id %>"
+                            <%= "selected" if @crewing.standin_posting[slot]&.to_s == item.id.to_s %>>
+                      <%= item.label %>
+                    </option>
+                  <% end %>
+                </select>
+              </div>
+            <% end %>
+          </div>
+        </section>
+      <% end %>
+
       <div class="flex flex-col gap-3">
-        <%# Seats, not jobs. Which station somebody works is decided during the match — everybody
-            starts in the quarters and is sent somewhere — so there is deliberately nothing here
-            to set it with. %>
+        <%# Seats, not jobs. Which station somebody works is decided during the match, so there
+            is deliberately nothing here to set it with — but WHERE a seat starts is a property
+            of the machine, and a mine's last few seats are already underground. %>
         <% @crewing.seats.each_with_index do |role, index| %>
           <% posting = @crewing.posting(role) %>
           <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3">
             <header class="flex items-baseline justify-between mb-2">
               <h2 class="text-sm font-medium">Seat <%= index + 1 %></h2>
-              <span class="text-[11px] uppercase tracking-wide text-slate-500">
-                starts in the quarters
+              <% origin = @crewing.starts_in(role) %>
+              <span class="text-[11px] uppercase tracking-wide <%=
+                      origin ? 'text-amber-400' : 'text-slate-500' %>">
+                <%= origin ? "starts at #{origin}" : "starts in the quarters" %>
               </span>
             </header>
 

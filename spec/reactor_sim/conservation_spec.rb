@@ -2,6 +2,7 @@
 
 require "reactor_sim"
 require "support/loop_rig"
+require "support/conservation"
 
 # "Lossy is fine, silent is not" (docs/simulation_architecture.md §8).
 #
@@ -13,10 +14,6 @@ require "support/loop_rig"
 # a phase change that loses latent heat, an arbiter that grants more than it takes — none
 # of which announce themselves any other way.
 RSpec.describe "conservation" do
-  # Relative, because absolute energies here are ~1e9 J and float epsilon scales with
-  # magnitude. Anything real is orders of magnitude bigger than this.
-  TOLERANCE = 1e-9
-
   def rig(seed: 7, time_scale: 4.0)
     ReactorSim::Match
       .create(id: "c", seed: seed, operations: [ { id: "rig", type: :loop_rig } ], time_scale:)
@@ -30,9 +27,9 @@ RSpec.describe "conservation" do
 
   def expect_balanced(op, mass0, joules0, context)
     mass, joules = balances(op)
-    expect((mass - mass0).abs / [ mass0.abs, 1.0 ].max).to be < TOLERANCE,
+    expect((mass - mass0).abs / [ mass0.abs, 1.0 ].max).to be < Conservation::TOLERANCE,
       "mass drifted by #{mass - mass0} kg #{context}"
-    expect((joules - joules0).abs / [ joules0.abs, 1.0 ].max).to be < TOLERANCE,
+    expect((joules - joules0).abs / [ joules0.abs, 1.0 ].max).to be < Conservation::TOLERANCE,
       "energy drifted by #{joules - joules0} J #{context}"
   end
 

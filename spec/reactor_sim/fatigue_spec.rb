@@ -1,17 +1,25 @@
 # frozen_string_literal: true
 
 require "reactor_sim"
+require "support/reference_crew"
 
 # Fatigue is the first mechanic whose whole point is that the SAME lever costs different people
 # different amounts, so nearly everything here asserts a **ratio** rather than a figure. The
 # `exertion:` constants are first guesses and are labelled as such in the sketch; the shape —
 # subjective, superlinear, bounded — is the contract.
 RSpec.describe ReactorSim::Fatigue do
-  STATS = ReactorSim::Sheet::STATS
+  # **Named for this file, because a constant inside a `describe` block is not scoped to it.**
+  # Ruby blocks do not open a constant scope, so a bare `STATS` here lands on Object and the
+  # last spec file loaded wins. Three files defined one: two a Hash of stats, this one the
+  # Array of their names — so `Minion.new(stats: STATS)` elsewhere got an Array and died with
+  # `no implicit conversion of Symbol into Integer`, but only in the file orders where this
+  # one loaded last.
+  EVERY_STAT = ReactorSim::Sheet::STATS
 
   def worker(stats: {}, fatigue: 0.0, health: 1.0, tags: {})
-    base = STATS.to_h { |stat| [ stat, 1.0 ] }
+    base = EVERY_STAT.to_h { |stat| [ stat, 1.0 ] }
     minion = ReactorSim::Minion.new(id: :hand, name: "Hand", station: :shovel,
+                                    mass_kg: ReferenceCrew::HUMAN_KG,
                                     stats: base.merge(stats), tags: tags)
     [ minion, { health: health, fatigue: fatigue, spent: false, station: :shovel,
                 resilience: 1.0, initial_resilience: 1.0, injury: nil } ]

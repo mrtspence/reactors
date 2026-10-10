@@ -15,7 +15,11 @@ RSpec.describe ReactorSim::Resources::Ignition do
         coal: { tags: [ :solid, :fuel ], specific_heat_j_per_kg_k: 1300, density_kg_per_m3: 800 },
         air: { tags: [ :gas, :oxidiser ], specific_heat_j_per_kg_k: 1005,
                density_kg_per_m3: 1.2, molar_mass_g_per_mol: 28.96 },
-        ash: { tags: [ :solid, :waste ], specific_heat_j_per_kg_k: 840, density_kg_per_m3: 700 }
+        ash: { tags: [ :solid, :waste ], specific_heat_j_per_kg_k: 840, density_kg_per_m3: 700 },
+        # A gaseous fuel, because a flammability range is a property of a MIXTURE and a fuel
+        # bed cannot express one. Methane's figures.
+        damp: { tags: [ :gas, :fuel ], specific_heat_j_per_kg_k: 2220, density_kg_per_m3: 0.668,
+                molar_mass_g_per_mol: 16.04 }
       },
       reactions: {
         burn: { consumes: { coal: 1.0, air: 11.0 }, produces: { ash: 12.0 },
@@ -23,7 +27,12 @@ RSpec.describe ReactorSim::Resources::Ignition do
                 ignition: { spread_per_s: 0.30, quench_per_s: 0.45 } },
         # No `ignition:` block — the opt-in that keeps every pre-existing reaction untouched.
         inert: { consumes: { coal: 1.0, air: 11.0 }, produces: { ash: 12.0 },
-                 enthalpy_j_per_unit: -30_000_000, rate_per_s: 6.0, min_temperature_k: 500 }
+                 enthalpy_j_per_unit: -30_000_000, rate_per_s: 6.0, min_temperature_k: 500 },
+        # Carries a flame between 5% and 15% of the volume and does nothing either side.
+        flash: { consumes: { damp: 1.0, air: 17.2 }, produces: { ash: 18.2 },
+                 enthalpy_j_per_unit: -55_000_000, rate_per_s: 18.0, min_temperature_k: 600,
+                 ignition: { spread_per_s: 9.0, quench_per_s: 0.2,
+                             lean_fraction: 0.05, rich_fraction: 0.15 } }
       }
     )
   end
@@ -40,6 +49,64 @@ RSpec.describe ReactorSim::Resources::Ignition do
     it "models ignition only where content asks for it" do
       expect(described_class.modelled?(spec)).to be(true)
       expect(described_class.modelled?(content.reaction(:inert))).to be(false)
+    end
+  end
+
+  # **A mixture outside its flammability range does not burn, however hot the room is.** This
+  # is what stops a trace of firedamp igniting off a lamp and then burning every kilogram that
+  # seeps in afterwards — a district that did exactly that sat at 1300 K for the rest of the
+  # match with its own gas gauge pinned at zero.
+  describe "the flammability range" do
+    let(:gas) { content.reaction(:flash) }
+
+    # Named for this file, because a constant in a `describe` block lands on Object — see
+    # the note in `fatigue_spec`, where a shared bare name cost an afternoon.
+    SEED_KG = 0.01
+
+    # Parcels holding `share` of their VOLUME as fuel, so an example says what the mixture is
+    # rather than hiding it in two kilogram figures that only convert in your head.
+    def mixture(share, air_kg: 5.0)
+      air_m3 = air_kg / content.resource(:air).fetch(:density_kg_per_m3)
+      damp_m3 = share / (1.0 - share) * air_m3
+      [ { resource: :damp, kg: damp_m3 * content.resource(:damp).fetch(:density_kg_per_m3),
+          joules: 0.0 },
+        { resource: :air, kg: air_kg, joules: 0.0 } ]
+    end
+
+    def flash(share, temperature_k: 900.0)
+      described_class.advance(gas, { kg: 0.0, oxidiser_kg: 99.0 }, mixture(share),
+                              temperature_k: temperature_k, dt: 0.25, content: content,
+                              seed_kg: SEED_KG).fetch(:kg)
+    end
+
+    it "will not carry a flame in a mixture too lean, however hot" do
+      expect(flash(0.01, temperature_k: 2_000.0)).to be < SEED_KG
+    end
+
+    it "will not carry one in a mixture too rich either" do
+      expect(flash(0.30, temperature_k: 2_000.0)).to be < SEED_KG
+    end
+
+    it "catches between the two" do
+      expect(flash(0.08)).to be > SEED_KG
+    end
+
+    # The behaviour the whole thing exists for: burning the mixture back down through its own
+    # lean limit puts the fire out, so an ignition is a flash rather than a permanent flare.
+    it "goes out once a burning mixture has been used up" do
+      burning = described_class.advance(gas, { kg: 0.5, oxidiser_kg: 99.0 }, mixture(0.01),
+                                        temperature_k: 2_000.0, dt: 0.25, content: content)
+
+      expect(burning.fetch(:kg)).to be < 0.5
+    end
+
+    # **Separately opt-in, because a fuel bed is not a mixture.** `burn` declares no range, and
+    # a lump of coal does not stop burning because the firebox is roomy — which it would, since
+    # a solid at 800 kg/m³ occupies almost none of the volume it sits in.
+    it "leaves a reaction that declares no range alone" do
+      result = advance({ kg: 0.0, oxidiser_kg: 99.0 }, seed_kg: SEED_KG, temperature_k: 900.0)
+
+      expect(result.fetch(:kg)).to be > SEED_KG
     end
   end
 

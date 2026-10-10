@@ -1,0 +1,20 @@
+<%# The other machines in this match, on the screen you are already on.
+
+    A match holds several and each is fitted out separately, so reaching the second one's crew
+    meant going back to its console first. `route` is the screen — the same one for every pill,
+    so this never changes what you are doing, only which machine you are doing it to.
+
+    Renders only when there is somewhere to go: a player who operates one machine sees nothing. %>
+<% if operable_siblings.length > 1 %>
+  <nav class="flex items-center gap-1" aria-label="Machine">
+    <% operable_siblings.each do |sibling| %>
+      <%= link_to sibling.operation_id.titleize,
+                  public_send(route, match_id: sibling.match_id,
+                                     operation_id: sibling.operation_id),
+                  class: "text-xs px-2 py-1 rounded ring-1 #{
+                    sibling.operation_id == params[:operation_id].to_s ?
+                      'bg-slate-700 ring-slate-500' : 'bg-slate-800 ring-slate-700 hover:bg-slate-700'
+                  }" %>
+    <% end %>
+  </nav>
+<% end %>

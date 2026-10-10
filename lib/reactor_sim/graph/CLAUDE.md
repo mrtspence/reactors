@@ -148,6 +148,8 @@ Port.new(id:, direction: :inlet | :outlet, accepts: [tags], max_kg_per_s:)
 Link.new(from: [node_id, port_id], to: [node_id, port_id])
 ThermalLink.new(a:, b:, conductance:)          # W/K
 DriveLink.new(a:, b:, stiffness:, max_torque:)
+Passage.new(a:, b:, metres:, speed_m_s:, requires:, control_id:, driven_by:, rated_omega:)
+Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they join
 ```
 
 - `accepts: []` means "anything".
@@ -158,6 +160,36 @@ DriveLink.new(a:, b:, stiffness:, max_torque:)
   `Path`, holder to holder**; conduits are resolved through and cost no tick.
 - `Operation#validate_graph!` rejects unknown nodes, links into an outlet, links out of an
   inlet, and thermal links to a non-thermal node, at construction.
+- **`Passage` is the odd one out and deliberately so.** The other three are settled every tick
+  by the arbiter; a passage is never settled at all. What limits air through a roadway is a
+  conductance and what limits *men* through it is how far it is and who is walking — so the two
+  are separate declarations over the same topology rather than one edge doing both. `Layout`
+  turns them into routing tables **once, at build**, and nothing searches them in a tick. An
+  operation that declares none has no geometry and every posting is worked from where you
+  stand.
+- **The routing table carries a distance beside every first step**, so `Layout#route_metres`
+  answers "how far is it" as a lookup. It is **geometry, not duration** — a cage and a ladderway
+  are the same ninety metres and only one of them is quick — so what a walk costs is still
+  `route_metres ÷ what is running`.
+- **A passage can be powered**, and that is the point of the whole spatial model: ladders are
+  free and slow, a cage is quick and costs a shaft. `control_id:` scales it by a lever and
+  `driven_by:`/`rated_omega:` by a shaft's speed, so a cage nobody has called — or one whose
+  supply has failed — is **not a slow way down, it is no way down at all**.
+- **Two places may be joined more than once**, which is why `Layout#passages_between` is plural
+  and `Tick#quickest` takes the fastest one *running*. A shaft has a ladderway and a cage;
+  returning the first-declared would pin everybody to whichever was written first, and nobody
+  would ever ride. Ties break on declaration order so a layout stays deterministic.
+- **A `Place` owns nodes, and that is what makes exposure geometric.** A node's `endangers:` may
+  name `places:`, `stations:` or both, and `Tick#endanger` looks a minion up in each. A place key
+  says the true thing — the boiler is in the engine room, and a rupture reaches whoever is in it,
+  including somebody walking through with no job at all and somebody just stood down from their
+  post. Nodes that are not in a room have no place and need none: a seam is rock.
+- **Places are declared, unioned by id, and validated at build.** A fitting names only the
+  machinery it installs (`Place.new(id: :bank, nodes: [:cage_drive])`) and the chassis owns the
+  room; `Layout` unions them, first label winning. It refuses a place that names a node the
+  operation does not have, a node two places both claim, and a passage endpoint or station in a
+  place nobody declared — because for a hazard system **silence must never be the safe answer**.
+  An operation declaring no places skips all of it and keys its hazards by station as before.
 
 ## `Node`
 

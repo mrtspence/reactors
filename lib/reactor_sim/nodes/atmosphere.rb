@@ -107,7 +107,17 @@ module ReactorSim
           # node's ends have to be allowed to disagree about what they mean. Energy is not
           # split — a joule leaving through a hole is the same loss as one leaving through
           # the chimney, and only the *mass* carries the story of how it left.
-          mass_vented: grant.received_kg(:exhaust),
+          # **Every port's receipts are booked, including the intake's.** `:intake` is an
+          # outlet, but a link is two-way and gas reverses whenever the gradient does — so an
+          # operation whose draught falls away pushes air back up the way it came. That arrives
+          # here, at a port nothing was counting, and this node resets to baseline every tick:
+          # the mass was destroyed unledgered. Measured on a mine with its fan stopped, **24 kg
+          # over 3000 ticks**, drifting steadily and invisible to every existing spec because
+          # nothing else in the game ever reverses its intake.
+          #
+          # Counted as vented rather than netted against `mass_injected`, because gross
+          # crossings are the rule: air that came back out of the workings did leave them.
+          mass_vented: grant.received_kg(:exhaust) + grant.received_kg(:intake),
           mass_spilled: grant.received_kg(:spill),
           joules_injected: grant.total_sent_joules,
           joules_discarded: grant.total_received_joules

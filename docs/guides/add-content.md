@@ -6,7 +6,7 @@ disk, and only once, never during a tick.
 
 ```
 content/
-  resources/    water.yml, combustion.yml, materials.yml
+  resources/    water.yml, combustion.yml, damps.yml, materials.yml
   reactions/    combustion.yml
   archetypes/   races.yml     — kinds of person
   minions/      crew.yml      — the people themselves
@@ -46,8 +46,22 @@ than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-In use at the time of writing: `bearing`, `coolant`, `exhaust`, `fuel`, `gas`, `liquid`,
-`lubricant`, `metal`, `moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+In use at the time of writing: `bearing`, `breathable`, `coolant`, `damp`, `dust`, `exhaust`,
+`fuel`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`, `oxidiser`, `solid`,
+`structural`, `waste`, `working_fluid`.
+
+**A tag does one of three jobs and the word does not say which**, so say it when you add one:
+
+| Job | Examples | Read by |
+|---|---|---|
+| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust` | `Port#accepts?` |
+| Reaction — what a substance can do in one | `fuel`, `oxidiser`, `inert` | reactions, ignition, a node's `reaction_throttle` |
+| Physiology — what it does to a person | `breathable` | `Breath` |
+
+`:gas` is the structural one: it decides whether something is limited by volume or by pressure,
+whether it occupies room, and whether it can be routed through a gas-only port. `breathable` is
+on `air` and on nothing else, because **everything that is not air asphyxiates by displacing
+it** — so a gas nobody thought about is dangerous by omission rather than safe by omission.
 
 A tag is a vocabulary shared between the content files and every port that filters on one, so
 **introducing a tag means updating this list in the same commit**. An undocumented tag is a
@@ -135,6 +149,46 @@ air. **It must also absorb any formation-enthalpy difference between the two sid
 stoichiometry itself conserves enthalpy exactly (products inherit what the reactants had,
 split by mass), so this is the only place a reaction may change the system's energy.
 
+### Pathways: when running short changes the *product*, not the rate
+
+By default, being short of a reagent makes a reaction slower and nothing else. Declare
+`limited_by:` and an ordered `alternatives:` list and it instead changes what the reaction
+makes — a fire with half the air it wants burns all its fuel anyway and produces carbon
+monoxide doing it.
+
+```yaml
+coal_combustion:
+  consumes: { coal: 1.0, air: 11.0 }
+  produces: { flue_gas: 11.9, ash: 0.1 }
+  enthalpy_j_per_unit: -30000000
+  rate_per_s: 1.5
+  limited_by: air                 # whose supply picks the pathway
+  alternatives:                   # ordered, most of it first
+    - consumes: { coal: 1.0, air: 5.5 }
+      produces: { flue_gas: 5.4, whitedamp: 1.0, ash: 0.1 }
+      enthalpy_j_per_unit: -9000000
+```
+
+The rules, all enforced at boot:
+
+- **Every pathway balances mass**, exactly as the top-level pair must.
+- **Every pathway consumes the same quantity of everything but `limited_by:`.** They are
+  alternative fates for *the same kilogram of coal*; if the coal term varied, their extents
+  would not be comparable and splitting one between them would mean nothing.
+- **Ordered most-of-`limited_by`-first.** The cascade reads them in order.
+- Each needs its own `enthalpy_j_per_unit` — incomplete combustion releases far less heat, and
+  that difference is the whole trade. `rate_per_s`, `min_temperature_k` and `ignition:` are
+  shared: a fire is one fire whatever it is making.
+
+**The split is exact and has no dial.** With `a₁` and `a₂` per unit and `A` available,
+`x·a₁ + (E−x)·a₂ = A` has one answer. Nothing to balance.
+
+> **A pathway may name a reagent the preferred one does not** — water gas is carbon and *steam*
+> rather than carbon and less air — and its own supply then caps it. **This is a seam and it
+> ships under-tested**: nothing in the game uses it, so `pathway_spec` is the only coverage. If
+> you are the first to build on it, treat a surprise as a gap in
+> [`reaction-pathways.md`](../design_sketches/reaction-pathways.md), not a bug in your content.
+
 ### `rate_per_s` must suit the timestep — and it means something different once a reaction ignites
 
 `extent = limit × (1 − e^(−rate × dt))`.
@@ -163,10 +217,29 @@ plateau is 1.5–2.0 and both edges are outright failures. Measurements are in
   ignition:
     spread_per_s: 0.30   # how fast burning fuel lights its neighbours
     quench_per_s: 0.45   # how fast it dies when cold or starved of air
+    lean_fraction: 0.05  # below this share of the volume it will not carry a flame
+    rich_fraction: 0.15  # above it there is not enough air in the mixture to burn
 ```
 
 **Opt-in.** A reaction without this block keeps the old bulk-temperature gate and behaves
 exactly as before, so adding it to one reaction cannot disturb another.
+
+### The flammability range is for mixtures, not for fuel beds
+
+`lean_fraction` and `rich_fraction` are **separately** opt-in, and a fuel lying on a grate must
+not declare them: a lump of coal does not stop burning because the firebox is roomy. They model
+a fuel *suspended in* the volume — firedamp in a roadway, dust in the air — which carries a
+flame only between two concentrations and does nothing whatever either side.
+
+Both are a **share of the volume**, never of the mass, for the same reason `Breath` measures
+that way: firedamp is 0.668 kg/m³ against air's 1.225, so kilograms understate it by half. For a
+solid suspended as dust the familiar figure is a mass concentration, and it converts — coal
+dust's 50 g/m³ over its 800 kg/m³ is `0.0000625`.
+
+Out of range is **total quench**, not slow burning. The effect is large and worth knowing before
+you set one: without a lean limit, a trace of fuel in a hot room ignites and then burns every
+kilogram that arrives afterwards, so the room never cools and the fuel reading sits at zero
+forever.
 
 With it, the reaction carries how much of its fuel is alight and only that portion burns. The
 fuel is inferred from the `:fuel` tag, so nothing has to be declared twice. See
@@ -194,7 +267,8 @@ kinds of person. The same person can do either, which is what made it the wrong 
 # content/archetypes/races.yml — layer one, the baseline for everyone of that race
 elf:
   label: Elf
-  strength: 0.75       # all six stats are required
+  mass_kg: 60.0        # REQUIRED, and not a stat — see below
+  strength: 0.85       # a strength-to-WEIGHT ratio, 1.0 = human. All six stats are required
   toughness: 0.7
   endurance: 0.85
   intelligence: 1.25
@@ -207,6 +281,7 @@ elf:
 galathas:
   name: Galathas        # required — a name is what separates a person from a race
   archetype: elf        # required, and checked at boot
+  mass_kg: 8.0          # optional offset — a big elf. Absent means "weighs what elves weigh"
   stats:
     strength: 0.35      # strong for an elf…
     dexterity: -0.25    # …and heavy-handed with it
@@ -215,6 +290,36 @@ galathas:
 ```
 
 Omit a stat to take the race's figure unchanged; omit `stats:` entirely for somebody unremarkable.
+
+**`mass_kg` is a seventh required field on an archetype, and it is deliberately not a stat.** Stats
+pass through `Minion#effective`, which derates them by injury — so a broken arm would make somebody
+*lighter*. It is not a tag either, because `Sheet::TAG_RANGE` is 0..1 and an ogre cannot be said at
+all. **A race that omits it raises at boot**: it is read by the lift limit and the burden ratio, and
+a quiet 70 kg would be invisible in the content. An individual's entry is an offset, so that one is
+optional.
+
+It is also **not** `hulking`: this is weight, and `hulking` is *dimensions* — it gates the `wedged`
+peril because a big frame jams in a narrow roadway. A tall thin thing and a dense small thing are
+different problems. (`hulking` is also *valued*, not a flag: `Peril#weight_for` reads the number,
+so 0.5 is wedged half as readily as something that fills the road and struck by tubs half as often
+as a kobold.)
+
+### `strength` is a ratio, so write it as one
+
+**1.0 is a human's strength-to-weight.** Below 1.0 means worse pound-for-pound, which is where
+most large things belong — strength grows with cross-section and weight with volume, so an ogre is
+`0.65` and a draught horse would be `0.50`. What a job actually gets is derived:
+
+| | Definition | Human | Ogre (0.65 / 500 kg) | Kobold (0.70 / 25 kg) |
+|---|---|---|---|---|
+| `strength` | the ratio | 1.00 | 0.65 | 0.70 |
+| `force` | `strength × mass ÷ 70` | 1.00 | 4.64 | 0.25 |
+| `swing` | `√force` | 1.00 | 2.15 | 0.50 |
+
+A new race therefore needs **both numbers to say one thing**: a kobold is weak because it is small
+*and* scrawny, and either alone would be the wrong animal. The sanity check is that nothing large
+should be able to carry its own kind comfortably — if yours can, the ratio is too high for the
+mass, and the lift limit will tell you so at once.
 
 There are four layers — **archetype → individual → training → equipment** — and each offsets the
 last. Only the first two are content: training and equipment are things a player *owns*, and the
@@ -233,6 +338,15 @@ Rules worth knowing before you add one:
 - **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
   things are two different statements about one person, and a steady-handed worker who knocks
   things over is a real person.
+- **A hazard tag needs no engine change — it needs a resister with a matching name.** A peril
+  or a failure tagged `%i[crush impact]` is resisted by `crush_resistance` and
+  `impact_resistance` through one naming convention in `Injury.resistance`, so adding a kind
+  of harm means adding gear that names it and nothing else. The flip side is that **a hazard
+  tag nothing resists is simply unresistable**, silently — grep the tag before you invent it.
+- **`clumsy` and `boneheaded` are the same family at opposite ends.** Clumsy makes the *bite*
+  worse once something has gone wrong; boneheaded makes the *mistake* likelier in the first
+  place. Pulling the wrong lever is not the same failing as dropping it, and only one of them
+  feeds the Danger Check.
 - **Minion tags are a MAP, not a list.** Resource tags are flat — a thing is `:liquid` or is not —
   but "how well can you see in the dark" has a number for an answer. Write `true` for a trait that
   is simply present.
@@ -241,6 +355,11 @@ Rules worth knowing before you add one:
 - **Health, fatigue, station and injury are state, not content.** They change during a match and
   live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion recovers on
   restore.
+- **A tag that gets used up is a rating here and a remainder in state**, and it needs both. A
+  respirator declares `respirator:` (how well it filters) and `respirator_air:` (how many
+  **ticks** it holds); `Minion#initial_state` seeds `apparatus` from the second and phase 6c
+  spends it. **A set with no air is no protection at all** — `respirator` alone is inert — so
+  the two are written together or the kit does nothing.
 
 The gauge-reading path (a diagnostic's `observer:`) is reserved and read by nothing — see
 `docs/simulation_architecture.md` §7.

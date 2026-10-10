@@ -73,6 +73,23 @@ RSpec.describe ProgressionDigest do
         .not_to include(:raised_steam_from_cold_alone)
     end
 
+    # **Disqualification is windowed, not global, and that is what makes the cold-start award
+    # winnable at all.** A pilot is how a cold fire is lit, so *every* real start engages a heater
+    # — at tick 1, one tick before the fire catches. If that counted, "without the pilot" would be
+    # unearnable rather than demanding.
+    #
+    # This is the rule an integration test was being paid 1,700 ticks to discover, and it got the
+    # answer backwards first: the example was written expecting the reference start to be refused,
+    # and it passed the award, because the only heater record fell outside its own window. The
+    # order of three records is the whole of it, so three records are the whole test.
+    it "ignores a pilot that was engaged before the interval opened" do
+      digest.call(event("heater_engaged", tick: 1, node: "firebox"))
+      digest.call(event("fire_lit", tick: 2))
+
+      expect(digest.call(event("steam_raised", tick: 900)))
+        .to include(:raised_steam_from_cold_alone)
+    end
+
     it "refuses one that did not last long enough" do
       digest.call(event("steam_raised", tick: 100))
 

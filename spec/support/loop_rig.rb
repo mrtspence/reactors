@@ -89,7 +89,7 @@ module LoopRig
       # ticks and occasionally just wrong — a report from someone eyeballing it rather
       # than an integrity readout (docs/simulation_architecture.md §7).
       ReactorSim::Diagnostic.new(
-        id: :boiler_condition, label: "Boiler Condition", observer: :grubwick,
+        id: :boiler_condition, label: "Boiler Condition",
         source: ReactorSim::Sources::Durability.new(:boiler),
         filters: [ ReactorSim::Filters::Lag.new(12),
                    ReactorSim::Filters::Misread.new(chance: 0.15, magnitude: 300.0),

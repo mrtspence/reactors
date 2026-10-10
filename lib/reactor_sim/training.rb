@@ -15,10 +15,17 @@ module ReactorSim
   #
   # See docs/design_sketches/minions.md §3.
   class Training
-    attr_reader :id, :label, :description, :stats, :tags
+    attr_reader :id, :label, :description, :stats, :tags, :mass_kg
 
-    def initialize(id:, label: nil, description: nil, stats: {}, tags: {})
+    # **`mass_kg:` is required even though every course so far passes `0.0`.** Learning weighs
+    # nothing, and that is a claim worth making once per course rather than assuming across the
+    # whole layer — a certificate that turns out to come with a brass helmet should have somewhere
+    # honest to put it. Required rather than defaulted for the reason `Equipment` gives.
+    #
+    # It folds into the **body**, not into what is worn: a course is part of who somebody is.
+    def initialize(id:, mass_kg:, label: nil, description: nil, stats: {}, tags: {})
       @id = id.to_sym
+      @mass_kg = mass_kg.to_f
       @label = label || @id.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
       @description = description
       @stats = stats.to_h { |k, v| [ k.to_sym, v.to_f ] }.freeze

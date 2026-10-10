@@ -2,6 +2,7 @@
 
 require "reactor_sim"
 require "json"
+require "support/reference_crew"
 
 # The crew, and specifically the one thing nothing else in the suite can prove.
 #
@@ -28,6 +29,7 @@ RSpec.describe ReactorSim::Minion do
       # is the only thing that knows a player owns anything. Nothing on the tick path looks a
       # stat up, so this rig hands one over directly.
       minions: [ described_class.new(id: :worker, name: "Hand", station: station,
+                                     mass_kg: ReferenceCrew::HUMAN_KG,
                                      stats: { strength: strength }) ]
     )
 
@@ -169,7 +171,8 @@ RSpec.describe ReactorSim::Minion do
           id: :rig, type: :test, seed: 1,
           nodes: [ ReactorSim::Nodes::Conduit.new(id: :stoker, accepts: [], max_kg_per_s: 1.0) ],
           control_points: [ ReactorSim::ControlPoint.new(id: :valve, node: :stoker) ],
-          minions: [ described_class.new(id: :stoker, archetype: :hand, station: :valve) ]
+          minions: [ described_class.new(id: :stoker, archetype: :hand, station: :valve,
+                                         mass_kg: ReferenceCrew::HUMAN_KG) ]
         )
       }.to raise_error(ReactorSim::Error, /duplicate component ids: stoker/)
     end
@@ -179,7 +182,8 @@ RSpec.describe ReactorSim::Minion do
         ReactorSim::Operation.new(
           id: :rig, type: :test, seed: 1,
           nodes: [ ReactorSim::Nodes::Conduit.new(id: :pipe, accepts: [], max_kg_per_s: 1.0) ],
-          minions: [ described_class.new(id: :worker, archetype: :hand, station: :nowhere) ]
+          minions: [ described_class.new(id: :worker, archetype: :hand, station: :nowhere,
+                                         mass_kg: ReferenceCrew::HUMAN_KG) ]
         )
       }.to raise_error(ReactorSim::Error, /no control point nowhere/)
     end

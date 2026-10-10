@@ -12,6 +12,11 @@ module ReactorSim
       # stream all survive a swap. See `docs/design_sketches/modular_components.md`.
       module_function
 
+      # **Every lever in this engine stands in the one room**, so they are built through here
+      # rather than seventeen registrations each repeating it. A control with no place at all
+      # would read as workable from anywhere, which is a different claim and not this one.
+      def lever(**opts) = ControlPoint.new(place: :engine_house, **opts)
+
       # --- shared shapes ---------------------------------------------------------
       #
       # **Where two parts of one kind differ only in numbers, the wiring is written once.** Eight
@@ -24,7 +29,7 @@ module ReactorSim
           nodes: [ SteamEngine.damper(conductance: conductance) ],
           links: [ Link.new(from: [ :damper, :outlet ], to: [ :firebox, :air_in ]) ],
           control_points: [
-            ControlPoint.new(id: :damper_open, label: "Damper", node: :damper, default: 50.0)
+            SteamEngine.lever(id: :damper_open, label: "Damper", node: :damper, default: 50.0)
           ]
         )
       end
@@ -85,8 +90,8 @@ module ReactorSim
             Link.new(from: [ :relief, :outlet ],     to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
-            ControlPoint.new(id: :ease_safety, label: "Ease the Safety Valve", node: :relief),
-            ControlPoint.new(id: :valve_setting, label: "Safety Valve Margin", node: :relief,
+            SteamEngine.lever(id: :ease_safety, label: "Ease the Safety Valve", node: :relief),
+            SteamEngine.lever(id: :valve_setting, label: "Safety Valve Margin", node: :relief,
                              default: 100.0)
           ]
         )
@@ -135,7 +140,7 @@ module ReactorSim
             Link.new(from: [ :cylinder_breach, :outlet ], to: [ :atmosphere, :spill ])
           ],
           control_points: [
-            ControlPoint.new(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0)
+            SteamEngine.lever(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0)
           ]
         )
       end
@@ -149,7 +154,7 @@ module ReactorSim
             Link.new(from: [ :cylinder_relief, :outlet ], to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
-            ControlPoint.new(id: :cylinder_valve_setting, label: "Cylinder Relief Margin",
+            SteamEngine.lever(id: :cylinder_valve_setting, label: "Cylinder Relief Margin",
                              node: :cylinder_relief, default: 100.0)
           ]
         )
@@ -174,7 +179,7 @@ module ReactorSim
           nodes: [ SteamEngine.load(moment_of_inertia: moment_of_inertia,
                                     max_torque: max_torque, rated_omega: rated_omega) ],
           control_points: [
-            ControlPoint.new(id: :load_demand, label: "Mill Load", node: :load, default: 60.0)
+            SteamEngine.lever(id: :load_demand, label: "Mill Load", node: :load, default: 60.0)
           ]
         )
       end
@@ -186,7 +191,7 @@ module ReactorSim
                      stats: { volume_m3: 6.0, igniter_kw: 120 }) do |_spec|
         Fragment.new(
           nodes: [ SteamEngine.firebox ],
-          control_points: [ ControlPoint.new(id: :igniter, label: "Igniter", node: :firebox) ]
+          control_points: [ SteamEngine.lever(id: :igniter, label: "Igniter", node: :firebox) ]
         )
       end
 
@@ -343,7 +348,7 @@ module ReactorSim
             # Fiddly and attentive rather than heavy, so the lightest `exertion:` on the engine —
             # a quarter hour at it flat out, against the stoker's five minutes. The oil round is a
             # job you can be sent back to.
-            ControlPoint.new(id: :oiling, label: "Oil Round", node: :oil_feed_journals,
+            SteamEngine.lever(id: :oiling, label: "Oil Round", node: :oil_feed_journals,
                              effort: { dexterity: 0.6, intelligence: 0.4 },
                              aided_by: :oiling, exertion: 3.7e-4)
           ]
@@ -375,7 +380,7 @@ module ReactorSim
                      stats: { crew_capacity: 2, recovery_rate: 2.0 }) do |_spec|
         Fragment.new(
           control_points: [
-            ControlPoint.new(id: :quarters, label: "Crew Quarters",
+            SteamEngine.lever(id: :quarters, label: "Crew Quarters",
                              recovery: Fatigue::BASE_RECOVERY * 2.0)
           ]
         )
@@ -409,7 +414,7 @@ module ReactorSim
           # there — and defaults open, because a ring oiler that has to be switched on is a hand
           # oiler with extra steps.
           control_points: [
-            ControlPoint.new(id: :oiling, label: "Oil Feed", node: :oil_feed_journals,
+            SteamEngine.lever(id: :oiling, label: "Oil Feed", node: :oil_feed_journals,
                              default: 100.0)
           ]
         )
@@ -437,8 +442,9 @@ module ReactorSim
           # time-to-spent by three (`Fatigue::LOAD_CEILING`). So 1.1e-3 is ~300 simulated seconds
           # at `dt` 0.25 s. At a third of the lever the same person lasts most of an hour, which
           # is what makes firing rate a decision rather than a setting.
-          control_points: [ ControlPoint.new(id: :stoking, label: "Stoking Effort", node: :stoker,
-                                             effort: { strength: 0.75, dexterity: 0.25 },
+          control_points: [ SteamEngine.lever(id: :stoking, label: "Stoking Effort", node: :stoker,
+                                             # A shovel is a tool, so `swing` — see `hewing`.
+                                             effort: { swing: 0.75, dexterity: 0.25 },
                                              aided_by: :shovelling, exertion: 1.1e-3) ]
         )
       end
@@ -460,8 +466,8 @@ module ReactorSim
             # `SteamEngine.ash_pan` already called it "somebody's effort with a shovel". More
             # awkward than firing, hence the heavier dexterity share: an ashpan is raked out
             # bent double under a locomotive rather than swung at from standing.
-            ControlPoint.new(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan,
-                             effort: { strength: 0.6, dexterity: 0.4 },
+            SteamEngine.lever(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan,
+                             effort: { swing: 0.6, dexterity: 0.4 },
                              aided_by: :shovelling, exertion: 9.3e-4)
           ]
         )
@@ -528,8 +534,10 @@ module ReactorSim
             Link.new(from: [ :blower_fan, :outlet ], to: [ :damper, :inlet ])
           ],
           control_points: [
-            ControlPoint.new(id: :blower, label: "Bellows", node: :blower_fan,
-                             effort: { strength: 0.8, toughness: 0.2 },
+            # `force`: heaving a handle against resistance, where there is no technique to cap
+            # what a big body brings.
+            SteamEngine.lever(id: :blower, label: "Bellows", node: :blower_fan,
+                             effort: { force: 0.8, toughness: 0.2 },
                              exertion: 1.4e-3)
           ]
         )
@@ -563,7 +571,7 @@ module ReactorSim
             Link.new(from: [ :donkey_flue, :outlet ],  to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
-            ControlPoint.new(id: :blower, label: "Donkey Throttle", node: :donkey)
+            SteamEngine.lever(id: :blower, label: "Donkey Throttle", node: :donkey)
           ]
         )
       end
@@ -642,7 +650,7 @@ module ReactorSim
             Link.new(from: [ :injector_steam, :outlet ], to: [ :injector, :steam_in ]),
             Link.new(from: [ :injector, :out ],          to: [ :boiler, :feed_in ])
           ],
-          control_points: [ ControlPoint.new(id: :feed, label: "Feed Pump", node: :feed_pump) ]
+          control_points: [ SteamEngine.lever(id: :feed, label: "Feed Pump", node: :feed_pump) ]
         )
       end
 
@@ -851,7 +859,7 @@ module ReactorSim
             Link.new(from: [ :steam_pipe_breach, :outlet ], to: [ :atmosphere, :spill ])
           ],
           control_points: [
-            ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle)
+            SteamEngine.lever(id: :throttle_open, label: "Throttle", node: :throttle)
           ]
         )
       end
@@ -914,7 +922,7 @@ module ReactorSim
             Link.new(from: [ :drain_cocks, :outlet ], to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
-            ControlPoint.new(id: :cylinder_cocks, label: "Cylinder Cocks", node: :drain_cocks)
+            SteamEngine.lever(id: :cylinder_cocks, label: "Cylinder Cocks", node: :drain_cocks)
           ]
         )
       end
@@ -1172,6 +1180,33 @@ module ReactorSim
 
         Fragment.new(nodes: [ Nodes::Atmosphere.new ], links: [ exhaust ])
       end
+
+      # **One room, because that is what a stationary plant was.** Separating the boiler into
+      # its own house was the exception rather than the rule: a mill engine's boiler, cylinder
+      # and flywheel stand together, and a fireman crosses to the throttle in a few steps.
+      #
+      # So there is no walking here and no passages at all — a shift is at its posts from the
+      # first tick, exactly as before this existed. What the place buys is everything else
+      # geometry carries: an instrument can name the station that reads it, a hazard can reach
+      # a room rather than a lever, the heat of the room can be asked about, and a mistake has
+      # a set of *other* levers within reach.
+      #
+      # **`atmosphere` is the room's air**, which is not a dodge: an engine house works with
+      # its doors open, and the whole point of the node is the air everything breathes. It
+      # also keeps this pass behaviour-neutral — breathability stays 1.0 and nothing cooks.
+      #
+      # **Derived from what was actually built, never listed.** A hand-written roll of nodes
+      # breaks the moment a loadout leaves a slot empty, because `Layout` rightly refuses a
+      # place that names a node the operation does not have — an engine with no boiler tubes
+      # stopped building at all.
+      def engine_house(fragment)
+        Place.new(id: :engine_house, label: "Engine House", air: :atmosphere,
+                  nodes: fragment.nodes.map(&:id) - OUTSIDE)
+      end
+
+      # The only things not in the room: the coal arriving and the work leaving are a boundary
+      # rather than something a person stands beside.
+      OUTSIDE = %i[supply].freeze
 
       # --- what makes a build functional ----------------------------------------
 

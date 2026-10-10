@@ -97,7 +97,8 @@ module ReactorSim
       # is left to burn. Expressed as a slowdown rather than as a cap, because that is what
       # choking is — the fuel and the air are both still there, they are just no longer meeting.
       # Linear in the free void, and it reaches zero only when the bed is solid.
-      def reaction_throttle(state, content)
+      # Ignores the reaction: a choked grate is choked for everything on it.
+      def reaction_throttle(state, content, _reaction_id = nil)
         return 1.0 if @obstruction_tags.empty?
 
         [ 1.0 - occupancy(state, content), 0.0 ].max
@@ -196,22 +197,28 @@ module ReactorSim
       # uses, and what keeps the answer independent of evaluation order.
       def note_transitions(state, ctx)
         events = []
-        alight = ignited_kg(state) > Parcel::EPSILON
+        # **Alight means a fire the room is having, not a flame standing at the igniter.** A
+        # naked light burns a trickle of gas continuously in a mixture far too lean to carry
+        # it; counting that as the district catching fire means the transition is spent on the
+        # lamp, and the explosion an hour later — the thing that actually matters — raises no
+        # event at all, because `alight` was already true.
+        alight = ignited_kg(state) > Parcel::EPSILON && carrying?(state, ctx)
+        engaged = heater_engaged?(ctx)
 
         if alight != state.fetch(:alight, false)
           # Both types spelled out at their own `Event.build`, rather than a ternary inside one
           # call: `event_spec` finds emitters by scanning for `type: :name`, which is what makes
           # "no type in the vocabulary is unreachable" a check rather than a hope.
-          fire = { node: id, label: label, severity: :info, tick: ctx.tick,
+          fire = { node: id, label: label, tick: ctx.tick,
                    detail: { ignited_kg: ignited_kg(state).round(3) } }
-          events << (alight ? Event.build(type: :fire_lit, **fire)
-                            : Event.build(type: :fire_out, **fire))
+          events << (alight ? Event.build(type: :fire_lit, severity: fire_severity,
+                                          cause: ignition_cause(engaged), **fire)
+                            : Event.build(type: :fire_out, severity: :info, **fire))
         end
 
         # Rising edge only. There is no matching "released" because nothing needs one: a
         # prerequisite about the igniter asks whether it was touched at all during an interval,
         # and a second event per use would be noise carrying no new fact.
-        engaged = heater_engaged?(ctx)
         if engaged && !state.fetch(:heater_engaged, false)
           events << Event.build(type: :heater_engaged, node: id, label: label,
                                 severity: :info, tick: ctx.tick,
@@ -219,6 +226,42 @@ module ReactorSim
         end
 
         [ state.merge(alight: alight, heater_engaged: engaged), events ]
+      end
+
+      # **A fire in a firebox is the machine working; a fire in a roadway is a disaster**, and
+      # the vessel has already said which it is. Something built to burn rates its temperature
+      # as infinite; anything carrying a real rating was not meant to hold a fire, so one
+      # lighting in it is an incident rather than a line of telemetry. `Operation#incidents`
+      # reports `warning` and `critical` only, so an `:info` ignition reaches the durable log
+      # and never the player — which is a district emptying itself with nothing on the panel.
+      #
+      # Keyed on the **rating** rather than on the temperature reached, because ignition settles
+      # in phase 5 and the transition is seen a tick before the heat arrives: a temperature test
+      # here reads the vessel while it is still cold and calls a gas explosion routine.
+      def fire_severity
+        rating = respond_to?(:max_temperature_k) ? max_temperature_k : nil
+        rating.nil? || rating.infinite? ? :info : :critical
+      end
+
+      # Whether the mixture will carry what is alight — the same question
+      # `Resources::Ignition` asks to decide whether the fire spreads, so the two cannot drift.
+      # A fuel bed declares no range and always answers true: a grate is not a mixture.
+      def carrying?(state, ctx)
+        reactions.any? do |reaction_id|
+          spec = ctx.content.reaction(reaction_id)
+          next false if spec.nil? || !Resources::Ignition.modelled?(spec)
+
+          Resources::Ignition.carries_flame?(spec, state.fetch(:parcels), ctx.content)
+        end
+      end
+
+      # **What lit it, named for the feed.** The console renders a missing `cause:` as the
+      # literal word "unknown", so a critical event owes one. A lever the player pulled is the
+      # most useful answer there is — "the district caught, naked flame" tells them what to
+      # stop doing — and a fire that caught with no igniter engaged did so off the heat already
+      # in the vessel.
+      def ignition_cause(engaged)
+        engaged && @heater_control_id ? @heater_control_id : :self_ignition
       end
 
       # A vessel hosting no ignited reaction — most of them — answers 0.0 and therefore never

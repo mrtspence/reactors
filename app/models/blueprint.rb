@@ -188,6 +188,10 @@ class Blueprint
     # migration to `unlocks`. See `docs/design_sketches/minions.md` §3.
     def scoped_id(minion_id, item_id) = "#{minion_id}/#{item_id}"
 
+    # Who can be sent on a course. Hireable only: the standin is a different person every
+    # shift, so there is nobody for the training to stay with.
+    def trainable = ReactorSim::Content.default.hireable
+
     def equipment
       for_each_minion(:equipment, ReactorSim::Equipment.known) do |id|
         item = ReactorSim::Equipment.fetch(id)
@@ -205,10 +209,16 @@ class Blueprint
     # The cross product, with the minion's name carried in `detail` so a catalogue listing reads
     # "Leather Apron — Jim Ashfield" rather than three identical rows.
     def for_each_minion(kind, item_ids)
-      # Hireable only, for the same reason: the standin cannot be trained and cannot be kitted
-      # out. Buying an apron for somebody who turns up from the labour exchange and leaves at
-      # the end of the shift is not a thing.
-      roster = ReactorSim::Content.default.hireable
+      # **Everybody who can hold a job, the standin included — because the PIT owns the gear.**
+      #
+      # Equipment scoped to the labour exchange is not an apron bought for a man who leaves at
+      # the end of the shift; it is the rack in the lamp cabin that whoever turns up is issued
+      # from. That is what a lamp cabin was for, and without it a day-labourer is a hewer with
+      # no pick and no light, which `gated_by:` scores at exactly zero.
+      #
+      # Training is deliberately NOT scoped this way — see `trainable`. You can hand somebody a
+      # lamp at the gate; you cannot hand them four years at the face.
+      roster = kind == :training ? trainable : ReactorSim::Content.default.minions
 
       roster.flat_map do |minion_id, minion|
         item_ids.map do |item_id|

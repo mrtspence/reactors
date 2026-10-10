@@ -27,6 +27,46 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > naming more seats than that is **refused**, never truncated: truncating silently discards
 > somebody the player chose. And a seat carries no station, because everybody starts in the
 > quarters and is sent somewhere.
+>
+> **Except where the operation says otherwise.** A spatial operation may start part of its shift
+> somewhere else — the mine's `ADVANCE_SHIFT` puts the last three seats in the district, posted
+> to nothing, so there is work to do before anybody has walked anywhere. It is a property of the
+> SEAT, decided by the chassis at build, so a draft roster never changes the answer; the crew
+> screen reads it back off the built minions' `default_place`.
+
+> **A place is worth declaring even where nobody walks.** The steam engine is one room with no
+> passages at all — a mill engine's boiler, cylinder and flywheel stand together and the
+> fireman crosses to the throttle in a few steps — so its shift is at its posts from the first
+> tick exactly as before geometry existed. What the place buys is everything else geometry
+> carries: an instrument can name the station that reads it, a hazard can reach a room rather
+> than a lever, the heat of the room can be asked about, and a mistake has a set of *other*
+> levers within reach.
+>
+> Two rules that fall out of doing it:
+>
+> - **Derive the node list from the built fragment, never write it down.** A hand-written roll
+>   breaks the moment a loadout leaves a slot empty, because `Layout` rightly refuses a place
+>   naming a node the operation does not have — an engine with no boiler tubes stopped
+>   building at all.
+> - **A place with more than one gas volume must name its `air:`.** A district holds exactly
+>   one and says nothing; an engine house holds five — the room, the firebox, the drum, the
+>   injector, the steam chest — and only one of them is a lungful. `Layout` infers when it is
+>   unambiguous and refuses to guess when it is not.
+
+> **Ground is drawn per match, and a mine that is the same every time is a mine you learn
+> once.** `Mine::Ground` gives the firedamp blower, the goaf seep and the water seepage a
+> multiplier from their own RNG stream at `initial_state`, and the goaf a random share of
+> whitedamp — so a fiery pit is not also a wet one and the player has to feel out which
+> colliery they were given. Entropy at `initial_state` only; the figure lives in state and
+> therefore snapshots and replays exactly. **Vary the ordinary make, never the catastrophe**:
+> `Inrush` scales its seep and leaves the breach alone, or a dry pit's inundation becomes
+> something the starting pump can simply handle and the upgrade decides nothing. **The range
+> deliberately exceeds what the starting fan holds** — a spread the base machine always copes
+> with is a spread that changes nothing.
+>
+> **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, or the example measures
+> which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
+> down, and the failure looks identical — a physics regression that is really a bad draw.
 
 Three ways that goes wrong, all of them silent:
 
@@ -53,9 +93,15 @@ Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass
 Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisories:)
 ```
 
-- **A part contributes a `Fragment`** — nodes, links, thermal/drive links, control points —
-  because a part is almost never one node. Its gauges are named by id and come from the
-  operation's panel catalogue.
+- **A part contributes a `Fragment`** — nodes, links, thermal/drive links, **passages**,
+  **places**, control points — because a part is almost never one node. A cage winder is the
+  worked example: it brings a node, a drive link, a lever *and* a way through the shaft, because
+  fitting one is what makes the shaft ridable at all. Its gauges are named by id and come from
+  the operation's panel catalogue.
+- **The chassis owns the rooms; a fitting places only what it installs.** `Place`s union by id,
+  so `Place.new(id: :bank, nodes: [ :cage_drive ])` on a fitting adds its gear to a pit bank the
+  chassis declared, and a fitting never has to know what else is in there. A node in no place is
+  legal and means it is not in a room — rock, water behind rock, a conduit between two rooms.
 - **`provides:` is the id contract.** The id belongs to the **role**, not the part: every
   boiler names its drum `:boiler`, so the wiring, the gauges and the rng stream all survive a
   swap.
@@ -67,6 +113,13 @@ Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisori
   dials.
 - **Errors refuse a build; warnings do not.** An engine with no fusible plug is legal and is
   meant to be — the hazard under the safety is what makes going without one a decision.
+- **A pure safety fitting is a node with no ports.** It holds nothing, is in the way of nothing,
+  and its whole contribution is the place it guards — manholes in a roadway side are a hole in
+  the wall, not an obstacle. Give it a slot with no required part, so going without is the
+  default and buying it is a decision, and let it answer `safety_equipment` (see
+  [`concerns/CLAUDE.md`](../concerns/CLAUDE.md)). Tier such a fitting on **whether it can be
+  used**, not on how much risk it deletes: limewashing the manholes is a better upgrade than
+  cutting more of them because the value is gated on the person seeing it in time.
 
 > **Assembly runs once, at build, and must leave no trace in the tick.** No `Context` method
 > may take a slot id; no node may ask what is fitted elsewhere. If it needs to know, the answer
@@ -109,9 +162,31 @@ to the builder.
 3. **Heat and torque.** Every `Thermal` node needs an `ambient_conductance` or the operation
    becomes a perfect heat accumulator.
 4. **What can the player touch?** Nodes read `ctx.controls.fetch(:id)` — the lever's **actual**
-   position. `stiffness:` makes a lever travel over several ticks. Work stations (shovelling,
-   stoking) are ordinary control points today; minions will drive `actual` later without
-   anything else changing.
+   position. `stiffness:` makes a lever travel over several ticks, in percent of its range per
+   second, scaled by whoever is posted there; an unattended lever still moves at its rated
+   speed. Leave it infinite on an **effort** station, where `capability` already supplies the
+   rate and a finite travel would charge the same minion twice.
+
+   **An `effort:` blend must say which kind of strong it means, and the engine cannot catch a
+   wrong answer.** `strength` is a strength-to-weight *ratio*, so three keys are available and a
+   station that names the wrong one still builds, still sums to 1.0, and silently makes a big
+   worker no better at a heavy job:
+
+   | Key | Means | Use for |
+   |---|---|---|
+   | `force` | `strength × mass ÷ 70` | pushing a tub, heaving rock, a heavy lever — friction and leverage, where bulk pays linearly |
+   | `swing` | `√force` | a tool at the end of an arm, where technique and the tool cap what bulk buys |
+   | `strength` | the ratio itself | where power-to-weight really is the question — moving your own body |
+
+   Ask *"would half a tonne of ogre be four times better at this, or twice?"* Four is `force`;
+   twice is `swing`. See
+   [`design_sketches/strength-to-weight.md`](../../docs/design_sketches/strength-to-weight.md).
+
+   `complexity:` is the **other** axis and orthogonal to `effort:`: effort says how *fast* a
+   job happens, complexity says whether it happens *correctly*. A strong idiot stokes
+   perfectly well and sets the cut-off wrong. Declare it on the one or two posts that genuinely
+   take knowing how, with `requires:` naming the ticket — and make sure that ticket is
+   something a player can buy, or the declaration is a punishment with no answer.
 5. **What can the player see?** The interesting design work. Give the two things that will
    kill the player the best instruments — and even those late.
 

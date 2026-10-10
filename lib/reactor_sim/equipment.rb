@@ -22,12 +22,21 @@ module ReactorSim
     # nothing is fitted here, what happens to the wiring? — and nothing here has any.
     SLOTS = %i[tool gear utility].freeze
 
-    attr_reader :id, :slot, :label, :description, :stats, :tags
+    attr_reader :id, :slot, :label, :description, :stats, :tags, :mass_kg
 
-    def initialize(id:, slot:, label: nil, description: nil, stats: {}, tags: {})
+    # **`mass_kg:` is required, with no default.** What a thing weighs is half of what it costs to
+    # carry it, so an item that does not say is a free upgrade by omission. Required rather than
+    # defaulted means a missing one is an `ArgumentError` the moment `kit.rb` loads, which
+    # `ruby -Ilib -e 'require "reactor_sim"'` already checks.
+    #
+    # Something genuinely weightless says `mass_kg: 0.0` and means it.
+    def initialize(id:, slot:, mass_kg:, label: nil, description: nil, stats: {}, tags: {})
       @id = id.to_sym
       @slot = slot.to_sym
       raise Error, "equipment #{@id}: unknown slot #{@slot.inspect}" unless SLOTS.include?(@slot)
+
+      @mass_kg = mass_kg.to_f
+      raise Error, "equipment #{@id}: mass_kg cannot be negative" if @mass_kg.negative?
 
       @label = label || @id.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
       @description = description
