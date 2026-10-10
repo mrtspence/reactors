@@ -94,23 +94,31 @@ module ReactorSim
     # against a 250 ms tick settled at **8.5 rad/s against a true equilibrium of 19.6**, and the
     # coupling above it then slipped 65% and burned 39% of shaft power. Halving `dt` halved the
     # gap, which is the signature. See `docs/design_sketches/bearings.md` §1.1.
-    def settle(links, capacities, potentials, dt, heads = nil, limits = nil, drags = nil)
+    # `sources` is optional: `{ node_id => rate }`, a constant flow into a body — gravity on a
+    # winding drum. It adds to the right-hand side and nothing to the matrix, so whatever drags and
+    # couplings that body has reach equilibrium with it in the same step. The caller applies
+    # `rate × dt` to the body itself; nothing is returned for it.
+    def settle(links, capacities, potentials, dt, heads = nil, limits = nil, drags = nil,
+               sources = nil)
       drags = nil if drags.nil? || drags.empty?
-      return {} if links.empty? && drags.nil?
+      sources = nil if sources.nil? || sources.empty?
+      return {} if links.empty? && drags.nil? && sources.nil?
 
       groups = components(links).map { |group| [ group, group.flat_map { |l| [ l.a, l.b ] }.uniq ] }
-      groups.concat(uncoupled(groups, drags)) if drags
+      groups.concat(uncoupled(groups, (drags&.keys || []) | (sources&.keys || []))) if drags || sources
 
       groups.each_with_object({}) do |(group, ids), acc|
-        acc.merge!(solve_component(group, ids, capacities, potentials, dt, heads, limits, drags))
+        acc.merge!(solve_component(group, ids, capacities, potentials, dt, heads, limits, drags,
+                                   sources))
       end.freeze
     end
 
-    # A body dragged against a reservoir but coupled to nothing is still a network — a
-    # one-node one — and skipping it would leave a free-spinning shaft with no bearings at all.
-    def uncoupled(groups, drags)
+    # A body dragged against a reservoir or pushed by a source but coupled to nothing is still a
+    # network — a one-node one — and skipping it would leave a free-spinning shaft with no
+    # bearings at all.
+    def uncoupled(groups, loose)
       coupled = groups.flat_map { |(_, ids)| ids }
-      (drags.keys - coupled).map { |id| [ [], [ id ] ] }
+      (loose - coupled).map { |id| [ [], [ id ] ] }
     end
 
     def head(heads, link) = heads ? heads.fetch(link.id, 0.0) : 0.0
@@ -154,7 +162,8 @@ module ReactorSim
       groups.compact
     end
 
-    def solve_component(links, ids, capacities, potentials, dt, heads, limits, drags = nil)
+    def solve_component(links, ids, capacities, potentials, dt, heads, limits, drags = nil,
+                        sources = nil)
       # link_id => the transfer it has been pinned to. A coupling at its choke carries a
       # fixed amount and contributes no conductance, exactly like a current source.
       pinned = {}
@@ -171,7 +180,8 @@ module ReactorSim
       settled = nil
 
       (limits ? MAX_CONSTRAINT_PASSES : 1).times do
-        settled = settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags)
+        settled = settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags,
+                                     sources)
         free = links.to_h { |link| [ link.id, free_transfer(link, settled, heads, dt) ] }
 
         transfers = links.to_h do |link|
@@ -218,14 +228,20 @@ module ReactorSim
       end
     end
 
+    # What `b` gains; `a` gives up `gear` times as much. Only a geared drive link has a gear, and
+    # at 1.0 every expression here is the plain coupling's to the bit.
+    def gear(link) = link.respond_to?(:ratio) ? link.ratio : 1.0
+
     def free_transfer(link, settled, heads, dt)
-      link.conductance * ((settled.fetch(link.a) + head(heads, link)) - settled.fetch(link.b)) * dt
+      link.conductance * (((gear(link) * settled.fetch(link.a)) + head(heads, link)) -
+                          settled.fetch(link.b)) * dt
     end
 
-    # Assemble `(C/dt + K)·p′ = (C/dt)·p + b` and solve it. `K` is the conductance Laplacian:
-    # symmetric, and diagonally dominant because every off-diagonal entry is subtracted from
-    # the diagonal it came from.
-    def settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags = nil)
+    # Assemble `(C/dt + K)·p′ = (C/dt)·p + b` and solve it. `K` is a sum of `k·vvᵀ` per coupling,
+    # with `v = (g, −1)` — `g` is 1 except across a gear — so it is symmetric and positive
+    # semidefinite, and `C/dt + K` is positive definite.
+    def settled_potentials(links, ids, capacities, potentials, dt, heads, pinned, drags = nil,
+                           sources = nil)
       n = ids.length
       index = ids.each_with_index.to_h
       matrix = Array.new(n) { Array.new(n, 0.0) }
@@ -238,29 +254,32 @@ module ReactorSim
         # the whole of it — the same Laplacian, with one row's sum no longer cancelling.
         matrix[i][i] = stiffness + (drags ? drags.fetch(id, 0.0) : 0.0)
         rhs[i] = stiffness * potentials.fetch(id)
+        rhs[i] += sources.fetch(id, 0.0) if sources
       end
 
       links.each do |link|
         i = index.fetch(link.a)
         j = index.fetch(link.b)
+        g = gear(link)
 
         if pinned.key?(link.id)
           # A known quantity leaving `a` and arriving at `b`, with no conductance either way.
           rate = pinned.fetch(link.id) / dt
-          rhs[i] -= rate
+          rhs[i] -= g * rate
           rhs[j] += rate
           next
         end
 
+        # `k·[g², −g; −g, 1]`: still symmetric, so a gear needs no change to the elimination.
         k = link.conductance
-        matrix[i][i] += k
-        matrix[i][j] -= k
+        matrix[i][i] += k * g * g
+        matrix[i][j] -= k * g
         matrix[j][j] += k
-        matrix[j][i] -= k
+        matrix[j][i] -= k * g
 
         # A head makes the far end of this coupling look higher from `b` and lower from `a`.
         bias = k * head(heads, link)
-        rhs[i] -= bias
+        rhs[i] -= g * bias
         rhs[j] += bias
       end
 
@@ -281,9 +300,10 @@ module ReactorSim
 
     # Gaussian elimination with no pivoting.
     #
-    # The matrix is symmetric and diagonally dominant by construction, so pivoting buys no
-    # accuracy — and leaving it out means the arithmetic does not depend on which rows
-    # happened to compare larger, which is one less way for a match to diverge.
+    # The matrix is symmetric positive definite by construction, so pivoting buys no accuracy —
+    # and leaving it out means the arithmetic does not depend on which rows happened to compare
+    # larger, which is one less way for a match to diverge. **Not diagonally dominant across a
+    # gear**: a ratio below one makes `k·g` exceed `k·g²`. Positive definiteness is what holds.
     def gaussian_elimination(matrix, rhs, size)
       size.times do |k|
         pivot = matrix[k][k]

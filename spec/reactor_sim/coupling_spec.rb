@@ -2,6 +2,7 @@
 
 require "reactor_sim"
 require "support/conservation"
+require "support/constructed"
 
 # **Work crossing between two operations**, which is the first thing that has ever done so.
 #
@@ -46,7 +47,10 @@ RSpec.describe "a coupling between operations" do
       nodes: [
         ReactorSim::Nodes::Import.new(id: :line_shaft, label: "Line Shaft",
                                       rated_torque_nm: 2.0e3, rated_omega: 30.0,
-                                      moment_of_inertia: 1.0e3, friction: 50.0)
+                                      moment_of_inertia: 1.0e3, friction: 50.0, control_id: :clutch)
+      ],
+      control_points: [
+        ReactorSim::ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0)
       ]
     )
   end
@@ -119,41 +123,28 @@ RSpec.describe "a coupling between operations" do
   end
 
   describe "when the supply fails" do
-    # The whole reason this is a shaft rather than a number on a ledger: an engine that cannot
-    # deliver leaves a shaft winding down, not a switch flipped.
-    it "winds the shaft down rather than stopping it dead" do
+    # **Throwing either clutch slackens the rope.** The sink's torque is gone a tick later — the
+    # far end's clutch is heard at the barrier — and the shaft coasts down on its own inertia
+    # against its windage, rather than stopping dead. Measured on these rigs: 95% after five
+    # ticks, 79% after twenty, 62% after forty.
+    it "coasts the shaft down rather than stopping it dead" do
       match = coupled
       120.times { match.step! }
       running = shaft(match).fetch(:angular_momentum)
       expect(running).to be > 0.0
 
       match.operation(:source).set_control(:demand, 0)
-      trace = Array.new(1400) do
+      trace = Array.new(40) do
         match.step!
-        [ shaft(match).fetch(:supply_joules), shaft(match).fetch(:angular_momentum) ]
+        [ shaft(match).fetch(:torque), shaft(match).fetch(:angular_momentum) ]
       end
-      supply = trace.map(&:first)
+      torque = trace.map(&:first)
       speed = trace.map(&:last)
 
-      expect(supply.each_cons(2).all? { |a, b| b <= a + 1e-9 }).to be(true), "supply rose again"
-      # Spent out, to float noise. **Not `eq(0.0)`**: `Import#add_joules` is deliberately
-      # unclamped so a genuinely mis-computed bill shows up as a negative balance, which means
-      # the last tick's rounding lands either side of zero rather than exactly on it.
-      expect(supply.last.abs).to be < 1e-6
-
-      # **The claim, and the reason this is a shaft rather than a number on a ledger.** The
-      # shaft does not drop when the supply does — it holds its equilibrium against its own
-      # windage, spending what is already in hand, and only fades once that is gone. Measured:
-      # it ran on at full speed for the better part of a thousand ticks.
-      # How long the run-on lasts is set by `Import`'s `holds_seconds:` — ten seconds of rated
-      # output — so this is "many ticks, at speed", not a figure. A switch would be one tick.
-      emptied = supply.index { |j| j.abs < 1e-6 }
-      expect(emptied).to be > 50
-      expect(speed.fetch(emptied - 1)).to be > running * 0.9
-
-      # And then it genuinely winds down, rather than the torque simply switching off.
-      expect(speed.last).to be < running * 0.05
-      expect(speed.fetch(emptied)).to be > speed.last
+      expect(torque.drop(1)).to all(eq(0.0))
+      expect(speed.each_cons(2).all? { |a, b| b < a }).to be(true), "it did not coast down"
+      expect(speed.fetch(4)).to be > running * 0.9
+      expect(speed.last).to be_between(running * 0.4, running * 0.8)
     end
 
     it "spins up no shaft at all with nothing coupled to it" do
@@ -168,6 +159,107 @@ RSpec.describe "a coupling between operations" do
   it "refuses a coupling between operations on different clocks" do
     expect { coupled(sink_time_scale: 40.0) }
       .to raise_error(ReactorSim::Error, /must share a clock/)
+  end
+
+  # **Both ends feel each other.** Each end treats the other's last-tick speed as a reservoir: a
+  # driver below it, a brake above it. Everything below is a claim that would be false of a
+  # one-way supply.
+  describe "the rope" do
+    include Constructed
+
+    def sink_omega(match) = match.operation(:sink).nodes.fetch(:line_shaft).omega(shaft(match))
+
+    def source_omega(match)
+      op = match.operation(:source)
+      op.nodes.fetch(:shaft).omega(op.state.fetch(:nodes).fetch(:shaft))
+    end
+
+    describe "one end, as arithmetic" do
+      let(:rope_end) do
+        ReactorSim::Nodes::Import.new(id: :line_shaft, rated_torque_nm: 2.0e3, rated_omega: 30.0,
+                                      moment_of_inertia: 1.0e3)
+      end
+      let(:ctx) { ReactorSim::Tick::Context.new(controls: {}, dt: 0.25) }
+
+      def at(omega, far:, supply: 1.0e5, grip: 1.0)
+        state = rope_end.initial_state(ReactorSim::Rng.new(1), ReactorSim::Content.default)
+        rope_end.hear(state, omega: far, grip: grip, conductance: 100.0)
+                .merge(angular_momentum: omega * 1.0e3, supply_joules: supply)
+      end
+
+      it "drives below the far end's speed, and does not brake" do
+        state = at(10.0, far: 20.0)
+
+        expect(rope_end.rope_torque(state, ctx, conductance: 100.0, reservoir: 20.0)).to eq(1_000.0)
+        expect(rope_end.rope_drags(state, ctx)).to be_empty
+      end
+
+      it "brakes above it, and does not drive" do
+        state = at(20.0, far: 10.0)
+
+        expect(rope_end.rope_torque(state, ctx, conductance: 100.0, reservoir: 10.0)).to eq(0.0)
+        expect(rope_end.rope_drags(state, ctx).fetch(:rope)).to be_within(1e-9).of(50.0)
+      end
+
+      it "does nothing at it" do
+        state = at(20.0, far: 20.0)
+
+        expect(rope_end.rope_torque(state, ctx, conductance: 100.0, reservoir: 20.0)).to eq(0.0)
+        expect(rope_end.rope_drags(state, ctx)).to be_empty
+      end
+
+      it "goes slack when either clutch is out" do
+        slack = at(20.0, far: 10.0, grip: 0.0)
+
+        expect(rope_end.rope_drags(slack, ctx)).to be_empty
+        expect(rope_end.rope_torque(at(10.0, far: 20.0, grip: 0.0), ctx, conductance: 100.0, reservoir: 20.0))
+          .to eq(0.0)
+      end
+    end
+
+    # The chain the rope exists for: the sink throws its clutch and the source, which was being
+    # held back by it, is not.
+    it "lets a load rejection at the far end be felt by the source" do
+      held = coupled
+      shed = coupled
+      [ held, shed ].each { |m| 60.times { m.step! } }
+
+      shed.operation(:sink).set_control(:clutch, 0)
+      [ held, shed ].each { |m| 20.times { m.step! } }
+
+      expect(source_omega(shed)).to be > source_omega(held)
+    end
+
+    # A stiff rope and a 1:1 ratio, so the sink is pulled up toward the source's 40 rad/s — past
+    # its own rated 30. Geared 2:1 it settles near half the source's speed instead.
+    it "delivers a supplier's speed through the gearing, overspeed and all" do
+      direct = coupled(couplings: [ default_couplings.first.merge(stiffness: 3_000.0) ])
+      geared = coupled(couplings: [ default_couplings.first.merge(stiffness: 3_000.0, ratio: 2.0) ])
+      [ direct, geared ].each { |m| 40.times { m.step! } }
+
+      expect(sink_omega(direct)).to be > 30.0
+      expect(sink_omega(geared)).to be_within(2.0).of(source_omega(geared) / 2.0)
+    end
+
+    # Overrunning the source, the sink becomes the brake and sends work back up the rope.
+    it "lets the far end drive the source when it overruns it" do
+      match = coupled
+      match = seed_match(match, :sink, nodes: { line_shaft: { angular_momentum: 80.0 * 1.0e3 } })
+      2.times { match.step! }
+
+      expect(shaft(match).fetch(:joules_roped)).to be > 0.0
+      expect(match.operation(:source).state.dig(:nodes, :load, :supply_joules)).to be > 0.0
+    end
+
+    it "refuses a rope stiff enough to ring" do
+      expect { coupled(couplings: [ default_couplings.first.merge(stiffness: 1.0e5) ]) }
+        .to raise_error(ReactorSim::Error, /would ring/)
+    end
+
+    it "refuses an end a rope cannot be tied to" do
+      expect { coupled(couplings: [ { from: %w[source shaft], to: %w[sink line_shaft] } ]) }
+        .to raise_error(ReactorSim::Error, /not something a rope can be tied to/)
+    end
   end
 
   describe "snapshot" do

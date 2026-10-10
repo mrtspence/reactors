@@ -155,11 +155,62 @@ module ReactorSim
       end
 
       # Quick, and it costs the whole mine while it runs.
+      #
+      # TODO: W1 — `cage_speed` reads the drum's rpm, which is the wrong instrument for a hoist; the
+      # depth indicator replaces it there.
       Parts.register(:cage_gear, kind: :manriding, label: "Cage",
                      description: "Guided cage and safety catches. Quick, and heavy on the shaft.",
                      provides: %i[cage_drive], instruments: %i[cage_speed],
-                     stats: { speed_m_s: 4.2, max_torque: 1_600.0 }) do |_spec|
-        Mine.manriding_fragment(speed_m_s: 4.2, max_torque: 1_600.0, label: "Cage")
+                     stats: { speed_m_s: 4.2, brake_nm: 20_000.0 }) do |_spec|
+        Mine.cage_fragment(speed_m_s: 4.2, brake_nm: 20_000.0)
+      end
+
+      # **The cage: a drum and two balanced cages, wound by an engineman.** The player names where
+      # cage A goes (`man_winding`, percent of the shaft from bank); the engineman works a forward
+      # clutch, a reversing clutch and the brake to get it there, and with nobody at the post they
+      # hold where they were left. The drum hangs off the line shaft through both clutches, so a
+      # laden cage running down drives the shaft back.
+      CAGE_DRUM_RADIUS_M = 1.5
+
+      def self.cage_fragment(speed_m_s:, brake_nm:)
+        gear = speed_m_s / (CAGE_DRUM_RADIUS_M * WORKING_OMEGA)
+        winding = Winding.new(hoist: :cage_drive, forward: :cage_forward, reverse: :cage_reverse,
+                              brake_release: :cage_brake_release)
+
+        Fragment.new(
+          nodes: [
+            Nodes::Hoist.new(id: :cage_drive, label: "Cage Drum", moment_of_inertia: 3_000.0,
+                             radius_m: CAGE_DRUM_RADIUS_M, depth_m: SHAFT_DEPTH_M, friction: 20.0),
+            Nodes::Brake.new(id: :cage_brake, label: "Winding Brake", supports: :cage_drive,
+                             capacity_nm: brake_nm, heat_capacity: 5.0e4,
+                             control_id: :cage_brake_release)
+          ],
+          drive_links: [
+            DriveLink.new(id: :forward_gear, a: :line_shaft, b: :cage_drive, stiffness: 4.0e3,
+                          ratio: gear, control_id: :cage_forward),
+            DriveLink.new(id: :reverse_gear, a: :line_shaft, b: :cage_drive, stiffness: 4.0e3,
+                          ratio: -gear, control_id: :cage_reverse)
+          ],
+          passages: [ Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M,
+                                  speed_m_s: speed_m_s, hoist: :cage_drive,
+                                  staffed_by: :man_winding, driven_by: :line_shaft,
+                                  rated_omega: WORKING_OMEGA, label: "Cage") ],
+          places: [ Place.new(id: :bank, nodes: %i[cage_drive cage_brake]) ],
+          control_points: [
+            # **The post that takes knowing how**: overwinding is how you put a cage through the
+            # headgear. A destination, so it moves the moment it is set — the engineman is what
+            # takes time.
+            ControlPoint.new(id: :man_winding, label: "Man Winding", node: :cage_drive,
+                             default: 0.0, place: :bank, complexity: 1.1, requires: :certificated,
+                             governor: winding),
+            ControlPoint.new(id: :cage_forward, label: "Lowering Clutch", node: :cage_drive,
+                             place: :bank, internal: true),
+            ControlPoint.new(id: :cage_reverse, label: "Raising Clutch", node: :cage_drive,
+                             place: :bank, internal: true),
+            ControlPoint.new(id: :cage_brake_release, label: "Winding Brake", node: :cage_brake,
+                             place: :bank, internal: true)
+          ]
+        )
       end
 
       def self.manriding_fragment(speed_m_s:, max_torque:, label:)
@@ -286,18 +337,20 @@ module ReactorSim
                      description: "Candles on nails down the roadway. An open flame, in a pit.",
                      provides: %i[sconces], instruments: %i[district_light],
                      stats: { illumination: 0.35 }) do |_spec|
-        Mine.lighting_fragment(illumination: 0.35, control_id: :naked_flame)
+        Mine.lighting_fragment(illumination: 0.35, control_id: :naked_flame,
+                               flame: Mine::OPEN_FLAME)
       end
 
       Parts.register(:oil_flares, kind: :lighting, label: "Oil Flares",
                      description: "Open oil flares on brackets. You can see; so can the gas.",
                      provides: %i[sconces], instruments: %i[district_light],
                      stats: { illumination: 0.75 }) do |_spec|
-        Mine.lighting_fragment(illumination: 0.75, control_id: :naked_flame)
+        Mine.lighting_fragment(illumination: 0.75, control_id: :naked_flame,
+                               flame: Mine::OPEN_FLAME)
       end
 
-      # **The first tier that is not an ignition source**, because its lever is not the one the
-      # district's igniter names. Dimmer than the flares it replaces, which is the trade.
+      # **The first tier that is not an ignition source**, because it declares no flame. Dimmer
+      # than the flares it replaces, which is the trade.
       Parts.register(:gauze_lanterns, kind: :lighting, label: "Gauze Lanterns",
                      description: "Davy gauze on the roadway side. Safe, and you see less by it.",
                      provides: %i[sconces], instruments: %i[district_light],
@@ -316,10 +369,11 @@ module ReactorSim
                                max_torque: 210.0, rated_omega: WORKING_OMEGA)
       end
 
-      def self.lighting_fragment(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0)
+      def self.lighting_fragment(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0,
+                                 flame: {})
         Fragment.new(
           nodes: [ Mine.sconces(illumination: illumination, control_id: control_id,
-                                max_torque: max_torque, rated_omega: rated_omega) ],
+                                max_torque: max_torque, rated_omega: rated_omega, flame: flame) ],
           # Only a powered tier hangs off the shaft. The rest are a flame on a bracket.
           drive_links: rated_omega.positive? ?
             [ DriveLink.new(a: :line_shaft, b: :sconces, stiffness: 1.4e3) ] : [],

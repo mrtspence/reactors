@@ -129,22 +129,20 @@ module ReactorSim
         ]
       end
 
-      # The same shaft, ridden instead of climbed — by rod or by cage. Either way it stops the
-      # moment the line shaft does, and the ladders are what is left.
-      def cage_passage(speed_m_s:, rated_omega:, label: "Cage")
+      # The same shaft, ridden on the man engine's rod instead of climbed. It stops the moment the
+      # line shaft does, and the ladders are what is left. The cage is a hoist and rides
+      # differently — see `cage_fragment`.
+      def cage_passage(speed_m_s:, rated_omega:, label: "Man Engine")
         Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M, speed_m_s: speed_m_s,
                     control_id: :man_winding, driven_by: :cage_drive,
                     rated_omega: rated_omega, label: label)
       end
 
-      # **What winding men costs, and it is the men-or-coal choice made physical.** The cage
-      # hangs off the same line shaft as everything else, so calling it loads the shaft, and a
-      # loaded shaft turns slower — which means the winder raises less coal, the pump lifts less
-      # water and the fan moves less air, all at once.
+      # **The man engine's drive.** It hangs off the same line shaft as everything else, so
+      # running it loads the shaft, and a loaded shaft turns slower — the winder raises less coal,
+      # the pump lifts less water and the fan moves less air, all at once.
       #
-      # `:constant` because a hoist is: the load on the drum is the weight on the rope and does
-      # not care how fast it is going. `Nodes::Load`'s own comment names hoists as the case that
-      # curve exists for.
+      # TODO: W7 — a rod on a bob, with a stroke phase, replaces this constant-torque stand-in.
       def cage_drive(max_torque:, rated_omega:)
         Nodes::Load.new(
           id: :cage_drive, label: "Cage Drive", moment_of_inertia: 120.0,
@@ -273,12 +271,10 @@ module ReactorSim
           heat_capacity: 3.0e5, ambient_conductance: 300.0,
           initial_contents: [ { resource: :air, kg: 1_700.0 } ],
           reactions: %i[firedamp_combustion coal_dust_combustion],
-          # **The igniter names the OPEN-FLAME lever, and a safe lighting tier does not declare
-          # it.** `run_heater` reads `ctx.controls.fetch(id, 0.0)`, so with gauze lanterns or
-          # electric lamps fitted this resolves to zero and the district has no ignition source
-          # at all — which is what "safe lighting" has to mean in a pit that makes firedamp.
-          heater_control_id: :naked_flame, heater_watts: 1.2e3,
-          igniter_kg_per_s: 4.0e-4,
+          # **No igniter of its own.** Whatever is alight in the district — an open-flame light —
+          # offers itself to this air through `Tick#ignition_sources`, so with a safe tier fitted
+          # the district has no ignition source at all, which is what "safe lighting" has to mean
+          # in a pit that makes firedamp.
           # **What a roadway stands, which is not much.** Timber, and men. Past this the district
           # is on fire, and `stress_rate` is high because there is no slow version of this
           # failure — a gas explosion crosses a district faster than anybody in it can move.
@@ -563,24 +559,35 @@ module ReactorSim
       # consulted. That keeps one class, one node id and one slot across a tech tree whose top
       # end is wired to the engine house and whose bottom end is a candle on a nail.
       #
-      # **`control_id` differs by tier and that is the mechanism, not an accident.** The
-      # district's igniter names `:naked_flame`; a tier that is an open flame in a gassy room
-      # declares its lever under that id and therefore lights the gas, and a safe tier declares
-      # `:safe_light` instead. `Vessel#run_heater` reads `ctx.controls.fetch(id, 0.0)`, so a
-      # lever nobody declared is simply zero and the district has no ignition source at all.
-      # Both are labelled "Sconces", because to the player it is one lever either way — and
-      # neither may be called `:sconces`, which is the NODE: one flat id namespace.
+      # **An open-flame tier is an ignition source in the room it lights**, and a safe tier is
+      # not: it declares no flame and offers nothing to `Tick#ignition_sources`. The lever's id
+      # differs too — `:naked_flame` against `:safe_light` — because a fire names what lit it, and
+      # "naked flame" tells the player what to stop doing. Both are labelled "Sconces", because
+      # to the player it is one lever either way — and neither may be called `:sconces`, which is
+      # the NODE: one flat id namespace.
       class Lighting < Nodes::Load
         attr_reader :illumination
 
-        def initialize(illumination:, **opts)
+        def initialize(illumination:, igniter_kg_per_s: 0.0, flame_watts: 0.0, **opts)
           @illumination = illumination.to_f
+          @igniter_kg_per_s = igniter_kg_per_s.to_f
+          @flame_watts = flame_watts.to_f
           super(**opts)
         end
 
         # What somebody standing in this room gets for free. Read off N−1 state and the
         # actuated levers, so it cannot depend on phase order.
         def ambient_tags(state, levers) = { darkvision: lit(state, levers) }
+
+        # **The flame goes with the lever, not with the light.** A candle turned down is fewer
+        # candles, each as hot as ever, so a powered tier's shaft speed has no say here.
+        def ignition(_state, levers)
+          return nil unless @igniter_kg_per_s.positive?
+
+          fraction = (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
+          { kg_per_s: @igniter_kg_per_s * fraction, watts: @flame_watts * fraction,
+            cause: @control_id }
+        end
 
         # Turned down is dimmer; a powered tier whose shaft has stopped is dark. Both are
         # fractions of what this fitting manages at full.
@@ -597,11 +604,15 @@ module ReactorSim
         end
       end
 
-      def sconces(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0)
+      # What an open flame on the roadway offers the district: enough seed to light a mixture
+      # that will carry it, and a little heat.
+      OPEN_FLAME = { igniter_kg_per_s: 4.0e-4, flame_watts: 1.2e3 }.freeze
+
+      def sconces(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0, flame: {})
         Lighting.new(
           id: :sconces, label: "Sconces", illumination: illumination, control_id: control_id,
           max_torque: max_torque, rated_omega: rated_omega, curve: :viscous,
-          moment_of_inertia: 12.0
+          moment_of_inertia: 12.0, **flame
         )
       end
 

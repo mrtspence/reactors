@@ -147,8 +147,9 @@ with no feedback at all.
 Port.new(id:, direction: :inlet | :outlet, accepts: [tags], max_kg_per_s:)
 Link.new(from: [node_id, port_id], to: [node_id, port_id])
 ThermalLink.new(a:, b:, conductance:)          # W/K
-DriveLink.new(a:, b:, stiffness:, max_torque:)
-Passage.new(a:, b:, metres:, speed_m_s:, requires:, control_id:, driven_by:, rated_omega:)
+DriveLink.new(a:, b:, stiffness:, max_torque:, ratio:, control_id:, id:)  # geared, clutched
+Passage.new(a:, b:, metres:, speed_m_s:, requires:, control_id:, driven_by:, rated_omega:,
+            hoist:, staffed_by:)                                         # ridden, if hoist:
 Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they join
 ```
 

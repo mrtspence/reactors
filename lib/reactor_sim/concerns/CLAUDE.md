@@ -9,10 +9,11 @@ specific heat. Reference:
 |---|---|---|---|
 | `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k`, `emissivity`, `radiating_area_m2` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k`, `radiative_conductance` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume`, `bulk_density_kg_m3` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating`, `suffer`, `suffers?` |
 | `Pressurized` | needs `Holds` + `Thermal`; optional `material`, `shell_radius_m`, `wall_thickness_m`, `safety_factor`, `max_pressure_pa` | none — derived | `pressure_pa`, `gas_headroom_kg`, `rated_pressure_pa` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque`, `drag_conductances` |
+| `Roped` | needs `Rotating`; `rope_capacity_joules`, `control_id` (the clutch) | `supply_joules`, `remote_omega`, `remote_grip`, `rope_k` | `hear`, `receive`, `rope_report`, `rope_torque`, `rope_drags`, `grip` |
 | `Fusible` | `fusible_kg`; needs `Thermal` and a `material:` declaring `latent_heat_of_fusion_j_per_kg` | `fusible_remaining_kg` | `run_melt`, `melt_kg`, `melted_fraction`, `melted_out?`, `fusible_temperature_k` |
 
 A snapshot — `ls lib/reactor_sim/concerns/` is the truth. This table drifts on a **column**, not
@@ -253,6 +254,20 @@ later one of them catches somebody. Declared on the node that embodies the dange
 - **There is no `absent_when:`.** A fitting removes a peril by not declaring it — railings are
   a part, and a fitted part contributes a fragment without the fall in it. That is how every
   other purchase works and it needs no second rule.
+- **`rate:` is how often, `severity:` is how badly, and they are separate.** `rate` spends the
+  margin and so also decides how often a peril is the one picked; `severity` is the Danger Check
+  and nothing else. It defaults to `severity`. Minor accidents outnumber deadly ones, so a
+  place's worst peril usually wants a low rate.
+- **Which accident fires is a pick weighted by this tick's bites** (`Blunder.pick`, the `peril:`
+  fate, walked by sorted id), so every peril that reaches somebody can happen to them. One margin
+  with a weighted pick gives the same long-run mix a margin per peril would.
+- **A peril may hurt the person, the machine, or both.** A positive `severity` is a Danger Check;
+  a `mishap: { node:, kind:, share: }` is something the person does to a part. Phase 6d emits
+  `:minion_mishap` and writes the mishap to `state[:mishaps]`, and the part suffers it at the
+  start of the **next** tick's `stress`. Its own state key, because events are not snapshotted.
+  `Wearing#suffer` understands `kind: :damage` (a share of starting durability, breaking with
+  `cause: :mishap`); a part with a structural consequence overrides `suffer` and `suffers?`. A
+  peril aimed at a part that cannot suffer its kind is refused at build.
 
 ### `safety_equipment` is the other way to buy out of one
 
@@ -332,6 +347,23 @@ Stores `angular_momentum`; `omega`, `rpm`, `kinetic_joules` and `rim_speed` all 
 Coupling is a `DriveLink`, settled by the same relaxation as heat. `stiffness` is how hard the
 ends are held to a common speed — a keyed shaft is stiff, a leather belt is not, and the
 difference is one number rather than one class.
+
+## Roped: one end of a rope to another operation
+
+A shaft in one operation cannot share a drive solve with a shaft in another, so the two are joined
+by a rope whose ends each see the other's speed as of last tick (`Match#exchange!` calls `hear`).
+Slower than the far end, an end is a **driver** paid from `supply_joules`; faster, a **brake**
+declared as `:rope` and sent to the far end. Throwing either clutch slackens it. See
+[`docs/reference/physics.md`](../../../docs/reference/physics.md#a-rope-between-operations) for
+the stability bound and [`settlement.md`](../../../docs/reference/settlement.md) for the books.
+
+- **The braking end sends everything its rope drag took**, and the driven end spends only what its
+  shaft measurably gained. The difference — the slip — overflows the driven end's buffer to
+  friction. Sending only `τ·ω_far` cannot start a stopped shaft: at rest it is zero.
+- **`:rope` is its own drag destination**, booked to `joules_roped`, because every other `:work`
+  drag on that shaft is the operation's own and must not cross.
+- **`Load` and `Import` both include it.** A load a coupling names brakes by the rope instead of
+  its curve; an uncoupled `Import` treats `rated_omega` as a steady far end.
 
 ### Drag is declared, never applied
 

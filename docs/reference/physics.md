@@ -211,6 +211,38 @@ the diagonal, because a reservoir at potential zero adds conductance and no righ
 > genuinely means "this has stopped turning" declares a large multiple of it instead, which is how
 > `Nodes::Bearing` expresses seizure.
 
+### Gears, clutches, sources and a brake that sticks
+
+A `DriveLink` may be geared and clutched — what lets a drum be driven both ways off a line shaft
+that turns one way. Across a gear `g`, `b` gains `τ·dt` and `a` loses `g·τ·dt`: momentum is not
+conserved across a gear and is not meant to be; energy is, and the slip `τ·(g·ω_a − ω_b)` is never
+negative.
+
+**A constant torque on a body is a source inside the solve** (`drive_torque`, passed as
+`sources:`), never an impulse applied after it. Applied afterwards, a brake's drag — solved
+first, against a body at rest — can never hold the load: the next tick's drag removes the impulse
+and gravity re-adds it, so a "held" cage creeps at one impulse per tick.
+
+**A constant-torque brake sticks, then slips** (`Nodes::Brake`). Linearised as `τ/ω` it has no
+torque at rest, so while the shaft is all but stopped and its capacity exceeds the torque it is
+holding against it declares a lock conductance of `I/dt × LOCK_MULTIPLE`; past that it slips at
+its capacity. The torque it holds against is read from the shaft it `supports:`, as of last tick.
+
+### A rope between operations
+
+Two operations cannot share a drive solve, so a shaft in one is joined to a shaft in another by a
+**rope** (`Concerns::Roped`, `Match::Coupling`): a viscous coupling of conductance `k`, each end
+treating the other's speed **as of last tick** as a reservoir. Below it an end is a driver,
+`k·(ω_far − ω)`, paid from what the far end sent; above it, a brake booked to `:rope` and sent.
+`ratio:` gears it — speeds cross divided by it, and `k` is reflected by `ratio²` — and energy is
+invariant under it.
+
+**The lag makes the cross term explicit**, so a stiff rope rings. For equal inertias the gap
+between the ends scales by `(I/dt − k)/(I/dt + k)` per tick, which changes sign past `k = I/dt`.
+Measured on an engine roped to a pit: no reversal of the slip at the line shaft's `I/dt`, a
+reversal every other tick at twice it. `Match` refuses a rope past either end's own `I/dt`, which
+is conservative for an end drive-linked to a heavier wheel.
+
 ---
 
 ## Phase change

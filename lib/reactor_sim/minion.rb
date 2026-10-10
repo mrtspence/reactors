@@ -92,7 +92,7 @@ module ReactorSim
       { health: 1.0, fatigue: 0.0, spent: false, asphyxia: 0.0, burns: 0.0,
         apparatus: Injury.numeric(tag(:respirator_air)), carrying: [],
         posting: @default_station, station: @default_station,
-        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0 }
+        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0, via: nil }
         .merge(Injury.initial_state(rng, toughness))
         # **After `Injury`, never before.** Both draw from this minion's stream, so inserting a
         # draw ahead of one shifts every roll after it and a whole crew comes out different.

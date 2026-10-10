@@ -5,56 +5,52 @@ require "support/pit_rig"
 
 # **The cage: buying your way out of the walk.**
 #
-# The spatial model made distance expensive; this is the purchase that makes it cheaper, and it is
-# the reason the whole thing was worth building. A ladderway is free and awful. A cage is quick and
-# hangs off the same line shaft as the fan, the pump and the winder — so calling it takes something
-# away from all three.
+# The spatial model made distance expensive; this is the purchase that makes it cheaper. A
+# ladderway is free and awful. A cage is a drum and two balanced cages on the line shaft, wound by an
+# engineman to wherever the player names — so it is a way down only while somebody is winding it and
+# the shaft is turning, and what it costs is the load in it.
 #
 # Its own crew for the same reason `firedamp_spec` has one: these examples time journeys, and a
-# day-labourer's pace turns every figure into a measurement of the labour exchange.
+# day-labourer's pace turns every figure into a measurement of the labour exchange. The cage is wound
+# by a banksman (`PitRig#wind!`), with `WOUND_CREW`'s engineman at the post.
 #
 # ## How far they have got, not how long they took
 #
-# The journeys are real — the time *is* the claim here — but a journey does not have to be
-# **finished** to be measured. Timing arrivals meant 600 ticks for the ladderway, 281 for the man
-# engine and 167 for the cage, three times over; reading how far down the road each one is after
-# sixty ticks says the same thing and is strictly ordered by then:
+# A journey does not have to be finished to be measured. How far down the road the putter has got:
 #
 #     after    20t    40t    60t    80t
 #     ladders  3.00   6.00   9.00  12.00
 #     rod      3.00   6.99  13.55  20.47
-#     cage     3.24  11.37  23.96  36.53
+#     cage     7.01  24.34  43.94  63.96
 #
-# **Twenty ticks is too early and that is worth knowing**: all three are still on the first leg of
-# the road, so the gear has not come into it and the man engine is indistinguishable from the
-# ladders. Sixty is where the ordering is clean.
-#
-# See `docs/design_sketches/mine.md` §4.6 stage E.
+# Sixty ticks is where the ordering is clean; at twenty the man engine is still indistinguishable
+# from the ladders.
 RSpec.describe "the cage" do
   include PitRig
 
   before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
 
-  def pit(manriding: :cage_gear)
-    op = build_pit(id: "c", seed: 3, loadout: { manriding: manriding || :none })
+  def pit(manriding: :cage_gear, wound: false)
+    op = build_pit(id: "c", seed: 3, loadout: { manriding: manriding || :none },
+                   crew: PitRig::WOUND_CREW)
     op.set_control(:winding, 100)
+    engineman!(op) if wound
     op
   end
 
-  # How far along their road a hand has got after `ticks`, with the gear called or left standing.
-  # The putter's post, at the near end: the face crew's road is longer and says nothing more.
-  def progress_after(op, ticks, called: true, supply: PitRig::SUPPLY_J)
-    op.set_control(:man_winding, 100) if called && op.control_points.key?(:man_winding)
+  # How far along their road a hand has got after `ticks`. The putter's post, at the near end.
+  def progress_after(op, ticks, supply: PitRig::SUPPLY_J)
+    op.set_control(:man_winding, 100) if op.nodes.fetch(:cage_drive, nil).is_a?(ReactorSim::Nodes::Load)
     op.assign_minion(:crew_1, :haulage)
-    run!(op, ticks, supply: supply)
+    run!(op, ticks, supply: supply, wind: true)
 
     op.state.fetch(:minions).fetch(:crew_1).fetch(:progress)
   end
 
   describe "the man-riding slot" do
     # **Where every mine starts.** Man riding is its own slot rather than a property of the winder,
-    # because raising coal and raising men are different machines — a man engine winds no coal at
-    # all. Empty is legal and means the ladders.
+    # because raising coal and raising men are different machines. Empty is legal and means the
+    # ladders.
     it "leaves a mine with nothing fitted to its ladders" do
       op = pit(manriding: nil)
 
@@ -62,15 +58,13 @@ RSpec.describe "the cage" do
       expect(op.layout.passages.map(&:label)).to contain_exactly("Ladderway", "Main Road")
     end
 
-    it "gives a fitted cage a way through the shaft and a lever to call it" do
+    it "gives a fitted cage a way through the shaft and a post to wind it from" do
       op = pit
 
       expect(op.control_points).to have_key(:man_winding)
       expect(op.layout.passages.map(&:label)).to include("Cage")
     end
 
-    # The tier between ladders and a cage, and the machine the research is fondest of: at Tresavean
-    # it cut the journey from an hour to twenty-four minutes.
     it "offers a man engine between the two" do
       rod = pit(manriding: :man_engine)
 
@@ -81,82 +75,78 @@ RSpec.describe "the cage" do
   end
 
   describe "riding it" do
-    # The ladderway is always there, so fitting a cage takes nothing away — it only adds a faster
-    # way that has to be called for. **Bit-identical**, which is the strongest form of "takes
-    # nothing away" and is true from the first tick.
-    it "leaves them on the ladders while nobody calls it" do
-      bare = progress_after(pit(manriding: nil), 10, called: false)
-      idle = progress_after(pit, 10, called: false)
+    # Fitting a cage takes nothing away: with nobody winding it, it is not a way down at all, and
+    # the shift takes the ladders **bit for bit** as a pit with no cage does.
+    it "leaves them on the ladders while nobody is winding it" do
+      bare = progress_after(pit(manriding: nil), 10)
+      unwound = progress_after(pit, 10)
 
-      expect(idle).to eq(bare)
+      expect(unwound).to eq(bare)
     end
 
-    # The whole tech tree in one assertion: each tier carries them further than the last.
-    # Measured at 60 ticks — 9.00 m, 13.55 m, 23.96 m.
+    # The whole tech tree in one assertion, at 60 ticks: 9.00 m, 13.55 m, 43.94 m.
     it "gets them down quicker the better the gear is" do
-      got = [ nil, :man_engine, :cage_gear ].map { |gear| progress_after(pit(manriding: gear), 60) }
+      got = [ pit(manriding: nil), pit(manriding: :man_engine), pit(wound: true) ]
+            .map { |op| progress_after(op, 60) }
 
       expect(got.each_cons(2).all? { |slower, faster| faster > slower }).to be(true), got.inspect
     end
 
-    it "gets them down far quicker once it is called" do
-      called = progress_after(pit, 40, called: true)
-      standing = progress_after(pit, 40, called: false)
+    it "gets them down far quicker with somebody winding it" do
+      wound = progress_after(pit(wound: true), 40)
+      unwound = progress_after(pit, 40)
 
-      expect(called).to be > standing * 1.5
+      expect(wound).to be > unwound * 3.0
     end
   end
 
+  # **The cages are in balance, so what costs is what is in them.** Four hands aboard at the bottom
+  # landing, wound up or down, against the same wind empty. Constructed aboard, because how they
+  # got there is the riding examples' business.
+  #
+  # **Small, and measured as small**: 280 kg of hands is 174.25 rpm against 174.32 empty. Men are
+  # light against a balanced drum; a laden coal deck is what makes the shaft feel a cage.
   describe "what it costs" do
-    # **The men-or-air choice**, which is where the cost actually landed. The cage is on the same
-    # line shaft as the fan, so calling it slows the shaft and the fan slows with it — and the
-    # district gets gassier while the shift is being wound. Historically exact: a winding engine
-    # and a fan competed for the same boiler.
-    def idle_and_busy(ticks)
-      idle = pit
-      busy = pit
-      busy.set_control(:man_winding, 100)
-      run!(idle, ticks)
-      run!(busy, ticks)
-      [ idle, busy ]
+    def aboard(place)
+      %i[crew_1 crew_2 crew_3 crew_4].to_h do |seat|
+        [ seat, { via: :cage_drive, place: place, posting: nil, station: nil } ]
+      end
     end
 
-    # Measured at 50 ticks: 177.15 rpm against 143.19.
-    it "loads the line shaft" do
-      idle, busy = idle_and_busy(50)
-
-      expect(rpm(busy)).to be < rpm(idle)
+    def winding(from_m, to_pct, laden:)
+      op = pit(wound: true)
+      place = from_m.zero? ? :bank : :pit_bottom
+      op = seed(op, nodes: { cage_drive: { position_m: from_m } },
+                    minions: laden ? aboard(place) : {})
+      op.set_control(:man_winding, to_pct)
+      run!(op, 40)
+      op
     end
 
-    # **The mechanism, measured where it happens.** A slower shaft is a slower fan, so the air
-    # crossing the upcast falls the moment the cage is called — 2.619 kg/tick to 1.686, a third of
-    # the ventilation gone — and the gas in the district follows from that rather than the other
-    # way round.
-    it "takes air away from the workings while it runs" do
-      idle, busy = idle_and_busy(50)
+    it "loads the line shaft while a laden deck is raised" do
+      laden = winding(90.0, 0, laden: true)
+      empty = winding(90.0, 0, laden: false)
 
-      expect(busy.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg))
-        .to be < idle.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg) * 0.8
+      expect(rpm(laden)).to be < rpm(empty)
+      expect(laden.nodes.fetch(:cage_drive).position_m(laden.state.dig(:nodes, :cage_drive)))
+        .to be < 90.0, "the laden cage never left the bottom"
     end
 
-    # And the consequence a player reads off a gauge, which needs a little longer because the gas
-    # has to accumulate against the weaker fan: 0.573% against 0.606% at 200 ticks.
-    it "leaves the district gassier for having wound the shift" do
-      idle, busy = idle_and_busy(200)
+    # And the other way: a laden deck going down drives the shaft rather than costing it.
+    it "gives the shaft work back while a laden deck is lowered" do
+      laden = winding(0.0, 100, laden: true)
+      empty = winding(0.0, 100, laden: false)
 
-      expect(gas_pct(busy)).to be > gas_pct(idle)
+      expect(rpm(laden)).to be > rpm(empty)
     end
   end
 
   describe "when the supply fails" do
-    # A cage that has stopped is not a slow way up, it is no way up — but the ladders are still
-    # there, which is why nobody is ever completely stranded. Awful, and survivable.
-    # **Asserted as "still walking", which is what not being stranded means.** The old form waited
-    # for the arrival and checked it had taken the slow road; the same fact is visible at once in
-    # the fact that they are making ladder-rate progress rather than none at all.
+    # A cage with no power behind it is not a way down, so nobody boards it — but the ladders are
+    # still there, which is why nobody is ever completely stranded. Awful, and survivable.
     it "falls back to the ladders rather than stranding the shift" do
-      starved = progress_after(pit, 40, called: true, supply: 0.0)
-      laddered = progress_after(pit(manriding: nil), 40, called: false)
+      starved = progress_after(pit(wound: true), 40, supply: 0.0)
+      laddered = progress_after(pit(manriding: nil), 40)
 
       expect(starved).to be > 0.0, "a stopped cage must not strand the shift"
       expect(starved).to be_within(1e-6).of(laddered)
@@ -164,13 +154,12 @@ RSpec.describe "the cage" do
   end
 
   it "conserves mass and energy with the cage running" do
-    op = pit
-    op.set_control(:man_winding, 100)
+    op = pit(wound: true)
     op.assign_minion(:crew_1, :hewing)
     mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
     joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
-    run!(op, 50)
+    run!(op, 50, wind: true)
 
     mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
     joules = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)

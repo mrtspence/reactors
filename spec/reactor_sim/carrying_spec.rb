@@ -207,25 +207,30 @@ RSpec.describe ReactorSim::Burden do
     # which is a precondition and used to cost 900 ticks of watching a hewer walk.
     #
     # **And the casualty is put at the pit bottom rather than the face**, which is the same claim
-    # over a road a fifth as long: fetched on tick 168 and home at +292, against 835 and more than
-    # 1,500 from the district. Note the carry back is slower than the walk out either way, because
-    # carrying somebody is a burden — which is the point of the whole file.
+    # over a far shorter road: fetched on tick 117 and home at +145. Note the carry back is slower
+    # than the walk out, because carrying somebody is a burden — which is the point of the whole
+    # file.
     def pit_with_a_casualty
-      casualty(build_pit(id: "c", seed: 3, loadout: { manriding: :cage_gear }))
+      casualty(build_pit(id: "c", seed: 3, loadout: { manriding: :cage_gear },
+                         crew: PitRig::WOUND_CREW))
     end
 
     # The tick number is tracked here rather than read back off the operation, which does not keep
     # one — and it has to keep counting across calls, or the replay example steps two runs through
     # different tick numbers and the digests cannot match.
+    #
+    # The cage is wound by a banksman (`PitRig#wind!`): it is how the rescue travels, not what it
+    # is about.
     def casualty(op)
       ready = at_the_face(op, hewing: nil, haulage: :crew_1, timbering: nil)
-      levers!(ready, winding: 100, man_winding: 100, haulage: 100)
+      engineman!(ready)
+      levers!(ready, winding: 100, haulage: 100)
       @tick = 0
       ready
     end
 
     def step_on!(op, ticks = 1)
-      events = run!(op, ticks, from: @tick)
+      events = run!(op, ticks, from: @tick, wind: true)
       @tick += ticks
       events
     end
@@ -291,16 +296,19 @@ RSpec.describe ReactorSim::Burden do
     # never went underground, and the digests would then agree about the wrong thing.
     it "replays bit for bit with a fetch and a drop delivered twice" do
       digests = Array.new(2) do
-        built = build_match(id: "c", seed: 3, loadout: { manriding: :cage_gear })
+        built = build_match(id: "c", seed: 3, loadout: { manriding: :cage_gear },
+                            crew: PitRig::WOUND_CREW)
         match = seed_match(built, :pit,
                            minions: at_the_face_minions(built.operation(:pit), hewing: nil,
                                                         haulage: :crew_1, timbering: nil))
         op = match.operation(:pit)
-        levers!(op, winding: 100, man_winding: 100, haulage: 100)
+        engineman!(op)
+        levers!(op, winding: 100, haulage: 100)
         @tick = 0
 
         2.times { op.assign_minion(:crew_2, :crew_1) }
         walk_until(op) { |o| crew_of(o, :crew_2)[:carrying].any? }
+        expect(crew_of(op, :crew_2)[:carrying]).to eq([ :crew_1 ]), "the rescue never got there"
         2.times { op.drop_minion(:crew_1) }
         step_on!(op, 50)
         match.digest

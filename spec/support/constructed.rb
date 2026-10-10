@@ -43,10 +43,11 @@ module Constructed
   # **The operation it returns is detached from any `Match` that built it**, because it is rebuilt
   # from a snapshot rather than mutated — so an example that steps an operation and then asks
   # `match.digest` would read the original. Use `seed_match` for those.
-  def seed(op, nodes: {}, minions: {})
+  def seed(op, nodes: {}, minions: {}, controls: {})
     snapshot = ReactorSim.deep_symbolize(op.to_h)
 
     patch_operation(snapshot, nodes, minions, op)
+    patch_section(snapshot, :controls, controls, op)
 
     ReactorSim::Operation.from_h(snapshot)
   end

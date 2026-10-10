@@ -214,6 +214,18 @@ ReactorSim::Match.create(
 Extra keys in the spec hash are passed through to the builder. **Anything that changes the
 graph's shape must also be in `options:`**, or a restored snapshot rebuilds the wrong machine.
 
+To sell one operation's work to another, rope a `Load` in one to an `Import` (or any rope end) in
+the other:
+
+```ruby
+couplings: [ { from: [ :engine, :load ], to: [ :pit, :line_shaft ], ratio: 0.78 } ]
+```
+
+`ratio:` is the `from` end's speed per unit of the `to` end's. `stiffness:` is optional and
+defaults to what the `to` end declares; past either end's own `I/dt` the rope rings and `Match`
+refuses it. Both operations must share a `time_scale`. The rope is felt at both ends — see
+[`physics.md`](../reference/physics.md#a-rope-between-operations).
+
 Three ways that goes wrong, each of them silent, and all three have bitten:
 
 - **Symbols as values do not survive JSON.** `deep_symbolize` converts keys only, so a loadout

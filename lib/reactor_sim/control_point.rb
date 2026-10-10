@@ -23,7 +23,8 @@ module ReactorSim
     UNTICKETED = 2.0
 
     attr_reader :id, :label, :node, :min, :max, :default, :unit, :stiffness, :effort, :aided_by,
-                :exertion, :recovery, :place, :gated_by, :capacity, :complexity, :requires
+                :exertion, :recovery, :place, :gated_by, :capacity, :complexity, :requires,
+                :governor
 
     # **A valve is not a job, and that distinction is what makes a crew matter.** Most controls
     # are valves: a regulator goes where you put it and who put it there is irrelevant. A few are
@@ -77,8 +78,15 @@ module ReactorSim
     def initialize(id:, label: nil, node: nil, min: 0.0, max: 100.0, default: 0.0,
                    unit: "%", stiffness: Float::INFINITY, effort: nil, aided_by: nil,
                    exertion: 0.0, recovery: nil, place: nil, gated_by: nil, capacity: nil,
-                   complexity: 0.0, requires: nil)
+                   complexity: 0.0, requires: nil, internal: false, governor: nil)
       @id = id.to_sym
+      # **A lever nobody commands.** Its `actual` is written in phase 0 by the governor of the
+      # post that works it, and `set_control` refuses it; it is not on the player's panel.
+      @internal = internal
+      # **A post whose occupant drives other levers**, from this lever's value and the machine's
+      # last-tick state — an engineman winding to a destination. With nobody posted, it does
+      # nothing and those levers hold where they were left.
+      @governor = governor
       @label = label || @id.to_s.tr("_", " ").capitalize
       @node = node&.to_sym
       @place = place&.to_sym
@@ -115,6 +123,11 @@ module ReactorSim
     # crew screen rather than the lever strip. Derived rather than declared, because a lever with
     # nothing on the other end of it is not a lever by construction.
     def lever? = !@node.nil?
+
+    def internal? = @internal
+
+    # What the player can command and sees on the lever strip.
+    def commandable? = lever? && !internal?
 
     # The lever as a 0..1 fraction of its travel, which is what `intent ÷ capability` needs — a
     # station's raw units are its own business and would make `exertion:` mean something different

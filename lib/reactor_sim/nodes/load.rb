@@ -28,10 +28,22 @@ module ReactorSim
     #
     # `max_torque` is what the load absorbs at `rated_omega`, so the two together name a duty
     # point rather than a ceiling.
+    #
+    # ## Any load can be sold
+    #
+    # **A load a coupling names is one end of a rope** (`Concerns::Roped`): its brake is then the
+    # rope to the operation it sells to, not its own curve, so it is exactly as loaded as the far
+    # end is — and when the far end overruns it, it is driven. Uncoupled it is the load it always
+    # was. Its lever is the clutch either way.
     class Load < Node
       include Concerns::Rotating
+      include Concerns::Roped
 
       CURVES = %i[fan viscous constant].freeze
+
+      # Bought work this end can have in hand, as a multiple of its rated duty — the same one-tick
+      # absorber an `Import` has, for when the far end drives it.
+      HOLDS_SECONDS = 10.0
 
       attr_reader :moment_of_inertia, :radius_m, :friction, :control_id, :max_torque,
                   :rated_omega, :curve
@@ -71,7 +83,18 @@ module ReactorSim
       # Integrating each side exactly and composing them is no fix: that is still splitting, and
       # it left the mill at 8.5 rad/s against a true equilibrium of 19.6. The linearisation here
       # is a far smaller error than the split it replaces.
+      def rope_capacity_joules = @max_torque * @rated_omega * HOLDS_SECONDS
+
+      def apply(state, ctx, _grant)
+        return state unless roped?(state)
+
+        state.merge(torque: rope_torque(state, ctx, conductance: state.fetch(:rope_k),
+                                                    reservoir: state.fetch(:remote_omega)))
+      end
+
       def drag_conductances(state, ctx)
+        return super.merge(rope_drags(state, ctx)) { |_, a, b| a + b } if roped?(state)
+
         w = omega(state)
         demand = @control_id ? (ctx.controls.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
         return super if broken?(state) || w <= 0.0 || demand <= 0.0

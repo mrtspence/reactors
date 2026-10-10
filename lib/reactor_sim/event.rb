@@ -38,6 +38,7 @@ module ReactorSim
       part_failed
       minion_hurt
       minion_near_miss
+      minion_mishap
       minion_carried
       minion_spent
       fusible_plug_melted

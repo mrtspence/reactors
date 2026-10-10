@@ -615,21 +615,45 @@ module ReactorSim
       # A coupling to a part that has let go transmits nothing. Without this a burst flywheel
       # stayed on the drivetrain and kept accelerating — measured at 2365 rpm and 3.97 MW, on
       # a wheel whose own burst limit is 322 rpm.
-      live = drive_links.reject do |link|
-        states.fetch(link.a)[:failure] || states.fetch(link.b)[:failure]
+      live = drive_links.filter_map do |link|
+        next if states.fetch(link.a)[:failure] || states.fetch(link.b)[:failure]
+
+        ctx ? link.engaged(ctx.controls) : link
       end
       drags = drive_drags(nodes, states, ctx)
-      return {} if live.empty? && drags.empty?
+      sources = drive_sources(nodes, states, ctx)
+      return {} if live.empty? && drags.empty? && sources.empty?
 
       velocities = {}
       inertias = {}
-      (live.flat_map { |l| [ l.a, l.b ] } + drags.keys).uniq.each do |id|
+      (live.flat_map { |l| [ l.a, l.b ] } + drags.keys + sources.keys).uniq.each do |id|
         node = nodes.fetch(id)
         velocities[id] = node.omega(states.fetch(id))
         inertias[id] = node.moment_of_inertia
       end
 
-      Relaxation.settle(live, inertias, velocities, dt, nil, nil, drags)
+      settled = Relaxation.settle(live, inertias, velocities, dt, nil, nil, drags, sources)
+      # A source's momentum is known before the solve; it rides beside the transfers, keyed so
+      # it cannot collide with a coupling's `a=b` or a drag's `node=ground`.
+      settled.merge(sources.to_h { |id, torque| [ :"#{id}=source", torque * dt ] }).freeze
+    end
+
+    # A constant torque on a body, from a node that declares one — gravity on a drum. Solved
+    # **inside** the network rather than applied after it, so a brake or a clutch reaches
+    # equilibrium with it in the same step; applied afterwards, a brake could never hold a load.
+    # A body that has let go has left the drivetrain and is pushed by nothing.
+    def drive_sources(nodes, states, ctx)
+      return {} if ctx.nil?
+
+      nodes.each_with_object({}) do |(id, node), acc|
+        next unless node.respond_to?(:drive_torque)
+
+        state = states.fetch(id)
+        next if state[:failure]
+
+        torque = node.drive_torque(state, ctx)
+        acc[id] = torque unless torque.zero?
+      end
     end
 
     # Total conductance toward rest per **shaft**, which is not always the node that declared it:

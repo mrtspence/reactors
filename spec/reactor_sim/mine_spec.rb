@@ -19,10 +19,10 @@ require "support/conservation"
 # arrival straight into state. That is sound only while a real walk still gets there — a
 # constructed arrival cannot fail when the walking breaks. So the guards live here:
 #
-# - a **complete** walk, start to station. The putter's is 167 ticks by cage, which exercises
-#   posting, travel, arrival and taking up a station on the whole of the same machinery the face
-#   crew use over a longer road.
-# - the face crew's journey **advancing**, since theirs is 834 ticks by cage and 1,267 down the
+# - a **complete** walk, start to station. The putter's is 117 ticks by the wound cage, which
+#   exercises posting, boarding, riding, alighting and taking up a station on the same machinery
+#   the face crew use over a longer road.
+# - the face crew's journey **advancing**, since theirs is well over a thousand ticks down the
 #   ladderway, and watching it tick down is the same claim as watching it finish.
 # - a constructed arrival being **field-for-field identical** to a walked one, which is what makes
 #   `at_the_face` honest everywhere else.
@@ -37,7 +37,12 @@ RSpec.describe "the mine" do
   # ladderway and `describe "the shift has to get there"` has something to measure.
   def mine(**opts) = build_pit(id: "m", seed: 11, **opts)
 
-  def caged = mine(loadout: { manriding: :cage_gear })
+  # A cage with a ticketed engineman at the post, which is what makes it a way down at all.
+  def caged
+    op = mine(loadout: { manriding: :cage_gear }, crew: PitRig::WOUND_CREW)
+    engineman!(op)
+    op
+  end
 
   # Send the shift underground the long way, and open everything up.
   def work!(op)
@@ -91,15 +96,14 @@ RSpec.describe "the mine" do
       expect(held(op, :seam, :coal)).to eq(90_000.0)
     end
 
-    # **A walk, all the way through.** The putter's road is the short one — 167 ticks by cage
-    # against the hewer's 834 — and it is a *complete* journey rather than a shortened one, so it
-    # exercises every part of the machinery the longer roads use.
+    # **A walk, all the way through.** The putter's road is the short one — 117 ticks by the wound
+    # cage — and it is a *complete* journey rather than a shortened one, so it exercises every part
+    # of the machinery the longer roads use.
     it "puts a hand at their post once their walk is done" do
       op = caged
       op.set_control(:winding, 100)
-      op.set_control(:man_winding, 100)
       op.assign_minion(:crew_2, :haulage)
-      run!(op, 200)
+      run!(op, 200, wind: true)
 
       expect(crew(op, :crew_2)[:place]).to be(:pit_bottom)
       expect(crew(op, :crew_2)[:station]).to be(:haulage)
@@ -125,13 +129,12 @@ RSpec.describe "the mine" do
     it "arrives in exactly the state at_the_face constructs" do
       walked = caged
       walked.set_control(:winding, 100)
-      walked.set_control(:man_winding, 100)
       walked.assign_minion(:crew_2, :haulage)
-      run!(walked, 200)
+      run!(walked, 200, wind: true)
 
       built = at_the_face(caged, hewing: nil, timbering: nil)
 
-      %i[posting station place progress remaining journey].each do |field|
+      %i[posting station place progress remaining journey via].each do |field|
         expect(crew(built, :crew_2).fetch(field)).to eq(crew(walked, :crew_2).fetch(field)),
                                                      "#{field} differs"
       end

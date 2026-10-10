@@ -80,6 +80,25 @@ module ReactorSim
       # beside which parts — which upgrades cleanly when volumes arrive.
       def failure_hazards = {}
 
+      # **What a person did to this part**, from a peril's `mishap:` — `{ node:, kind:, share: }`.
+      # Returns `[state, events]`.
+      #
+      # The default understands `kind: :damage` and is `spread_damage`'s: a share of starting
+      # durability, gone. A part worn through breaks with `cause: :mishap`, so a failure somebody
+      # caused is a `part_failed` like any other and says so. A part whose consequence is
+      # structural rather than wear overrides both this and `suffers?`.
+      def suffer(state, mishap, ctx)
+        spent = state.fetch(:initial_durability, 0.0) * mishap.fetch(:share, 0.0)
+        remaining = state.fetch(:durability) - spent
+        return [ state.merge(durability: remaining), [] ] if remaining.positive?
+
+        break_part(state, ctx, :mishap)
+      end
+
+      # Checked at build, so a peril aimed at something that cannot suffer it is refused rather
+      # than silently doing nothing.
+      def suffers?(kind) = kind == :damage
+
       # Subclasses override. Returns durability units consumed per simulated second under
       # the given conditions; 0.0 while operating within limits.
       def stress_per_second(_state, _ctx) = 0.0

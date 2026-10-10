@@ -187,6 +187,13 @@ to the builder.
    perfectly well and sets the cut-off wrong. Declare it on the one or two posts that genuinely
    take knowing how, with `requires:` naming the ticket — and make sure that ticket is
    something a player can buy, or the declaration is a punishment with no answer.
+
+   **A post can drive other levers.** `governor:` on a control point makes whoever is posted
+   there a controller: each tick in phase 0 it reads the post's lever and the machine's last-tick
+   state and writes the levers it works, which are `internal: true` — off the panel, refused by
+   `set_control`. The mine's winding engineman is the worked example (`Mine::Winding`): the player
+   names where the cage goes and he works the clutches and brake. With nobody posted, those
+   levers hold where they were left — the machine does not know it is unattended.
 5. **What can the player see?** The interesting design work. Give the two things that will
    kill the player the best instruments — and even those late.
 

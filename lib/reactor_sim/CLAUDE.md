@@ -87,6 +87,10 @@ Two more rules that cost something to learn:
 - **Spell the type literally at the `Event.build` call.** `spec/reactor_sim/event_spec.rb`
   finds emitters by scanning for `type: :name`, which is what makes "no type is unreachable" a
   check rather than a hope; a computed type is invisible to it.
+- **Events are output and are not snapshotted**, so nothing the engine needs next tick may wait
+  in them. A `:minion_mishap` is reported as an event *and* written to `state[:mishaps]`, which
+  is what the next tick's `stress` reads; waiting only in the events it would vanish across a
+  restore and the restored match would diverge from the one that ran straight through.
 
 Plus the crew layer — `minion.rb` (somebody stood at a lever), `equipment.rb` and `training.rb`
 (two small registries), `kit.rb` (their catalogue). A minion's sheet is **four layers, each
@@ -118,6 +122,13 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > never the sum** — two lamps do not let you see twice. `Tick#ambient_tags` builds the map from
 > N−1 node state and this tick's lever positions, so it cannot depend on phase order; an
 > operation with no places skips it and every gate stays what the minion carries.
+>
+> **An ignition source belongs to the room, the same way.** A node that answers
+> `ignition(state, levers)` offers `{ kg_per_s:, watts:, cause: }` to the air of its place, and
+> `Tick#ignition_sources` sums the offers per air node — **walked by sorted id**, because a float
+> sum depends on its order and `graph_spec` shuffles declaration order. A vessel names no
+> igniters of its own beyond its heater lever, so a candle, a sparking bell and a hot bearing are
+> all simply things standing in the room.
 
 > **`posting` is where somebody has been SENT; `station` is what they are actually working.**
 > `assign_minion` writes the first and names a destination, never a step — which is what lets it
@@ -129,6 +140,11 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > use, beside material, heat and momentum) and `Layout` is where everything is. **Both are
 > build-time only** — routing tables are computed once per distinct capability set, never
 > searched in a tick, which is the same discipline `Path.resolve` follows.
+>
+> **A ridden passage is boarded, not walked.** One that names a `hoist:` is a cage: a rider waits
+> at the landing until it is there and stopped, is then `via` the drum and wherever the cage is,
+> and gets off at the far landing. Their weight is the drum's cargo next tick (`ctx.cargo_kg`).
+> It is offered only while its `staffed_by` post is manned, its drum sound and its shaft turning.
 
 > **`air` is the only substance tagged `breathable`, and every other gas asphyxiates by taking
 > up the room it was in.** That is the whole of `breath.rb`, and it is why afterdamp needed no

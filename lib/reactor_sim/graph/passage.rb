@@ -13,6 +13,10 @@ module ReactorSim
   #   requires     a minion tag without which this way cannot be taken at all
   #   control_id   a lever that scales it: a cage nobody has called does not move
   #   driven_by    a shaft that scales it, against `rated_omega`. **A way that costs power.**
+  #   hoist        a drum whose cage you **ride**: you board at your landing when the cage is
+  #                there and stopped, you are wherever the cage is, and you get off at the far
+  #                landing. `staffed_by` is the post that winds it, and with nobody there it is
+  #                not running at all. `a` is the landing at the top of the drum's travel.
   #
   # Two-way. A passage that is genuinely one-way is a different thing (a chute, a fall) and can
   # have its own declaration when something needs one.
@@ -21,22 +25,33 @@ module ReactorSim
   # cage is quick and costs a shaft. That is the trade a man engine was built to make, and a
   # passage that can be driven is what lets a player buy their way out of it.
   Passage = Struct.new(:a, :b, :metres, :speed_m_s, :requires, :control_id, :driven_by,
-                       :rated_omega, :label, keyword_init: true) do
+                       :rated_omega, :label, :hoist, :staffed_by, keyword_init: true) do
     def initialize(a:, b:, metres:, speed_m_s: 1.2, requires: nil, control_id: nil,
-                   driven_by: nil, rated_omega: nil, label: nil)
+                   driven_by: nil, rated_omega: nil, label: nil, hoist: nil, staffed_by: nil)
       super(a: a.to_sym, b: b.to_sym, metres: metres.to_f, speed_m_s: speed_m_s.to_f,
             requires: requires&.to_sym, control_id: control_id&.to_sym,
-            driven_by: driven_by&.to_sym, rated_omega: rated_omega&.to_f, label: label)
+            driven_by: driven_by&.to_sym, rated_omega: rated_omega&.to_f, label: label,
+            hoist: hoist&.to_sym, staffed_by: staffed_by&.to_sym)
       raise Error, "passage #{a}->#{b}: metres must be positive" unless metres.to_f.positive?
       raise Error, "passage #{a}->#{b}: speed must be positive" unless speed_m_s.to_f.positive?
 
       freeze
     end
 
+    def ridden? = !hoist.nil?
+
+    # Where on the drum's travel a landing is: `a` at the top, `b` at the bottom.
+    def landing_m(place) = place == a ? 0.0 : metres
+
     # What this way is good for **right now**. A cage with no lever pulled and no shaft turning
     # is not a slow way down, it is not a way down at all — and a shift underground when the
     # winder stops is exactly the situation the ladderway exists for.
+    #
+    # A ridden way runs at its rated speed whenever it is in service; whether its cage is here is
+    # the rider's business, not the route's.
     def speed_in(ctx)
+      return speed_m_s if ridden?
+
       speed = speed_m_s
       speed *= lever(ctx) if control_id
       speed *= drive(ctx) if driven_by && rated_omega&.positive?

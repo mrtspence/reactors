@@ -27,8 +27,10 @@ module DevMatch
   # a fan, a pump and a winder all slow together when the engine house stops paying attention.
   #
   # Declared at both ends rather than inferred, because an operation may have several loads and
-  # only one of them is sold.
-  COUPLINGS = [ { from: [ :engine, :load ], to: [ :pit, :line_shaft ] } ].freeze
+  # only one of them is sold. **A rope, felt at both ends**: a pit that sheds its load lets the
+  # engine run away. `ratio:` gears an engine at work — about 165 rpm — to the line shaft's
+  # working 22 rad/s.
+  COUPLINGS = [ { from: [ :engine, :load ], to: [ :pit, :line_shaft ], ratio: 0.78 } ].freeze
 
   # Where `/` lands. The first machine, not the only one.
   PRIMARY = OPERATIONS.keys.first

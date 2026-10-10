@@ -215,6 +215,72 @@ RSpec.describe "perils" do
     end
   end
 
+  # **All arithmetic, no ticks.** Which accident fires is a pick weighted by what each peril took
+  # this tick, so the claims are about `Blunder.pick` and `Blunder.spend` themselves.
+  describe "which accident it was" do
+    def peril(id, rate:, severity: 1.0, **opts)
+      ReactorSim::Peril.new(id: id, severity: severity, rate: rate, places: %i[pit_bottom], **opts)
+    end
+
+    let(:caught) { peril(:caught_in_haulage, rate: 1.0) }
+    let(:struck) { peril(:struck_by_tub, rate: 3.0) }
+
+    def pick(bites, roll) = ReactorSim::Blunder.pick(bites, roll)
+
+    # Sorted by id, `caught_in_haulage` comes first and owns the first quarter of the weight.
+    it "is picked in proportion to what each peril took" do
+      bites = [ [ struck, 3.0 ], [ caught, 1.0 ] ]
+
+      expect([ 0.0, 0.2499 ].map { |r| pick(bites, r) }).to all(be(caught))
+      expect([ 0.25, 0.9999 ].map { |r| pick(bites, r) }).to all(be(struck))
+    end
+
+    it "does not depend on the order the perils arrive in" do
+      forward = [ [ caught, 1.0 ], [ struck, 3.0 ] ]
+      rolls = (0..19).map { |i| i / 20.0 }
+
+      expect(rolls.map { |r| pick(forward.reverse, r) }).to eq(rolls.map { |r| pick(forward, r) })
+    end
+
+    # On the real road, both perils that reach a poor hand can happen to them.
+    it "can be any peril that reaches somebody, not only the largest" do
+      road = ReactorSim::Operations::Mine.build(id: "w", seed: 1).nodes.fetch(:tub_road)
+      working = road.perils.to_h { |p| [ p, 0.14 ] }
+      _, bites = ReactorSim::Blunder.spend(working, pit(:poor).minions.fetch(:crew_2),
+                                           { fatigue: 0.0 }, 0.25)
+
+      picked = (0..99).map { |i| pick(bites, i / 100.0).id }.uniq
+
+      expect(picked).to contain_exactly(:caught_in_haulage, :struck_by_tub)
+    end
+
+    it "spends the margin by rate and not by severity" do
+      hand = pit(:poor).minions.fetch(:crew_2)
+      often = peril(:often, rate: 2.0, severity: 0.1)
+      deadly = peril(:deadly, rate: 0.1, severity: 2.0)
+      bite = ->(p) { ReactorSim::Blunder.spend({ p => 1.0 }, hand, { fatigue: 0.0 }, 0.25).first }
+
+      expect(bite.call(often)).to be_within(1e-12).of(bite.call(deadly) * 20.0)
+    end
+
+    it "takes the rate from the severity when none is given" do
+      expect(ReactorSim::Peril.new(id: :plain, severity: 2.2, places: %i[x]).rate).to eq(2.2)
+    end
+
+    it "lets a mishap and an injury compete in one pick" do
+      knock = peril(:a_knock, rate: 1.0, severity: 0.0, mishap: { node: :shaft, kind: :obstruction })
+      bites = [ [ knock, 1.0 ], [ caught, 1.0 ] ]
+
+      expect(pick(bites, 0.1)).to be(knock)
+      expect(pick(bites, 0.9)).to be(caught)
+    end
+
+    it "refuses a peril that hurts nobody and breaks nothing" do
+      expect { ReactorSim::Peril.new(id: :idle, rate: 1.0, places: %i[x]) }
+        .to raise_error(ReactorSim::Error, /hurts nobody/)
+    end
+  end
+
   # **`edge: true` throughout this group**, because every claim in it is about what happens once
   # the margin is gone rather than about how long the road takes to take it. The crossing lands on
   # tick 131 and catches all three posted hands.
@@ -329,18 +395,21 @@ RSpec.describe "perils" do
       expect(miss.dig(:detail, :saved_by)).to be(:manholes)
     end
 
-    # And the stronger half of the same pairing, which the seeded margin makes checkable: the
-    # fitting turns **every** casualty of that crossing into a near miss rather than thinning them
-    # out. Three hurt bare, three saved fitted, all on the one tick.
+    # And the stronger half of the same pairing, which the seeded margin makes checkable: every
+    # casualty of the bare crossing is **the same accident** in the fitted pit — same tick, same
+    # person, same peril — ending as a near miss or as the injury it was, never moved in time and
+    # never swapped for another. Whether each is saved is the dodge's business, and the cap means
+    # not all of them always are.
     it "changes the whole crossing rather than displacing part of it" do
       bare, = shift(:poor, edge: true)
       fitted_hurt, = shift(:poor, edge: true, loadout: { manholes: :whitewashed_manholes })
       fitted_misses, = shift(:poor, edge: true, loadout: { manholes: :whitewashed_manholes },
                              causes: %i[minion_near_miss])
+      accident = ->(e) { [ e[:tick], e[:node], e[:cause] ] }
 
       expect(bare.length).to be > 0
-      expect(fitted_hurt).to be_empty
-      expect(fitted_misses.length).to eq(bare.length)
+      expect(fitted_misses).not_to be_empty
+      expect((fitted_hurt + fitted_misses).map(&accident).sort).to eq(bare.map(&accident).sort)
     end
 
     it "says nothing at all in a pit that bought none" do
