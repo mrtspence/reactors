@@ -244,6 +244,28 @@ Three findings from doing it, all of which made the test better rather than mere
    the plug the chance to re-seat it was supposed to refuse. Seeded into a *full* drum at exposure
    0.0000 it is the condition a `ReliefValve` would actually heal under.
 
+### When a claim is a rate, find the function that computes it
+
+Three times now the thing a long sample was measuring turned out to be a **pure function** sitting
+right there, and sampling it was both slower and worse:
+
+| Claim | Was | Is |
+|---|---|---|
+| a coarse gauge misreads more than a fine one | 2,200 ticks of a boiler | the filter chain on a synthetic signal, **0 ticks** |
+| a boneheaded hand fumbles a lever more often | 9,000 ticks of sampling | `ControlPoint#slip_chance`, **0 ticks** |
+| a poor hand spends margin faster than a sound one | two shifts compared | `Blunder.spend`, **0 ticks** (already done) |
+
+`slip_spec` is the clearest case, because sampling was not merely slow — it was **wrong**. Slips
+arrive in bursts of `SLIP_TICKS`, so a sample has to catch several before two hands can be ordered
+at all: at 200 ticks the kobold and the uncertificated hand tie at thirteen apiece and the ordering
+claim reads as false. The rates are 0.01002 and 0.00578 per tick and always were. Asking the
+function also bought two claims a sample could never make — that an ordinary valve is **exactly**
+zero for an unsuited hand, and that doubling `boneheaded` doubles the chance to nine decimal
+places.
+
+The signature of this case: an example that counts occurrences, or averages an error, or compares
+two tallies. Something decided it per tick, and that something takes arguments.
+
 ### Achievements must not cost an integration test each
 
 `event_pipeline_spec` raised steam from cold for 1,700 ticks so that a `ProgressionDigest` could be

@@ -513,9 +513,12 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     #     throttle 60, working    0.430 -> 0.001  170 rpm   swept dry
     it "is swept out by revolutions, and collects in an engine barely turning" do
       wet = body(engine, :cylinder, 360.0, water: 6.0, steam: 0.4)
+      # **A hundred, not forty.** Sweeping a cylinder out is a rate — `exhaust_demand_kg` carries
+      # a little per stroke — so a shorter window catches the working engine mid-clear at 0.395
+      # rather than dry. The other time constant in this file; everything else here is 20 ticks.
       ends = [ 0, 5, 60 ].map do |lever|
         op = at_work(engine, rpm: 0.0, cylinder: wet)
-        peak_occupancy(op, 40, throttle_open: lever)
+        peak_occupancy(op, 100, throttle_open: lever)
         occupancy(op)
       end
 

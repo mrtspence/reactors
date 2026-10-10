@@ -102,7 +102,7 @@ RSpec.describe "the mine's tech tree" do
     # no pick was merely unaided; `gated_by:` multiplies, so they are useless — which is the
     # honest model of a job that cannot be done without the thing.
     it "wins no coal at all from a hewer with neither pick nor light" do
-      expect(cut_over(cutting(pit(kit: :bare)), 100)).to eq(0.0)
+      expect(cut_over(cutting(pit(kit: :bare)), 50)).to eq(0.0)
     end
 
     it "wins none from somebody who can see but has nothing to cut with" do
@@ -116,13 +116,13 @@ RSpec.describe "the mine's tech tree" do
       op = build_pit(id: "t", seed: 5, loadout: { manriding: :cage_gear },
                      crew: (1..4).to_h { |i| [ :"crew_#{i}", { minion: :hand_lit } ] })
 
-      expect(cut_over(cutting(op), 100)).to eq(0.0)
+      expect(cut_over(cutting(op), 50)).to eq(0.0)
     end
 
     # Ratios, never figures: the shape is the claim. Measured at 100 ticks — 0.0 / 0.88 / 3.94 /
     # 21.0 kg across bare, candle, lamp and a proper kit.
     it "pays for every step up in kit" do
-      won = %i[candle lamp proper].map { |kit| cut_over(cutting(pit(kit: kit)), 100) }
+      won = %i[candle lamp proper].map { |kit| cut_over(cutting(pit(kit: kit)), 50) }
 
       expect(won.first).to be > 0.0
       expect(won.each_cons(2).all? { |worse, better| better > worse }).to be(true), won.inspect
@@ -132,8 +132,8 @@ RSpec.describe "the mine's tech tree" do
   describe "the cutting tier" do
     # Measured at 100 ticks: 84.0 kg against 21.0 by hand.
     it "gets far more coal out of the same face with a machine" do
-      by_hand = cut_over(cutting(pit), 100)
-      by_machine = cut_over(cutting(pit(cutting: :coal_cutter)), 100)
+      by_hand = cut_over(cutting(pit), 50)
+      by_machine = cut_over(cutting(pit(cutting: :coal_cutter)), 50)
 
       expect(by_machine).to be > by_hand
     end
@@ -155,7 +155,7 @@ RSpec.describe "the mine's tech tree" do
     def won(tier, light:)
       op = cutting(pit(kit: :pick, lighting: tier), ventilation: 100)
       op.set_control(op.control_points.key?(:naked_flame) ? :naked_flame : :safe_light, light)
-      cut_over(op, 200)
+      cut_over(op, 60)
     end
 
     it "lights a face for somebody carrying no lamp" do

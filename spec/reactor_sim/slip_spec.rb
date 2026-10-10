@@ -89,49 +89,71 @@ RSpec.describe "doing the wrong thing" do
 
   def slipping(states) = states.count { |s| s[:slip] }
 
+  # **Who gets it wrong is a rate, and a rate is arithmetic.**
+  #
+  # `ControlPoint#slip_chance` is the whole of it — a pure function of the post, the hand and
+  # `dt`, which `Tick#begin_slip` compares a fate against. So none of this needs a pit: sampling
+  # was measuring the same number through several hundred ticks of luck, and badly. Slips arrive
+  # in **bursts** of `SLIP_TICKS`, so a sample has to be long enough to catch several before two
+  # hands can be ordered at all — at 200 ticks the kobold and the uncertificated hand tie at 13
+  # apiece and the ordering claim reads as false.
+  #
+  # Measured, per tick, which is every claim in this group at once:
+  #
+  #     post       certificated  uncertificated  kobold (0.5)  witless (1.0)
+  #     winding        0.00000       0.00578        0.01002       0.01174
+  #     pumping        0.00000       0.00000        0.00100       0.00200
   describe "who gets it wrong" do
+    def slip_chance(hand, post: POST, ambient: {})
+      op = pit(hand)
+      minion = op.minions.fetch(:crew_1)
+      wits = minion.wits(op.state.fetch(:minions).fetch(:crew_1), ambient: ambient)
+
+      op.control_points.fetch(post).slip_chance(minion, wits, ReactorSim::DT)
+    end
+
     # **The ticket is the whole counterplay**, and it has to be worth buying: the same wit with a
     # certificate behind it never fumbles the winder at all.
     it "never catches out somebody certificated for the post" do
-      expect(slipping(worked(:certificated))).to eq(0)
+      expect(slip_chance(:certificated)).to eq(0.0)
     end
 
     it "catches the same man out without his ticket" do
-      expect(slipping(worked(:uncertificated))).to be > 0
+      expect(slip_chance(:uncertificated)).to be > 0.0
     end
 
     it "catches somebody boneheaded far more often again" do
-      expect(slipping(worked(:kobold))).to be > slipping(worked(:uncertificated))
+      expect(slip_chance(:kobold)).to be > slip_chance(:uncertificated)
     end
 
     # The first clause of the gate, and the reason it is separate: being boneheaded is not about
     # the post. It follows somebody to the pump, where being merely unsuited does not.
-    #
-    # **The wholly boneheaded hand, because the tag is a weight.** At `boneheaded: 0.5` the rate at
-    # a plain valve is low enough to need thousands of ticks to see — which is itself the right
-    # behaviour and worth saying: being a bit absent-minded rarely spoils a valve. At 1.0 it is 13
-    # fumbles in 200 ticks.
     it "follows somebody boneheaded to a lever nobody could get wrong" do
-      expect(slipping(worked(:witless, post: :pumping, ticks: 200))).to be > 0
+      expect(slip_chance(:witless, post: :pumping)).to be > 0.0
     end
 
     # **A valve goes where you put it and who put it there is irrelevant**, which is why
     # `complexity:` is declared on one lever rather than assumed everywhere. The hand here is the
-    # one who fumbles the winder constantly — at the pump he is simply fine.
-    #
-    # Not a boneheaded hand, deliberately: that is the *other* clause of the gate and makes
-    # somebody capable of getting any job wrong, pumps included. The two routes are separate on
-    # purpose and this example is about the second one.
+    # one who fumbles the winder constantly — at the pump he is **exactly** fine, which is a
+    # sharper thing to be able to say than "no slips turned up in the sample".
     it "leaves an ordinary valve alone however poorly suited the hand" do
-      expect(slipping(worked(:uncertificated, post: :pumping, ticks: 200))).to eq(0)
+      expect(slip_chance(:uncertificated, post: :pumping)).to eq(0.0)
+      expect(slip_chance(:certificated, post: :pumping)).to eq(0.0)
     end
 
-    # And that the gate reads the **level** rather than the presence of the tag, which nothing else
-    # here distinguishes: at a lever with no `complexity:` the half-boneheaded kobold is as safe as
-    # the certificated man, and only the wholly boneheaded one is not.
+    # And that the gate reads the **level** rather than the presence of the tag. Exactly double,
+    # for exactly double the tag — which no sample could have shown.
     it "scales with how boneheaded somebody is, not merely whether they are" do
-      expect(slipping(worked(:kobold, post: :pumping, ticks: 200))).to eq(0)
-      expect(slipping(worked(:witless, post: :pumping, ticks: 200))).to be > 0
+      expect(slip_chance(:witless, post: :pumping))
+        .to be_within(1e-9).of(slip_chance(:kobold, post: :pumping) * 2.0)
+    end
+
+    # **`wits` is gated on being able to see**, so a dark roadway takes a certificate's value with
+    # it — and the room's own light counts, because `Minion#gate` takes the better of what somebody
+    # carries and what the sconces give them. Measured: 0.4400 lit against 0.3960 dark.
+    it "is worse for a hand who cannot see what they are working" do
+      expect(slip_chance(:kobold, ambient: { darkvision: 1.0 }))
+        .to be < slip_chance(:kobold, ambient: {})
     end
   end
 
