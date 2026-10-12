@@ -22,7 +22,7 @@ require "support/pit_rig"
 # — what there is instead is a sample long enough to be stable, and this file was taking a 3,000-
 # tick settle plus 6,000 ticks of sampling for every call. Neither is needed:
 #
-# - **The settle bought nothing.** `:winding` is a bank post and the shift starts at bank, so
+# - **The settle bought nothing.** `:man_winding` is a bank post and the shift starts at bank, so
 #   there is no walk to wait out. It changed the counts (13 slips became 65) by letting fatigue and
 #   margin drift, which is a different experiment from the one being run.
 # - **The lever has to travel for a slip to spoil anything**, and the cycle was 400 ticks long — so
@@ -63,7 +63,7 @@ RSpec.describe "doing the wrong thing" do
   before { allow(ReactorSim::Content).to receive(:default).and_return(SlipCrew::CONTENT) }
 
   # The one certificated post in the pit, because overwinding puts a cage through the headgear.
-  POST = :winding
+  POST = :man_winding
 
   # How often the lever is sent the other way. Short enough that a 400-tick sample sees eight
   # reversals — a slip needs travel to spoil, so a cycle longer than the sample tests nothing.
@@ -101,8 +101,8 @@ RSpec.describe "doing the wrong thing" do
   # Measured, per tick, which is every claim in this group at once:
   #
   #     post       certificated  uncertificated  kobold (0.5)  witless (1.0)
-  #     winding        0.00000       0.00578        0.01002       0.01174
-  #     pumping        0.00000       0.00000        0.00100       0.00200
+  #     man_winding    0.00000       0.00578        0.01527       0.05974
+  #     pumping        0.00000       0.00000        0.00625       0.05000
   describe "who gets it wrong" do
     def slip_chance(hand, post: POST, ambient: {})
       op = pit(hand)
@@ -141,11 +141,11 @@ RSpec.describe "doing the wrong thing" do
       expect(slip_chance(:certificated, post: :pumping)).to eq(0.0)
     end
 
-    # And that the gate reads the **level** rather than the presence of the tag. Exactly double,
-    # for exactly double the tag — which no sample could have shown.
-    it "scales with how boneheaded somebody is, not merely whether they are" do
+    # And that the gate reads the **level** rather than the presence of the tag, and climbs steeply
+    # with it: exactly eight times, for double the tag — which no sample could have shown.
+    it "scales steeply with how boneheaded somebody is, not merely whether they are" do
       expect(slip_chance(:witless, post: :pumping))
-        .to be_within(1e-9).of(slip_chance(:kobold, post: :pumping) * 2.0)
+        .to be_within(1e-9).of(slip_chance(:kobold, post: :pumping) * 8.0)
     end
 
     # **`wits` is gated on being able to see**, so a dark roadway takes a certificate's value with

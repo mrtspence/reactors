@@ -129,6 +129,10 @@ module ReactorSim
         end
 
         return break_part(state, ctx, :overload) if overload?(state, ctx, integrity(state))
+        # Emptied by something else letting go beside it (`spread_damage`), a part has nothing left
+        # to fail *from* — it fails now, whatever its own stress, or a part with no wear of its own
+        # could never be wrecked at all.
+        return break_part(state, ctx, :damage) unless state.fetch(:durability).positive?
 
         lost = stress_per_second(state, ctx) * ctx.dt
         return [ state, [] ] if lost <= 0.0

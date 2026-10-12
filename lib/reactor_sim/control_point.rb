@@ -11,9 +11,9 @@ module ReactorSim
   # application would make replay diverge.
   class ControlPoint
     # How often somebody who simply is not sharp gets a job wrong, per second, at any lever at
-    # all — about once every two minutes, which is frequent enough to be a character trait and
-    # rare enough not to be a disability.
-    BONEHEADED_PER_S = 0.008
+    # all, at full `Minion#daftness`: once every five seconds. A kobold (0.5) is once every forty,
+    # a 0.3 hand once every three minutes.
+    BONEHEADED_PER_S = 0.2
 
     # And how often somebody out of their depth does, per second per point of shortfall.
     BEYOND_PER_S = 0.02
@@ -180,7 +180,7 @@ module ReactorSim
     # **beyond them**. A careful expert at a simple lever is never wrong, and that is the point
     # — this must cost nothing at the fourteen levers that are just valves.
     def slip_chance(minion, wits, dt)
-      careless = Injury.numeric(minion.tag(:boneheaded))
+      careless = minion.daftness
       beyond = @complexity.positive? ? [ difficulty(minion) - wits, 0.0 ].max : 0.0
       return 0.0 if careless.zero? && beyond.zero?
 

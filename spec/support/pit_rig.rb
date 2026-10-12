@@ -76,8 +76,12 @@ module PitRig
 
   # `loadout:` is omitted rather than defaulted, so an unfitted slot takes the chassis default
   # exactly as it would without the rig.
-  def build_match(id:, seed:, crew: CREW, ground: ORDINARY, loadout: nil, **opts)
-    operation = { id: "pit", type: :mine, ground: ground, crew: crew, **opts }
+  #
+  # **The two-shaft frame unless an example asks otherwise**, pinned for the reason `ground:` is:
+  # a mine spec measures the machine, and the starting frame's brattice leaks some of every
+  # ventilation figure away.
+  def build_match(id:, seed:, crew: CREW, ground: ORDINARY, loadout: nil, chassis: :two_shaft, **opts)
+    operation = { id: "pit", type: :mine, ground: ground, crew: crew, chassis: chassis, **opts }
     operation[:loadout] = loadout if loadout
 
     ReactorSim::Match.create(id: id, seed: seed, operations: [ operation ])
@@ -102,16 +106,21 @@ module PitRig
   end
 
   # **A banksman for specs**: calls the cage to whoever is waiting at a landing to cross the shaft,
-  # and sends it to the far landing once somebody is aboard. The cage is incidental to most claims
-  # that ride it, and a winding schedule written into every one would bury the claim. Needs
-  # somebody at `:man_winding` — `WOUND_CREW`'s engineman — or nothing winds.
+  # and sends it to the far landing once somebody is aboard and has finished getting in. The cage is
+  # incidental to most claims that ride it, and a winding schedule written into every one would bury
+  # the claim. Needs somebody at `:man_winding` — `WOUND_CREW`'s engineman — or nothing winds.
   def wind!(op)
     shaft = op.layout.passages.find(&:ridden?) or return
     hands = op.state.fetch(:minions).values
     aboard = hands.find { |s| s[:via] == shaft.hoist }
+    getting_in = hands.find { |s| s[:via] == shaft.hoist && s.fetch(:boarding_s, 0.0).positive? }
     waiting = hands.find { |s| s[:via].nil? && shaft.touches?(s[:place]) && crossing?(op, shaft, s) }
 
-    landing = aboard ? shaft.other(aboard[:place]) : waiting&.fetch(:place)
+    landing =
+      if getting_in then getting_in[:place]
+      elsif aboard then shaft.other(aboard[:place])
+      else waiting&.fetch(:place)
+      end
     op.set_control(shaft.staffed_by, landing == shaft.a ? 0.0 : 100.0) if landing
   end
 

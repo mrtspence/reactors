@@ -5,8 +5,9 @@ module ReactorSim
   #
   # `failure_hazards` answers "a part broke, who was near it". A peril answers the other half:
   # nothing broke, the haulage road is simply a place where tubs go past and sooner or later one
-  # of them catches somebody. Declared on the node that embodies the danger, keyed by `places:`
-  # or `stations:` exactly as `failure_hazards` is, so the two resolve through one mechanism.
+  # of them catches somebody. Declared on the node that embodies the danger, keyed by `places:`,
+  # `stations:` or `riders:` exactly as `failure_hazards` is, so the two resolve through one
+  # mechanism.
   #
   # **A fitting removes a peril by not declaring it.** There is no `absent_when:` — railings are
   # a part, and a part that is fitted contributes a fragment without the fall in it. That is how
@@ -22,16 +23,17 @@ module ReactorSim
   # that part suffers on the next tick (`Concerns::Wearing#suffer`). The clumsy banksman letting a
   # tub into the shaft is unhurt; the shaft is not.
   Peril = Struct.new(:id, :tags, :severity, :rate, :mishap, :scales_with, :when_tagged,
-                     :unless_tagged, :places, :stations, keyword_init: true) do
+                     :unless_tagged, :places, :stations, :riders, keyword_init: true) do
     def initialize(id:, severity: 0.0, rate: nil, mishap: nil, tags: [], scales_with: nil,
-                   when_tagged: nil, unless_tagged: nil, places: nil, stations: nil)
+                   when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil)
       super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
             mishap: Peril.mishap(mishap),
             tags: Array(tags).map(&:to_sym).freeze,
             scales_with: scales_with&.to_sym,
             when_tagged: when_tagged&.to_sym, unless_tagged: unless_tagged&.to_sym,
             places: Array(places).map(&:to_sym).freeze,
-            stations: Array(stations).map(&:to_sym).freeze)
+            stations: Array(stations).map(&:to_sym).freeze,
+            riders: Array(riders).map(&:to_sym).freeze)
       raise Error, "peril #{id}: hurts nobody and breaks nothing" unless hurts? || mishap?
       raise Error, "peril #{id}: a rate of zero never happens" unless self.rate.positive?
 
@@ -71,7 +73,13 @@ module ReactorSim
       (want * avoid).clamp(0.0, 1.0)
     end
 
-    def reaches?(station, place) = stations.include?(station) || places.include?(place)
+    # `riders:` names what carries somebody through a shaft — a cage's drum, a man engine's rods —
+    # and reaches whoever it is carrying, wherever they are.
+    def reaches?(station, place, carried = nil)
+      return true if carried && riders.include?(carried)
+
+      stations.include?(station) || places.include?(place)
+    end
   end
 
   # The hidden margin of safety every worker carries, and what spends it.
@@ -126,6 +134,10 @@ module ReactorSim
     EXPONENT = 2.0
     SPENT_WEIGHT = 4.0
 
+    # What full `Minion#daftness` adds to how fast the margin is spent: a 1.0 hand spends it five
+    # times as fast as a sound one, a kobold at 0.5 half as fast again.
+    DAFT_SPEND = 4.0
+
     module_function
 
     def roll(rng) = rng.between(SPREAD.begin, SPREAD.end)
@@ -176,7 +188,7 @@ module ReactorSim
     # pointed at severity; `hazard_sense` in particular belongs mostly here — pit sense is about
     # not being there, not about absorbing it better.
     def susceptibility(minion, state)
-      careless = 1.0 + tag(minion, :clumsy) + tag(minion, :green) + tag(minion, :boneheaded)
+      careless = 1.0 + tag(minion, :clumsy) + tag(minion, :green) + (DAFT_SPEND * minion.daftness)
       wary = 1.0 + tag(minion, :hazard_sense) + tag(minion, :practised)
       tired = 1.0 + (SPENT_WEIGHT * (state.fetch(:fatigue, 0.0)**EXPONENT))
 

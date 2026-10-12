@@ -36,12 +36,12 @@ RSpec.describe "afterdamp" do
   # 8% by mass, about 15% by volume — good and gassy, and comfortably inside the band.
   def gassy_pct = 8.0
 
-  def pit = build_pit(id: "a", seed: 3, loadout: { manriding: :cage_gear })
+  def pit = build_pit(id: "a", seed: 3, loadout: { winder: :cage_gear })
 
   def pit_with(**mix) = at_the_face(seed(pit, nodes: { district: district_mix(pit, **mix) }))
 
   def work!(op, ticks, ventilation: 100, naked_flame: 0, hewing: 100, from: 0, **levers)
-    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: ventilation, naked_flame: naked_flame, **levers)
 
     run!(op, ticks, from: from)

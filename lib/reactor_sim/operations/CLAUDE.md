@@ -94,7 +94,7 @@ Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisori
 ```
 
 - **A part contributes a `Fragment`** — nodes, links, thermal/drive links, **passages**,
-  **places**, control points — because a part is almost never one node. A cage winder is the
+  **places**, control points — because a part is almost never one node. A cage is the
   worked example: it brings a node, a drive link, a lever *and* a way through the shaft, because
   fitting one is what makes the shaft ridable at all. Its gauges are named by id and come from
   the operation's panel catalogue.
@@ -194,6 +194,16 @@ to the builder.
    `set_control`. The mine's winding engineman is the worked example (`Mine::Winding`): the player
    names where the cage goes and he works the clutches and brake. With nobody posted, those
    levers hold where they were left — the machine does not know it is unattended.
+
+   **Coal rides the hoist.** A deck in cage A is filled at the bottom by the onsetter and run off
+   at bank by the banksman, each only while the cage stands at their landing, and its coal is the
+   drum's load. With `coal_winding` on the engineman shuttles it himself — **men always first** — so
+   winding coal takes three posts: the engineman, the onsetter and the banksman.
+
+   **One person's report can drive another person's lever.** The engineman winds away from a
+   landing only on its marshal's bell — the banksman at bank, the onsetter below — and a marshal
+   out of their depth slips and rings a **false ready** while somebody is still getting in. A good
+   engineman paired with a bad onsetter is a crew problem nobody near the winding can see.
 5. **What can the player see?** The interesting design work. Give the two things that will
    kill the player the best instruments — and even those late.
 

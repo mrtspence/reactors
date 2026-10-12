@@ -96,12 +96,14 @@ module ReactorSim
     # What is dangerous this tick, by the two things that can make it so: the post somebody is
     # standing at, and the room they are standing in. Resolved together per minion, because a
     # hewer whose roof comes in while his district is full of afterdamp is in both.
-    Exposure = Struct.new(:stations, :places, keyword_init: true) do
-      def empty? = stations.empty? && places.empty?
+    # And the third: the hoist somebody is riding, because a cage hitting the headframe hurts the
+    # men in it and not the men standing at the landing it passed.
+    Exposure = Struct.new(:stations, :places, :riders, keyword_init: true) do
+      def empty? = stations.empty? && places.empty? && riders.empty?
 
       # Severity ADDS and tags union, the same rule two failures at one post already follow.
-      def at(station, place)
-        found = [ stations[station], places[place] ].compact
+      def at(station, place, via = nil)
+        found = [ stations[station], places[place], riders[via] ].compact
         return nil if found.empty?
         return found.first if found.one?
 
@@ -222,13 +224,65 @@ module ReactorSim
         minion = minions[minion_id] or next acc
 
         governor = post.governor
+        drum = nodes.fetch(governor.hoist)
+        drum_state = state.fetch(:nodes).fetch(governor.hoist)
+        destination = governor.dispatch(
+          commanded: post.value(acc.fetch(post.id)), shuttling: shuttling?(governor, acc),
+          drum: drum, drum_state: drum_state, states: state.fetch(:nodes),
+          calls: calls_for(governor.hoist)
+        )
         outputs = governor.govern(
-          destination: post.value(acc.fetch(post.id)),
-          drum: nodes.fetch(governor.hoist), drum_state: state.fetch(:nodes).fetch(governor.hoist),
+          destination: destination, drum: drum, drum_state: drum_state,
           lateness: lateness(post, minion), frozen: acc.fetch(post.id)[:slip] == :freeze,
-          held: governor.levers.to_h { |id| [ id, control_points.fetch(id).value(acc.fetch(id)) ] }
+          held: governor.levers.to_h { |id| [ id, control_points.fetch(id).value(acc.fetch(id)) ] },
+          ready: signalled?(governor.hoist, acc)
         )
         acc.merge(outputs.to_h { |id, value| [ id, acc.fetch(id).merge(target: value, actual: value).freeze ] })
+      end
+    end
+
+    def shuttling?(governor, levers)
+      return false unless governor.shuttle && levers.key?(governor.shuttle)
+
+      control_points.fetch(governor.shuttle).value(levers.fetch(governor.shuttle)) >= 50.0
+    end
+
+    # **Where the men on a hoist want it**, as percent of the shaft from bank: the far landing of
+    # anybody aboard first, then the landing of anybody waiting there to cross, by id. From the
+    # frozen previous tick, like everything else the engineman reads.
+    def calls_for(hoist)
+      passage = layout.passages.find { |p| p.hoist == hoist } or return []
+      riders = state.fetch(:minions).select { |id, _| minions.key?(id) }.sort_by(&:first)
+
+      aboard = riders.filter_map { |_, s| passage.other(s[:place]) if s[:via] == hoist }
+      waiting = riders.filter_map { |id, s| s[:place] if waiting_to_cross?(id, s, passage) }
+      (aboard + waiting).uniq.map { |landing| passage.landing_m(landing) / passage.metres * 100.0 }
+    end
+
+    def waiting_to_cross?(id, minion_state, passage)
+      here = minion_state[:place]
+      return false unless minion_state[:via].nil? && passage.touches?(here)
+
+      going = posted_place(minions.fetch(id), minion_state)
+      return false if going.nil? || going == here
+
+      layout.next_hop(here, going, routing.fetch(id, []), closed_ways) == passage.other(here)
+    end
+
+    # **The marshal's bell**: whether the cage may be wound away from the landing it stands at. With
+    # no marshal posted there is no bell, and the engineman winds on the order alone. A posted
+    # marshal rings once nobody is still getting in — or, slipping, rings anyway: a false ready.
+    def signalled?(hoist, levers)
+      passage = layout.passages.find { |p| p.hoist == hoist } or return true
+      drum = nodes.fetch(hoist)
+      drum_state = state.fetch(:nodes).fetch(hoist)
+      landing = passage.ends.find { |place| drum.cage_stopped_at?(drum_state, passage.landing_m(place)) }
+      marshal = landing && passage.marshals[landing]
+      return true if marshal.nil? || station_index[marshal].nil?
+      return true if levers.fetch(marshal)[:slip]
+
+      state.fetch(:minions).none? do |_, s|
+        s[:via] == hoist && s[:place] == landing && s.fetch(:boarding_s, 0.0).positive?
       end
     end
 
@@ -393,13 +447,16 @@ module ReactorSim
     # id**, because sources in one room are summed and the sum must not depend on the order an
     # operation declared its nodes in.
     #
-    # TODO: callers still to come, each untested until it lands — the signal bell (mine
-    # accidents unit 2, W6); gauze lamps in a fast draught and hot bearings and a burning
-    # headgear (unit 3); a blown-out shot (unit 4).
+    # **People are in the room too**: anybody carrying a naked light (`open_flame`) offers it to the
+    # air where they stand, as of last tick — the commonest igniter of all. Walked after the nodes,
+    # by sorted id, for the same reason.
+    #
+    # TODO: callers still to come, each untested until it lands — hot bearings and a burning
+    # headgear (unit 3b); a blown-out shot (unit 4).
     def ignition_sources(levers)
       return {} if layout.places.empty?
 
-      nodes.keys.sort.each_with_object({}) do |id, acc|
+      lit = nodes.keys.sort.each_with_object({}) do |id, acc|
         node = nodes.fetch(id)
         next unless node.respond_to?(:ignition)
 
@@ -408,16 +465,27 @@ module ReactorSim
         next unless offered.fetch(:kg_per_s, 0.0).positive? || offered.fetch(:watts, 0.0).positive?
 
         acc[air] = alight_together(acc[air], offered)
-      end.freeze
+      end
+      hand_flames(lit).freeze
     end
 
-    # **What each hoist is carrying**: everybody committed to it, by their body, their kit and
+    def hand_flames(lit)
+      minions.keys.sort.each_with_object(lit) do |id, acc|
+        minion = minions.fetch(id)
+        next unless minion.open_flame?
+
+        air = layout.breathes(state.dig(:minions, id, :place)) or next
+        acc[air] = alight_together(acc[air], Minion::HAND_FLAME)
+      end
+    end
+
+    # **What each hoist or man engine is carrying**: everybody on it, by their body, their kit and
     # anybody they are carrying. From the frozen previous tick, so it cannot depend on phase order.
     def cargo
       carried = being_carried(state.fetch(:minions))
 
       state.fetch(:minions).each_with_object(Hash.new(0.0)) do |(id, minion_state), acc|
-        hoist = minion_state[:via] or next
+        hoist = carried_by(minion_state) or next
         minion = minions[id] or next
         next if carried.key?(id)
 
@@ -1051,7 +1119,7 @@ module ReactorSim
         # somewhere else, and one already carried out has no station and cannot be hurt again by
         # the same blast. **A place outlives a station**: being stood down clears the post but
         # not the room, so somebody carried out of a district full of afterdamp is still in it.
-        hazard = exposure.at(minion_state[:station], minion_state[:place])
+        hazard = exposure.at(minion_state[:station], minion_state[:place], carried_by(minion_state))
         next [ id, minion_state ] if minion.nil? || hazard.nil?
 
         hurt, mode = Injury.check(minion, minion_state, hazard)
@@ -1150,7 +1218,9 @@ module ReactorSim
     end
 
     def weigh(minion, minion_state, reaching, fates, events, ctx)
-      mine = reaching.select { |peril, _| peril.reaches?(minion_state[:station], minion_state[:place]) }
+      mine = reaching.select do |peril, _|
+        peril.reaches?(minion_state[:station], minion_state[:place], carried_by(minion_state))
+      end
       after, peril = Blunder.advance(mine, minion, minion_state, ctx.dt,
                                      fates.dig(minion.id, :margin) || 1.0,
                                      fates.dig(minion.id, :peril) || 0.0)
@@ -1366,12 +1436,43 @@ module ReactorSim
         minion = minions[id]
         next [ id, minion_state ] if minion.nil? || carried.key?(id)
 
-        after = walk(minion, minion_state, ctx)
+        after = walk(minion, minion_state, ctx, events)
         lifted(minion_state, after).each { |got| events << carried_event(minion, got, ctx) }
         [ id, after.freeze ]
       end
 
-      [ stow(walked, carried), events ]
+      [ stow(marshal(walked, minions_state), carried), events ]
+    end
+
+    # **Who a marshal lets on.** Everybody who boarded a cage this tick at a landing whose marshal is
+    # posted is let on in id order while what is already aboard, as of last tick, leaves room under
+    # the cage's rating; the first who does not fit and everybody after them wait. With nobody at the
+    # landing, nobody is stopped. A pass of its own, after the walk, so who boarded first cannot
+    # depend on the order the walk visited them in.
+    def marshal(walked, before)
+      boarded = walked.select { |id, s| s[:via] && before.dig(id, :via).nil? }
+      return walked if boarded.empty?
+
+      aboard = cargo
+      refused = boarded.group_by { |_, s| [ s[:via], s[:place] ] }.flat_map do |(hoist, landing), group|
+        passage = layout.passages.find { |p| p.hoist == hoist && p.touches?(landing) }
+        room = room_aboard(passage, landing, aboard) or next []
+
+        group.sort_by(&:first).filter_map do |id, s|
+          room -= minions.fetch(id).mass_kg + Burden.load_kg(minions.fetch(id), s, minions)
+          id if room.negative?
+        end
+      end
+
+      walked.merge(refused.to_h { |id| [ id, walked.fetch(id).merge(via: nil, boarding_s: 0.0).freeze ] })
+    end
+
+    # Kilograms a marshalled landing will still let on, or nil where nobody is marshalling it.
+    def room_aboard(passage, landing, aboard)
+      station = passage&.marshals&.fetch(landing, nil)
+      return nil if station.nil? || passage.rated_kg.nil? || station_index[station].nil?
+
+      passage.rated_kg - aboard.fetch(passage.hoist, 0.0)
     end
 
     # Who this minion picked up this tick. A set difference rather than a flag, so it cannot
@@ -1408,8 +1509,8 @@ module ReactorSim
     # **A posting may name a person as well as a station**, which is the whole of the fetch order:
     # `assign_minion(:crew_2, :crew_1)` sends somebody to wherever `crew_1` is, and the id spaces
     # cannot collide because every id in an operation is one flat namespace.
-    def walk(minion, state, ctx)
-      return ride(minion, state, ctx) if state[:via]
+    def walk(minion, state, ctx, events)
+      return ride(minion, state, ctx, events) if state[:via]
 
       destination = posted_place(minion, state)
       here = minion.place(state)
@@ -1486,7 +1587,7 @@ module ReactorSim
       progress = state.fetch(:progress, 0.0)
 
       while remaining.positive? && here != destination
-        hop = layout.next_hop(here, destination, routing.fetch(minion.id, []))
+        hop = layout.next_hop(here, destination, routing.fetch(minion.id, []), closed_ways)
         passage = hop && quickest(here, hop, ctx)
         # No way on, or the only ways on are powered and stopped. They wait where they are,
         # which is what being stranded underground looks like.
@@ -1509,16 +1610,22 @@ module ReactorSim
       end
 
       at_post = here == destination
+      on = passage&.driven_by if !at_post && progress.positive? && passage&.powered?
       minion.advance_to(state, place: here, progress: at_post ? 0.0 : progress,
                                remaining: at_post ? 0.0 : left(minion, state, here, destination, progress),
                                station: at_post ? minion.posting(state) : nil)
+            .merge(riding: on)
     end
+
+    # What is carrying somebody through the shaft — a cage they are in, or the rods they are
+    # stepping on — which is how a `riders:` hazard or peril finds them.
+    def carried_by(minion_state) = minion_state[:via] || minion_state[:riding]
 
     # How much walking is left, for the panel rather than for the walking. `assign_minion`
     # refuses a posting there is no way to, so a missing route means the ways out have changed
     # under somebody already walking — they hold where they are, and so does their progress.
     def left(minion, state, here, destination, progress)
-      route = layout.route_metres(here, destination, routing.fetch(minion.id, []))
+      route = layout.route_metres(here, destination, routing.fetch(minion.id, []), closed_ways)
       return state.fetch(:remaining, 0.0) if route.nil?
 
       [ route - progress, 0.0 ].max
@@ -1529,7 +1636,17 @@ module ReactorSim
     # layout stays deterministic when two ways are equally good. A cage nobody is winding is not
     # running at all.
     def quickest(here, hop, ctx)
-      layout.passages_between(here, hop).select { |p| in_service?(p, ctx) }.max_by { |p| p.speed_in(ctx) }
+      layout.passages_between(here, hop)
+            .select { |p| !closed_ways.include?(p.through) && in_service?(p, ctx) }
+            .max_by { |p| p.speed_in(ctx) }
+    end
+
+    # **What is in the way**: every node some passage runs through that has failed, as of last
+    # tick. A choked shaft closes the ladders and the cage in it alike, and routing finds another
+    # way out if the pit has one.
+    def closed_ways
+      @closed_ways ||= layout.through_nodes.select { |id| nodes.fetch(id).blocks_passage?(state.dig(:nodes, id)) }
+                             .freeze
     end
 
     # A ridden way is running while somebody is winding it, the drum is sound, and whatever drives
@@ -1537,7 +1654,7 @@ module ReactorSim
     def in_service?(passage, ctx)
       return true unless passage.ridden?
       return false if station_index[passage.staffed_by].nil?
-      return false if nodes.fetch(passage.hoist).broken?(ctx.states.fetch(passage.hoist))
+      return false if wrecked?(passage)
       return true unless passage.driven_by && passage.rated_omega&.positive?
 
       ctx.node_omega(passage.driven_by).to_f >= passage.rated_omega * DRIVEN_IN_SERVICE
@@ -1553,15 +1670,17 @@ module ReactorSim
       end
 
       minion.advance_to(state, place: here, progress: 0.0, remaining: passage.metres)
-            .merge(via: passage.hoist)
+            .merge(via: passage.hoist, boarding_s: Nodes::Hoist::BOARDING_S)
     end
 
     # Aboard: where the cage is, until it stops at the far landing — or back at the one they got on
     # at, if that is where they are going now or if the cage has stopped running there.
-    def ride(minion, state, ctx)
+    def ride(minion, state, ctx, events)
       here = minion.place(state)
       passage = layout.passages.find { |p| p.hoist == state[:via] && p.touches?(here) }
-      return state.merge(via: nil) if passage.nil?
+      return state.merge(via: nil, boarding_s: 0.0) if passage.nil?
+      return alight(minion, state, nearest_landing(passage)) if wrecked?(passage)
+      return boarding(minion, state, passage, here, ctx, events) if state.fetch(:boarding_s, 0.0).positive?
 
       far = passage.other(here)
       return alight(minion, state, far) if cage_at?(passage, far)
@@ -1574,19 +1693,58 @@ module ReactorSim
                                remaining: [ passage.metres - travelled, 0.0 ].max)
     end
 
+    # **Still getting in.** With the cage stopped at the landing it is a few seconds; wound away
+    # meanwhile, they are caught between the cage and the shaft side and left at the landing hurt.
+    def boarding(minion, state, passage, here, ctx, events)
+      if cage_at?(passage, here)
+        return state.merge(boarding_s: [ state.fetch(:boarding_s) - ctx.dt, 0.0 ].max)
+      end
+
+      hazard = nodes.fetch(passage.hoist).boarding_hazard
+      return alight(minion, state.merge(boarding_s: 0.0), here) if hazard.nil?
+
+      hurt, mode = Injury.check(minion, state, hazard)
+      events << caught_boarding_event(minion, hurt, mode, ctx) if mode
+      alight(minion, hurt.merge(boarding_s: 0.0), here)
+    end
+
+    def caught_boarding_event(minion, state, mode, ctx)
+      Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
+                  severity: :critical, tick: ctx.tick, mode: mode, cause: :caught_boarding,
+                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
+                            place: state[:place] })
+    end
+
     def alight(minion, state, place)
       arrived = minion.advance_to(state.merge(via: nil), place: place, progress: 0.0, remaining: 0.0)
       posted_place(minion, arrived) == place ? reached(minion, arrived) : arrived
     end
 
+    # A cage that has hit the end of its shaft, or whose rope has parted, is not going anywhere:
+    # whoever is in it gets out where it ended, and the failure's own hazards have already found
+    # them. A rope that parts with nothing to grip the guides drops the cage to the bottom.
+    def wrecked?(passage)
+      drum = nodes.fetch(passage.hoist)
+      drum.broken?(state.dig(:nodes, passage.hoist)) || rope_parted?(drum)
+    end
+
+    def rope_parted?(drum) = !drum.rope.nil? && nodes.fetch(drum.rope).broken?(state.dig(:nodes, drum.rope))
+
+    def nearest_landing(passage)
+      drum = nodes.fetch(passage.hoist)
+      return passage.b if rope_parted?(drum) && !nodes.fetch(drum.rope).catches?
+
+      cage_position(passage) < passage.metres / 2.0 ? passage.a : passage.b
+    end
+
     def cage_position(passage)
       drum = nodes.fetch(passage.hoist)
-      drum.position_m(state.fetch(:nodes).fetch(passage.hoist))
+      drum.cage_m(state.fetch(:nodes).fetch(passage.hoist))
     end
 
     def cage_at?(passage, place)
-      nodes.fetch(passage.hoist).stopped_at?(state.fetch(:nodes).fetch(passage.hoist),
-                                              passage.landing_m(place))
+      nodes.fetch(passage.hoist).cage_stopped_at?(state.fetch(:nodes).fetch(passage.hoist),
+                                                   passage.landing_m(place))
     end
 
     # **A rescue reaching its casualty, which the engine did on its own.** The order was given
@@ -1622,7 +1780,7 @@ module ReactorSim
     # in each, which is what lets a machine be moved onto places without moving all of them at
     # once. See `docs/design_sketches/breathable-air.md` §5.
     def hazards_from(wear_events)
-      exposure = Exposure.new(stations: {}, places: {})
+      exposure = Exposure.new(stations: {}, places: {}, riders: {})
 
       wear_events.each do |event|
         node = nodes[event[:node]]
@@ -1633,6 +1791,7 @@ module ReactorSim
 
         accrue(exposure.stations, :station, declared[:stations], declared, scale, event[:node])
         accrue(exposure.places, :place, declared[:places], declared, scale, event[:node])
+        accrue(exposure.riders, :via, declared[:riders], declared, scale, event[:node])
       end
 
       exposure

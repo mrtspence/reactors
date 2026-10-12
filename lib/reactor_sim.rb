@@ -116,6 +116,7 @@ require_relative "reactor_sim/nodes/load"
 require_relative "reactor_sim/nodes/bearing"
 require_relative "reactor_sim/nodes/brake"
 require_relative "reactor_sim/nodes/hoist"
+require_relative "reactor_sim/nodes/rope"
 # A small engine carrying its own rotor, so a fitting can be driven by something other than the
 # main drivetrain — which is what a blower on a black start needs.
 require_relative "reactor_sim/nodes/motor"

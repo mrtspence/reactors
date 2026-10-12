@@ -211,7 +211,7 @@ RSpec.describe ReactorSim::Burden do
     # than the walk out, because carrying somebody is a burden — which is the point of the whole
     # file.
     def pit_with_a_casualty
-      casualty(build_pit(id: "c", seed: 3, loadout: { manriding: :cage_gear },
+      casualty(build_pit(id: "c", seed: 3, loadout: { winder: :cage_gear },
                          crew: PitRig::WOUND_CREW))
     end
 
@@ -224,7 +224,7 @@ RSpec.describe ReactorSim::Burden do
     def casualty(op)
       ready = at_the_face(op, hewing: nil, haulage: :crew_1, timbering: nil)
       engineman!(ready)
-      levers!(ready, winding: 100, haulage: 100)
+      levers!(ready, haulage: 100)
       @tick = 0
       ready
     end
@@ -296,14 +296,14 @@ RSpec.describe ReactorSim::Burden do
     # never went underground, and the digests would then agree about the wrong thing.
     it "replays bit for bit with a fetch and a drop delivered twice" do
       digests = Array.new(2) do
-        built = build_match(id: "c", seed: 3, loadout: { manriding: :cage_gear },
+        built = build_match(id: "c", seed: 3, loadout: { winder: :cage_gear },
                             crew: PitRig::WOUND_CREW)
         match = seed_match(built, :pit,
                            minions: at_the_face_minions(built.operation(:pit), hewing: nil,
                                                         haulage: :crew_1, timbering: nil))
         op = match.operation(:pit)
         engineman!(op)
-        levers!(op, winding: 100, haulage: 100)
+        levers!(op, haulage: 100)
         @tick = 0
 
         2.times { op.assign_minion(:crew_2, :crew_1) }

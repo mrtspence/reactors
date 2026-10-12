@@ -41,7 +41,7 @@ RSpec.describe "whitedamp" do
   # 0.0015 of the volume, so the line sits between 1 and 3 kg in a 1,400 m³ district.
   def poisonous_kg = 3.0
 
-  def pit = build_pit(id: "w", seed: 3, loadout: { manriding: :cage_gear })
+  def pit = build_pit(id: "w", seed: 3, loadout: { winder: :cage_gear })
 
   def poisoned?(op, node) = ReactorSim::Breath.poisoned?(parcels(op, node), op.content)
 
@@ -53,7 +53,7 @@ RSpec.describe "whitedamp" do
   def pit_with(**mix) = at_the_face(seed(pit, nodes: { district: district_mix(pit, **mix) }))
 
   def work!(op, ticks, ventilation: 0, naked_flame: 0, hewing: 0, from: 0, **levers)
-    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: ventilation, naked_flame: naked_flame, **levers)
 
     run!(op, ticks, from: from)

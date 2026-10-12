@@ -618,7 +618,7 @@ module ReactorSim
       live = drive_links.filter_map do |link|
         next if states.fetch(link.a)[:failure] || states.fetch(link.b)[:failure]
 
-        ctx ? link.engaged(ctx.controls) : link
+        ctx ? link.engaged(ctx.controls, ctx) : link
       end
       drags = drive_drags(nodes, states, ctx)
       sources = drive_sources(nodes, states, ctx)

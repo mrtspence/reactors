@@ -3,6 +3,7 @@
 require "reactor_sim"
 require "support/conservation"
 require "support/constructed"
+require "support/pit_rig"
 
 # **Work crossing between two operations**, which is the first thing that has ever done so.
 #
@@ -249,6 +250,75 @@ RSpec.describe "a coupling between operations" do
 
       expect(shaft(match).fetch(:joules_roped)).to be > 0.0
       expect(match.operation(:source).state.dig(:nodes, :load, :supply_joules)).to be > 0.0
+    end
+
+    # **What the shaft does to the engine house**, end to end once: a winding rope parting under a
+    # laden wind takes the cage off the line shaft, and the supplier on the far end of the coupling
+    # runs up. The rest of the chain is proven a slice at a time in `hoist_spec` and above.
+    describe "with a pit on the far end" do
+      include PitRig
+
+      before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
+
+      def pit_coupled(rope_left:)
+        match = ReactorSim::Match.create(
+          id: "w", seed: 1,
+          operations: [ { id: "source", type: :coupling_source_rig },
+                        { id: "pit", type: :mine, ground: 1.0, crew: PitRig::WOUND_CREW,
+                          loadout: { winder: :cage_gear } } ],
+          couplings: [ { from: %w[source load], to: %w[pit line_shaft],
+                         ratio: 40.0 / ReactorSim::Operations::Mine::WORKING_OMEGA } ]
+        )
+        pit = match.operation(:pit)
+        line = pit.nodes.fetch(:line_shaft)
+        riders = %i[crew_1 crew_2 crew_3 crew_4].to_h do |seat|
+          [ seat, { via: :cage_drive, place: :pit_bottom, posting: nil, station: nil } ]
+        end
+        rope = rope_left * pit.state.dig(:nodes, :winding_rope, :initial_durability)
+        match = seed_match(match, :pit,
+                           nodes: { cage_drive: { position_m: 60.0 }, winding_rope: { durability: rope },
+                                    line_shaft: { angular_momentum: line.moment_of_inertia * line.rated_omega } },
+                           minions: riders.merge(crew_5: { place: :bank, posting: :man_winding,
+                                                           station: :man_winding }))
+        match.operation(:pit).set_control(:man_winding, 0.0)
+        match
+      end
+
+      # **A surge delivered downstream.** The supplier geared to pull the pit's line shaft toward
+      # 2.4× rated: with nothing to stop it the pump's main goes at 1.44× (tick 15), the lamps and the
+      # fan's rotor by tick 18; with an overspeed trip fitted the clutch throws out at 1.25× and they
+      # survive.
+      def surging(loadout)
+        line_rated = ReactorSim::Operations::Mine::WORKING_OMEGA
+        match = ReactorSim::Match.create(
+          id: "s", seed: 1,
+          operations: [ { id: "source", type: :coupling_source_rig },
+                        { id: "pit", type: :mine, ground: 1.0, crew: PitRig::WOUND_CREW,
+                          loadout: { lighting: :electric_lamps }.merge(loadout) } ],
+          couplings: [ { from: %w[source load], to: %w[pit line_shaft], ratio: 40.0 / (2.4 * line_rated) } ]
+        )
+        line = match.operation(:pit).nodes.fetch(:line_shaft)
+        match = seed_match(match, :pit, nodes: { line_shaft: { angular_momentum: line.moment_of_inertia * line_rated } })
+        %i[ventilation pumping safe_light].each { |lever| match.operation(:pit).set_control(lever, 100) }
+        events = []
+        30.times { events.concat(match.step!) }
+        events.select { |e| e[:type] == :part_failed }.map { |e| e[:node] }
+      end
+
+      it "bursts the pit's fittings on a surge, and not with an overspeed trip fitted" do
+        expect(surging({})).to include(:upcast, :pump, :sconces)
+        expect(surging(overspeed_trip: :overspeed_trip)).to be_empty
+      end
+
+      it "runs the supplier up when the rope parts on a laden wind" do
+        parted = pit_coupled(rope_left: 0.11)
+        sound = pit_coupled(rope_left: 1.0)
+        [ parted, sound ].each { |m| 20.times { m.step! } }
+
+        expect(parted.operation(:pit).state.dig(:nodes, :winding_rope, :failure)).to be(:parted)
+        expect(sound.operation(:pit).state.dig(:nodes, :winding_rope, :failure)).to be_nil
+        expect(source_omega(parted)).to be > source_omega(sound)
+      end
     end
 
     it "refuses a rope stiff enough to ring" do

@@ -30,7 +30,7 @@ RSpec.describe "blackdamp" do
   # **Hands who tire**, because bad air drains `fatigue` rather than a pool of its own.
   before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::TIRING_CONTENT) }
 
-  def pit = build_pit(id: "b", seed: 3, loadout: { manriding: :cage_gear })
+  def pit = build_pit(id: "b", seed: 3, loadout: { winder: :cage_gear })
 
   def lamp(op)
     state = op.state.dig(:diagnostics, :lamp_flame)
@@ -57,7 +57,7 @@ RSpec.describe "blackdamp" do
   end
 
   def work!(op, ticks, ventilation: 0, **levers)
-    levers!(op, haulage: 100, winding: 100, pumping: 100, ventilation: ventilation, **levers)
+    levers!(op, haulage: 100, coal_winding: 100, pumping: 100, ventilation: ventilation, **levers)
 
     run!(op, ticks)
   end

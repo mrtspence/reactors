@@ -87,11 +87,13 @@ module ReactorSim
   #
   # **Clutched**: `control_id` scales the conductance by the lever, and a disengaged link drops out
   # of the network. Two links between one pair — forward and reverse — need their own `id`.
+  # `cut_by:` names a node that can throw the clutch out whatever the lever says — an overwind
+  # trip cutting the drive — by answering `cuts_drive?(ctx)`.
   class DriveLink
-    attr_reader :a, :b, :conductance, :max_torque, :ratio, :control_id, :id
+    attr_reader :a, :b, :conductance, :max_torque, :ratio, :control_id, :id, :cut_by
 
     def initialize(a:, b:, stiffness:, max_torque: Float::INFINITY, ratio: 1.0, control_id: nil,
-                   id: nil)
+                   id: nil, cut_by: nil)
       @a = a.to_sym
       @b = b.to_sym
       @conductance = stiffness.to_f
@@ -99,6 +101,7 @@ module ReactorSim
       @ratio = ratio.to_f
       @control_id = control_id&.to_sym
       @id = (id || :"#{@a}=#{@b}").to_sym
+      @cut_by = cut_by&.to_sym
       raise Error, "stiffness must be positive" unless @conductance.positive?
       raise Error, "drive link #{@id}: ratio must not be zero" if @ratio.zero?
 
@@ -106,8 +109,9 @@ module ReactorSim
     end
 
     # This link as the solve sees it this tick: its conductance scaled by the clutch, or nil when
-    # the clutch is out.
-    def engaged(controls)
+    # the clutch is out or cut.
+    def engaged(controls, ctx = nil)
+      return nil if cut?(ctx)
       return self unless @control_id
 
       fraction = (controls.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
@@ -115,6 +119,12 @@ module ReactorSim
 
       DriveLink.new(a: @a, b: @b, stiffness: @conductance * fraction, max_torque: @max_torque,
                     ratio: @ratio, id: @id)
+    end
+
+    def cut?(ctx)
+      return false unless @cut_by && ctx
+
+      ctx.nodes[@cut_by]&.cuts_drive?(ctx) || false
     end
   end
 end

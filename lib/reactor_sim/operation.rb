@@ -571,6 +571,7 @@ module ReactorSim
                                  posting: minion_state[:posting]&.to_sym,
                                  place: minion_state[:place]&.to_sym,
                                  via: minion_state[:via]&.to_sym,
+                                 riding: minion_state[:riding]&.to_sym,
                                  injury: minion_state[:injury]&.to_sym,
                                  carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze)
               .freeze ]

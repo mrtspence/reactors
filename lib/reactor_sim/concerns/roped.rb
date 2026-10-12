@@ -60,10 +60,12 @@ module ReactorSim
       end
 
       # How hard the rope is held: both clutches, this end's as actuated this tick and the far
-      # end's as it was last tick.
-      def grip(state, ctx) = own_grip(ctx) * state.fetch(:remote_grip, 1.0)
+      # end's as it was last tick. An end whose state says `tripped` has thrown its clutch out
+      # whatever the lever says.
+      def grip(state, ctx) = own_grip(state, ctx) * state.fetch(:remote_grip, 1.0)
 
-      def own_grip(ctx)
+      def own_grip(state, ctx)
+        return 0.0 if state.fetch(:tripped, false)
         return 1.0 unless control_id
 
         (ctx.controls.fetch(control_id, 0.0) / 100.0).clamp(0.0, 1.0)
@@ -96,6 +98,7 @@ module ReactorSim
       # booked apart from every other `:work` drag on the same shaft by `Tick#book_drive`.
       def rope_report(state, controls)
         lever = control_id ? (controls.fetch(control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
+        lever = 0.0 if state.fetch(:tripped, false)
         { omega: omega(state), grip: lever, joules: state.fetch(:joules_roped, 0.0) }
       end
     end

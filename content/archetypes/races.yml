@@ -160,3 +160,6 @@ kobold:
     # *mistake* likelier in the first place. A kobold at a lever that takes knowing how will
     # occasionally pull the wrong one, which is not the same failing as dropping it.
     boneheaded: 0.5
+    # Small enough to sit in a manhole by a trap door all shift, which is what a pit gave its
+    # smallest hands. Aids the stations that want somebody little, never the ones that want force.
+    diminutive: 0.6

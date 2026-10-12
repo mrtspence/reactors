@@ -6,9 +6,10 @@ require "support/pit_rig"
 # **The cage: buying your way out of the walk.**
 #
 # The spatial model made distance expensive; this is the purchase that makes it cheaper. A
-# ladderway is free and awful. A cage is a drum and two balanced cages on the line shaft, wound by an
-# engineman to wherever the player names — so it is a way down only while somebody is winding it and
-# the shaft is turning, and what it costs is the load in it.
+# ladderway is free and awful. Every pit has a hoist — the starting whim's kibble, or a cage — a drum
+# and two balanced cages on the line shaft, wound by an engineman to wherever the player names; so
+# it is a way down only while somebody is winding it and the shaft is turning, and what it costs is
+# the load in it. A man engine is a separate fitting beside it.
 #
 # Its own crew for the same reason `firedamp_spec` has one: these examples time journeys, and a
 # day-labourer's pace turns every figure into a measurement of the labour exchange. The cage is wound
@@ -21,80 +22,71 @@ require "support/pit_rig"
 #     after    20t    40t    60t    80t
 #     ladders  3.00   6.00   9.00  12.00
 #     rod      3.00   6.99  13.55  20.47
-#     cage     7.01  24.34  43.94  63.96
+#     kibble   0.97   8.84  17.54  26.39
+#     cage     1.88  17.82  35.86  54.29
 #
-# Sixty ticks is where the ordering is clean; at twenty the man engine is still indistinguishable
-# from the ladders.
+# Sixty ticks is where the ordering is clean: at twenty the man engine is still indistinguishable
+# from the ladders, and the hoists are behind both while their riders take three seconds to get in.
 RSpec.describe "the cage" do
   include PitRig
 
   before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
 
-  def pit(manriding: :cage_gear, wound: false)
-    op = build_pit(id: "c", seed: 3, loadout: { manriding: manriding || :none },
+  def pit(winder: :cage_gear, manriding: nil, wound: false)
+    op = build_pit(id: "c", seed: 3, loadout: { winder: winder, manriding: manriding || :none },
                    crew: PitRig::WOUND_CREW)
-    op.set_control(:winding, 100)
     engineman!(op) if wound
     op
   end
 
   # How far along their road a hand has got after `ticks`. The putter's post, at the near end.
   def progress_after(op, ticks, supply: PitRig::SUPPLY_J)
-    op.set_control(:man_winding, 100) if op.nodes.fetch(:cage_drive, nil).is_a?(ReactorSim::Nodes::Load)
+    op.set_control(:rods, 100) if op.control_points.key?(:rods)
     op.assign_minion(:crew_1, :haulage)
     run!(op, ticks, supply: supply, wind: true)
 
     op.state.fetch(:minions).fetch(:crew_1).fetch(:progress)
   end
 
-  describe "the man-riding slot" do
-    # **Where every mine starts.** Man riding is its own slot rather than a property of the winder,
-    # because raising coal and raising men are different machines. Empty is legal and means the
-    # ladders.
-    it "leaves a mine with nothing fitted to its ladders" do
-      op = pit(manriding: nil)
-
-      expect(op.control_points).not_to have_key(:man_winding)
-      expect(op.layout.passages.map(&:label)).to contain_exactly("Ladderway", "Main Road")
+  describe "the hoist and the man-riding slot" do
+    # **Where every mine starts**: a steam whim, whose kibble is a way down for men who will stand
+    # in a bucket. A cage is the same post and a better way.
+    it "gives every pit a hoist to ride and a post to wind it from" do
+      expect(pit(winder: :steam_whim).layout.passages.map(&:label)).to include("Kibble")
+      expect(pit.layout.passages.map(&:label)).to include("Cage")
+      expect(pit(winder: :steam_whim).control_points).to have_key(:man_winding)
     end
 
-    it "gives a fitted cage a way through the shaft and a post to wind it from" do
-      op = pit
-
-      expect(op.control_points).to have_key(:man_winding)
-      expect(op.layout.passages.map(&:label)).to include("Cage")
-    end
-
-    it "offers a man engine between the two" do
+    it "offers a man engine beside it, as its own fitting" do
       rod = pit(manriding: :man_engine)
 
-      expect(rod.layout.passages.map(&:label)).to include("Man Engine")
+      expect(rod.layout.passages.map(&:label)).to include("Man Engine", "Cage")
       expect(rod.layout.passages.find { |p| p.label == "Man Engine" }.speed_m_s)
         .to be_between(0.6, 4.2).exclusive
     end
   end
 
   describe "riding it" do
-    # Fitting a cage takes nothing away: with nobody winding it, it is not a way down at all, and
-    # the shift takes the ladders **bit for bit** as a pit with no cage does.
+    # With nobody winding it, a hoist is not a way down at all, and the shift takes the ladders
+    # **bit for bit** whichever hoist it is.
     it "leaves them on the ladders while nobody is winding it" do
-      bare = progress_after(pit(manriding: nil), 10)
-      unwound = progress_after(pit, 10)
+      kibble = progress_after(pit(winder: :steam_whim), 10)
+      cage = progress_after(pit, 10)
 
-      expect(unwound).to eq(bare)
+      expect(cage).to eq(kibble)
     end
 
-    # The whole tech tree in one assertion, at 60 ticks: 9.00 m, 13.55 m, 43.94 m.
+    # The whole tech tree in one assertion, at 60 ticks: 9.00 m, 13.55 m, 35.86 m.
     it "gets them down quicker the better the gear is" do
-      got = [ pit(manriding: nil), pit(manriding: :man_engine), pit(wound: true) ]
+      got = [ pit, pit(manriding: :man_engine), pit(wound: true) ]
             .map { |op| progress_after(op, 60) }
 
       expect(got.each_cons(2).all? { |slower, faster| faster > slower }).to be(true), got.inspect
     end
 
     it "gets them down far quicker with somebody winding it" do
-      wound = progress_after(pit(wound: true), 40)
-      unwound = progress_after(pit, 40)
+      wound = progress_after(pit(wound: true), 60)
+      unwound = progress_after(pit, 60)
 
       expect(wound).to be > unwound * 3.0
     end
@@ -146,10 +138,101 @@ RSpec.describe "the cage" do
     # still there, which is why nobody is ever completely stranded. Awful, and survivable.
     it "falls back to the ladders rather than stranding the shift" do
       starved = progress_after(pit(wound: true), 40, supply: 0.0)
-      laddered = progress_after(pit(manriding: nil), 40)
+      laddered = progress_after(pit, 40)
 
       expect(starved).to be > 0.0, "a stopped cage must not strand the shift"
       expect(starved).to be_within(1e-6).of(laddered)
+    end
+  end
+
+  # **The man engine's own accidents.** A missed step every stroke, more the faster it runs; a
+  # strap that wears per stroke and per man and tears out at a hard overspeed; and catches that
+  # hold a rod whose strap wore through but not one torn out. Constructed states, a few ticks each.
+  describe "the man engine" do
+    def rods(part = :man_engine) = build_pit(id: "r", seed: 1, chassis: :single_shaft,
+                                             loadout: { manriding: part })
+
+    def rod(op) = op.nodes.fetch(:man_engine)
+
+    # The line shaft and the rod both turning at `over` × rated, with a man part-way down it.
+    def running(part, over:, strap: 1.0, rider: :crew_1, margin: nil)
+      op = rods(part)
+      line = op.nodes.fetch(:line_shaft)
+      omega = rod(op).rated_omega * over
+      durability = strap * op.state.dig(:nodes, :man_engine, :initial_durability)
+      op = seed(op, nodes: { line_shaft: { angular_momentum: line.moment_of_inertia * omega },
+                             man_engine: { angular_momentum: rod(op).moment_of_inertia * omega,
+                                           durability: durability } },
+                    minions: { rider => { place: :bank, posting: :haulage, progress: 30.0,
+                                          riding: :man_engine, margin: margin }.compact })
+      op.set_control(:rods, 100.0)
+      op
+    end
+
+    def failed(events) = events.find { |e| e[:type] == :part_failed && e[:node] == :man_engine }
+
+    it "carries somebody part-way down it as a rider of the rods" do
+      line = rods.nodes.fetch(:line_shaft)
+      op = seed(rods, nodes: { line_shaft: { angular_momentum: line.moment_of_inertia * 20.0 } },
+                      controls: { rods: { target: 100.0, actual: 100.0 } })
+      op.assign_minion(:crew_1, :haulage)
+      run!(op, 20)
+
+      expect(op.state.dig(:minions, :crew_1, :riding)).to be(:man_engine)
+    end
+
+    it "makes a missed step likelier the faster it strokes" do
+      man_engine = rod(rods)
+      working = { angular_momentum: man_engine.moment_of_inertia * man_engine.rated_omega }
+      surging = { angular_momentum: working[:angular_momentum] * 1.3 }
+
+      expect(man_engine.activity(surging, :strokes, 0.25)).to be > man_engine.activity(working, :strokes, 0.25)
+      expect(man_engine.perils.map(&:riders)).to all(include(:man_engine))
+    end
+
+    it "costs a man on the rods a missed step when his margin runs out" do
+      events = run!(running(:man_engine, over: 1.0, margin: 1.0e-9), 3)
+
+      expect(events.find { |e| e[:type] == :minion_hurt && e[:node] == :crew_1 }).to include(cause: :misstep)
+    end
+
+    it "wears its strap faster with men on it" do
+      man_engine = rod(rods)
+      state = { angular_momentum: man_engine.moment_of_inertia * man_engine.rated_omega }
+      ctx = ->(kg) { ReactorSim::Tick::Context.new(controls: {}, dt: 0.25, cargo: { man_engine: kg }) }
+
+      expect(man_engine.stress_per_second(state, ctx.call(280.0)))
+        .to be > man_engine.stress_per_second(state, ctx.call(0.0))
+    end
+
+    it "tears a worn strap out at an overspeed, and keeps it at working speed" do
+      outcomes = [ 1.0, 1.5 ].map { |over| failed(run!(running(:man_engine, over: over, strap: 0.3), 6)) }
+
+      expect(outcomes.first).to be_nil
+      expect(outcomes.last).to include(mode: :torn_out, cause: :overload)
+    end
+
+    it "takes its load off the line shaft, and the shaft with it, when it goes" do
+      op = running(:man_engine, over: 1.5, strap: 0.3)
+      before = op.state.dig(:nodes, :shaft, :durability)
+      run!(op, 6)
+
+      expect(op.state.dig(:nodes, :shaft, :durability)).to be < before
+      expect(op.state.dig(:nodes, :brattice, :durability)).to be < op.state.dig(:nodes, :brattice, :initial_durability)
+    end
+
+    # **Levant, by mode.** Catches hold a rod whose strap wore through; one torn out by an overspeed
+    # takes them out of line with it.
+    it "is held by its catches when the strap wears through, and not when it is torn out" do
+      hazards = ->(part) { rod(rods(part)).failure_hazards }
+
+      expect(hazards.call(:caught_man_engine)[:parted][:tags]).not_to include(:fall)
+      expect(hazards.call(:caught_man_engine)[:torn_out][:tags]).to include(:fall)
+      expect(hazards.call(:man_engine)[:parted][:tags]).to include(:fall)
+    end
+
+    it "parts by wearing through when the strap is spent at working speed" do
+      expect(failed(run!(running(:man_engine, over: 1.0, strap: 1.0e-6), 4))).to include(mode: :parted)
     end
   end
 

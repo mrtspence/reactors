@@ -346,7 +346,12 @@ Rules worth knowing before you add one:
 - **`clumsy` and `boneheaded` are the same family at opposite ends.** Clumsy makes the *bite*
   worse once something has gone wrong; boneheaded makes the *mistake* likelier in the first
   place. Pulling the wrong lever is not the same failing as dropping it, and only one of them
-  feeds the Danger Check.
+  feeds the Danger Check. **`boneheaded` climbs steeply**: it is read cubed (`Minion#daftness`),
+  so 0.3 is daft on occasion, 0.5 often, and 1.0 — something that cannot count past its fingers —
+  slips every few seconds. Pick the value with that curve in mind.
+- **`open_flame` is an igniter wherever its wearer stands**, so a piece of kit that carries it is
+  a naked light in a gassy district. **`diminutive`** (a value, like `hulking`) aids stations that
+  want somebody small — the trapper at a haulage door — and nothing that wants force.
 - **Minion tags are a MAP, not a list.** Resource tags are flat — a thing is `:liquid` or is not —
   but "how well can you see in the dark" has a number for an answer. Write `true` for a trait that
   is simply present.

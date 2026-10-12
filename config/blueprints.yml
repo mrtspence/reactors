@@ -56,6 +56,11 @@ chassis:
     materials:
       cast_iron: 4200
       wrought_iron: 1800
+  # The starting pit: one shaft, with both halves of the air in it.
+  mine/single_shaft:
+    materials:
+      wrought_iron: 2600
+      steel: 400
   # Two shafts, because after Hartley one is not lawful and not survivable. The cost is the
   # second shaft — the frame of a colliery is the hole itself.
   mine/two_shaft:
@@ -115,6 +120,11 @@ equipment:
     materials: { steel: 14, bronze: 6, wrought_iron: 4 }
   leather_apron:
     materials: {}
+  # Hardened leather with a steel band: cheap, and the first kit that answers a falling stone.
+  pit_helmet:
+    materials: { steel: 1 }
+  safety_belt:
+    materials: { wrought_iron: 1, steel: 1 }
   fettlers_gloves:
     materials: {}
   oilskin_coat:
@@ -380,28 +390,63 @@ part:
       steel: 1400
       cast_iron: 900
       babbitt: 22
+  # The hoist. A whim is a drum, a rope and a bucket; a cage is the same drum with steel guides
+  # and a deck, which is where the steel goes.
   steam_whim:
     materials:
       cast_iron: 1600
       wrought_iron: 900
       babbitt: 20
-  cage_winder:
-    materials:
-      cast_iron: 2400
-      steel: 2200         # wire rope, which is what makes a cage possible at all
-      babbitt: 34
-  # Man riding. A man engine is mostly pitch pine — a rod the depth of the shaft — where a cage
-  # is steel rope and guides, which is why the cheaper one is the one made of trees.
+  # Man riding. A man engine is mostly pitch pine — a rod the depth of the shaft — which is why it
+  # is cheaper than the cages it competes with for the shift's time.
   man_engine:
     materials:
       wrought_iron: 700
       cast_iron: 900
+      babbitt: 18
+  # The same rods, and a catch at every sollar.
+  caught_man_engine:
+    materials:
+      wrought_iron: 900
+      cast_iron: 1000
       babbitt: 18
   cage_gear:
     materials:
       steel: 1900
       cast_iron: 1100
       babbitt: 26
+  # A forged hook and a catch plate in the headframe: little iron, and it saves the cage.
+  hooked_cage:
+    materials:
+      steel: 2100
+      cast_iron: 1300
+      babbitt: 26
+  tripped_cage:
+    materials:
+      steel: 2300
+      cast_iron: 1500
+      bronze: 40
+      babbitt: 30
+  # A whole second rope: all steel, for something that does nothing until the day it is needed.
+  spare_rope:
+    materials:
+      steel: 1400
+  shaft_gates:
+    materials:
+      wood: 120
+      cast_iron: 80
+  # Flyweights and a trip lever: small, precise, and it is the bronze that costs.
+  overspeed_trip:
+    materials:
+      steel: 30
+      bronze: 15
+  electric_bells:
+    materials:
+      steel: 20
+  flameproof_bells:
+    materials:
+      steel: 20
+      cast_iron: 60
   waddle_fan:
     materials:
       wrought_iron: 1500
@@ -454,6 +499,31 @@ part:
     materials:
       wood: 340
       wrought_iron: 120
+  # The haulage door. Wood and a hinge; what costs is hanging it so it shuts itself, and twice.
+  plain_door:
+    materials: {}
+  self_closing_door:
+    materials:
+      wood: 60
+      wrought_iron: 20
+  air_lock:
+    materials:
+      wood: 140
+      wrought_iron: 50
+  # Brattices. What one is made of is what it leaks; what it does when it comes down is later.
+  canvas_brattice:
+    materials:
+      wood: 120
+  creosoted_brattice:
+    materials:
+      wood: 160
+  timber_brattice:
+    materials:
+      wood: 900
+  concrete_brattice:
+    materials:
+      stone_dust: 2400
+      steel: 300
   sparse_manholes:
     materials:
       wood: 160

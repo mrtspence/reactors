@@ -123,17 +123,29 @@ module DevMatch
   # player would get fresh. Logged loudly, because a silently forgotten choice is worse than a
   # noisy one — this is the loadout's equivalent of the stale `unlocks` rows
   # `rake blueprints:audit` exists to find.
+  #
+  # **A part that still exists but moved slot is stale too** — the mine's cages went from
+  # `manriding` to `winder` — so a part its slot no longer accepts is dropped the same way.
   def stored_parts(operation_id: PRIMARY)
     parts = stored(operation_id: operation_id)&.to_sim || {}
-    known, stale = parts.partition { |_, part| part.nil? || ReactorSim::Parts.key?(part) }
+    accepts = slot_kinds(operation_id)
+    known, stale = parts.partition do |slot, part|
+      part.nil? || (ReactorSim::Parts.key?(part) && accepts[slot] == ReactorSim::Parts.fetch(part).kind)
+    end
     if stale.any?
       Rails.logger.warn(
         "dev_match: #{operation_id} loadout names #{stale.map(&:last).join(', ')}, " \
-        "which the catalogue no longer has — falling back to the slot default"
+        "which the catalogue no longer has in that slot — falling back to the slot default"
       )
     end
 
     known.to_h
+  end
+
+  # `{ slot id => the kind of part it takes }` for this machine's frame.
+  def slot_kinds(operation_id)
+    ReactorSim::Operations.assembly_for(kind_of(operation_id), chassis: chassis(operation_id: operation_id))
+                          .slots.to_h { |slot| [ slot.id, slot.accepts ] }
   end
 
   # **A match beginning, which is the one thing that advances the recovery clock.**

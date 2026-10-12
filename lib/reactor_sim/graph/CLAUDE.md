@@ -147,9 +147,11 @@ with no feedback at all.
 Port.new(id:, direction: :inlet | :outlet, accepts: [tags], max_kg_per_s:)
 Link.new(from: [node_id, port_id], to: [node_id, port_id])
 ThermalLink.new(a:, b:, conductance:)          # W/K
-DriveLink.new(a:, b:, stiffness:, max_torque:, ratio:, control_id:, id:)  # geared, clutched
+DriveLink.new(a:, b:, stiffness:, max_torque:, ratio:, control_id:, id:,  # geared, clutched
+              cut_by:)          # a node whose `cuts_drive?` throws the clutch out — a trip
 Passage.new(a:, b:, metres:, speed_m_s:, requires:, control_id:, driven_by:, rated_omega:,
-            hoist:, staffed_by:)                                         # ridden, if hoist:
+            hoist:, staffed_by:,                                         # ridden, if hoist:
+            through:, rated_kg:, marshals: { landing => station })
 Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they join
 ```
 
@@ -171,7 +173,16 @@ Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they
 - **The routing table carries a distance beside every first step**, so `Layout#route_metres`
   answers "how far is it" as a lookup. It is **geometry, not duration** — a cage and a ladderway
   are the same ninety metres and only one of them is quick — so what a walk costs is still
-  `route_metres ÷ what is running`.
+  `route_metres ÷ what is running`. Routes are **shortest by distance** (Dijkstra, ties on
+  declaration order), not fewest hops, because a second way out is usually the long one.
+- **A passage may run `through:` a node** — a shaft — and is closed while that node
+  `blocks_passage?`: broken, or for the shaft, with something lodged in it. Tables are keyed by
+  the closed set as well as by capabilities, built on first use and kept, so a choked shaft
+  re-routes everybody the long way round, or strands them where there is none.
+- **A ridden passage may be marshalled.** `rated_kg:` is what its cage is rated for and
+  `marshals:` names who stands at each landing; with a marshal posted, boarding stops at the
+  rating, and with nobody there everybody waiting gets on. `Layout` refuses a marshal who is not a
+  station at that landing.
 - **A passage can be powered**, and that is the point of the whole spatial model: ladders are
   free and slow, a cage is quick and costs a shaft. `control_id:` scales it by a lever and
   `driven_by:`/`rated_omega:` by a shaft's speed, so a cage nobody has called — or one whose

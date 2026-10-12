@@ -31,12 +31,17 @@ module ReactorSim
     # is the far end's speed and it brakes when it overruns it, so a mine that sheds its load is
     # felt by the engine. Uncoupled — a rig fed by `receive_supply` — the far end is a steady
     # supply at `rated_omega`, and `rated_torque_nm / rated_omega` is the rope.
+    #
+    # **An overspeed trip throws the clutch out** (`trip:` names the node that is fitted as one,
+    # answering `trip_ratio`): past that multiple of rated speed the shaft is `tripped`, the rope
+    # slack, until it has run back down to rated. It saves what hangs off the shaft — and sheds
+    # the whole operation as a load rejection on whoever is at the far end.
     class Import < Node
       include Concerns::Rotating
       include Concerns::Roped
 
       attr_reader :moment_of_inertia, :radius_m, :friction, :rated_torque_nm, :rated_omega,
-                  :control_id
+                  :control_id, :trip
 
       # `holds_seconds:` is how much bought work the shaft can have **in hand**, as a multiple of
       # its own rated output. It exists to absorb the one-tick lag between an exporter paying out
@@ -45,8 +50,10 @@ module ReactorSim
       # supply a battery rather than a rope. Measured on a mine fed more than it could use,
       # **355 MJ** of it after an hour.
       def initialize(id:, rated_torque_nm:, rated_omega:, label: nil, holds_seconds: 10.0,
-                     moment_of_inertia: 50.0, radius_m: 1.0, friction: 0.0, control_id: nil)
+                     moment_of_inertia: 50.0, radius_m: 1.0, friction: 0.0, control_id: nil,
+                     trip: nil)
         super(id: id, label: label)
+        @trip = trip&.to_sym
         @rated_torque_nm = rated_torque_nm.to_f
         @rated_omega = rated_omega.to_f
         @capacity_joules = @rated_torque_nm * @rated_omega * holds_seconds.to_f
@@ -66,11 +73,22 @@ module ReactorSim
       # `rated_omega` against a steady supply.
       def rope_conductance = @rated_torque_nm / @rated_omega
 
+      def base_initial_state(rng, content) = super.merge(tripped: false)
+
       def apply(state, ctx, _grant)
         conductance = roped?(state) ? state.fetch(:rope_k) : rope_conductance
         reservoir = roped?(state) ? state.fetch(:remote_omega) : @rated_omega
 
-        state.merge(torque: rope_torque(state, ctx, conductance: conductance, reservoir: reservoir))
+        state.merge(torque: rope_torque(state, ctx, conductance: conductance, reservoir: reservoir),
+                    tripped: tripped?(state, ctx))
+      end
+
+      # Past the trip's ratio it throws out, and it stays out until the shaft is back to rated.
+      def tripped?(state, ctx)
+        trip = @trip && ctx.nodes[@trip] or return false
+
+        ratio = omega(state).abs / @rated_omega
+        ratio > trip.trip_ratio || (state.fetch(:tripped, false) && ratio > 1.0)
       end
 
       def drag_conductances(state, ctx)

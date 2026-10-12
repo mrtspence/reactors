@@ -81,6 +81,20 @@ module ReactorSim
 
     def tag?(key) = !@tags.fetch(key.to_sym, nil).nil?
 
+    # **How daft somebody is, and it climbs steeply.** `boneheaded` cubed: a 0.3 hand is daft on
+    # occasion, a kobold at 0.5 several times as often, and a 1.0 is an accident waiting to happen.
+    # Slips and the accident margin both read this, never the tag directly.
+    DAFT_POWER = 3
+
+    def daftness = Injury.numeric(tag(:boneheaded))**DAFT_POWER
+
+    # **A naked light carried by a person** — a candle in the hat, an oil lamp on the belt — and
+    # what it offers the air of the room they are standing in: a seed for a mixture that will
+    # carry it, and a little heat.
+    HAND_FLAME = { kg_per_s: 2.0e-4, watts: 200.0, cause: :open_flame }.freeze
+
+    def open_flame? = tag?(:open_flame) && Injury.numeric(tag(:open_flame)).positive?
+
     # Health and fatigue start fixed rather than rolled: a minion who begins already tired would
     # be indistinguishable from one the player has worn out.
     #
@@ -92,7 +106,8 @@ module ReactorSim
       { health: 1.0, fatigue: 0.0, spent: false, asphyxia: 0.0, burns: 0.0,
         apparatus: Injury.numeric(tag(:respirator_air)), carrying: [],
         posting: @default_station, station: @default_station,
-        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0, via: nil }
+        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0, via: nil,
+        boarding_s: 0.0, riding: nil }
         .merge(Injury.initial_state(rng, toughness))
         # **After `Injury`, never before.** Both draw from this minion's stream, so inserting a
         # draw ahead of one shifts every roll after it and a whole crew comes out different.

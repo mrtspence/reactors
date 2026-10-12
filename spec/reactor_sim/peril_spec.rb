@@ -81,7 +81,7 @@ RSpec.describe "perils" do
 
   def pit(hand, seed: 1, loadout: {})
     build_pit(id: "r", seed: seed,
-              loadout: { manriding: :cage_gear }.merge(loadout),
+              loadout: { winder: :cage_gear }.merge(loadout),
               crew: (1..4).to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{hand}" } ] })
   end
 
@@ -95,7 +95,7 @@ RSpec.describe "perils" do
   def shift(hand, rate: 100, seed: 1, ticks: 200, loadout: {}, causes: nil, edge: false)
     op = at_the_face(seed(pit(hand, seed: seed, loadout: loadout), minions: edge ? brink : {}))
     levers!(op, hewing: rate, haulage: rate, timbering: 100,
-                winding: 100, pumping: 100, ventilation: 100)
+                coal_winding: 100, pumping: 100, ventilation: 100)
 
     events = run!(op, ticks)
     wanted = if causes
@@ -423,7 +423,7 @@ RSpec.describe "perils" do
   # `initial_state` and in phase 0, which is what keeps replay bit-identical.
   it "replays bit for bit" do
     digests = Array.new(2) do
-      match = build_match(id: "r", seed: 1, loadout: { manriding: :cage_gear },
+      match = build_match(id: "r", seed: 1, loadout: { winder: :cage_gear },
                           crew: (1..4).to_h { |i| [ :"crew_#{i}", { minion: :hand_poor } ] })
       op = match.operation(:pit)
       op.assign_minion(:crew_2, :haulage)

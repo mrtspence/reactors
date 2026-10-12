@@ -62,7 +62,7 @@ RSpec.describe "the mine's tech tree" do
   def pit(kit: :proper, ground: PitRig::ORDINARY, **loadout)
     hand = :"hand_#{kit}"
     build_pit(id: "t", seed: 5, ground: ground,
-              loadout: { manriding: :cage_gear, **loadout },
+              loadout: { winder: :cage_gear, **loadout },
               crew: (1..4).to_h { |i| [ :"crew_#{i}", { minion: hand } ] })
   end
 
@@ -75,13 +75,19 @@ RSpec.describe "the mine's tech tree" do
   def cutting(op, hewing: 100, timbering: 100, worn: nil, damp: 0.0, firedamp: 0.0, **levers)
     nodes = {}
     nodes[:seepage] = { durability: worn } if worn
+    # **`firedamp:` is percent by volume**, and the gas takes the room of the air it displaced, so
+    # the district stays at its own pressure. Added on top it would surge back down the intake as a
+    # gust no pit ever makes — 35 m/s for a tick — and blow a gauze lamp's flame through.
     if damp.positive? || firedamp.positive?
-      nodes[:district] = district_mix(op, blackdamp: gas_kg(damp), firedamp: gas_kg(firedamp))
+      share = firedamp / 100.0
+      fire = PitRig::DISTRICT_AIR_KG / 28.96 * share * 16.04
+      air = PitRig::DISTRICT_AIR_KG * (1.0 - share)
+      nodes[:district] = district_mix(op, air: air, blackdamp: gas_kg(damp), firedamp: fire)
     end
 
     at_the_face(seed(op, nodes: nodes)).tap do |ready|
       levers!(ready, hewing: hewing, haulage: 100, timbering: timbering,
-                     winding: 100, pumping: 100, **levers)
+                     coal_winding: 100, pumping: 100, **levers)
     end
   end
 
@@ -113,7 +119,7 @@ RSpec.describe "the mine's tech tree" do
       )
       allow(ReactorSim::Content).to receive(:default).and_return(content)
 
-      op = build_pit(id: "t", seed: 5, loadout: { manriding: :cage_gear },
+      op = build_pit(id: "t", seed: 5, loadout: { winder: :cage_gear },
                      crew: (1..4).to_h { |i| [ :"crew_#{i}", { minion: :hand_lit } ] })
 
       expect(cut_over(cutting(op), 50)).to eq(0.0)
@@ -183,7 +189,7 @@ RSpec.describe "the mine's tech tree" do
     # this a 2,500-tick example per tier. Where the explosive band is is `district_fire_spec`'s.
     it "fires the district on an open flame and never on a safe one" do
       fired = %i[tallow_candles oil_flares gauze_lanterns electric_lamps].to_h do |tier|
-        op = cutting(pit(lighting: tier), hewing: 0, firedamp: 8.0, ventilation: 0)
+        op = cutting(pit(lighting: tier), hewing: 0, firedamp: 10.0, ventilation: 0)
         lever = op.control_points.key?(:naked_flame) ? :naked_flame : :safe_light
         op.set_control(lever, 100)
         events = run!(op, 60)
@@ -203,7 +209,7 @@ RSpec.describe "the mine's tech tree" do
     # That the fan *does* hold a worked district at a trace is `firedamp_spec`'s claim.
     it "is harmless at the concentration a running fan holds, and fatal above it" do
       trace = cutting(pit(kit: :pick, lighting: :oil_flares), firedamp: 1.0, ventilation: 100)
-      gassy = cutting(pit(kit: :pick, lighting: :oil_flares), firedamp: 8.0, ventilation: 0)
+      gassy = cutting(pit(kit: :pick, lighting: :oil_flares), firedamp: 10.0, ventilation: 0)
       [ trace, gassy ].each { |op| op.set_control(:naked_flame, 100) }
 
       quiet = run!(trace, 60)
@@ -219,9 +225,13 @@ RSpec.describe "the mine's tech tree" do
   #
   # Historically the Guibal is why Victorian pits stopped being places you could suffocate in
   # while working normally — the upgrade is measured in breathable air, not in airflow.
+  #
+  # **The haulage door is self-closing throughout**, because a plain door with nobody trapping
+  # stands open under the tubs and shorts the air past the district — a claim about the door, not
+  # the fan.
   describe "the ventilation tier" do
     def airflow(fan)
-      op = cutting(pit(fan: fan), ventilation: 100)
+      op = cutting(pit(fan: fan, door: :self_closing_door), ventilation: 100)
       run!(op, 50)
       op.state.fetch(:nodes).fetch(:upcast).fetch(:carried_kg)
     end
@@ -231,13 +241,13 @@ RSpec.describe "the mine's tech tree" do
     # safe line, and one that does not leaves it below, which is the equilibrium stated without
     # waiting for it.
     def settles_at(fan, ground: PitRig::ORDINARY, damp: 7.0)
-      op = cutting(pit(fan: fan, ground: ground), damp: damp, ventilation: 100)
+      op = cutting(pit(fan: fan, ground: ground, door: :self_closing_door), damp: damp, ventilation: 100)
       run!(op, 200)
       breathable(op)
     end
 
     # The direct measurement, and the plainest statement of what the tier is: half again as much
-    # air through the same pit. 3.873 kg/tick against 2.569.
+    # air through the same pit. 4.097 kg/tick against 2.772.
     it "moves half again as much air" do
       expect(airflow(:guibal_fan)).to be > airflow(:waddle_fan) * 1.4
     end
@@ -252,7 +262,7 @@ RSpec.describe "the mine's tech tree" do
     # changes nothing; some pits have to be bought out of.
     #
     # Measured on the gassiest ground from a district at 7% blackdamp: the waddle settles at
-    # 0.92479 and the Guibal at 0.93081, either side of the 0.93 safe line.
+    # 0.92494 and the Guibal at 0.93076, either side of the 0.93 safe line.
     it "is not enough on the gassiest ground, where the Guibal still is" do
       worst = ReactorSim::Operations::Mine::Ground::RANGE.end
 
@@ -316,5 +326,38 @@ RSpec.describe "the mine's tech tree" do
     expect((mass - mass0).abs / mass0.abs).to be < 1e-9, "mass drifted by #{mass - mass0}"
     expect((joules - joules0).abs / joules0.abs).to be < 1e-9,
            "energy drifted by #{joules - joules0}"
+  end
+
+  # **Overspeed, against the line shaft's speed as of last tick.** The surge itself is
+  # `coupling_spec`'s; this is the rule, at zero ticks: each fitting goes past its ratio, and a worn
+  # one sooner.
+  describe "overspeed" do
+    # About the machine, not the crew, so the rig's hands.
+    before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
+
+    def at(ratio)
+      op = build_pit(id: "o", seed: 1, loadout: { lighting: :electric_lamps })
+      line = op.nodes.fetch(:line_shaft)
+      states = op.state[:nodes].merge(line_shaft: { angular_momentum: line.moment_of_inertia * line.rated_omega * ratio })
+      [ op, ReactorSim::Tick::Context.new(controls: {}, dt: 0.25, nodes: op.nodes, states: states) ]
+    end
+
+    it "bursts the fan and the pump past their ratio, and a worn one sooner" do
+      op, ctx = at(1.45)
+
+      expect(op.nodes.fetch(:upcast).overload?({}, ctx, 1.0)).to be(false)
+      expect(op.nodes.fetch(:upcast).overload?({}, ctx, 0.5)).to be(true)
+      expect(op.nodes.fetch(:pump).overload?({}, ctx, 1.0)).to be(true)
+    end
+
+    it "blows electric lamps over-run, and never a flame on a bracket" do
+      lamps = build_pit(id: "o", seed: 1, loadout: { lighting: :electric_lamps }).nodes.fetch(:sconces)
+      candles = build_pit(id: "o", seed: 1).nodes.fetch(:sconces)
+      fast = { angular_momentum: lamps.moment_of_inertia * lamps.rated_omega * 1.5 }
+
+      expect(lamps.overload?(fast, nil, 1.0)).to be(true)
+      expect(lamps.overload?({ angular_momentum: lamps.moment_of_inertia * lamps.rated_omega }, nil, 1.0)).to be(false)
+      expect(candles.overload?(fast, nil, 1.0)).to be(false)
+    end
   end
 end

@@ -28,7 +28,7 @@ Diagnostic.new(
              Filters::Range.new(0.0, 1.4e6) ],
   display: Displays::Needle.new(unit: "kPa", convert: :kpa, precision: 0,
                                 min: 0.0, max: 1.4e6),
-  observer: :grubwick   # reserved for minions; inert for now
+  observer: :stoking    # optional: a station whose occupant reads it; :offline with nobody there
 )
 ```
 
@@ -53,7 +53,7 @@ Diagnostic.new(
 is the truth: `temperature_k`, `pressure_pa`, `contents_volume`, `room_m3`, `occupancy`,
 `compression_pressure_pa`, `effective_fill`, `contents_kg`, `flooding`, `omega`, `rpm`,
 `rim_speed`, `kinetic_joules`,
-`stress_fraction`, `integrity`.
+`stress_fraction`, `integrity`, `position_m`, `slack_m`.
 **Add new ones there** with the right arity (`:with_content` or `:state_only`) or the source
 will not build — it raises at construction rather than reading nothing at runtime.
 

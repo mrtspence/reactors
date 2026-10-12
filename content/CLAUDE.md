@@ -204,7 +204,12 @@ something the simulation may know about. `Registry#sheet(id)` returns the first 
 - **`clumsy` and `boneheaded` are the same family at opposite ends of the causal chain.**
   Clumsy makes the *bite* worse once something has gone wrong; boneheaded makes the *mistake*
   likelier in the first place — pulling the wrong lever is not the same failing as dropping it.
-  Both feed the accident margin; only one feeds the Danger Check.
+  Both feed the accident margin; only one feeds the Danger Check. `boneheaded` is read **cubed**
+  (`Minion#daftness`): 0.3 is daft on occasion, 1.0 is an accident waiting to happen.
+- **`open_flame` on anybody's kit is an igniter**: they offer a naked light to the air of the room
+  they stand in, which is why safety lamps are a progression item. **`diminutive`** marks the
+  smallest creatures and aids the stations that want somebody little — the haulage trapper —
+  never the ones that want force.
 - **`intelligence` and `dexterity` are read now**, by `Minion#wits`: how often somebody posted
   at a gauge is confidently wrong about it, and how often somebody at a certificated post does
   the wrong thing with it. A tag named by a station's `requires:` — `certificated` — is what a

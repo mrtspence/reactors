@@ -216,7 +216,11 @@ the diagonal, because a reservoir at potential zero adds conductance and no righ
 A `DriveLink` may be geared and clutched — what lets a drum be driven both ways off a line shaft
 that turns one way. Across a gear `g`, `b` gains `τ·dt` and `a` loses `g·τ·dt`: momentum is not
 conserved across a gear and is not meant to be; energy is, and the slip `τ·(g·ω_a − ω_b)` is never
-negative.
+negative. **A clutch carries torque only as stiffness × slip**, so its stiffness has to be sized for
+the load: the mine's winding clutches are 3×10⁴ N·m·s/rad because a tonne of coal on the deck is
+14 kN·m at the drum, and at 4×10³ the slip that needed was more than the drum's rated speed — the
+laden cage ran backwards into the sump. `cut_by:` names a node that can throw a clutch out whatever
+its lever says, which is how an overwind trip cuts the drive as well as braking.
 
 **A constant torque on a body is a source inside the solve** (`drive_torque`, passed as
 `sources:`), never an impulse applied after it. Applied afterwards, a brake's drag — solved
@@ -227,6 +231,23 @@ and gravity re-adds it, so a "held" cage creeps at one impulse per tick.
 torque at rest, so while the shaft is all but stopped and its capacity exceeds the torque it is
 holding against it declares a lock conductance of `I/dt × LOCK_MULTIPLE`; past that it slips at
 its capacity. The torque it holds against is read from the shaft it `supports:`, as of last tick.
+
+### A winding rope's tension, and the snatch
+
+A winding rope (`Nodes::Rope`) is not in the drive solve: the hoist's gravity source carries the
+load, and the rope only **reads** what it is carrying, off the drum as of last tick. Riding, that is
+`(cage + cargo)·(g + |a|)`. A cage **hung** on something in the shaft is off the rope, so it carries
+nothing while the drum pays out slack; when the hang gives, the cage falls its slack `h` onto a
+rope of stiffness `s`, and the peak is
+
+```
+T = mg + √((mg)² + 2·s·mg·h)
+```
+
+— exactly twice the static load at no slack and rising with its root. At 8×10⁵ N/m and a 1,650 kg
+cage that is 32 kN with no slack, 90 kN at 0.2 m and 178 kN at a metre: a slack metre parts a new
+140 kN rope. The rope parts when this passes `breaking_kn × integrity`; the energy of the fall is
+not booked, since the drum never stored the cage's potential energy to begin with.
 
 ### A rope between operations
 

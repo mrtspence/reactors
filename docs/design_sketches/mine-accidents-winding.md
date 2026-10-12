@@ -899,6 +899,41 @@ on the two thin rigs (20). Everything else is already proven a slice at a time.
 
 ---
 
+## Unit 2, as built — where it parted from the design
+
+- **S0.** The shaft is a portless `Wearing` node every way runs `through:`; routing became
+  shortest-distance, keyed by the closed set, because the second way out is the long one.
+- **W1.** `position_m` is **rope paid out**, which is what a drum-geared depth indicator honestly
+  reads; the cage is `cage_m`, which only differs once W4 can hang it. The engineman's belief in a
+  2 m/s² brake against a real ~9.5 is left for the tuning pass.
+- **W3.** No `:frayed` rung — a failure takes a part out of service, and a rope still in use is not
+  that. The banksman's rope report (`observer: :banking`) is the warning. Catches come with the
+  hooked tiers rather than as a separate fitting. The sheave is a `Bearing` on the drum, so a seized
+  one stops the winding as well as scoring the rope; its dry equilibrium (~400 K) is estimated from
+  a 376 K measurement at a slightly higher heat loss.
+- **W4.** A tub lodges at a fixed 25 m, or falls onto the cage if the cage is below that — and
+  **that fall hurts nobody yet** (TODO on `Mine::Shaft#suffer`: a mishap cannot raise a hazard). A
+  jam interacts with a descending cage only. A snatch the rope survives jolts nobody. Shaft gates are
+  the bank's `safety_equipment` rather than the fragment without the peril, because a gate left
+  open is the realistic failure and attention-gated saving already models it. While hung, cage B's
+  unbalanced weight is not modelled — the drum simply feels nothing of cage A.
+- **W5.** The cap is a pass after the walk that admits this tick's boarders **in id order** against
+  last tick's cargo, so two boarders on one tick cannot both slip under the rating.
+- **W6.** The ready signal is the marshal's state, read by the governor in phase 0 — not an
+  instrument; there is no "ready to wind" gauge. A false ready is **any slip** at the marshal's
+  post, so it rides the existing slip machinery and its `complexity:`/`boneheaded` gates. The pit
+  bottom gained the firedamp reaction so the bell has something to light, which also lets a
+  district explosion's flame arrive there.
+- **W7.** No reciprocating stroke phase: `strokes` is `(ω/rated)²`, which is what a step window
+  shortening with speed needs. Riders of the rods are found by a new `riding` field — the man
+  engine's `via` — which `riders:` hazards and perils both key on. Catches are a second part tier.
+- **Kit.** A pit helmet and a safety belt; `blast` and `afterdamp` remain unresisted by kit, which
+  is deliberate for afterdamp (breath has its own apparatus) and open for blast.
+- **During the pass**, `boneheaded` became **cubed** (`Minion#daftness`), so a 1.0 hand is an
+  accident waiting to happen rather than a mild version of a 0.3 one.
+
+---
+
 ## 5. Decisions from review
 
 **Decided:**

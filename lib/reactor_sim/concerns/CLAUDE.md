@@ -215,7 +215,9 @@ itself and what only the machine knows:
   a derating means is the node's business. `0.0` is how a mode says "no longer does that thing at
   all", in the same vocabulary rather than a second flag beside it.
 - **`failure_damages`** — `{ mode => { node_id => share } }` — is what the part takes with it,
-  spent by `Tick#spread_damage` as a share of each bystander's *starting* durability.
+  spent by `Tick#spread_damage` as a share of each bystander's *starting* durability. **A part it
+  empties fails on its next evaluation with `cause: :damage`** rather than waiting for a stress of
+  its own — the mine's shaft has none, and is wrecked only by what comes down it.
 
 **`failure_hazards` is `failure_damages` pointed at people**, declared the same way and for the
 same reason, and spent in phase 6b immediately after `spread_damage`. It names **stations**, never
@@ -266,8 +268,13 @@ later one of them catches somebody. Declared on the node that embodies the dange
   `:minion_mishap` and writes the mishap to `state[:mishaps]`, and the part suffers it at the
   start of the **next** tick's `stress`. Its own state key, because events are not snapshotted.
   `Wearing#suffer` understands `kind: :damage` (a share of starting durability, breaking with
-  `cause: :mishap`); a part with a structural consequence overrides `suffer` and `suffers?`. A
-  peril aimed at a part that cannot suffer its kind is refused at build.
+  `cause: :mishap`); a part with a structural consequence overrides `suffer` and `suffers?` — the
+  mine's shaft suffers `:obstruction`, a tub lodging in it. A peril aimed at a part that cannot
+  suffer its kind is refused at build.
+- **`riders:` reaches whoever something is carrying through a shaft** — `via` a cage's drum or
+  `riding` a man engine's rods — wherever they are, beside `places:` and `stations:`.
+- **`boneheaded` spends the margin through `Minion#daftness`, its cube**, scaled by
+  `Blunder::DAFT_SPEND`: a kobold at 0.5 half as fast again as a sound hand, a 1.0 five times.
 
 ### `safety_equipment` is the other way to buy out of one
 
@@ -364,6 +371,8 @@ the stability bound and [`settlement.md`](../../../docs/reference/settlement.md)
   drag on that shaft is the operation's own and must not cross.
 - **`Load` and `Import` both include it.** A load a coupling names brakes by the rope instead of
   its curve; an uncoupled `Import` treats `rated_omega` as a steady far end.
+- **An end whose state says `tripped` has its clutch out** whatever the lever says — in its own
+  grip and in what it reports to the far end. `Import` sets it from an overspeed trip.
 
 ### Drag is declared, never applied
 

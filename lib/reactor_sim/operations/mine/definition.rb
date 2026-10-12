@@ -5,14 +5,14 @@ module ReactorSim
     # A single-seam, bord-and-pillar shaft colliery, in its fan-ventilated era.
     #
     # The second operation, and the first that **buys** its power rather than making it: a line
-    # shaft turned from an engine house somewhere else drives the fan, the pump and the winder.
+    # shaft turned from an engine house somewhere else drives the fan, the pump and the hoist.
     # Everything that makes a colliery difficult is a competition for that one shaft.
     #
     # ## The five subsystems, and what each one is here
     #
     #   winning      a hewer at the face, cutting into a seam that depletes
     #   haulage      face -> pit bottom, a road with a rate limit
-    #   hoisting     pit bottom -> bank, the winder, off the line shaft
+    #   hoisting     pit bottom -> bank on the deck of the hoist, men and coal alike
     #   drainage     water runs downhill to the sump and is pumped out, off the line shaft
     #   ventilation  air down the downcast, round the workings, out through the fan
     #
@@ -48,20 +48,30 @@ module ReactorSim
       # on the chassis today because nothing yet sells it.
       ADVANCE_SHIFT = { seats: 3, place: :district }.freeze
 
+      STARTING_PARTS = {
+        cutting: :hand_picks,
+        lighting: :tallow_candles,
+        winder: :steam_whim,
+        fan: :waddle_fan,
+        pump: :sinking_set,
+        quarters: :lamp_cabin,
+        rest: :refuge_hole
+      }.freeze
+
+      # **The starting pit has one shaft.** It carries the ways up and down and both halves of the
+      # air, divided by a brattice — so what chokes the shaft traps the shift *and* short-circuits
+      # the ventilation, which is Hartley's shape. Two shafts is the upgrade: the second is a
+      # second way out, and a circuit with no brattice in it.
+      #
+      # The first frame is the one a pit starts on.
       CHASSIS = {
-        # The post-Hartley pit: two shafts, so the ventilation circuit is a circuit and there is
-        # a second way out. The only frame offered for now; a single-shaft variant is a
-        # deliberately worse machine and belongs with the hazards that make it worse.
+        single_shaft: {
+          parts: STARTING_PARTS.merge(brattice: :canvas_brattice).freeze,
+          single_shaft: true,
+          advance: ADVANCE_SHIFT
+        }.freeze,
         two_shaft: {
-          parts: {
-            cutting: :hand_picks,
-            lighting: :tallow_candles,
-            winder: :steam_whim,
-            fan: :waddle_fan,
-            pump: :sinking_set,
-            quarters: :lamp_cabin,
-            rest: :refuge_hole
-          }.freeze,
+          parts: STARTING_PARTS,
           advance: ADVANCE_SHIFT
         }.freeze
       }.freeze
@@ -70,7 +80,7 @@ module ReactorSim
       # `options:`**, and it does not need to be: it changes `initial_state` and nothing about
       # the graph, and a restored snapshot installs its own state over the top — so the ground
       # a match was given survives a round trip whatever this was called with.
-      def build(id:, seed:, chassis: :two_shaft, loadout: {}, crew: {}, ground: nil,
+      def build(id:, seed:, chassis: CHASSIS.keys.first, loadout: {}, crew: {}, ground: nil,
                 time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         chassis = chassis.to_sym
         assembly = assembly_for(chassis, loadout, ground: ground)
@@ -116,38 +126,308 @@ module ReactorSim
       # spent a third of a shift on ladders, which is exactly why the man engine was worth its
       # cost) and probably still too long for an opening five minutes of play.
       #
-      # **The ladderway is a fixture and the cage is a fitting.** Every shaft can be climbed;
-      # only a mine that has bought the gear can be ridden. That is what makes the cage a
-      # purchase rather than a setting, and it is why nobody is ever *completely* stranded —
-      # when the winder stops the ladders are still there, and still awful.
-      def passages
+      # **The ladderway is a fixture and the hoist is a fitting.** Every shaft can be climbed;
+      # the hoist that winds the coal can be ridden too, a kibble badly and a cage well. Nobody is
+      # ever *completely* stranded — when the hoist stops the ladders are still there, and still
+      # awful.
+      def passages(spec = {})
         [
           Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M, speed_m_s: 0.6,
-                      label: "Ladderway"),
+                      through: :shaft, label: "Ladderway"),
           Passage.new(a: :pit_bottom, b: :district, metres: 200.0, speed_m_s: 1.2,
-                      label: "Main Road")
+                      label: "Main Road"),
+          *([ escape ] unless spec[:single_shaft])
         ]
       end
 
-      # The same shaft, ridden on the man engine's rod instead of climbed. It stops the moment the
-      # line shaft does, and the ladders are what is left. The cage is a hoist and rides
-      # differently — see `cage_fragment`.
-      def cage_passage(speed_m_s:, rated_omega:, label: "Man Engine")
-        Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M, speed_m_s: speed_m_s,
-                    control_id: :man_winding, driven_by: :cage_drive,
-                    rated_omega: rated_omega, label: label)
+      # **The second way out**, which is what the second shaft is for: up the return and the far
+      # shaft's ladders, straight to bank. Longer than the main way, so it is taken only when that
+      # is closed — and slow, because it is a return airway.
+      def escape
+        Passage.new(a: :district, b: :bank, metres: 200.0 + SHAFT_DEPTH_M + 40.0, speed_m_s: 0.45,
+                    label: "Upcast Ladders")
       end
 
-      # **The man engine's drive.** It hangs off the same line shaft as everything else, so
-      # running it loads the shaft, and a loaded shaft turns slower — the winder raises less coal,
-      # the pump lifts less water and the fan moves less air, all at once.
+      # **The shaft itself**, which nothing in the air or the coal passes through as a node but
+      # every way up and down runs `through:`. Choked, it closes all of them at once.
       #
-      # TODO: W7 — a rod on a bob, with a stroke phase, replaces this constant-torque stand-in.
-      def cage_drive(max_torque:, rated_omega:)
-        Nodes::Load.new(
-          id: :cage_drive, label: "Cage Drive", moment_of_inertia: 120.0,
+      # **Something can lodge in it.** A tub let into the shaft at bank falls until it wedges in
+      # the guides at `LODGE_M` — or, with the cage below that, lands on the cage instead. A jam
+      # closes every way through the shaft and is a ledge a descending cage hangs on (see
+      # `Nodes::Hoist`). Its `hold` is spent by the shaft working it loose and, much faster, by
+      # the weight of a cage resting on it; spent, it falls to the sump.
+      #
+      #   state: durability, failure, jam_m, hold
+      class Shaft < ReactorSim::Node
+        include Concerns::Wearing
+
+        LODGE_M = 25.0
+
+        # Newton-seconds a lodged tub holds against. What works it loose with nothing on it, N.
+        HOLD_NS = 6.0e5
+        SETTLING_N = 1_000.0
+
+        def initialize(hoist: nil, **opts)
+          @hoist = hoist&.to_sym
+          super(**opts)
+          freeze
+        end
+
+        attr_reader :hoist
+
+        def base_initial_state(rng, content) = super.merge(jam_m: nil, hold: 0.0)
+
+        def failure_modes = { choked: {} }
+
+        def jam_m(state) = state[:jam_m]
+
+        def blocks_passage?(state) = broken?(state) || !jam_m(state).nil?
+
+        def suffers?(kind) = kind == :obstruction || super
+
+        # TODO: a tub that lands on the cage is a falling-object hazard to its riders — first
+        # caller is a hazard a mishap can raise; until then it falls on the cage and stops.
+        def suffer(state, mishap, ctx)
+          return super unless mishap.fetch(:kind) == :obstruction
+          return [ state, [] ] unless jam_m(state).nil?
+
+          return [ state, [] ] if cage_below?(ctx)
+
+          [ state.merge(jam_m: LODGE_M, hold: HOLD_NS * mishap.fetch(:share, 1.0)), [] ]
+        end
+
+        def cage_below?(ctx)
+          drum = @hoist && ctx.nodes[@hoist]
+          drum.respond_to?(:cage_m) && drum.cage_m(ctx.node_state(@hoist)) > LODGE_M
+        end
+
+        def apply(state, ctx, _grant)
+          return state if jam_m(state).nil?
+
+          bearing = @hoist ? ctx.node_state(@hoist)&.fetch(:resting_n, 0.0).to_f : 0.0
+          hold = state.fetch(:hold) - ((SETTLING_N + bearing) * ctx.dt)
+          hold.positive? ? state.merge(hold: hold) : state.merge(jam_m: nil, hold: 0.0)
+        end
+      end
+
+      def shaft = Shaft.new(id: :shaft, label: "Shaft", hoist: :cage_drive)
+
+      # **The signal bell at the pit bottom**, rung as the cage is sent away from it. An open
+      # electric bell sparks at its contacts every time it rings, which is an ignition source in the
+      # room it hangs in; a flameproof one declares no `spark:` and offers nothing.
+      #
+      #   state: ringing
+      class SignalBell < ReactorSim::Node
+        # How close to the landing the cage still is while the bell is ringing it away.
+        RINGS_WITHIN_M = 2.0
+
+        def initialize(hoist:, landing_m:, spark: nil, **opts)
+          @hoist = hoist.to_sym
+          @landing_m = landing_m.to_f
+          @spark = spark&.freeze
+          super(**opts)
+          freeze
+        end
+
+        attr_reader :hoist, :landing_m, :spark
+
+        def base_initial_state(rng, content) = super.merge(ringing: false)
+
+        def ignition(state, _levers)
+          return nil unless @spark && state.fetch(:ringing, false)
+
+          { kg_per_s: @spark.fetch(:igniter_kg_per_s), watts: @spark.fetch(:watts),
+            cause: :signal_bell }
+        end
+
+        # Ringing while the cage is moving off this landing, as of last tick.
+        def apply(state, ctx, _grant)
+          drum = ctx.nodes[@hoist]
+          drum_state = ctx.node_state(@hoist)
+          return state.merge(ringing: false) unless drum.respond_to?(:cage_m) && drum_state
+
+          near = (drum.cage_m(drum_state) - @landing_m).abs < RINGS_WITHIN_M
+          state.merge(ringing: near && drum.cage_speed_m_s(drum_state).abs >= Nodes::Hoist::STOPPED_M_S)
+        end
+      end
+
+      # A spark at the contacts: a little seed for a mixture that will carry it, and almost no heat.
+      BELL_SPARK = { igniter_kg_per_s: 2.0e-4, watts: 50.0 }.freeze
+
+      def signal_bell(spark:, label:)
+        SignalBell.new(id: :signal_bell, label: label, hoist: :cage_drive, landing_m: SHAFT_DEPTH_M,
+                       spark: spark)
+      end
+
+      # **The foot of the upcast compartment**, on the far side of the brattice: where the return
+      # air arrives, and where whatever leaks through the brattice joins it on the way to the fan.
+      # Only a single-shaft pit has one — two shafts have no brattice between them.
+      def upcast_foot
+        Nodes::Vessel.new(
+          id: :upcast_foot, label: "Upcast Foot", volume_m3: 300.0,
+          heat_capacity: 4.0e4, ambient_conductance: 80.0,
+          initial_contents: [ { resource: :air, kg: 360.0 } ],
+          ports: [
+            Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            Port.new(id: :leak_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0)
+          ]
+        )
+      end
+
+      # **A leak from the intake straight to the return**: whatever it passes is air that never
+      # reaches the face. Shut, it passes `leak_fraction` of its bore; `opening` is how far it
+      # stands open beyond that; failed, it is a hole and passes everything.
+      class Leak < Nodes::Conduit
+        def initialize(leak_fraction:, **opts)
+          @leak_fraction = leak_fraction.to_f
+          super(**opts)
+        end
+
+        attr_reader :leak_fraction
+
+        def opening(_state) = 0.0
+
+        def gas_conductance(state, ctx)
+          base = super or return nil
+          return base if broken?(state)
+
+          base * (@leak_fraction + ((1.0 - @leak_fraction) * opening(state)))
+        end
+      end
+
+      # **The partition between the downcast and the upcast**: nearly shut while sound, a torrent
+      # once breached — the fan then pulls the air down one side and straight back up the other,
+      # and the district starves. How much it leaks sound is the tier.
+      class Brattice < Leak
+        def failure_modes = { breached: {} }
+
+        def failure_mode(_state, _ctx, _cause) = :breached
+      end
+
+      # **The door where the haulage crosses from intake to return.** Every set of tubs pushes it
+      # open (`traffic:`, the road's activity as of last tick); a trapper shuts it after them, and a
+      # self-closing door shuts itself. With nobody trapping a plain door stays as the last tub left
+      # it — it does not know nobody is there. An air lock is two doors, so the way through is open
+      # only as often as both are at once. An explosion blows it out for good.
+      #
+      #   state: open, durability, failure
+      class Door < Leak
+        # Open, per second, under full traffic; shut, per second, under a trapper fully at it.
+        OPENED_PER_S = 0.5
+        SHUT_PER_S = 1.2
+
+        def initialize(traffic:, trapper: nil, self_closing_per_s: 0.0, doors: 1, **opts)
+          @traffic = traffic.to_sym
+          @trapper = trapper&.to_sym
+          @self_closing_per_s = self_closing_per_s.to_f
+          @doors = Integer(doors)
+          super(**opts)
+        end
+
+        attr_reader :traffic, :trapper, :self_closing_per_s, :doors
+
+        def base_initial_state(rng, content) = super.merge(open: 0.0)
+
+        def opening(state) = state.fetch(:open, 0.0)**@doors
+
+        def apply(state, ctx, _grant)
+          road = ctx.nodes[@traffic]
+          tubs = road&.activity(ctx.node_state(@traffic), :tubs, ctx.dt).to_f
+          trapping = @trapper ? (ctx.controls.fetch(@trapper, 0.0) / 100.0).clamp(0.0, 1.5) : 0.0
+          shutting = (SHUT_PER_S * trapping) + @self_closing_per_s
+          open = state.fetch(:open, 0.0) + (((OPENED_PER_S * tubs) - shutting) * ctx.dt)
+
+          state.merge(open: open.clamp(0.0, 1.0))
+        end
+
+        def failure_modes = { blown_out: {} }
+
+        def failure_mode(_state, _ctx, _cause) = :blown_out
+      end
+
+      def door(label:, self_closing_per_s: 0.0, doors: 1, trapper: :trapping)
+        Door.new(id: :door, label: label, accepts: [ :gas ], leak_fraction: 0.02, max_kg_per_s: 40.0,
+                 conductance: 1.0, heat_capacity: 1.0e3, traffic: :tub_road, trapper: trapper,
+                 self_closing_per_s: self_closing_per_s, doors: doors)
+      end
+
+      def brattice(leak_fraction:)
+        Brattice.new(id: :brattice, label: "Brattice", accepts: [ :gas ], leak_fraction: leak_fraction,
+                     max_kg_per_s: 40.0, conductance: 1.0, heat_capacity: 1.0e3)
+      end
+
+      # The same shaft, ridden on the man engine's rod instead of climbed. It stops the moment the
+      # line shaft does, and the ladders are what is left. A cage or kibble is a hoist and rides
+      # differently — see `hoist_fragment`.
+      def rod_passage(speed_m_s:, rated_omega:, label: "Man Engine")
+        Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M, speed_m_s: speed_m_s,
+                    control_id: :rods, driven_by: :man_engine,
+                    rated_omega: rated_omega, through: :shaft, label: label)
+      end
+
+      # **The man engine: a rod down the shaft on a bob at the top.** It hangs off the same line
+      # shaft as everything else, so running it loads the shaft, and a loaded shaft turns slower —
+      # the hoist raises less coal, the pump lifts less water and the fan moves less air, all at
+      # once.
+      #
+      # **Every stroke is a step on or off.** How busy the rods are is `strokes`, the square of
+      # its speed against rated: a missed step is a peril that scales with it, so an engine house
+      # opening its throttle shortens the step window under every man on the rods.
+      #
+      # **The strap joining bob to rod wears per stroke and per man on it**, and parts on a hard
+      # overspeed. How it parted decides what the catches do: worn through (`parted`) leaves them
+      # in line and they hold; torn out (`torn_out`) knocks them out of line with it. Parted, the
+      # rod is gone from the line shaft — a load rejection upstream.
+      #
+      #   state: angular_momentum, durability, failure
+      class ManEngine < Nodes::Load
+        include Concerns::Wearing
+
+        # Durability per second at rated speed with nobody on the rods.
+        STRAP_PER_S = 0.05
+
+        # Riders' weight that doubles the strap's wear.
+        STRAP_RIDERS_KG = 400.0
+
+        # How far past rated speed a sound strap stands before it is torn out. A worn one less.
+        OVERSPEED_MARGIN = 0.6
+
+        def initialize(endangers: {}, damages: {}, perils: [], **opts)
+          @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          @failure_damages = damages.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          @perils = perils.freeze
+          super(**opts)
+        end
+
+        attr_reader :failure_hazards, :failure_damages, :perils
+
+        def speed_ratio(state) = @rated_omega.positive? ? omega(state).abs / @rated_omega : 0.0
+
+        def activity(state, quantity, _dt) = quantity == :strokes ? speed_ratio(state)**2 : nil
+
+        def stress_per_second(state, ctx)
+          riders = ctx.respond_to?(:cargo_kg) ? ctx.cargo_kg(id) : 0.0
+          STRAP_PER_S * (speed_ratio(state)**2) * (1.0 + (riders / STRAP_RIDERS_KG))
+        end
+
+        def overload?(state, _ctx, integrity) = speed_ratio(state) > 1.0 + (OVERSPEED_MARGIN * integrity)
+
+        def failure_modes = { parted: {}, torn_out: {} }
+
+        def failure_mode(_state, _ctx, cause) = cause == :overload ? :torn_out : :parted
+
+        def failure_detail(state, _ctx) = { speed_ratio: speed_ratio(state).round(2) }
+      end
+
+      def man_engine(max_torque:, rated_omega:, endangers:, damages:)
+        ManEngine.new(
+          id: :man_engine, label: "Man Engine", moment_of_inertia: 120.0,
           max_torque: max_torque, rated_omega: rated_omega, curve: :constant,
-          control_id: :man_winding, friction: 1.0
+          control_id: :rods, friction: 1.0, endangers: endangers, damages: damages,
+          # A missed step, every stroke a chance of it. Mostly a fall onto the next sollar.
+          perils: [ Peril.new(id: :misstep, tags: %i[fall crush], severity: 1.6, rate: 0.6,
+                              scales_with: :strokes, riders: %i[man_engine]) ]
         )
       end
 
@@ -190,9 +470,17 @@ module ReactorSim
           id: :pit_bottom, label: "Pit Bottom", volume_m3: 900.0,
           heat_capacity: 2.0e5, ambient_conductance: 220.0,
           initial_contents: [ { resource: :air, kg: 1_100.0 } ],
+          # **Gas that reaches the shaft can burn there.** It is on the intake and is clear while
+          # the air runs; stop the fan or breach the brattice and the district's gas backs out to
+          # where the signal bell rings — or to where a district explosion's flame arrives.
+          reactions: %i[firedamp_combustion],
           ports: [
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            # Through the brattice into the upcast compartment, in a single-shaft pit.
+            Port.new(id: :brattice_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            # Through the haulage door into the return.
+            Port.new(id: :door_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             # Its own inlet, not the downcast's: a port filters on tags and cannot tell two
             # gases apart, so a seep sharing the intake would be a seep the ventilation drives.
             Port.new(id: :damp_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 2.0),
@@ -292,6 +580,9 @@ module ReactorSim
                        reference: 1_400.0,
                        places: { district: 3.2, pit_bottom: 1.1 } }
           },
+          # The blast goes down the roads and blows the haulage door out of its frame, so the air
+          # that might have cleared the afterdamp takes the short way back to the fan instead.
+          damages: { rupture: { door: 1.0 } },
           ports: [
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
@@ -321,12 +612,14 @@ module ReactorSim
       # `delivers_to:` is deliberately left at its default — itself. The air a fan moves stays in
       # the operation and the pressure it put there dissipates into the stream, unlike the pump,
       # whose water genuinely leaves.
+      # A rotor flying apart in the fan house throws iron across the bank.
       def upcast(head_pa:, rated_omega:)
-        Nodes::Conduit.new(
+        Fan.new(
           id: :upcast, label: "Upcast Fan", accepts: [ :gas ],
           max_kg_per_s: 40.0, conductance: 1.2, heat_capacity: 5.0e4,
           control_id: :ventilation, head_pa: head_pa,
-          driven_by: :line_shaft, efficiency: 0.55, rated_omega: rated_omega
+          driven_by: :line_shaft, efficiency: 0.55, rated_omega: rated_omega,
+          burst_ratio: 1.5, endangers: { burst: { tags: %i[impact], places: { bank: 1.6 } } }
         )
       end
 
@@ -565,13 +858,40 @@ module ReactorSim
       # "naked flame" tells the player what to stop doing. Both are labelled "Sconces", because
       # to the player it is one lever either way — and neither may be called `:sconces`, which is
       # the NODE: one flat id namespace.
+      #
+      # **A gauze is safe only in still enough air.** Past `gauze_passes_m_s` of draught through the
+      # district — measured off the intake road as of last tick — the flame is blown through the
+      # mesh and the lamp is a naked light after all, named `:gauze` so a fire says so. A stronger
+      # fan is what gets it there.
+      #
+      # **Lamps on a dynamo over-run.** Driven past `BLOWS_AT` of rated speed — less once worn — the
+      # filaments go, and the district is dark with the shift still in it. A flame on a bracket has
+      # no dynamo and cannot.
       class Lighting < Nodes::Load
-        attr_reader :illumination
+        include Concerns::Wearing
 
-        def initialize(illumination:, igniter_kg_per_s: 0.0, flame_watts: 0.0, **opts)
+        attr_reader :illumination, :gauze_passes_m_s
+
+        # The intake road's cross-section the draught is read across, m².
+        ROADWAY_M2 = 4.0
+
+        BLOWS_AT = 1.4
+
+        def overload?(state, _ctx, integrity)
+          return false unless @rated_omega.positive?
+
+          omega(state).abs / @rated_omega > 1.0 + ((BLOWS_AT - 1.0) * integrity)
+        end
+
+        def failure_modes = { blown: { derates: { illumination: 0.0 } } }
+
+        def initialize(illumination:, igniter_kg_per_s: 0.0, flame_watts: 0.0,
+                       gauze_passes_m_s: nil, draught_from: :main_road, **opts)
           @illumination = illumination.to_f
           @igniter_kg_per_s = igniter_kg_per_s.to_f
           @flame_watts = flame_watts.to_f
+          @gauze_passes_m_s = gauze_passes_m_s&.to_f
+          @draught_from = draught_from.to_sym
           super(**opts)
         end
 
@@ -581,12 +901,25 @@ module ReactorSim
 
         # **The flame goes with the lever, not with the light.** A candle turned down is fewer
         # candles, each as hot as ever, so a powered tier's shaft speed has no say here.
-        def ignition(_state, levers)
+        def ignition(state, levers)
+          fraction = (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
+          return through_the_gauze(state, fraction) if @gauze_passes_m_s
           return nil unless @igniter_kg_per_s.positive?
 
-          fraction = (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
           { kg_per_s: @igniter_kg_per_s * fraction, watts: @flame_watts * fraction,
             cause: @control_id }
+        end
+
+        def through_the_gauze(state, fraction)
+          return nil unless state.fetch(:draught_m_s, 0.0) > @gauze_passes_m_s
+
+          { kg_per_s: OPEN_FLAME.fetch(:igniter_kg_per_s) * fraction,
+            watts: OPEN_FLAME.fetch(:flame_watts) * fraction, cause: :gauze }
+        end
+
+        def draught_m_s(ctx)
+          kg = ctx.node_state(@draught_from)&.fetch(:carried_kg, 0.0).to_f
+          kg / Units::AIR_DENSITY_KG_PER_M3 / ROADWAY_M2 / ctx.dt
         end
 
         # Turned down is dimmer; a powered tier whose shaft has stopped is dark. Both are
@@ -595,12 +928,12 @@ module ReactorSim
           fraction = @control_id ? (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
           fraction *= (omega(state).abs / @rated_omega).clamp(0.0, 1.0) if @rated_omega.positive?
 
-          @illumination * fraction
+          @illumination * fraction * derating(state, :illumination)
         end
 
         # Recorded so the panel can read it as an ordinary field, the way `carried_kg` is.
         def apply(state, ctx, grant)
-          super.merge(lit: lit(state, ctx.controls))
+          super.merge(lit: lit(state, ctx.controls), draught_m_s: draught_m_s(ctx))
         end
       end
 
@@ -621,11 +954,41 @@ module ReactorSim
       # **The node is a noun and the lever is a gerund**, as `:stoker`/`:stoking` is on the
       # engine — node, control point, gauge and minion ids share one flat namespace, so a
       # conduit and its own lever cannot both be called `:hewing`.
-      def pick_line(max_kg_per_s:)
-        Nodes::Conduit.new(
+      # **A cutter's picks strike sparks** off the pyrite and sandstone in the seam, in the room they
+      # are cutting in, for as long as they are cutting — read off what it cut last tick. A hand
+      # pick declares no `sparks:` and strikes none.
+      class PickLine < Nodes::Conduit
+        def initialize(sparks: nil, **opts)
+          @sparks = sparks&.freeze
+          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
+          super(**opts)
+        end
+
+        attr_reader :sparks
+
+        def ignition(state, _levers)
+          cutting = state.fetch(:cutting, 0.0)
+          return nil unless @sparks && cutting.positive?
+
+          { kg_per_s: @sparks.fetch(:kg_per_s) * cutting, watts: @sparks.fetch(:watts) * cutting,
+            cause: :cutter_sparks }
+        end
+
+        # How hard it was cutting this tick, against its rating.
+        def apply(state, ctx, grant)
+          cut = state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * ctx.dt)
+          super.merge(cutting: cut.clamp(0.0, 1.0))
+        end
+      end
+
+      # A frictional spark: enough seed to fire a mixture in the band, almost no heat.
+      CUTTER_SPARKS = { kg_per_s: 1.0e-4, watts: 30.0 }.freeze
+
+      def pick_line(max_kg_per_s:, sparks: nil)
+        PickLine.new(
           id: :pick_line, label: "Hewing", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 2.0e3,
-          control_id: :hewing
+          control_id: :hewing, sparks: sparks
         )
       end
 
@@ -708,13 +1071,12 @@ module ReactorSim
         end
       end
 
-      # **Cubbies cut into the roadway side, at intervals, for a man to step into while a set
-      # of tubs goes past.** The mine's instance of safety equipment: it wins no coal, spends
-      # money, and does nothing whatever visible until the day somebody is in one.
+      # **A pure safety fitting**: manholes cut in a roadway side, gates across the shaft at bank.
+      # It wins no coal, spends money, and does nothing whatever visible until the day it is used.
       #
       # It holds no material and has no ports, which is correct — it is not in the way of
-      # anything, it is a hole in the wall. What it contributes is the place it guards.
-      class Manholes < ReactorSim::Node
+      # anything. What it contributes is the place it guards.
+      class Guard < ReactorSim::Node
         def initialize(effectiveness:, places:, **opts)
           @safety_equipment = places.to_h { |place| [ place.to_sym, effectiveness.to_f ] }.freeze
           super(**opts)
@@ -726,8 +1088,13 @@ module ReactorSim
       def manholes(effectiveness:, label:)
         # Both ends of the haulage road, because the road runs between them and the tubs go
         # the whole way: a refuge at one end is no use at the other.
-        Manholes.new(id: :manholes, label: label, effectiveness: effectiveness,
-                     places: %i[pit_bottom district])
+        Guard.new(id: :manholes, label: label, effectiveness: effectiveness,
+                  places: %i[pit_bottom district])
+      end
+
+      # Shut, a tub cannot run past the banksman into the shaft; but somebody has to shut them.
+      def shaft_gates(effectiveness:, label:)
+        Guard.new(id: :shaft_gates, label: label, effectiveness: effectiveness, places: %i[bank])
       end
 
       def tub_road(max_kg_per_s:)
@@ -768,15 +1135,72 @@ module ReactorSim
         )
       end
 
-      # The winder. **Driven off the line shaft**, so raising coal costs bought power, and the
-      # work it does leaves the operation on the ledger rather than heating anything.
-      def winder(max_kg_per_s:, lift_m:, rated_omega:)
-        Nodes::Conduit.new(
-          id: :winder, label: "Winding Engine", accepts: [ :solid ],
-          max_kg_per_s: max_kg_per_s, heat_capacity: 8.0e3,
-          control_id: :winding,
-          driven_by: :line_shaft, lift_m: lift_m, efficiency: 0.62,
-          rated_omega: rated_omega, delivers_to: :work, displacement: true
+      # **Coal rides the cage**, on a deck that is the hoist's load like anybody in it — so lifting
+      # coal is work the line shaft does through the drum, booked as the drum's gravity source does
+      # it, and everything that can happen to a cage can happen with a deck of coal on it.
+      def cage_deck(capacity_kg:)
+        Nodes::Vessel.new(
+          id: :cage_deck, label: "Cage Deck", volume_m3: capacity_kg / COAL_BULK_KG_M3,
+          heat_capacity: 2.0e3, ambient_conductance: 20.0,
+          ports: [
+            Port.new(id: :coal_in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: 40.0),
+            Port.new(id: :coal_out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 40.0)
+          ]
+        )
+      end
+
+      COAL_BULK_KG_M3 = 800.0
+
+      # **A landing: tubs run on or off the deck, but only with the cage standing there.** Whoever
+      # works it is the lever (`control_id:`, an effort station), so with nobody at the landing no
+      # coal moves however long the cage stands.
+      #
+      # **The bank's tubs are the banksman's**, so its traffic is what his peril scales with: the
+      # busier the bank, the likelier a tub runs past him into the shaft.
+      class Landing < Nodes::Conduit
+        def initialize(hoist:, landing_m:, perils: [], **opts)
+          @hoist = hoist.to_sym
+          @landing_m = landing_m.to_f
+          @perils = perils.freeze
+          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
+          super(**opts)
+        end
+
+        attr_reader :hoist, :landing_m, :perils
+
+        def throughput_kg(state, ctx)
+          drum = ctx.nodes[@hoist]
+          drum_state = ctx.node_state(@hoist)
+          return 0.0 unless drum_state && drum.cage_stopped_at?(drum_state, @landing_m)
+
+          super
+        end
+
+        def activity(state, quantity, dt)
+          return nil unless quantity == :tubs
+
+          (state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * dt)).clamp(0.0, 1.0)
+        end
+      end
+
+      # The onsetter running full tubs onto the deck at the pit bottom.
+      def deck_loading(max_kg_per_s:)
+        Landing.new(id: :deck_loading, label: "Onsetting", accepts: [ :solid ],
+                    hoist: :cage_drive, landing_m: SHAFT_DEPTH_M, max_kg_per_s: max_kg_per_s,
+                    heat_capacity: 2.0e3, control_id: :onsetting)
+      end
+
+      # The banksman running them off at bank.
+      def deck_unloading(max_kg_per_s:)
+        Landing.new(
+          id: :deck_unloading, label: "Banking", accepts: [ :solid ],
+          hoist: :cage_drive, landing_m: 0.0, max_kg_per_s: max_kg_per_s,
+          heat_capacity: 2.0e3, control_id: :banking,
+          # Rare beside the haulage road's, because it is one tub in many hundreds — and it hurts
+          # nobody at bank; it is the shaft that suffers it.
+          perils: [ Peril.new(id: :tub_into_shaft, rate: 0.3, scales_with: :tubs,
+                              mishap: { node: :shaft, kind: :obstruction, share: 1.0 },
+                              stations: %i[banking]) ]
         )
       end
 
@@ -871,12 +1295,12 @@ module ReactorSim
       end
 
       def pump(max_kg_per_s:, lift_m:, efficiency:, rated_omega:)
-        Nodes::Conduit.new(
+        Pump.new(
           id: :pump, label: "Sump Pump", accepts: [ :liquid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e4,
           control_id: :pumping,
           driven_by: :line_shaft, lift_m: lift_m, efficiency: efficiency,
-          rated_omega: rated_omega, delivers_to: :work, displacement: true
+          rated_omega: rated_omega, delivers_to: :work, displacement: true, burst_ratio: 1.4
         )
       end
 
@@ -888,12 +1312,64 @@ module ReactorSim
 
       # What the engine house turns. Everything that costs power hangs off this one shaft, which
       # is what makes a brownout a whole-mine event rather than one machine stopping.
+      # `trip:` names the overspeed trip if one is fitted; with none, the line shaft never trips.
       def line_shaft(rated_torque_nm:, rated_omega:)
         Nodes::Import.new(
           id: :line_shaft, label: "Line Shaft",
           rated_torque_nm: rated_torque_nm, rated_omega: rated_omega,
-          moment_of_inertia: 900.0, friction: 4.0, control_id: :clutch
+          moment_of_inertia: 900.0, friction: 4.0, control_id: :clutch, trip: :overspeed_trip
         )
+      end
+
+      # **A centrifugal trip on the line shaft**: past `trip_ratio` of rated speed it throws the
+      # clutch out. Holds nothing and moves nothing; the line shaft reads its setting.
+      class OverspeedTrip < ReactorSim::Node
+        def initialize(trip_ratio:, **opts)
+          @trip_ratio = trip_ratio.to_f
+          super(**opts)
+          freeze
+        end
+
+        attr_reader :trip_ratio
+      end
+
+      # **Overspeed, felt at the fan and the pump.** A surge from the engine house arrives as the
+      # line shaft running past rated, and both fittings hang off it: past `burst_ratio` of rated —
+      # less on a worn part — the fan's rotor bursts and the pump's rising main bursts. Burst, a fan
+      # makes no head and a pump lifts nothing.
+      module Overspeed
+        def speed_ratio(ctx) = ctx.node_omega(@driven_by).to_f.abs / @rated_omega
+
+        def overload?(_state, ctx, integrity) = speed_ratio(ctx) > 1.0 + ((@burst_ratio - 1.0) * integrity)
+
+        def failure_detail(_state, ctx) = { speed_ratio: speed_ratio(ctx).round(2) }
+      end
+
+      class Fan < Nodes::Conduit
+        include Overspeed
+
+        def initialize(burst_ratio:, endangers: {}, **opts)
+          @burst_ratio = burst_ratio.to_f
+          @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          super(**opts)
+        end
+
+        attr_reader :failure_hazards
+
+        def head_pa(ctx) = ctx.node_state(id)&.fetch(:failure, nil) ? 0.0 : super
+
+        def failure_modes = { burst: {} }
+      end
+
+      class Pump < Nodes::Conduit
+        include Overspeed
+
+        def initialize(burst_ratio:, **opts)
+          @burst_ratio = burst_ratio.to_f
+          super(**opts)
+        end
+
+        def failure_modes = { main_burst: { derates: { throughput: 0.0 } } }
       end
 
       def crew_for(roster, content, station:, place:, advance: nil)

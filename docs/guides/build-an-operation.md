@@ -84,8 +84,10 @@ ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle, default
 
 Nodes read `ctx.controls.fetch(:throttle_open)` — the lever's **actual** position. A control
 point with `stiffness:` travels toward its target over several ticks; the default is
-instantaneous. Work stations (shovelling, stoking) are ordinary control points today; minions
-will drive `actual` later without anything else changing.
+instantaneous. An **effort** station (`effort:`) reads as its position scaled by whoever is posted
+there, and nothing at all with nobody there. A **governor** post (`governor:`) drives other,
+`internal:` levers from its own — the mine's winding engineman works the clutches and brake to
+send the cage where the player names. See [`operations/CLAUDE.md`](../../lib/reactor_sim/operations/CLAUDE.md).
 
 ### 5. What can the player see?
 
@@ -258,6 +260,11 @@ CHASSIS = {
 `slots(spec)` and `fixtures(spec)` branch on `spec.fetch(:condenser)`. The exhaust link lives
 in `fixtures` rather than in a slot deliberately: fitting a condenser does not add a branch, it
 **reroutes** the exhaust, and "absent means rerouted" is a frame decision rather than a fitting.
+
+**The first chassis in `CHASSIS` is the default**, so order the hash starting machine first. The
+mine starts on `single_shaft` — one shaft carrying both halves of the air, split by a brattice
+slot, so whatever chokes it traps the shift — and `two_shaft` is the upgrade that brings a second
+way out.
 
 **A loadout is what is bolted to it.** Each part registers a builder returning a `Fragment` —
 its nodes, its links, its levers — plus the ids it promises and the gauges that arrive with it.

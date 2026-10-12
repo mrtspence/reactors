@@ -31,7 +31,7 @@ RSpec.describe "firedamp" do
 
   before { allow(ReactorSim::Content).to receive(:default).and_return(PitRig::CONTENT) }
 
-  def pit(**opts) = build_pit(id: "f", seed: 7, loadout: { manriding: :cage_gear }, **opts)
+  def pit(**opts) = build_pit(id: "f", seed: 7, loadout: { winder: :cage_gear }, **opts)
 
   def station_of(op, seat) = crew(op, seat)[:station]
 
@@ -51,7 +51,7 @@ RSpec.describe "firedamp" do
   # `from:` is explicit rather than swept into `**levers`, because `set_control` ignores an id it
   # does not know — so a stray keyword became a lever nobody has and the run restarted at tick 1.
   def work!(op, ticks, from: 0, ventilation: 100, naked_flame: 0, hewing: 0, **levers)
-    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: ventilation, naked_flame: naked_flame, **levers)
 
     run!(op, ticks, from: from)
@@ -225,6 +225,29 @@ RSpec.describe "firedamp" do
       work!(op, 60, ventilation: 0, naked_flame: 100)
 
       expect(op.state.fetch(:minions).fetch(:crew_2).fetch(:resilience)).to be < intact
+    end
+  end
+
+  # **The restart slug.** A district gassed past its rich limit cannot burn; restarting the fan
+  # dilutes it down through the flammable band, and a naked light that sat in it safely fires it.
+  # Withdrawing the lights before restarting is the procedure. 130 ticks, because the dilution is
+  # the claim: built just past the rich limit (9.5% by mass, about 16% by volume) the restarted fan
+  # reaches the band at tick 122, where the stopped one never does.
+  describe "restarting the fan" do
+    def restarted(fan:, lights:)
+      op = build_pit(id: "s", seed: 1, chassis: :single_shaft)
+      op = seed(op, nodes: { district: district_mix(op, firedamp: gas_kg(9.5)) })
+      levers!(op, ventilation: fan, naked_flame: lights)
+      run!(op, 130).any? { |e| e[:type] == :fire_lit && e[:node] == :district }
+    end
+
+    it "fires a district too rich to burn once it has diluted it into the band" do
+      expect(restarted(fan: 100, lights: 100)).to be(true)
+      expect(restarted(fan: 0, lights: 100)).to be(false)
+    end
+
+    it "fires nothing with the lights withdrawn first" do
+      expect(restarted(fan: 100, lights: 0)).to be(false)
     end
   end
 

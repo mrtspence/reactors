@@ -128,7 +128,8 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > `Tick#ignition_sources` sums the offers per air node — **walked by sorted id**, because a float
 > sum depends on its order and `graph_spec` shuffles declaration order. A vessel names no
 > igniters of its own beyond its heater lever, so a candle, a sparking bell and a hot bearing are
-> all simply things standing in the room.
+> all simply things standing in the room. **So is a person**: anybody carrying `open_flame` offers
+> `Minion::HAND_FLAME` to the air where they stand, summed after the nodes, by sorted minion id.
 
 > **`posting` is where somebody has been SENT; `station` is what they are actually working.**
 > `assign_minion` writes the first and names a destination, never a step — which is what lets it
@@ -145,6 +146,10 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > at the landing until it is there and stopped, is then `via` the drum and wherever the cage is,
 > and gets off at the far landing. Their weight is the drum's cargo next tick (`ctx.cargo_kg`).
 > It is offered only while its `staffed_by` post is manned, its drum sound and its shaft turning.
+> Getting in takes `boarding_s`, and a marshal at the landing stops boarding at the cage's rating.
+> Somebody part-way along any other powered way is `riding` its drive — the man engine's rods —
+> and is cargo to it the same way. **`via` and `riding` are both what a `riders:` hazard or peril
+> keys on**, and both are symbols held as values, normalised on restore.
 
 > **`air` is the only substance tagged `breathable`, and every other gas asphyxiates by taking
 > up the room it was in.** That is the whole of `breath.rb`, and it is why afterdamp needed no

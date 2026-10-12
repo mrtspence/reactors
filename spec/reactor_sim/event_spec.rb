@@ -124,10 +124,10 @@ RSpec.describe "events" do
     # more slowly — at 0.05 it mends faster than it spends and nobody is ever hurt. A margin seed
     # belongs to the hand it is seeded on.
     def pit_on_the_brink
-      pit = build_pit(id: "h", seed: 5, loadout: { manriding: :cage_gear })
+      pit = build_pit(id: "h", seed: 5, loadout: { winder: :cage_gear })
       brink = %i[crew_1 crew_2 crew_3].to_h { |seat| [ seat, { margin: 0.005 } ] }
       at_the_face(seed(pit, minions: brink)).tap do |op|
-        levers!(op, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100)
+        levers!(op, hewing: 100, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100)
       end
     end
 
@@ -178,10 +178,10 @@ RSpec.describe "events" do
     # lies is `district_fire_spec`'s claim and getting there by seepage is what made this 2,500
     # ticks. 8% by mass is comfortably inside it, so the flame catches within a handful.
     it "puts a fire in a place not built for one in front of the player" do
-      pit = build_pit(id: "f", seed: 1, loadout: { manriding: :cage_gear })
+      pit = build_pit(id: "f", seed: 1, loadout: { winder: :cage_gear })
       op = at_the_face(seed(pit, nodes: { district: district_mix(pit, firedamp: gas_kg(8.0)) }))
       levers!(op, naked_flame: 100, ventilation: 0, hewing: 0, haulage: 100,
-                  timbering: 100, winding: 100, pumping: 100)
+                  timbering: 100, coal_winding: 100, pumping: 100)
 
       lit = nil
       20.times do |i|
