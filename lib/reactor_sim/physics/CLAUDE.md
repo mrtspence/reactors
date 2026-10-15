@@ -136,7 +136,10 @@ Four things that were each got wrong first, and will be again:
   It stays as deliberate fuel-bed inertia, not as a prop.
 
 Spread is closed-form logistic — exact at any `dt`, cannot overshoot, and from exactly zero
-stays at zero, which is what makes an igniter a match rather than a switch.
+stays at zero, which is what makes an igniter a match rather than a switch. **The one exception
+is `autoignition_k`**: past it the fuel seeds itself, read against the hotter of the node and its
+`hot_spot:` (a vessel's contents touching something hotter than their own bulk). Wood, coal and
+firedamp declare it.
 
 **It does not replace distinct nodes for distinct temperatures.** A reactor's fuel pin is
 genuinely hundreds of kelvin above its coolant; no ignited fraction expresses that.

@@ -73,7 +73,7 @@ module ReactorSim
                      oil_loss_kg_per_m: 0.0, lining_kg: 0.0, ports: nil,
                      mu_film: nil, mu_boundary: nil,
                      emissivity: 0.0, radiating_area_m2: 0.0,
-                     initial_temperature_k: 293.15, ambient_k: 293.15)
+                     initial_temperature_k: 293.15, ambient_k: 293.15, slips_when_seized: nil)
         super(
           id: id, label: label,
           # One inlet, for the oil round. Tagged rather than named, so a better grade of oil is
@@ -108,6 +108,10 @@ module ReactorSim
         @mu_film, @mu_boundary = mu_for(@duty, film: mu_film, boundary: mu_boundary)
         @emissivity = emissivity.to_f
         @radiating_area_m2 = radiating_area_m2.to_f
+        # `{ mu:, lever_m: }`: seized, this does not lock its shaft — what it carries slides over it
+        # instead, a rope through a seized sheave's groove, at `mu` and `lever_m` of travel per
+        # radian of the shaft. Nil for a journal that locks.
+        @slips_when_seized = slips_when_seized&.freeze
         freeze
       end
 
@@ -206,18 +210,34 @@ module ReactorSim
         return {} unless omega.positive?
 
         cap = ctx.states[@supports] ? shaft_stall_conductance(ctx) : Float::INFINITY
-        if state.fetch(:failure, nil) == :seized
-          return { id => cap.finite? ? cap * SEIZED_CONDUCTANCE_MULTIPLE : cap }
-        end
+        return { id => seized_conductance(ctx, omega, cap) } if state.fetch(:failure, nil) == :seized
 
         { id => [ boundary_conductance(state, ctx, omega) + @viscous_c, cap ].min }
       end
 
+      # A lock, or — for a bearing that `slips_when_seized` — what it carries dragged over it, at
+      # the load `loaded_by:` presses on it; its own weight presses the journal, not the groove.
+      def seized_conductance(ctx, omega, cap)
+        if @slips_when_seized
+          slip = @slips_when_seized
+          carried = load_n(ctx) - @static_load_n
+          return [ slip.fetch(:mu) * carried * slip.fetch(:lever_m) / omega, cap ].min
+        end
+
+        cap.finite? ? cap * SEIZED_CONDUCTANCE_MULTIPLE : cap
+      end
+
+      # **Metal on metal, once the lining has wiped**: a steel journal dry on its bronze shell.
+      METAL_ON_METAL_MU = 0.35
+
       # **Coulomb friction, divided by ω to become a conductance.** The rubbing term is a force
       # times a lever and does not fall away as the shaft slows, so its conductance diverges at
       # rest — which is stiction, correctly, and why the caller caps it.
+      #
+      # A wiped bearing has lost the soft metal it rubbed on, so its boundary is metal on metal.
       def boundary_conductance(state, ctx, omega)
-        mu = @mu_boundary - ((@mu_boundary - @mu_film) * film(state, omega))
+        boundary = state.fetch(:failure, nil) == :wiped ? [ @mu_boundary, METAL_ON_METAL_MU ].max : @mu_boundary
+        mu = boundary - ((boundary - @mu_film) * film(state, omega))
         mu * load_n(ctx) * lever_m / omega
       end
 
@@ -267,8 +287,14 @@ module ReactorSim
       # A journal is bent by the **torque** passing over its crank throw; a piston ring is pushed
       # into its bore by the **gas pressure** behind it. Both make working the engine hard the
       # thing that wears it, which is the connection the whole mechanic rests on.
+      #
+      # **Or by the pull of a rope**: a node that answers `bearing_load_n(ctx)` says itself what it
+      # presses on the bearing — a winding rope over its sheave.
       def load_n(ctx)
         return @static_load_n if @loaded_by.nil?
+
+        loader = ctx.nodes[@loaded_by]
+        return @static_load_n + loader.bearing_load_n(ctx) if loader.respond_to?(:bearing_load_n)
 
         @static_load_n + (@duty == :slide ? gas_load_n(ctx) : torque_load_n(ctx))
       end

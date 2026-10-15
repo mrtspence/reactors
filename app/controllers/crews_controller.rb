@@ -9,7 +9,7 @@
 class CrewsController < ApplicationController
   include CrewParams
 
-  before_action :require_operator!
+  before_action :require_operator!, :require_fittable!
 
   def edit
     @crewing = Crewing.for(owner_id: current_player, operation_id: operation_id)

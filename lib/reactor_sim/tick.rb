@@ -962,10 +962,17 @@ module ReactorSim
         # Set by the node in phase 4 — a pilot light, an arc, a match. Consumed here rather
         # than added by the node itself, for the same reason `joules_injected` is: a node
         # records what it did and the tick decides what that means.
-        seed_kg: state.fetch(:ignition_seed_kg, 0.0)
+        seed_kg: state.fetch(:ignition_seed_kg, 0.0),
+        hottest_k: hot_spot_k(node, ctx)
       )
 
       with_ignition(state, reaction_id, advanced)
+    end
+
+    # The temperature of the node a vessel's fuel touches, as of last tick; nil if it names none.
+    def hot_spot_k(node, ctx)
+      spot = node.respond_to?(:hot_spot) && node.hot_spot
+      spot ? ctx.node_temperature(spot) : nil
     end
 
     # Kilograms of fuel alight, or nil for a reaction that does not model ignition — which is
@@ -1373,8 +1380,8 @@ module ReactorSim
       return {} if layout.places.empty?
 
       layout.places.to_h do |place|
-        parcels = states.dig(layout.breathes(place), :parcels)
-        [ place, parcels ? breathability(parcels) : 1.0 ]
+        air = layout.breathes(place)
+        [ place, states[air] ? breathability(nodes[air], states.fetch(air)) : 1.0 ]
       end
     end
 
@@ -1383,10 +1390,16 @@ module ReactorSim
     # that is still almost entirely air kills just the same. Collapsing it to zero here rather
     # than in `Breath.rate` keeps the rate a function of one number and puts both ways of
     # ruining a volume of air in the same place.
-    def breathability(parcels)
-      return 0.0 if Breath.poisoned?(parcels, content)
+    #
+    # **What you breathe is the gas.** Water standing on the floor and coal in the tubs take up
+    # none of a lungful; a room drowned to its roof has none left at all.
+    def breathability(node, state)
+      return 0.0 if node.respond_to?(:submerged?) && node.submerged?(state, content)
 
-      Breath.breathable_fraction(parcels, content)
+      gas = Parcel.matching(state.fetch(:parcels, []), [ :gas ], content)
+      return 0.0 if Breath.poisoned?(gas, content)
+
+      Breath.breathable_fraction(gas, content)
     end
 
     # Collapse, and then the clock. **Pinned at the fatigue ceiling is not enough on its own** —
@@ -1637,16 +1650,17 @@ module ReactorSim
     # running at all.
     def quickest(here, hop, ctx)
       layout.passages_between(here, hop)
-            .select { |p| !closed_ways.include?(p.through) && in_service?(p, ctx) }
+            .select { |p| !p.closed_by?(closed_ways) && in_service?(p, ctx) }
             .max_by { |p| p.speed_in(ctx) }
     end
 
-    # **What is in the way**: every node some passage runs through that has failed, as of last
-    # tick. A choked shaft closes the ladders and the cage in it alike, and routing finds another
-    # way out if the pit has one.
+    # **What is in the way**: every node some passage runs through that is blocking it, as of
+    # last tick. A choked shaft closes the ladders and the cage in it alike, a flooded pit bottom
+    # every way that runs through it, and routing finds another way out if the pit has one.
     def closed_ways
-      @closed_ways ||= layout.through_nodes.select { |id| nodes.fetch(id).blocks_passage?(state.dig(:nodes, id)) }
-                             .freeze
+      @closed_ways ||= layout.through_nodes.select { |id|
+        nodes.fetch(id).blocks_passage?(state.dig(:nodes, id), content)
+      }.freeze
     end
 
     # A ridden way is running while somebody is winding it, the drum is sound, and whatever drives
@@ -1732,7 +1746,7 @@ module ReactorSim
 
     def nearest_landing(passage)
       drum = nodes.fetch(passage.hoist)
-      return passage.b if rope_parted?(drum) && !nodes.fetch(drum.rope).catches?
+      return passage.b if rope_parted?(drum) && !drum.catches?
 
       cage_position(passage) < passage.metres / 2.0 ? passage.a : passage.b
     end

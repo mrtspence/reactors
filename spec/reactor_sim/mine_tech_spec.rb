@@ -46,9 +46,9 @@ module MineTech
     }
   )
 
-  # A fissure with almost nothing left, so driving the face breaks it inside 150 ticks instead of
-  # twelve thousand. The erosion rate itself is `Inrush#stress_per_second`'s business.
-  WORN_FISSURE = 20.0
+  # Old workings a hand's breadth ahead of the face — ten kilograms of coal — so driving it breaks
+  # through inside a few ticks instead of hours. Where the water lies is the ground's business.
+  WATER_AHEAD_M = 0.002
 end
 
 RSpec.describe "the mine's tech tree" do
@@ -70,11 +70,11 @@ RSpec.describe "the mine's tech tree" do
 
   def water(op) = held(op, :pit_bottom, :water)
 
-  # A shift at the face with the levers over. `worn:` seeds the fissure's remaining durability;
-  # `damp:` and `firedamp:` seed the district.
-  def cutting(op, hewing: 100, timbering: 100, worn: nil, damp: 0.0, firedamp: 0.0, **levers)
+  # A shift at the face with the levers over. `water_ahead_m:` puts a body of old workings that far
+  # ahead of the face; `damp:` and `firedamp:` seed the district.
+  def cutting(op, hewing: 100, timbering: 100, water_ahead_m: nil, damp: 0.0, firedamp: 0.0, **levers)
     nodes = {}
-    nodes[:seepage] = { durability: worn } if worn
+    nodes[:seepage] = { waters: [ { at_m: water_ahead_m, kg: 40_000.0 } ] } if water_ahead_m
     # **`firedamp:` is percent by volume**, and the gas takes the room of the air it displaced, so
     # the district stays at its own pressure. Added on top it would surge back down the intake as a
     # gust no pit ever makes — 35 m/s for a tick — and blow a gauze lamp's flame through.
@@ -272,13 +272,13 @@ RSpec.describe "the mine's tech tree" do
   end
 
   describe "inundation" do
-    # Not merely the pump stopping: a face driven hard for long enough breaks into whatever is
-    # standing behind it, and then the water arrives faster than the set can lift it.
+    # Not merely the pump stopping: a face driven into old workings breaks through, and then the
+    # water arrives faster than the set can lift it.
     #
-    # **The fissure is seeded part-worn**, so what is tested is the breach rather than the hours
-    # of driving that cause it — `Inrush#stress_per_second` owns the rate.
-    it "breaks into old workings on a face that is driven hard" do
-      op = cutting(pit, worn: MineTech::WORN_FISSURE)
+    # **The water is seeded just ahead of the face**, so what is tested is the breach rather than
+    # the hours of driving that reach it — `Ahead` owns where it lies.
+    it "breaks into old workings on a face that is driven into them" do
+      op = cutting(pit, water_ahead_m: MineTech::WATER_AHEAD_M)
       events = run!(op, 150)
 
       inrush = events.find { |e| e[:type] == :part_failed && e[:node] == :seepage }
@@ -286,27 +286,27 @@ RSpec.describe "the mine's tech tree" do
       expect(inrush[:mode]).to be(:inrush)
     end
 
-    # **The pair, and the sharper half of the claim**: the same nearly-gone fissure, and the only
-    # thing keeping it intact is that nobody is cutting.
+    # **The pair, and the sharper half of the claim**: the same water a hand's breadth away, and the
+    # only thing keeping it back is that nobody is cutting.
     it "does not break into anything on a face nobody is driving" do
-      op = cutting(pit, hewing: 0, worn: MineTech::WORN_FISSURE)
+      op = cutting(pit, hewing: 0, water_ahead_m: MineTech::WATER_AHEAD_M)
       events = run!(op, 150)
 
       expect(events.select { |e| e[:node] == :seepage }).to be_empty
     end
 
     it "overwhelms the starting pump and floods the pit bottom" do
-      op = cutting(pit, worn: MineTech::WORN_FISSURE)
+      op = cutting(pit, water_ahead_m: MineTech::WATER_AHEAD_M)
       run!(op, 300)
 
       expect(water(op)).to be > 100.0
     end
 
     # The reason to buy the bigger set, and the shape of every upgrade in this mine: it does
-    # nothing at all until the day it matters. Measured at 150 ticks: 63.9 kg against 4.4.
+    # nothing at all until the day it matters.
     it "is held by a Cornish set where a sinking set is not" do
-      small = cutting(pit, worn: MineTech::WORN_FISSURE)
-      big = cutting(pit(pump: :cornish_set), worn: MineTech::WORN_FISSURE)
+      small = cutting(pit, water_ahead_m: MineTech::WATER_AHEAD_M)
+      big = cutting(pit(pump: :cornish_set), water_ahead_m: MineTech::WATER_AHEAD_M)
       run!(small, 150)
       run!(big, 150)
 
@@ -315,7 +315,7 @@ RSpec.describe "the mine's tech tree" do
   end
 
   it "conserves mass and energy through an inrush" do
-    op = cutting(pit, worn: MineTech::WORN_FISSURE)
+    op = cutting(pit, water_ahead_m: MineTech::WATER_AHEAD_M)
     mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
     joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 

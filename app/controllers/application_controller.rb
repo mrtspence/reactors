@@ -42,6 +42,12 @@ class ApplicationController < ActionController::Base
     head :forbidden unless current_operation.operable_by?(current_player)
   end
 
+  # For the outfitting and crew screens, after `require_operator!`: a machine with no slots has
+  # neither.
+  def require_fittable!
+    head :not_found unless current_operation.fittable?
+  end
+
   # **Match-level, for a reset.** Rebuilding a match restarts every operation in it, so the rule
   # is "you operate something here" rather than "you operate this one" — which is the honest
   # answer while a match has one owner and the conservative one when it has several. A match
@@ -57,12 +63,12 @@ class ApplicationController < ActionController::Base
     @match_operations ||= Operation.in_match(params[:match_id]).to_a
   end
 
-  # **Every machine here you may work on**, which is what the fitting screens switch between.
-  # Ownership is the whole filter: a player who operates one machine gets a list of one and the
-  # switcher does not render, so this is a development affordance without being a development
+  # **Every machine here you may fit out**, which is what the fitting screens switch between.
+  # Ownership is the filter that matters: a player who operates one machine gets a list of one and
+  # the switcher does not render, so this is a development affordance without being a development
   # branch.
   def operable_siblings
-    @operable_siblings ||= match_operations.select { |op| op.operable_by?(current_player) }
+    @operable_siblings ||= match_operations.select { |op| op.operable_by?(current_player) && op.fittable? }
   end
   helper_method :operable_siblings
 end

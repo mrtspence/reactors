@@ -20,7 +20,7 @@ module ReactorSim
         flame_cap lamp_flame canary
         shaft_speed shaft_supply
         air_quantity district_air
-        sump_level water_make
+        sump_level beam_condition water_make survey bore_holes goaf_weight fire_stink
         district_light district_fire
         roof_timber putting
         cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
@@ -321,11 +321,67 @@ module ReactorSim
                                            "she looks sound", "new" ])
           ),
 
+          # **The Cornish beam, as the banksman sees it from the bank**: late, and in words.
+          beam_condition: Diagnostic.new(
+            id: :beam_condition, label: "Pump Beam", observer: :banking,
+            source: Sources::Derived.new(:pump_beam, :integrity),
+            filters: [ Filters::Lag.new(6), Filters::Noise.new(0.1, deadband: 0.05),
+                       Filters::Bands.new([ 0.25, 0.5, 0.8 ]) ],
+            display: Displays::Prose.new([ "cracked across the gudgeon", "she groans on the stroke",
+                                           "working sweetly", "new" ])
+          ),
+
           sheave_heat: Diagnostic.new(
             id: :sheave_heat, label: "Sheave",
             source: Sources::Derived.new(:sheave, :temperature_k),
             filters: [ Filters::Lag.new(2), Filters::Bands.new([ 320.0, 360.0, 400.0 ]) ],
             display: Displays::Prose.new([ "cool", "warm", "hot to the hand", "smoking" ])
+          ),
+
+          # **What lies between the face and the old workings**, as somebody at the face judges it
+          # from the plans and the water coming off the coal: the barrier left, in metres, banded
+          # hard and noisy. Old plans were wrong, which is how Lofthouse was flooded — and where
+          # there is no water at all the plans say the same as where there is plenty of coal. Read by
+          # the borer, who is the one probing ahead of the face — nobody boring, nobody looking.
+          survey: Diagnostic.new(
+            id: :survey, label: "The Plans", observer: :boring,
+            source: Sources::Field.new(:seepage, :barrier_m),
+            filters: [ Filters::Lag.new(8), Filters::Noise.new(1.0, deadband: 0.5),
+                       Filters::Bands.new([ 1.0, 3.0, 8.0 ]) ],
+            display: Displays::Prose.new([ "water standing in the cut", "the coal is weeping",
+                                           "the plans show old workings near", "forty yards of solid coal" ])
+          ),
+
+          # **Fire stink**: the smell off the waste of coal heating in it, long before anything shows. A
+          # deputy's nose, so it is the timberman's, and it is banded on the waste's own heat.
+          fire_stink: Diagnostic.new(
+            id: :fire_stink, label: "The Waste", observer: :timbering,
+            source: Sources::Derived.new(:gob, :temperature_k),
+            filters: [ Filters::Lag.new(8), Filters::Noise.new(4.0, deadband: 2.0),
+                       Filters::Bands.new([ 320.0, 380.0, 600.0 ]) ],
+            display: Displays::Prose.new([ "sweet", "a musty smell off the waste", "fire stink",
+                                           "smoke coming off the waste" ])
+          ),
+
+          # **The goaf working**: the roof behind the face, heard rather than seen, as what hangs comes
+          # toward the span it will fall at. The timberman is the one listening to the roof.
+          goaf_weight: Diagnostic.new(
+            id: :goaf_weight, label: "The Goaf", observer: :timbering,
+            source: Sources::Field.new(:goaf, :weighting),
+            filters: [ Filters::Lag.new(4), Filters::Noise.new(0.08, deadband: 0.04),
+                       Filters::Bands.new([ 0.5, 0.8, 0.95 ]) ],
+            display: Displays::Prose.new([ "quiet", "creaking", "the goaf is talking", "bumping and cracking" ])
+          ),
+
+          # **What the auger is finding**: the gas in a pocket within its reach, by what comes out of
+          # the holes. Nothing within reach and a pocket nobody has got near read the same — dry holes.
+          bore_holes: Diagnostic.new(
+            id: :bore_holes, label: "Bore Holes", observer: :boring,
+            source: Sources::Field.new(:bore_line, :found_kg),
+            filters: [ Filters::Lag.new(4), Filters::Noise.new(20.0, deadband: 10.0),
+                       Filters::Bands.new([ 5.0, 100.0, 600.0 ]) ],
+            display: Displays::Prose.new([ "dry holes", "gas singing in the holes", "gas blowing hard from the holes",
+                                           "the auger blown back out of the hole" ])
           ),
 
           # A surveyor's estimate of what is left in the district, and it is a guess.

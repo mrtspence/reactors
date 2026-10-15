@@ -121,7 +121,7 @@ module ReactorSim
 
     # Whether a passage running `through:` this node is closed. Broken, by default; a node that
     # can be in the way without being broken says so.
-    def blocks_passage?(state) = broken?(state)
+    def blocks_passage?(state, _content = nil) = broken?(state)
 
     # How busy this node is, **0..1 and dimensionless**, for a peril that `scales_with:` it —
     # the activity that both drives the danger and sizes it. Nil where the node has no such

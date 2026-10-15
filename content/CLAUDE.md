@@ -58,8 +58,13 @@ governs *physiology*: `breathable`. Say which when you add one.
 > `content/resources/damps.yml` holds firedamp, blackdamp and whitedamp. **Afterdamp needs no
 > entry** — it is `flue_gas` in a place with people in it. Whitedamp arrives two ways and both
 > are emergent rather than declared: a fire that could not get air makes it (the second
-> `alternatives:` pathway on each combustion reaction), and the goaf makes a little of it on
-> its own, in a share drawn per match.
+> `alternatives:` pathway on firedamp, coal dust and coal — so a smouldering gob and an over-fed
+> grate both make it), and the goaf makes a little of it on its own, in a share drawn per match.
+>
+> **Coal also oxidises cold** (`coal_oxidation`): no flame, oxygen taken up by broken coal into
+> blackdamp and heat. Where the heat cannot get away the coal climbs to its `autoignition_k` and
+> lights of itself — a gob fire. Blackdamp is therefore a product of one reaction, and still a
+> reagent in none, which is what keeps it inert.
 >
 > **Blackdamp is firedamp's opposite and is modelled by where it is wired, not by its density.**
 > It does not burn, there is nothing to smell, and it kills by being there instead of air.

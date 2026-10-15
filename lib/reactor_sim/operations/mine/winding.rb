@@ -84,6 +84,9 @@ module ReactorSim
           speed = drum.speed_m_s(drum_state)
 
           return stopped if drum.stopped_at?(drum_state, goal)
+          # At the mark he holds it with the brake, whichever way it is drifting: driving back
+          # against a rope's imbalance with a stiff clutch only hunts round the landing.
+          return stopped if gap.abs < Nodes::Hoist::LANDING_M
           return stopped if !ready && speed.abs < Nodes::Hoist::STOPPED_M_S
           return stopped if closing?(gap, speed) && gap.abs <= brake_point(speed, lateness)
 

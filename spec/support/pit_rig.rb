@@ -234,8 +234,10 @@ module PitRig
     held(op, node, gas) / total * 100.0
   end
 
+  # The gas phase only, as the tick reads it.
   def air(op, place)
-    ReactorSim::Breath.breathable_fraction(parcels(op, op.layout.breathes(place)), op.content)
+    gas = ReactorSim::Parcel.matching(parcels(op, op.layout.breathes(place)), [ :gas ], op.content)
+    ReactorSim::Breath.breathable_fraction(gas, op.content)
   end
 
   def crew(op, seat) = op.state.fetch(:minions).fetch(seat)

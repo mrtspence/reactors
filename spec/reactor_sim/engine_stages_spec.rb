@@ -36,7 +36,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
   # first few ticks would be a scramble back to equilibrium, and every measurement taken after it
   # would be a measurement of that scramble.
   #
-  # Measured across 400 ticks the drum holds 607.5 → 608.3 kPa and the fire 1025.0 → 1024.1 K.
+  # Measured across 400 ticks the drum holds 607.5 → 607.8 kPa and the fire 1010.0 → 1001.5 K.
   describe "the constructed state" do
     it "carries on from the state it was given, with no transient" do
       op = at_work(engine)

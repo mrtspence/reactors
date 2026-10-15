@@ -52,6 +52,8 @@ module ReactorSim
         cutting: :hand_picks,
         lighting: :tallow_candles,
         winder: :steam_whim,
+        rope: :hemp_rope,
+        headframe: :timber_headframe,
         fan: :waddle_fan,
         pump: :sinking_set,
         quarters: :lamp_cabin,
@@ -133,9 +135,9 @@ module ReactorSim
       def passages(spec = {})
         [
           Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M, speed_m_s: 0.6,
-                      through: :shaft, label: "Ladderway"),
+                      through: THROUGH_SHAFT, label: "Ladderway"),
           Passage.new(a: :pit_bottom, b: :district, metres: 200.0, speed_m_s: 1.2,
-                      label: "Main Road"),
+                      through: :pit_bottom, label: "Main Road"),
           *([ escape ] unless spec[:single_shaft])
         ]
       end
@@ -181,7 +183,7 @@ module ReactorSim
 
         def jam_m(state) = state[:jam_m]
 
-        def blocks_passage?(state) = broken?(state) || !jam_m(state).nil?
+        def blocks_passage?(state, _content = nil) = broken?(state) || !jam_m(state).nil?
 
         def suffers?(kind) = kind == :obstruction || super
 
@@ -211,6 +213,71 @@ module ReactorSim
       end
 
       def shaft = Shaft.new(id: :shaft, label: "Shaft", hoist: :cage_drive)
+
+      # **The headframe over the downcast**, and the air the fan draws past it on its way down the
+      # shaft — a share of the intake, through `headframe_draught` and on into the pit bottom
+      # through `headframe_smoke`. Iron or timber, the air is the same; only timber burns.
+      #
+      # **A timber frame is lit by the sheave it carries** (`hot_spot: :sheave`): the bearers the
+      # plummer blocks sit on reach the bearing's temperature, and past timber's ignition point the
+      # frame catches with nothing alight near it. Burning, its smoke goes down the shaft and through
+      # every working. **It comes down when a share of its timber has gone**, taking the sheave and
+      # part of the shaft with it.
+      class Headframe < Nodes::Vessel
+        # The share of its timber burnt away when it falls.
+        BURNT_THROUGH = 0.3
+
+        def initialize(timber_kg:, **opts)
+          @timber_kg = timber_kg.to_f
+          super(**opts)
+        end
+
+        attr_reader :timber_kg
+
+        def timber_left_kg(state)
+          state.fetch(:parcels).sum { |p| p.fetch(:resource) == :wood ? p.fetch(:kg) : 0.0 }
+        end
+
+        def overload?(state, _ctx, _integrity)
+          @timber_kg.positive? && timber_left_kg(state) < @timber_kg * (1.0 - BURNT_THROUGH)
+        end
+
+        def failure_modes = { collapsed: {} }
+
+        def failure_mode(_state, _ctx, _cause) = :collapsed
+
+        def failure_detail(state, _ctx) = { timber_left_kg: timber_left_kg(state).round(1) }
+      end
+
+      # Who the frame falls on, and what it brings down with it.
+      HEADFRAME_FALL = { tags: %i[impact burn], places: { bank: 1.4 }, riders: { cage_drive: 1.2 } }.freeze
+
+      def headframe(timber_kg:)
+        Headframe.new(
+          id: :headframe, label: "Headframe", timber_kg: timber_kg, volume_m3: 300.0,
+          heat_capacity: 2.0e4, ambient_conductance: 300.0,
+          initial_contents: [ { resource: :air, kg: 360.0 },
+                              *([ { resource: :wood, kg: timber_kg } ] if timber_kg.positive?) ],
+          reactions: (timber_kg.positive? ? %i[wood_combustion] : []), hot_spot: :sheave,
+          # A finite rating, so a fire in it is reported as an incident rather than as telemetry.
+          max_temperature_k: 1_400.0,
+          endangers: { collapsed: HEADFRAME_FALL }, damages: { collapsed: { sheave: 1.0, shaft: 0.6 } },
+          ports: [ Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+                   Port.new(id: :smoke_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0) ]
+        )
+      end
+
+      # The share of the intake drawn past the headframe: each of these two in series with the other
+      # is a ninth of the downcast's conductance.
+      def headframe_draught
+        Nodes::Conduit.new(id: :headframe_draught, label: "Headframe Draught", accepts: [ :gas ],
+                           max_kg_per_s: 40.0, conductance: 0.2, heat_capacity: 2.0e3)
+      end
+
+      def headframe_smoke
+        Nodes::Conduit.new(id: :headframe_smoke, label: "Headframe Smoke", accepts: [ :gas ],
+                           max_kg_per_s: 40.0, conductance: 0.2, heat_capacity: 2.0e3)
+      end
 
       # **The signal bell at the pit bottom**, rung as the cage is sent away from it. An open
       # electric bell sparks at its contacts every time it rings, which is an ignition source in the
@@ -363,7 +430,7 @@ module ReactorSim
       def rod_passage(speed_m_s:, rated_omega:, label: "Man Engine")
         Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M, speed_m_s: speed_m_s,
                     control_id: :rods, driven_by: :man_engine,
-                    rated_omega: rated_omega, through: :shaft, label: label)
+                    rated_omega: rated_omega, through: THROUGH_SHAFT, label: label)
       end
 
       # **The man engine: a rod down the shaft on a bob at the top.** It hangs off the same line
@@ -450,19 +517,28 @@ module ReactorSim
       # Water runs downhill and this is downhill, so what the pumps do not lift stands here.
       # `flooding` is what a float on a chain actually tells you: not a weight, but how far up
       # it has come against the point where it is over the rails and backing up the road.
+      #
+      # **Past the roof mark it is drowned.** There is no air left to stand in, so nobody here can
+      # breathe, and every way that runs through the pit bottom — the shaft's and the main road —
+      # is closed. The district, higher up, is then an air pocket.
       class Sump < Nodes::Vessel
         # Where the pit bottom stops being wet and starts being flooded — water over the
-        # landing, the onsetter's feet and the bottom of the cage. Nothing enforces it; it is
-        # the mark the gauge is read against, and the number a player is actually racing.
+        # landing, the onsetter's feet and the bottom of the cage. It is the mark the gauge is
+        # read against, and the number a player is actually racing.
         FLOOD_KG = 2_400.0
 
-        def flooding(state, content)
-          standing = Parcel.total_kg(
-            Parcel.matching(state.fetch(:parcels), [ :liquid ], content)
-          )
+        # Water to the roof of the roadways.
+        ROOF_KG = 6 * FLOOD_KG
 
-          (standing / FLOOD_KG).clamp(0.0, 1.0)
+        def standing_kg(state, content)
+          Parcel.total_kg(Parcel.matching(state.fetch(:parcels), [ :liquid ], content))
         end
+
+        def flooding(state, content) = (standing_kg(state, content) / FLOOD_KG).clamp(0.0, 1.0)
+
+        def submerged?(state, content) = standing_kg(state, content) >= ROOF_KG
+
+        def blocks_passage?(state, content = nil) = !content.nil? && submerged?(state, content)
       end
 
       def pit_bottom
@@ -477,6 +553,10 @@ module ReactorSim
           ports: [
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            # The share of the intake drawn down past the headframe — smoke, when it is burning.
+            Port.new(id: :smoke_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            # The trickle that leaks off the intake into the waste behind the face.
+            Port.new(id: :waste_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 5.0),
             # Through the brattice into the upcast compartment, in a single-shaft pit.
             Port.new(id: :brattice_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             # Through the haulage door into the return.
@@ -559,6 +639,8 @@ module ReactorSim
           heat_capacity: 3.0e5, ambient_conductance: 300.0,
           initial_contents: [ { resource: :air, kg: 1_700.0 } ],
           reactions: %i[firedamp_combustion coal_dust_combustion],
+          # The waste behind the face: a gob fire hot enough fires the district's gas with no flame.
+          hot_spot: :gob,
           # **No igniter of its own.** Whatever is alight in the district — an open-flame light —
           # offers itself to this air through `Tick#ignition_sources`, so with a safe tier fitted
           # the district has no ignition source at all, which is what "safe lighting" has to mean
@@ -587,6 +669,10 @@ module ReactorSim
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :gas_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 2.0),
+            # What comes out of the coal ahead: an outburst's gas and dust, or the borer's draw.
+            Port.new(id: :burst_in, direction: :inlet, accepts: [], max_kg_per_s: 60.0),
+            # What has leaked through the waste behind the face — and its smoke, if it is heating.
+            Port.new(id: :waste_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 5.0),
             # **Inlets only.** Dust that has settled in a district has no way out of it: no
             # conduit here accepts `:dust`, so it neither rides out on the tubs nor blows away
             # up the return. It goes when it burns or when it is covered over.
@@ -613,11 +699,12 @@ module ReactorSim
       # the operation and the pressure it put there dissipates into the stream, unlike the pump,
       # whose water genuinely leaves.
       # A rotor flying apart in the fan house throws iron across the bank.
-      def upcast(head_pa:, rated_omega:)
+      def upcast(head_pa:, rated_omega:, reversible: false)
         Fan.new(
           id: :upcast, label: "Upcast Fan", accepts: [ :gas ],
           max_kg_per_s: 40.0, conductance: 1.2, heat_capacity: 5.0e4,
           control_id: :ventilation, head_pa: head_pa,
+          reverse_control_id: (:fan_reversed if reversible),
           driven_by: :line_shaft, efficiency: 0.55, rated_omega: rated_omega,
           burst_ratio: 1.5, endangers: { burst: { tags: %i[impact], places: { bank: 1.6 } } }
         )
@@ -781,6 +868,15 @@ module ReactorSim
       # It matters out of all proportion to its size: whitedamp poisons at a concentration that
       # displaces nothing, so a pit whose goaf has gone sour is one where the canary is the only
       # warning there will be — and the flame lamp reads perfectly clear the whole time.
+      #
+      # **The roof over it hangs until it falls.** Every metre the face advances leaves a metre of
+      # unsupported roof behind it, less what has been packed with stone; when what hangs passes the
+      # next **span** the goaf falls — flushing its gas out through the seep and driving a windblast
+      # down the roads ahead of it — and the roof starts hanging again. The spans are drawn per match,
+      # varied, and the first is the largest (the first weighting), so nobody knows when.
+      #
+      #   state: parcels, spans (metres, next first), fallen_at_m, packed_m, hanging_m, weighting,
+      #          flushing_s, durability, failure
       class OldWorkings < Nodes::Vessel
         SOUR = (0.0..0.09)
 
@@ -788,10 +884,86 @@ module ReactorSim
         # spec about which waste it was given. Sweet, because sour is the exception.
         ORDINARY_SOUR = 0.0
 
-        def initialize(sour: nil, **opts)
+        # **Spans, log-normal**: the first weighting, then the periodic falls after it, in metres of
+        # unsupported advance.
+        FIRST_SPAN_M = 6.0
+        SPAN_M = 3.0
+        SPAN_SIGMA = 0.4
+        SPANS_DRAWN = 12
+
+        # How long a fall drives the goaf's gas out, and how hard.
+        FLUSH_S = 20.0
+        FLUSH_FACTOR = 150.0
+
+        # A packer at full effort fills this much of the void a second, in metres of advance — about
+        # half what a hewer wins.
+        PACK_M_PER_S = 8.0e-5
+
+        def initialize(sour: nil, spans: nil, seam: nil, seam_kg: 0.0, packing: nil, **opts)
           @sour = sour&.to_f
+          @spans = spans&.map(&:to_f)&.freeze
+          @seam = seam&.to_sym
+          @seam_kg = seam_kg.to_f
+          @packing = packing&.to_sym
           super(**opts)
         end
+
+        def initial_state(rng, content = nil)
+          state = super
+          spans = @spans || Array.new(SPANS_DRAWN) { |n| span(rng, n.zero? ? FIRST_SPAN_M : SPAN_M) }
+          state.merge(spans: spans, fallen_at_m: 0.0, packed_m: 0.0, hanging_m: 0.0, weighting: 0.0,
+                      flushing_s: 0.0)
+        end
+
+        def span(rng, median_m) = median_m * Math.exp(SPAN_SIGMA * GasPocket.standard_normal(rng).clamp(-2.5, 2.5))
+
+        def advance_m(ctx) = @seam ? Ahead.advance_m(ctx, seam: @seam, seam_kg: @seam_kg) : 0.0
+
+        def flushing?(state) = state.fetch(:flushing_s, 0.0).positive?
+
+        def overload?(state, _ctx, _integrity)
+          span = state.fetch(:spans, []).first
+          !span.nil? && state.fetch(:hanging_m, 0.0) >= span
+        end
+
+        def failure_modes = { fell: {} }
+
+        def failure_mode(_state, _ctx, _cause) = :fell
+
+        def failure_detail(state, _ctx) = { hanging_m: state.fetch(:hanging_m, 0.0).round(2) }
+
+        # What hangs, what has been packed, and the fall: on the tick after it, the roof starts hanging
+        # afresh and the gas is driven out for `FLUSH_S`; once that is spent the goaf is quiet again.
+        def apply(state, ctx, grant)
+          state, events = super
+          advance = advance_m(ctx)
+          state = fall(state, advance) if broken?(state) && !flushing?(state) && state.fetch(:hanging_m).positive?
+          state = settle(state, ctx) if flushing?(state)
+
+          packed = [ state.fetch(:packed_m) + (PACK_M_PER_S * packing(ctx) * ctx.dt),
+                     advance - state.fetch(:fallen_at_m) ].min
+          hanging = [ advance - state.fetch(:fallen_at_m) - packed, 0.0 ].max
+          span = state.fetch(:spans).first
+          [ state.merge(packed_m: packed, hanging_m: hanging, weighting: span ? hanging / span : 0.0), events ]
+        end
+
+        private
+
+        def packing(ctx) = @packing ? (ctx.controls.fetch(@packing, 0.0) / 100.0).clamp(0.0, 1.0) : 0.0
+
+        def fall(state, advance)
+          state.merge(fallen_at_m: advance, packed_m: 0.0, hanging_m: 0.0, flushing_s: FLUSH_S,
+                      spans: state.fetch(:spans).drop(1))
+        end
+
+        def settle(state, ctx)
+          left = state.fetch(:flushing_s) - ctx.dt
+          return state.merge(flushing_s: left) if left.positive?
+
+          state.merge(flushing_s: 0.0, failure: nil, durability: state.fetch(:initial_durability))
+        end
+
+        public
 
         def holds_initial_state(rng, content)
           state = super
@@ -814,14 +986,185 @@ module ReactorSim
         end
       end
 
-      def goaf(kg:, sour: nil)
+      # A fall drives the air out ahead of it, down the roads, at whoever is in them — by how much
+      # came down.
+      WINDBLAST = { tags: %i[impact], scales_with: :hanging_m, reference: OldWorkings::FIRST_SPAN_M,
+                    places: { district: 1.8, pit_bottom: 0.6 } }.freeze
+
+      # A pinned `ground:` draws no spans, so a spec measuring the machine has no falls.
+      def goaf(kg:, seam_kg:, sour: nil, ground: nil)
         OldWorkings.new(
           id: :goaf, label: "Old Workings", volume_m3: 3_000.0, ambient_conductance: 0.0,
-          sour: sour,
+          sour: sour, spans: ([] if ground), seam: :seam, seam_kg: seam_kg, packing: :packing,
           initial_contents: [ { resource: :blackdamp, kg: kg } ],
+          endangers: { fell: WINDBLAST },
           ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :gas ],
                             max_kg_per_s: 2.0) ]
         )
+      end
+
+      # **The waste the last workings left behind this district's face, and how far it has got.** A
+      # match inherits it: in some pits nothing heating at all, and otherwise a zone of broken coal of
+      # drawn size **already part-way to firing** — so the danger runs from none to a fire ready in
+      # fifteen minutes, weighted to one between three quarters of an hour and an hour and a half.
+      #
+      # From there it is physics. Air trickles through it from the intake at the pit bottom to the face,
+      # driven by the fan; the coal takes up its oxygen (`coal_oxidation`) and warms, and where the heat
+      # cannot get away it climbs until the coal lights of itself — a gob fire. Short of air it
+      # smoulders and makes carbon monoxide, which comes out at the face; hot enough it breaks out
+      # there; hotter still it fires the district's gas. **Sealing** builds stoppings across the leak,
+      # which starves it; the stoppings stay built.
+      #
+      #   state: parcels, joules, ignition, ground, sealed (0..1)
+      class Gob < Nodes::Vessel
+        include Ground
+
+        # A pit whose last workings left nothing heating.
+        NONE_SHARE = 0.25
+
+        # The heating zone's coal, log-normal.
+        ZONE_COAL_KG = 3_000.0
+        ZONE_SIGMA = 0.6
+
+        # **When it is due to fire**, as the draw intends it — log-normal, so most between three quarters
+        # of an hour and an hour and a half, clamped to a quarter of an hour at the soonest.
+        FIRES_IN_S = 65.0 * 60.0
+        FIRES_SIGMA = 0.4
+        SOONEST_S = 15.0 * 60.0
+
+        # The heat a waste makes on the leak's ordinary trickle — what the start temperature is solved
+        # against, measured off running pits rather than assumed. The real trickle sets the real rate.
+        DESIGN_HEAT_W = 35_000.0
+
+        # Broken coal has a great deal of surface: how much faster than lump coal it takes up oxygen.
+        REACTIVITY = 10.0
+
+        # Stoppings built per second at full effort: a couple of hours to seal it.
+        SEAL_PER_S = 1.4e-4
+
+        # `waste:` pins `{ coal_kg:, temperature_k: }` instead of drawing it; a pinned `ground:` pins
+        # none.
+        def initialize(sealing: nil, waste: nil, **opts)
+          @sealing = sealing&.to_sym
+          @waste = waste&.transform_keys(&:to_sym)&.freeze
+          super(**opts)
+        end
+
+        # **A waste that has been heating for days has used its air.** It holds what the trickle keeps
+        # in it against the coal taking it up — the rest long since gone to blackdamp — so it does
+        # not start with a lungful of fresh oxygen to burn through in its first minutes.
+        HEATING_AIR_KG = 25.0
+
+        def initial_state(rng, content = nil)
+          state = super
+          waste = @waste || left_behind(rng, content)
+          kelvin = waste.fetch(:temperature_k, ambient_k)
+          parcels = waste.fetch(:coal_kg).positive? ? heating(state, waste, kelvin, content) : state.fetch(:parcels)
+          state.merge(parcels: Parcel.normalise(parcels), joules: heat_capacity * kelvin, sealed: 0.0)
+        end
+
+        def heating(state, waste, kelvin, content)
+          held = Parcel.total_kg(state.fetch(:parcels))
+          [ Parcel.build(resource: :coal, kg: waste.fetch(:coal_kg), temperature_k: kelvin, content: content),
+            Parcel.build(resource: :air, kg: HEATING_AIR_KG, temperature_k: kelvin, content: content),
+            Parcel.build(resource: :blackdamp, kg: held - HEATING_AIR_KG, temperature_k: kelvin, content: content) ]
+        end
+
+        # **What the last shift left**: nothing, or a zone of drawn size at the temperature that brings
+        # it to coal's ignition point in a drawn time. Solved against Newton's law of cooling with the
+        # design heat: `T(t) = Tₐ + P/G + (T₀ − Tₐ − P/G)·e^(−Gt/C)`, inverted for `T₀`.
+        def left_behind(rng, content)
+          return { coal_kg: 0.0 } if rng.float < NONE_SHARE
+
+          coal_kg = ZONE_COAL_KG * Math.exp(ZONE_SIGMA * GasPocket.standard_normal(rng).clamp(-2.5, 2.5))
+          fires_in = [ FIRES_IN_S * Math.exp(FIRES_SIGMA * GasPocket.standard_normal(rng).clamp(-3.0, 3.0)), SOONEST_S ].max
+          capacity = heat_capacity + (coal_kg * content.resource(:coal).fetch(:specific_heat_j_per_kg_k))
+          { coal_kg: coal_kg, temperature_k: start_k(fires_in, capacity, content) }
+        end
+
+        def start_k(fires_in, capacity, content)
+          fire_k = content.reaction(:coal_combustion).dig(:ignition, :autoignition_k).to_f
+          settles = ambient_k + (DESIGN_HEAT_W / ambient_conductance)
+          start = settles + ((fire_k - settles) * Math.exp(ambient_conductance * fires_in / capacity))
+          start.clamp(ambient_k, fire_k - 1.0)
+        end
+
+        def reaction_throttle(state, content, reaction_id = nil)
+          reaction_id == :coal_oxidation ? REACTIVITY : super
+        end
+
+        # **Breaking out**: past its rating its fire is through to the face, at once.
+        def overload?(state, ctx, _integrity) = temperature_k(state, ctx.content) >= rated_temperature_k(ctx.content)
+
+        def sealed(state) = state.fetch(:sealed, 0.0)
+
+        def apply(state, ctx, grant)
+          state, events = super
+          worked = @sealing ? (ctx.controls.fetch(@sealing, 0.0) / 100.0).clamp(0.0, 1.0) : 0.0
+          [ state.merge(sealed: [ sealed(state) + (SEAL_PER_S * worked * ctx.dt), 1.0 ].min), events ]
+        end
+      end
+
+      # Breaking out: the waste's fire reaching the face.
+      GOB_BREAKOUT = { tags: %i[burn afterdamp], places: { district: 1.6 } }.freeze
+
+      # A pinned `ground:` inherits no heating waste.
+      def gob(ground: nil)
+        Gob.new(
+          id: :gob, label: "The Waste", volume_m3: 300.0, sealing: :sealing, ground: ground,
+          waste: ({ coal_kg: 0.0 } if ground),
+          # The rock round the heating zone, warmed with it; and the little it loses to the strata,
+          # which is the whole of the hazard.
+          heat_capacity: 5.0e5, ambient_conductance: 40.0,
+          initial_contents: [ { resource: :air, kg: 360.0 } ],
+          reactions: %i[coal_oxidation coal_combustion],
+          # Past this its fire is through to the face.
+          max_temperature_k: 1_000.0, endangers: { rupture: GOB_BREAKOUT },
+          ports: [ Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 5.0),
+                   Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 5.0) ]
+        )
+      end
+
+      # A leak through the waste, closed off by the stoppings as they are built. **Never to exactly
+      # zero**: a zero conductance drops the path out of the pressure-driven regime, and it then
+      # passes its port's whole rating — a sealed waste breathing harder than an open one.
+      class GobLeak < Nodes::Conduit
+        # What a fully sealed waste still leaks, as a share of the open figure.
+        SEALED_LEAK = 1.0e-6
+
+        def initialize(gob:, **opts)
+          @gob = gob.to_sym
+          super(**opts)
+        end
+
+        def gas_conductance(state, ctx)
+          base = super or return nil
+          base * [ 1.0 - ctx.node_state(@gob)&.fetch(:sealed, 0.0).to_f, SEALED_LEAK ].max
+        end
+      end
+
+      def gob_leak(id)
+        GobLeak.new(id: id, label: "Leakage Through the Waste", accepts: [ :gas ], gob: :gob,
+                    max_kg_per_s: 5.0, conductance: GOB_LEAK_CONDUCTANCE, heat_capacity: 1.0e3)
+      end
+
+      # Each side of the waste. A trickle beside the main road's 0.8 — a few hundredths of a kilogram
+      # a second, and the reason it can heat at all.
+      GOB_LEAK_CONDUCTANCE = 0.004
+
+      # **The goaf's gas, driven out when it falls**: while the goaf is flushing, the seep passes
+      # `FLUSH_FACTOR` times its ordinary make.
+      class GoafSeep < Seep
+        def initialize(goaf:, **opts)
+          @goaf = goaf.to_sym
+          super(**opts)
+        end
+
+        def gas_conductance(state, ctx)
+          base = super or return nil
+          flushing = ctx.node_state(@goaf)&.fetch(:flushing_s, 0.0).to_f.positive?
+          flushing ? base * OldWorkings::FLUSH_FACTOR : base
+        end
       end
 
       # **Into the pit bottom, because blackdamp is heavy and runs downhill.** Firedamp collects
@@ -833,8 +1176,8 @@ module ReactorSim
       # holders moves nothing or everything — and it gives the same behaviour for free: it vents
       # harder into a pit bottom that has been cleared than into one already full of it.
       def goaf_seep(conductance:, ground: nil)
-        Seep.new(
-          id: :goaf_seep, label: "Blackdamp", accepts: [ :gas ], ground: ground,
+        GoafSeep.new(
+          id: :goaf_seep, label: "Blackdamp", accepts: [ :gas ], ground: ground, goaf: :goaf,
           max_kg_per_s: 0.5, conductance: conductance, heat_capacity: 1.0e3
         )
       end
@@ -1226,62 +1569,328 @@ module ReactorSim
       # **It can also let go**, and that is inundation. A roadway driven toward old workings is
       # driven toward whatever is standing in them, and the wall between is only as thick as the
       # last survey said — break through and the water arrives faster than anybody in a dipping
-      # road can walk out of it. The mechanism is the same one a burst pipe uses: the fissure
-      # `derates: { throughput: }` **upward**, so what was a trickle becomes a torrent through
-      # the same conduit.
+      # road can walk out of it.
+      #
       # **Sized for the inrush, not for the trickle**, and the fitting throttles itself down to
       # the trickle while it is sound. A `derates: { throughput: }` above 1.0 cannot do this:
       # the path is also capped by the narrowest *port* along it, so a conduit rated at the
       # seepage rate stays at the seepage rate however far its throughput is derated upward.
       # One restriction, one number — and here the number belongs to the node.
-      def seepage(inrush_kg_per_s:, ground: nil)
+      #
+      # A pinned `ground:` is a spec measuring the machine, and draws no water ahead.
+      def seepage(inrush_kg_per_s:, seam_kg:, ground: nil)
         Inrush.new(
           id: :seepage, label: "Seepage", accepts: [ :liquid ], ground: ground,
+          seam: :seam, seam_kg: seam_kg, waters: ([] if ground),
           max_kg_per_s: inrush_kg_per_s, heat_capacity: 1.0e3
         )
       end
 
-      # A fissure that can give way.
+      # **What lies ahead of the face**, drawn with the ground and told to nobody: old workings full
+      # of water, pockets of gas. Each match has none, one or two, at a depth into the face that is
+      # never in the first couple of metres — not knowing whether there is one, or whether there is
+      # another, is the tension.
       #
-      # `stress_per_second` is driven by **how hard the face is being driven**: cutting is what
-      # advances the workings toward whatever is behind them, so a district nobody is working
-      # never breaks into anything. The same term as `Roadway`'s, and deliberately — they are
-      # two consequences of one decision, which is how hard to push a face you cannot see the
-      # far side of.
+      # **The face advances by coal won** from the seam, at a heading's worth of coal a metre, so the
+      # depths are real metres: a pit raising a few kilograms a second makes a couple of metres an
+      # hour, and the 90 t district is about nineteen metres deep.
+      module Ahead
+        # How many: 0, 1 or 2, by these odds.
+        COUNT_ODDS = [ 0.5, 0.45, 0.05 ].freeze
+
+        # Where, in metres of advance.
+        DEPTHS_M = (2.0..12.0)
+
+        # A heading 3 m wide in a 1.2 m seam of coal at 1300 kg/m³.
+        FACE_KG_PER_M = 4_700.0
+
+        module_function
+
+        def count(rng)
+          roll = rng.float
+          COUNT_ODDS.each_with_index do |odds, n|
+            return n if roll < odds
+
+            roll -= odds
+          end
+          COUNT_ODDS.length - 1
+        end
+
+        # Depths into the face, nearest first.
+        def depths(rng) = Array.new(count(rng)) { rng.between(DEPTHS_M.begin, DEPTHS_M.end) }.sort
+
+        # How far the face has come, from the coal the seam has given up as of last tick.
+        def advance_m(ctx, seam:, seam_kg:)
+          state = ctx.node_state(seam) or return 0.0
+          left = state.fetch(:parcels).sum { |p| p.fetch(:resource) == :coal ? p.fetch(:kg) : 0.0 }
+          [ (seam_kg - left) / FACE_KG_PER_M, 0.0 ].max
+        end
+      end
+
+      # **Gas held in the coal ahead of the face**, under pressure: the pockets `Ahead` draws for a
+      # match, each a mass of firedamp and coal dust, all held here from the start so the books
+      # need nothing new — gassier ground, bigger pockets. The pocket is the ledger of what is
+      # ahead: as the face comes on it records how far the next pocket is (`ahead_m`) and what is
+      # left in it (`next_kg`), spending a pocket's tonnes as the outburst or the borer takes them,
+      # read off their own carried mass as of last tick.
+      #
+      #   state: parcels, ground, pockets ([{ at_m:, kg: }], nearest first), ahead_m, next_kg
+      class GasPocket < Nodes::Vessel
+        include Ground
+
+        # **How big an outburst is, and it is heavy-tailed**: most throw a few tonnes to a few tens
+        # of tonnes of coal, and the rare one hundreds. Log-normal on the coal thrown — median
+        # `COAL_MEDIAN_T`, `COAL_SIGMA` in log space, clamped at `COAL_TAIL` standard deviations.
+        COAL_MEDIAN_T = 20.0
+        COAL_SIGMA = 1.0
+        COAL_TAIL = 2.5
+
+        # Firedamp the thrown coal held, m³ a tonne on ordinary ground, at 0.668 kg/m³.
+        GAS_M3_PER_T = 10.0
+        FIREDAMP_KG_PER_M3 = 0.668
+
+        # The airborne fines among the coal thrown — a first guess.
+        DUST_SHARE_OF_COAL = 0.01
+
+        # Below this a pocket is spent.
+        SPENT_KG = 1.0
+
+        # Reported with nothing ahead.
+        NOTHING_M = 1_000.0
+
+        def initialize(seam:, seam_kg:, outburst:, bore:, pockets: nil, **opts)
+          @seam = seam.to_sym
+          @seam_kg = seam_kg.to_f
+          @outburst = outburst.to_sym
+          @bore = bore.to_sym
+          @pockets = pockets&.map { |p| p.transform_keys(&:to_sym).freeze }&.freeze
+          super(**opts)
+        end
+
+        def initial_state(rng, content = nil)
+          state = super
+          gassy = ground(state)
+          pockets = @pockets || Ahead.depths(rng).map { |at| pocket(rng, at, gassy) }
+          state.merge(parcels: held(pockets, content), pockets: pockets, ahead_m: NOTHING_M, next_kg: 0.0,
+                      next_coal_t: 0.0)
+        end
+
+        # A pocket at `at_m`: the coal it throws, the firedamp that coal held, and its fines.
+        def self.drawn(rng, at_m, gassy)
+          coal_t = COAL_MEDIAN_T * Math.exp(COAL_SIGMA * standard_normal(rng).clamp(-COAL_TAIL, COAL_TAIL))
+          firedamp = coal_t * GAS_M3_PER_T * FIREDAMP_KG_PER_M3 * gassy
+          dust = coal_t * 1_000.0 * DUST_SHARE_OF_COAL
+          { at_m: at_m, coal_t: coal_t, firedamp_kg: firedamp, dust_kg: dust, kg: firedamp + dust }
+        end
+
+        # Box–Muller, from the stream's own uniform draws.
+        def self.standard_normal(rng)
+          u = [ rng.float, 1.0e-12 ].max
+          Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math::PI * rng.float)
+        end
+
+        def pockets(state) = state.fetch(:pockets, [])
+
+        def apply(state, ctx, grant)
+          taken = [ @outburst, @bore ].sum { |id| ctx.node_state(id)&.fetch(:carried_kg, 0.0).to_f }
+          pockets = spend(pockets(state), taken)
+          nearest = pockets.first
+          ahead = nearest ? nearest.fetch(:at_m) - Ahead.advance_m(ctx, seam: @seam, seam_kg: @seam_kg) : NOTHING_M
+
+          applied, events = super
+          [ applied.merge(pockets: pockets, ahead_m: ahead, next_kg: nearest ? nearest.fetch(:kg) : 0.0,
+                          next_coal_t: nearest ? nearest.fetch(:coal_t, 0.0) : 0.0), events ]
+        end
+
+        private
+
+        def spend(pockets, taken)
+          return pockets if pockets.empty? || taken <= 0.0
+
+          left = pockets.first.fetch(:kg) - taken
+          left > SPENT_KG ? [ pockets.first.merge(kg: left), *pockets.drop(1) ] : pockets.drop(1)
+        end
+
+        def pocket(rng, at_m, gassy) = self.class.drawn(rng, at_m, gassy)
+
+        def held(pockets, content)
+          return [] if pockets.empty?
+
+          Parcel.normalise(%i[firedamp coal_dust].zip(%i[firedamp_kg dust_kg]).map do |resource, key|
+            Parcel.build(resource: resource, kg: pockets.sum { |p| p.fetch(key) }, temperature_k: ambient_k,
+                         content: content)
+          end)
+        end
+      end
+
+      # **The outburst**: the face reaching a pocket with gas still in it, and the pocket emptying
+      # into the district in seconds — firedamp, and dust for the next flame. It lets go as a failure
+      # (`outburst`) so it hurts whoever is at the face, and once that pocket is spent it is shut
+      # again, so a second pocket further in is a second outburst.
+      class Outburst < Nodes::Conduit
+        def initialize(pocket:, endangers: {}, **opts)
+          @pocket = pocket.to_sym
+          @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          super(**opts)
+        end
+
+        attr_reader :failure_hazards
+
+        def pocket_state(ctx) = ctx.node_state(@pocket) || {}
+
+        def overload?(_state, ctx, _integrity)
+          ahead = pocket_state(ctx)
+          ahead.fetch(:ahead_m, GasPocket::NOTHING_M) <= 0.0 && ahead.fetch(:next_kg, 0.0) > GasPocket::SPENT_KG
+        end
+
+        def throughput_kg(state, ctx) = broken?(state) ? super : 0.0
+
+        # Spent, it shuts; the next pocket, if any, is what lies ahead.
+        def apply(state, ctx, _grant)
+          return state unless broken?(state) && !overload?(state, ctx, 1.0)
+
+          state.merge(failure: nil, durability: state.fetch(:initial_durability))
+        end
+
+        def failure_modes = { outburst: {} }
+
+        def failure_mode(_state, _ctx, _cause) = :outburst
+
+        def failure_detail(_state, ctx)
+          ahead = pocket_state(ctx)
+          { coal_t: ahead.fetch(:next_coal_t, 0.0).round(1), gas_kg: ahead.fetch(:next_kg, 0.0).round }
+        end
+      end
+
+      # **Boring ahead**: an auger driven into the face, which draws the next pocket off slowly once it
+      # is within reach — into the district's air, so the fan has to carry it — and is how anybody
+      # learns a pocket is there.
+      class BoreLine < Nodes::Conduit
+        # How far ahead an auger reaches.
+        REACH_M = 4.0
+
+        def initialize(pocket:, **opts)
+          @pocket = pocket.to_sym
+          super(**opts)
+        end
+
+        def in_reach?(ctx)
+          ahead = ctx.node_state(@pocket) || {}
+          ahead.fetch(:ahead_m, GasPocket::NOTHING_M) <= REACH_M && ahead.fetch(:next_kg, 0.0) > GasPocket::SPENT_KG
+        end
+
+        def throughput_kg(state, ctx) = in_reach?(ctx) ? super : 0.0
+
+        # What the holes are giving: the gas in the pocket within reach, or nothing.
+        def apply(state, ctx, _grant)
+          state.merge(found_kg: in_reach?(ctx) ? ctx.node_state(@pocket).fetch(:next_kg) : 0.0)
+        end
+      end
+
+      # A pinned `ground:` draws no pockets.
+      def gas_pocket(seam_kg:, ground: nil)
+        GasPocket.new(
+          id: :gas_pocket, label: "Gas Pocket", volume_m3: 6.0, ambient_conductance: 0.0,
+          seam: :seam, seam_kg: seam_kg, outburst: :outburst, bore: :bore_line,
+          ground: ground, pockets: ([] if ground),
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [], max_kg_per_s: 60.0) ]
+        )
+      end
+
+      # Coal thrown into the face, and how hard it hits goes with how much: a median outburst at the
+      # reference, the rare large one far worse.
+      OUTBURST_HARM = { tags: %i[crush impact], scales_with: :coal_t, reference: GasPocket::COAL_MEDIAN_T,
+                        places: { district: 2.4 } }.freeze
+
+      def outburst
+        Outburst.new(id: :outburst, label: "Outburst", accepts: [], pocket: :gas_pocket,
+                     max_kg_per_s: 60.0, heat_capacity: 1.0e3, endangers: { outburst: OUTBURST_HARM })
+      end
+
+      def bore_line
+        BoreLine.new(id: :bore_line, label: "Bore Holes", accepts: [], pocket: :gas_pocket,
+                     max_kg_per_s: 0.25, heat_capacity: 1.0e3, control_id: :boring)
+      end
+
+      # **The fissure between the face and whatever water lies ahead of it.**
+      #
+      # It seeps the ordinary make of water a pit lives with, by its `ground`. **Where the ground
+      # holds a body of water** — drawn per match (`Ahead`) — the coal weeps harder as the face comes
+      # within `WEEPS_WITHIN_M` of it, and when the face reaches it the fissure lets go: an inrush at
+      # the full rate until that body's tonnes are through, and then back to the seep. A second body
+      # further in is a second inrush. Driving the face is the cause, because it is the only thing
+      # that advances it.
+      #
+      #   state: durability, failure, ground, waters ([{ at_m:, kg: }], nearest first), drained_kg,
+      #          barrier_m
       class Inrush < Nodes::Conduit
         include Ground
 
-        # Slower than a roof fall by a good margin: breaking through is rarer than being
-        # careless with timber, and it is meant to catch a player who has got comfortable
-        # rather than one who is being reckless today.
-        #
-        # **Against the WORKED value of the lever, not its position.** `ctx.controls` carries
-        # what the station actually achieved — `Tick#worked` scales an effort lever by whoever
-        # is standing at it — so a rate sized against 0–100 is out by whatever the hewer's
-        # capability happens to be, and quietly never fires.
-        DRIVEN_RATE = 1.2
-
-        def stress_per_second(state, ctx)
-          ((ctx.controls.fetch(:hewing, 0.0) / 100.0) * DRIVEN_RATE) + super
-        end
-
         # What gets through a fissure that has not given way yet, as a fraction of what gets
-        # through one that has. The ordinary make of water a pit lives with.
+        # through one that has.
         SEEP_FRACTION = 0.06
 
-        # The hole is the conduit, and while the ground holds it is nearly shut. Nothing is
-        # derated: the node governs its own throughput, so there is one restriction and one
-        # number for it.
-        #
+        # Within this the coal weeps, up to this many times the ordinary seep at the barrier.
+        WEEPS_WITHIN_M = 3.0
+        WEEPS_UP_TO = 4.0
+
+        # What a body of old workings holds.
+        WATER_KG = (20_000.0..80_000.0)
+
+        # The barrier reported with no water ahead — the plans' "forty yards of solid coal".
+        NO_WATER_M = 1_000.0
+
+        # `waters:` pins the bodies instead of drawing them; a pinned `ground:` pins none.
+        def initialize(seam:, seam_kg:, waters: nil, **opts)
+          @seam = seam.to_sym
+          @seam_kg = seam_kg.to_f
+          @waters = waters&.map { |w| w.transform_keys(&:to_sym).freeze }&.freeze
+          super(**opts)
+        end
+
+        def initial_state(rng, content = nil)
+          state = super
+          waters = @waters || Ahead.depths(rng).map { |at| { at_m: at, kg: rng.between(WATER_KG.begin, WATER_KG.end) } }
+          state.merge(waters: waters, drained_kg: 0.0, barrier_m: NO_WATER_M)
+        end
+
+        def waters(state) = state.fetch(:waters, [])
+
+        def barrier_m(state, ctx)
+          ahead = waters(state).first or return NO_WATER_M
+          ahead.fetch(:at_m) - Ahead.advance_m(ctx, seam: @seam, seam_kg: @seam_kg)
+        end
+
+        # Weeping: the seep rises as the barrier thins.
+        def weeping(barrier)
+          closeness = (1.0 - (barrier / WEEPS_WITHIN_M)).clamp(0.0, 1.0)
+          1.0 + ((WEEPS_UP_TO - 1.0) * closeness)
+        end
+
         # **`ground` varies the ordinary make and never the inrush**, because they are two
-        # different facts: how wet the strata runs is the ground, and what is standing behind
-        # the fissure is not. Scaling the breach as well would make a dry pit's inundation
-        # something the starting set could simply pump away, which is the one moment the pump
-        # tier is supposed to decide.
+        # different facts: how wet the strata runs is the ground, and what is standing behind the
+        # fissure is not.
         def throughput_kg(state, ctx)
           return super if broken?(state)
 
-          super * SEEP_FRACTION * ground(state)
+          super * SEEP_FRACTION * ground(state) * weeping(state.fetch(:barrier_m, NO_WATER_M))
+        end
+
+        # The face has reached the water.
+        def overload?(state, ctx, _integrity) = !waters(state).empty? && barrier_m(state, ctx) <= 0.0
+
+        # Breached, the body drains through it; once its tonnes are through, the fissure is a seep
+        # again and the next body, if any, is what lies ahead.
+        def apply(state, ctx, _grant)
+          return state.merge(barrier_m: barrier_m(state, ctx)) unless broken?(state)
+
+          drained = state.fetch(:drained_kg) + state.fetch(:carried_kg, 0.0)
+          body = waters(state).first
+          return state.merge(drained_kg: drained, barrier_m: 0.0) if body && drained < body.fetch(:kg)
+
+          healed = state.merge(failure: nil, durability: state.fetch(:initial_durability), drained_kg: 0.0,
+                               waters: waters(state).drop(1))
+          healed.merge(barrier_m: barrier_m(healed, ctx))
         end
 
         def failure_modes = { inrush: {} }
@@ -1289,23 +1898,87 @@ module ReactorSim
         def failure_mode(_state, _ctx, _cause) = :inrush
 
         def failure_detail(state, ctx)
-          { driven: ctx.controls.fetch(:hewing, 0.0).round(1),
-            carried_kg: state.fetch(:carried_kg, 0.0).round(3) }
+          { depth_m: Ahead.advance_m(ctx, seam: @seam, seam_kg: @seam_kg).round(2),
+            water_kg: waters(state).first&.fetch(:kg)&.round }
         end
       end
 
-      def pump(max_kg_per_s:, lift_m:, efficiency:, rated_omega:)
+      def pump(max_kg_per_s:, lift_m:, efficiency:, rated_omega:, driven_by: :line_shaft)
         Pump.new(
           id: :pump, label: "Sump Pump", accepts: [ :liquid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e4,
           control_id: :pumping,
-          driven_by: :line_shaft, lift_m: lift_m, efficiency: efficiency,
+          driven_by: driven_by, lift_m: lift_m, efficiency: efficiency,
           rated_omega: rated_omega, delivers_to: :work, displacement: true, burst_ratio: 1.4
         )
       end
 
       def drainage
         Nodes::Delivery.new(id: :drainage, label: "Drainage", accepts: [ :liquid ])
+      end
+
+      # **The Cornish set's beam**: the bob at the shaft top that works the pump rods. A power sink
+      # on the line shaft like everything else, so whatever turns that shaft works the pump through
+      # it — and a broken beam stops the pumping by itself, because nothing turns the pump.
+      #
+      # It fatigues with every stroke under the column, faster the more water it is lifting, and a
+      # surge breaks it outright. **Broken, it falls into the shaft** and chokes it; in a single
+      # shaft it tears the brattice out on the way. Hartley.
+      #
+      #   state: angular_momentum, durability, failure
+      class PumpBeam < ReactorSim::Node
+        include Concerns::Rotating
+        include Concerns::Wearing
+
+        # Durability per second at rated speed with the pump lifting its full rating.
+        STROKE_PER_S = 0.04
+
+        # The share of that the bob costs with nothing in the column.
+        UNLADEN = 0.3
+
+        # How far past rated speed a sound beam stands before it breaks. A worn one less.
+        OVERSPEED_MARGIN = 0.5
+
+        def initialize(id:, pump:, pump_kg_per_s:, rated_omega:, label: nil, endangers: {},
+                       damages: {})
+          @pump = pump.to_sym
+          @pump_kg_per_s = pump_kg_per_s.to_f
+          @rated_omega = rated_omega.to_f
+          @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          @failure_damages = damages.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          super(id: id, label: label)
+          freeze
+        end
+
+        attr_reader :failure_hazards, :failure_damages
+
+        def moment_of_inertia = 400.0
+        def friction = 2.0
+
+        def speed_ratio(state) = omega(state).abs / @rated_omega
+
+        # How much of its rating the pump lifted last tick.
+        def lifting(ctx)
+          carried = ctx.node_state(@pump)&.fetch(:carried_kg, 0.0).to_f
+          (carried / (@pump_kg_per_s * ctx.dt)).clamp(0.0, 1.0)
+        end
+
+        def stress_per_second(state, ctx)
+          STROKE_PER_S * (speed_ratio(state)**2) * (UNLADEN + ((1.0 - UNLADEN) * lifting(ctx)))
+        end
+
+        def overload?(state, _ctx, integrity) = speed_ratio(state) > 1.0 + (OVERSPEED_MARGIN * integrity)
+
+        def failure_modes = { broken: {} }
+
+        def failure_mode(_state, _ctx, _cause) = :broken
+
+        def failure_detail(state, _ctx) = { speed_ratio: speed_ratio(state).round(2) }
+      end
+
+      def pump_beam(pump_kg_per_s:, rated_omega:, endangers:, damages:)
+        PumpBeam.new(id: :pump_beam, label: "Pump Beam", pump: :pump, pump_kg_per_s: pump_kg_per_s,
+                     rated_omega: rated_omega, endangers: endangers, damages: damages)
       end
 
       # --- the supply -----------------------------------------------------------
@@ -1345,18 +2018,36 @@ module ReactorSim
         def failure_detail(_state, ctx) = { speed_ratio: speed_ratio(ctx).round(2) }
       end
 
+      # **Reversed, it blows down the upcast instead of drawing up it** (`reverse_control_id:`, on a
+      # reversible tier only): the whole circuit runs backwards, smoke on the intake goes back up the
+      # downcast — and the district's gas comes out past whatever is alight at the pit bottom. It
+      # costs the same to turn either way.
       class Fan < Nodes::Conduit
         include Overspeed
 
-        def initialize(burst_ratio:, endangers: {}, **opts)
+        def initialize(burst_ratio:, endangers: {}, reverse_control_id: nil, **opts)
           @burst_ratio = burst_ratio.to_f
+          @reverse_control_id = reverse_control_id&.to_sym
           @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
           super(**opts)
         end
 
         attr_reader :failure_hazards
 
-        def head_pa(ctx) = ctx.node_state(id)&.fetch(:failure, nil) ? 0.0 : super
+        def head_pa(ctx)
+          return 0.0 if ctx.node_state(id)&.fetch(:failure, nil)
+
+          reversed?(ctx) ? -super : super
+        end
+
+        def reversed?(ctx) = !@reverse_control_id.nil? && ctx.controls.fetch(@reverse_control_id, 0.0) >= 50.0
+
+        # The bill is the head it makes times the air it moves, whichever way it is blowing.
+        def hydraulic_w(state, ctx)
+          return 0.0 unless ctx.dt.positive?
+
+          head_pa(ctx).abs * state.fetch(:carried_m3, 0.0) / ctx.dt
+        end
 
         def failure_modes = { burst: {} }
       end

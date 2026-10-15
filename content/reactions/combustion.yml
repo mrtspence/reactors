@@ -85,6 +85,29 @@ coal_combustion:
     # and that is the failure worth making a player see coming.
     spread_per_s: 0.30
     quench_per_s: 0.45
+    # Coal heating in a waste with air reaching it catches of itself around here. A firebox that hot
+    # is already alight, so the grate never notices.
+    autoignition_k: 700
+  # **Short of air, coal goes to carbon monoxide** instead of stopping for want of it: half the air,
+  # a quarter of the heat, and whitedamp — a smouldering gob, and a choked grate.
+  limited_by: air
+  alternatives:
+    - consumes: { coal: 1.0, air: 5.5 }
+      produces: { flue_gas: 4.07, whitedamp: 2.33, ash: 0.1 }
+      enthalpy_j_per_unit: -8400000
+
+# **Coal going sour in the waste: slow oxidation at whatever temperature it lies at.** No flame and
+# no ignition — oxygen taken up by broken coal, leaving blackdamp and heat. A tenth of a kilogram of
+# coal per kilogram of air, at about 400 kJ a mole of oxygen. Where the heat cannot get away, the
+# coal warms until `coal_combustion` lights of itself — a gob fire.
+coal_oxidation:
+  consumes: { coal: 0.1, air: 1.0 }
+  produces: { blackdamp: 1.1 }
+  enthalpy_j_per_unit: -2900000
+  # Per second, of the air in reach of the coal: slow, so a fast leak carries its air away
+  # before much of it is taken up.
+  rate_per_s: 0.0001
+  min_temperature_k: 273
 
 wood_combustion:
   consumes: { wood: 1.0, air: 6.0 }
@@ -96,6 +119,9 @@ wood_combustion:
     # Catches readily and dies readily. Kindling: the reason you light a coal fire with wood.
     spread_per_s: 0.80
     quench_per_s: 0.70
+    # Timber held at about 300 °C chars and lights with no flame near it — a hot bearing in a
+    # wooden headframe. Read against the hottest point the wood touches (`Vessel#hot_spot`).
+    autoignition_k: 573
 
 oil_combustion:
   consumes: { fuel_oil: 1.0, air: 14.0 }
@@ -146,6 +172,9 @@ firedamp_combustion:
     # in afterwards.
     lean_fraction: 0.05
     rich_fraction: 0.15
+    # A hot enough surface lights it with no flame — a gob fire against the district's air. Nothing
+    # else in a pit gets there.
+    autoignition_k: 870
   # **A gas explosion in a working with the air already used up does not go out — it goes
   # wrong.** Methane burnt with three-quarters of the oxygen it wants makes carbon monoxide
   # instead of carbon dioxide, which is why the survivors of a firedamp ignition in a badly

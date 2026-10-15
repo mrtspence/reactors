@@ -105,14 +105,16 @@ RSpec.describe ReactorSim::Nodes::Bearing do
     # either tick: a threshold that slides with durability lets the part seize before fatigue
     # can finish, and then the warning rung never happens at all. That is not hypothetical —
     # it is what the first cut of `overload?` did, at 481.7 K on a 0.63 integrity.
+    # `run_to` counts from where it is called, so the second figure is the warning rung itself:
+    # how long a wiped journal runs before it seizes.
     it "wipes before it seizes, not instead of" do
       op = rig(oil_charge_kg: 0.0)
       wiped = run_to(op, :wiped)
       expect(wiped).not_to be_nil, "a dry journal never wiped"
 
-      seized = run_to(op, :seized)
-      expect(seized).not_to be_nil, "a wiped journal never seized"
-      expect(seized).to be > wiped
+      warning = run_to(op, :seized)
+      expect(warning).not_to be_nil, "a wiped journal never seized"
+      expect(warning).to be > 1
     end
 
     it "wipes above the service limit and seizes at the rating itself" do

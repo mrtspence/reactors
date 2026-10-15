@@ -17,8 +17,8 @@ module ReactorSim
   #                there and stopped, you are wherever the cage is, and you get off at the far
   #                landing. `staffed_by` is the post that winds it, and with nobody there it is
   #                not running at all. `a` is the landing at the top of the drum's travel.
-  #   through      a node this way runs through — a shaft. Failed, it closes the way, and routing
-  #                finds another if there is one.
+  #   through      the nodes this way runs through — a shaft, a pit bottom. Any one of them
+  #                blocking closes the way, and routing finds another if there is one.
   #   rated_kg     what a ridden way's cage is rated to carry. Only a marshal enforces it.
   #   marshals     `{ landing => station }`: who stands at each landing and stops boarding at the
   #                rating. With nobody there, everybody waiting gets on.
@@ -38,7 +38,8 @@ module ReactorSim
       super(a: a.to_sym, b: b.to_sym, metres: metres.to_f, speed_m_s: speed_m_s.to_f,
             requires: requires&.to_sym, control_id: control_id&.to_sym,
             driven_by: driven_by&.to_sym, rated_omega: rated_omega&.to_f, label: label,
-            hoist: hoist&.to_sym, staffed_by: staffed_by&.to_sym, through: through&.to_sym,
+            hoist: hoist&.to_sym, staffed_by: staffed_by&.to_sym,
+            through: Array(through).map(&:to_sym).freeze,
             rated_kg: rated_kg&.to_f,
             marshals: marshals.to_h { |landing, station| [ landing.to_sym, station.to_sym ] }.freeze)
       raise Error, "passage #{a}->#{b}: metres must be positive" unless metres.to_f.positive?
@@ -78,6 +79,8 @@ module ReactorSim
     def other(place) = place == a ? b : a
 
     def touches?(place) = a == place || b == place
+
+    def closed_by?(closed) = through.intersect?(Array(closed))
 
     # Seconds for a competent, unaided human. What a particular minion manages is this divided
     # by their pace, which is where fatigue and injury get their say.
@@ -162,7 +165,7 @@ module ReactorSim
     end
 
     # The nodes some passage runs through, which are the only ones whose failure can close a way.
-    def through_nodes = @passages.filter_map(&:through).uniq
+    def through_nodes = @passages.flat_map(&:through).uniq
 
     # Every table this layout will ever need, built once. Called at operation build so nothing
     # is computed during a tick.
@@ -215,7 +218,7 @@ module ReactorSim
 
     def passable?(passage, capabilities, closed)
       (passage.requires.nil? || capabilities.include?(passage.requires)) &&
-        !closed.include?(passage.through)
+        !passage.closed_by?(closed)
     end
 
     # **A room is named once and furnished by whoever brings the furniture.** The chassis

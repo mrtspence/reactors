@@ -85,17 +85,17 @@ RSpec.describe "blackdamp" do
       expect(held(op, :pit_bottom, :blackdamp)).to be > held(op, :district, :blackdamp)
     end
 
-    # **It is inert because no reaction names it**, which is the whole mechanism — a substance is a
-    # reagent by being listed, so being left out of every list is what "will not burn" means.
-    # Asserted against the registry rather than by weighing a district afterwards: an explosion
-    # drives the atmosphere out through the return, so blackdamp does leave, and a mass test would
-    # be measuring the blast rather than the chemistry.
-    it "is in no reaction at all, as a reagent or as a product" do
-      named = ReactorSim::Content.default.reactions.values.flat_map do |spec|
-        spec.fetch(:consumes, {}).keys + spec.fetch(:produces, {}).keys
-      end
+    # **It is inert because no reaction consumes it**, which is the whole mechanism — a substance is
+    # a reagent by being listed, so being left out of every `consumes` is what "will not burn" means.
+    # Coal going sour in the waste makes it, which is where it comes from. Asserted against the
+    # registry rather than by weighing a district afterwards: an explosion drives the atmosphere out
+    # through the return, so blackdamp does leave, and a mass test would be measuring the blast
+    # rather than the chemistry.
+    it "is a reagent in no reaction, and is what coal oxidising leaves" do
+      reagents = ReactorSim::Content.default.reactions.values.flat_map { |spec| spec.fetch(:consumes, {}).keys }
 
-      expect(named).not_to include(:blackdamp)
+      expect(reagents).not_to include(:blackdamp)
+      expect(ReactorSim::Content.default.reaction(:coal_oxidation).fetch(:produces)).to include(:blackdamp)
     end
 
     # And the consequence a player sees: it is still down there after the blast.

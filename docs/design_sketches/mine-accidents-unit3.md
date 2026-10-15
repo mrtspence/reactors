@@ -1,6 +1,8 @@
 # Mine accidents, unit 3 — the hazards that ride on P1–P4
 
-**Status: second draft — reviewed; unit 3a is ready to build** (decisions in §4). Units 1 (P1–P4)
+**Status: unit 3a built** (as-built notes below); unit 3b is re-drafted in
+[`mine-accidents-unit3b.md`](mine-accidents-unit3b.md), and its sections here are superseded.
+Decisions in §4. Units 1 (P1–P4)
 and 2 (the shaft, W1–W8) are built; see
 [`mine-accidents-winding.md`](mine-accidents-winding.md) for both, its §5 for every decision taken in
 review, and its "Unit 2, as built" section for where the build parted from the design. This draft
@@ -440,6 +442,25 @@ fissure with noise (≤ 10).
     winder ran unattended; the man engine's ids became `:man_engine` / `rods`, since a man engine
     and a hoist now stand side by side; `coal_raised` averages over a minute because coal comes a
     deck at a time; the `winding_gear` gauge went with the winder (the rope report replaces it).
+- **14.** Built as designed, the door leaking from the pit bottom into the return road so one
+  wiring serves both frames. Not built: **a trapper who slips leaving the door open** — a node reads
+  the worked lever and cannot see a slip — and a self-closing door jamming. At hand-putting traffic
+  the air lock is indistinguishable from a self-closing door; it wants heavier haulage to matter.
+  The plain door standing open under the tubs with nobody trapping it is the starting pit's new
+  normal, and it costs a third of the district's air.
+- **15.** Built as designed. The gauze threshold is **2.3 m/s**, set from draught measured with
+  the door shut (waddle 1.84 / 2.02, Guibal 2.54 / 3.03 m/s, single / two shafts; natural draught
+  about 1.9) so that the Guibal is what defeats the gauze. A hand-carried Davy lamp does not yet fail
+  in a draught — only the wall sconces read it. Constructing gas **on top of** a district's air
+  over-pressures it into a 35 m/s gust down the intake for a tick; specs construct by displacement.
+- **9.** Built as designed, the trip reaching the rope through a `tripped` flag in the line
+  shaft's own state, because the rope's report sees only that state. Tested as **prevention**: a
+  surge geared to 2.4× rated bursts the pump's main at 1.44× by tick 15 and the lamps and fan by
+  tick 18 without a trip, and nothing with one. A trip cannot save a shaft already past every
+  burst speed, and was never meant to.
+- **10.** Specced, nothing built: the flame cap is the reading before a restart. The clean split
+  needs the district just past its rich limit (9.5% by mass); just below it the stopped fan's
+  natural draught dilutes it into the band too, only later.
 
 ## 3. Mechanisms this unit adds, collected
 

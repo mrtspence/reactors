@@ -115,7 +115,12 @@ module ReactorSim
 
         return { id => limit * LOCK_MULTIPLE } if speed < STICK_OMEGA && applied >= holding
 
-        { id => [ applied / [ speed, STICK_OMEGA ].max, limit ].min }
+        # **Sliding, it is only capped where it cannot hold the load.** At `I/dt` a brake against
+        # a steady load settles at `load ÷ (I/dt)`, which past ~800 N·m on a drum is above the stick
+        # speed — so a brake holding nine times a cage's weight let it creep for ever. The implicit
+        # solve cannot reverse the shaft, so uncapped it simply brings it under the stick speed.
+        cap = applied >= holding ? limit * LOCK_MULTIPLE : limit
+        { id => [ applied / [ speed, STICK_OMEGA ].max, cap ].min }
       end
 
       # --- wear ---------------------------------------------------------------------

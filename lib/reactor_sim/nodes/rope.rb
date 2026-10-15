@@ -23,11 +23,18 @@ module ReactorSim
     # **Re-roping** (`renew_control:`) puts a new rope on from the spare (`spare:`), once enough work
     # has gone into it — a fresh rope at full length, even in place of one that has parted.
     #
-    # Hazards and wreckage are the machine's to declare; `catches:` says whether safety catches
-    # grip the guides when it parts, which the drum and the riders read.
+    # **What it is made of is its own config** — `breaking_kn`, `kg_per_m`, `stiffness_n_per_m` and
+    # its wear rates — so a hemp rope and a steel one are the same node. **What hangs on it is the
+    # drum's**: the cage's mass and whether the cage carries safety catches, read off `hoist:`.
+    # Parted, it fails `parted` with the cage falling, or `parted_held` where the catches grip the
+    # guides; hazards and wreckage per mode are the machine's to declare.
     #
-    #   config: hoist, cage_kg, breaking_kn, sheave, wet_by, catches, recap_control, renew_control,
-    #           spare, endangers, damages
+    # **Its own weight is load.** The rope hanging below the sheave pulls on it as the cage does,
+    # so a heavy rope in a deep shaft strains itself with the cage empty, and what the sheave
+    # carries is both sides of the drum (`bearing_load_n`).
+    #
+    #   config: hoist, breaking_kn, kg_per_m, sheave, wet_by, recap_control, renew_control, spare,
+    #           bend_per_m, corrode_per_s, stiffness_n_per_m, endangers, damages
     #   state:  durability, failure, spare_m, renewing_s, renewed
     class Rope < Node
       include Concerns::Wearing
@@ -61,20 +68,22 @@ module ReactorSim
       # N/m: steel winding rope, ninety metres of it.
       STIFFNESS_N_PER_M = 8.0e5
 
-      attr_reader :hoist, :cage_kg, :breaking_kn, :sheave, :wet_by, :recap_control, :renew_control,
+      attr_reader :hoist, :breaking_kn, :kg_per_m, :sheave, :wet_by, :recap_control, :renew_control,
                   :spare, :stiffness_n_per_m
 
-      def initialize(id:, hoist:, cage_kg:, breaking_kn:, label: nil, sheave: nil, wet_by: nil,
-                     catches: false, recap_control: nil, renew_control: nil, spare: nil,
+      def initialize(id:, hoist:, breaking_kn:, kg_per_m: 0.0, label: nil, sheave: nil, wet_by: nil,
+                     recap_control: nil, renew_control: nil, spare: nil,
+                     bend_per_m: BEND_PER_M, corrode_per_s: CORRODE_PER_S,
                      stiffness_n_per_m: STIFFNESS_N_PER_M, endangers: {}, damages: {})
         super(id: id, label: label)
         @stiffness_n_per_m = stiffness_n_per_m.to_f
         @hoist = hoist.to_sym
-        @cage_kg = cage_kg.to_f
         @breaking_kn = breaking_kn.to_f
+        @kg_per_m = kg_per_m.to_f
+        @bend_per_m = bend_per_m.to_f
+        @corrode_per_s = corrode_per_s.to_f
         @sheave = sheave&.to_sym
         @wet_by = wet_by&.to_sym
-        @catches = catches
         @recap_control = recap_control&.to_sym
         @renew_control = renew_control&.to_sym
         @spare = spare&.to_sym
@@ -85,8 +94,6 @@ module ReactorSim
 
       attr_reader :failure_hazards, :failure_damages
 
-      def catches? = @catches
-
       def base_initial_state(rng, content)
         super.merge(spare_m: SPARE_M, renewing_s: 0.0, renewed: 0)
       end
@@ -94,18 +101,33 @@ module ReactorSim
       # --- what it is carrying ---------------------------------------------------------------
 
       # Newtons in the rope at the cage, read off the drum as of last tick: nothing while the cage
-      # hangs; its weight and what is in it, plus what it takes to accelerate them, while it rides;
-      # and the snatch on the tick it falls its slack.
+      # hangs; its weight, what is in it and the rope below the sheave, plus what it takes to
+      # accelerate them, while it rides; and the snatch on the tick it falls its slack.
       def tension_n(ctx)
         drum = ctx.nodes.fetch(@hoist)
         drum_state = ctx.states.fetch(@hoist)
         return 0.0 if drum.hung?(drum_state)
 
-        mass = @cage_kg + drum.cargo_kg(ctx)
+        mass = drum.cage_kg + drum.cargo_kg(ctx) + hanging_kg(drum.cage_m(drum_state))
         fallen = drum.snatch_m(drum_state)
         return Rope.snatch_n(mass, fallen, @stiffness_n_per_m) if fallen.positive?
 
         mass * (Units::GRAVITY_M_PER_S2 + drum.acceleration_m_s2(drum_state).abs)
+      end
+
+      # The rope below the sheave on a side that reaches `depth_m` down the shaft.
+      def hanging_kg(depth_m) = @kg_per_m * [ depth_m, 0.0 ].max
+
+      # **What the sheave carries**: both sides of the drum — cage A on this rope, the empty cage B
+      # and its rope on the other — each pressing the journal with √2 of its pull over a quarter
+      # turn of wrap. Read by a `Bearing` that names this rope as `loaded_by:`.
+      def bearing_load_n(ctx)
+        drum = ctx.nodes.fetch(@hoist)
+        drum_state = ctx.states.fetch(@hoist)
+        other = (drum.cage_kg + hanging_kg(drum.depth_m - drum.cage_m(drum_state))) *
+                Units::GRAVITY_M_PER_S2
+
+        Math.sqrt(2.0) * (tension_n(ctx) + other)
       end
 
       # **A mass falling `h` onto a rope of stiffness `s`**: `T = mg + √((mg)² + 2·s·mg·h)`, which
@@ -126,7 +148,7 @@ module ReactorSim
         running = drum.speed_m_s(ctx.states.fetch(@hoist)).abs
         loaded = tension_n(ctx) / (breaking_n * WORKING_SHARE)
 
-        (BEND_PER_M * running * loaded) + (CORRODE_PER_S * wetness(ctx)) + scoring(ctx) + kinking(ctx)
+        (@bend_per_m * running * loaded) + (@corrode_per_s * wetness(ctx)) + scoring(ctx) + kinking(ctx)
       end
 
       # A snatch kinks the rope where it took it, per metre of slack fallen, once.
@@ -149,7 +171,10 @@ module ReactorSim
         over.positive? ? over * SCORED_PER_K_S : 0.0
       end
 
-      def failure_modes = { parted: {} }
+      # Ascending severity: caught in the guides is the lesser of the two.
+      def failure_modes = { parted_held: {}, parted: {} }
+
+      def failure_mode(_state, ctx, _cause) = ctx.nodes.fetch(@hoist).catches? ? :parted_held : :parted
 
       def failure_detail(_state, ctx)
         drum = ctx.nodes.fetch(@hoist)

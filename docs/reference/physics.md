@@ -338,6 +338,12 @@ Five rules, each of which was got wrong first:
   Note what `quench_per_s` alone cannot do: it is multiplied by `max(chill, starved, unlit)`,
   so in a hot room with air to spare the quench term is **zero whatever figure is written**.
   A fire that will not go out is almost never a quench that is too low.
+- **A fuel hot enough lights itself.** `autoignition_k`, opt-in in the `ignition:` block, seeds
+  the fire at `Ignition::AUTO_SEED_KG_PER_S` while the fuel is past it — read against the hotter
+  of the node's bulk temperature and its `hot_spot:` node's, as of last tick, because a lumped body
+  has no local hot spot and a timber frame is lit where it touches the bearing. Wood declares it
+  (573 K), coal (700 K) and firedamp (870 K) — the last so a gob fire can fire the district's gas
+  through the district's `hot_spot:`, the one surface in a pit that gets there.
 
 Spread is **closed-form logistic**, so it is exact at any `dt` and cannot overshoot. Logistic
 because a fire spreads from its *edges* — and because from exactly zero it stays at zero, which

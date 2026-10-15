@@ -116,6 +116,13 @@ which diagnostics exist (`condenser_vacuum` is atmospheric-only: 20 instruments 
 pressure gauge's full-scale reading. That is why both processes read it through
 `DevMatch.chassis` and never from `ENV` directly.
 
+**`REACTOR_DEV_ENGINE=1` is the same kind of switch**, read only through `DevMatch.dev_engine?`
+and ignored outside development and test. It adds the developer's engine to the match and ropes
+the pit to it instead of to the steam engine. The runner provisions the match's `Operation` rows
+at boot, so the console appears and disappears with the flag. **A machine with no assembler has
+no outfitting or crew screen** (`Operation#fittable?`): the console hides both links, the
+fitting screens 404 through `require_fittable!`, and their switcher leaves it out.
+
 > **`loadout:` is the second thing, and it came due in stage 4.** A player now chooses the
 > configuration on the outfitting screen, which is exactly the moment the old TODO warned about.
 > It stays sound with one word changed: **the panel is a pure function of the LOADOUT**, so two

@@ -75,6 +75,17 @@ RSpec.describe ReactorSim::Nodes::Hoist do
       expect(position(op)).to be_within(1e-3).of(45.0)
     end
 
+    # Caught creeping, a brake that can hold the load stops it; capped at `I/dt` it settled at the
+    # load over `I/dt` and crept for ever.
+    it "is stopped by the brake when it is caught creeping" do
+      creeping = 0.15 / drum(pit).radius_m * drum(pit).moment_of_inertia
+      op = seed(pit, nodes: { cage_drive: { position_m: 45.0, angular_momentum: creeping } },
+                     minions: aboard(:bank))
+      run!(op, 4)
+
+      expect(speed(op).abs).to be < 0.01
+    end
+
     it "closes the books while it lowers and while it raises" do
       [ [ 0.0, 100 ], [ 90.0, 0 ] ].each do |from, to|
         op = seed(pit, nodes: { cage_drive: { position_m: from } },
@@ -118,6 +129,17 @@ RSpec.describe ReactorSim::Nodes::Hoist do
 
       expect(at(2.2)[:f]).to be < 100.0
       expect(slow[:f]).to be > 40.0
+    end
+
+    # Drifting off the mark — a rope's imbalance pulling the cage — he holds it with the brake rather
+    # than driving back against it.
+    it "holds a cage drifting at the mark with the brake" do
+      hoist = drum(pit)
+      drifting = { angular_momentum: -1.0 / hoist.radius_m * hoist.moment_of_inertia, position_m: 0.2 }
+
+      expect(winding.govern(destination: 0.0, drum: hoist, drum_state: drifting, lateness: 1.0,
+                            frozen: false, held: { f: 0.0, r: 100.0, b: 100.0 }))
+        .to eq(f: 0.0, r: 0.0, b: 0.0)
     end
 
     it "leaves the levers where they are while he is frozen" do
@@ -284,11 +306,14 @@ RSpec.describe ReactorSim::Nodes::Hoist do
     def rope_state(op) = op.state.dig(:nodes, :winding_rope)
     def parted?(op) = rope_state(op)[:failure] == :parted
 
-    # Just under a laden cage's weight, and well over an empty one's.
+    # Worn to hold midway between the empty cage and the same cage with four aboard, whatever rope
+    # is fitted.
     def near_its_end(op, minions: {}, cage: nil)
-      worn = 0.115 * rope_state(op).fetch(:initial_durability)
-      seed(op, nodes: { cage_drive: { position_m: 30.0 }.merge(cage.to_h), winding_rope: { durability: worn } },
-               minions: minions)
+      at = { position_m: 30.0 }.merge(cage.to_h)
+      holds_kg = drum(op).cage_kg + rope(op).hanging_kg(at.fetch(:position_m)) + (2 * PitRig::COLLIER.fetch(:mass_kg))
+      integrity = holds_kg * ReactorSim::Units::GRAVITY_M_PER_S2 / rope(op).breaking_n
+      worn = integrity * rope_state(op).fetch(:initial_durability)
+      seed(op, nodes: { cage_drive: at, winding_rope: { durability: worn } }, minions: minions)
     end
 
     def with_cage(cage) = build_pit(id: "r", seed: 5, loadout: { winder: cage }, crew: PitRig::WOUND_CREW)
@@ -326,6 +351,25 @@ RSpec.describe ReactorSim::Nodes::Hoist do
       end
 
       expect(worn.last).to be > worn.first * 10.0
+    end
+
+    # **Seized, the sheave is a brake on the rope, not a lock on the drum**: the engine winds on
+    # and the rope drags through the dead wheel's groove, heating it — how a headgear catches fire.
+    it "lets the drum wind on through a seized sheave, and heats the sheave doing it" do
+      heated = [ nil, :seized ].to_h do |failure|
+        op = pit
+        running = 3.0 / drum(op).radius_m * drum(op).moment_of_inertia
+        op = seed(op, nodes: { cage_drive: { position_m: 30.0, angular_momentum: running },
+                               sheave: { failure: failure } },
+                      controls: levers_at(forward: 100.0, release: 100.0))
+        temperature = -> { op.nodes.fetch(:sheave).temperature_k(op.state.dig(:nodes, :sheave), op.content) }
+        before = temperature.call
+        run!(op, 8)
+        expect(speed(op)).to be > 0.5
+        [ failure, temperature.call - before ]
+      end
+
+      expect(heated.fetch(:seized)).to be > heated.fetch(nil) * 10.0
     end
 
     def recapping(spare_m)

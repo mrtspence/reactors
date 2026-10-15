@@ -23,7 +23,7 @@ module ReactorSim
                   :reactions, :heater_control_id, :heater_watts, :igniter_kg_per_s,
                   :max_pressure_pa, :max_temperature_k, :stress_rate, :material,
                   :shell_radius_m, :wall_thickness_m, :safety_factor,
-                  :emissivity, :radiating_area_m2
+                  :emissivity, :radiating_area_m2, :hot_spot
 
       def initialize(id:, label: nil, volume_m3:, ports: [],
                      heat_capacity: 5.0e5, ambient_conductance: 0.0,
@@ -34,8 +34,13 @@ module ReactorSim
                      shell_radius_m: nil, wall_thickness_m: nil, safety_factor: 1.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
                      stress_rate: 0.0, damages: {}, endangers: {},
-                     emissivity: 0.0, radiating_area_m2: 0.0)
+                     emissivity: 0.0, radiating_area_m2: 0.0, hot_spot: nil)
         super(id: id, label: label, ports: ports)
+        # **A node this one's contents touch**, whose temperature is what the fuel against it
+        # reaches — a timber headframe's bearers on the sheave. A lumped body has no local hot
+        # spot of its own, so a fuel that lights itself (`autoignition_k`) reads the hotter of the
+        # two. Nil for nearly everything.
+        @hot_spot = hot_spot&.to_sym
         # Radiant loss to the environment, on top of whatever `ambient_conductance` carries.
         # Both default to nothing, so a vessel that has not been given a surface behaves exactly
         # as it did before radiation existed.

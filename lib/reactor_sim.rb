@@ -186,3 +186,5 @@ require_relative "reactor_sim/operations/mine/winding"
 require_relative "reactor_sim/operations/mine/definition"
 require_relative "reactor_sim/operations/mine/parts"
 require_relative "reactor_sim/operations/mine/panel"
+
+require_relative "reactor_sim/operations/dev_engine"

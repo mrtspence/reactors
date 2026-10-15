@@ -7,6 +7,13 @@ module ReactorSim
       # rather than being repeated in three fittings that could disagree.
       SHAFT_DEPTH_M = 90.0
 
+      # What every way up and down the shaft runs through: the shaft, choked or jammed, and the
+      # pit bottom at its foot, drowned.
+      THROUGH_SHAFT = %i[shaft pit_bottom].freeze
+
+      # The district's coal. At a heading's 4.7 t a metre (`Ahead`), about nineteen metres of face.
+      SEAM_KG = 90_000.0
+
       # What the line shaft turns at when the supply is healthy. Driven fittings are rated
       # against it, so a fitting's declared duty means "at working speed" rather than "always".
       WORKING_OMEGA = 22.0
@@ -89,7 +96,7 @@ module ReactorSim
                            description: tier.fetch(:description),
                            provides: %i[cage_drive cage_deck],
                            instruments: %i[coal_raised cage_depth slack_rope winding_brake brake_heat
-                                           rope_condition sheave_heat],
+                                           sheave_heat],
                            stats: tier.except(:label, :description)) do |spec|
           Mine.hoist_fragment(tier: tier, spec: spec)
         end
@@ -205,12 +212,52 @@ module ReactorSim
       # them it falls to the sump and takes the shaft's guides with it; with them it is a jolt.
       # Hooked and tripped cages carry catches, which is what the tier buys besides the hook.
       ROPE_HAZARDS = {
-        falls: { parted: { tags: %i[fall impact], riders: { cage_drive: 3.4 } } },
-        caught: { parted: { tags: %i[impact], riders: { cage_drive: 0.5 } } }
+        parted: { tags: %i[fall impact], riders: { cage_drive: 3.4 } },
+        parted_held: { tags: %i[impact], riders: { cage_drive: 0.5 } }
       }.freeze
 
-      # A winding rope for this shaft: rated at about six times a cage with a full deck.
-      ROPE_BREAKING_KN = 140.0
+      # **The winding rope, and what it is made of.** Flat hemp first; wrought-iron wire from the
+      # 1840s; steel wire from the 1870s. A ~40 mm rope of each: hemp is light, stretchy — so a
+      # snatch is softer — weak, and rots in a wet shaft; iron is four times as strong and five times
+      # the weight; steel is stronger again, stiffest, and rusts least. Cheaper rope is likelier to
+      # part, and the drum lifts its weight.
+      ROPES = {
+        hemp_rope: { label: "Hemp Rope", breaking_kn: 110.0, kg_per_m: 1.1, stiffness_n_per_m: 8.0e4,
+                     corrode_per_s: 0.06, bend_per_m: 0.025,
+                     description: "Flat hemp. Light and cheap, and it rots in a wet shaft." },
+        iron_wire_rope: { label: "Iron Wire Rope", breaking_kn: 400.0, kg_per_m: 5.5,
+                          stiffness_n_per_m: 6.5e5, corrode_per_s: 0.03, bend_per_m: 0.025,
+                          description: "Wrought-iron wire, laid. Strong, heavy, and it rusts." },
+        steel_wire_rope: { label: "Steel Wire Rope", breaking_kn: 1_000.0, kg_per_m: 5.8,
+                           stiffness_n_per_m: 8.0e5, corrode_per_s: 0.02, bend_per_m: 0.02,
+                           description: "Plough-steel wire. The strongest rope there is." }
+      }.freeze
+
+      ROPES.each do |id, tier|
+        Parts.register(id, kind: :rope, label: tier.fetch(:label), description: tier.fetch(:description),
+                           provides: %i[winding_rope], instruments: %i[rope_condition],
+                           stats: tier.except(:label, :description)) do |_spec|
+          Mine.rope_fragment(tier: tier)
+        end
+      end
+
+      # The rope, and the two jobs at bank that keep it: recapping and re-roping.
+      def self.rope_fragment(tier:)
+        Fragment.new(
+          nodes: [ Mine.winding_rope(tier: tier) ],
+          places: [ Place.new(id: :bank, nodes: [ :winding_rope ]) ],
+          control_points: [
+            # Only with the cage stopped at bank — cutting and re-socketing the capel.
+            ControlPoint.new(id: :recapping, label: "Recapping", node: :winding_rope, default: 100.0,
+                             place: :bank, effort: { dexterity: 0.7, force: 0.3 },
+                             exertion: 6.0e-4),
+            # A long, heavy job, and only with a spare rope in store.
+            ControlPoint.new(id: :reroping, label: "Re-roping", node: :winding_rope, default: 100.0,
+                             place: :bank, effort: { force: 0.6, dexterity: 0.4 },
+                             exertion: 9.0e-4)
+          ]
+        )
+      end
 
       # **Riding the kibble**: standing in an unguided bucket that swings and catches the shaft
       # side, worse the faster it is wound. What the cage buys besides speed.
@@ -224,25 +271,40 @@ module ReactorSim
       # slipping rings a false ready.
       MARSHAL_COMPLEXITY = 0.7
 
-      def self.winding_rope(catches:, cage_kg:)
-        Nodes::Rope.new(id: :winding_rope, label: "Winding Rope", hoist: :cage_drive,
-                        cage_kg: cage_kg, breaking_kn: ROPE_BREAKING_KN, sheave: :sheave,
-                        wet_by: :seepage, catches: catches, recap_control: :recapping,
+      # Without catches a parted rope takes the cage down the shaft, and the shaft's guides with it.
+      def self.winding_rope(tier:)
+        Nodes::Rope.new(id: :winding_rope, label: tier.fetch(:label), hoist: :cage_drive,
+                        **tier.slice(:breaking_kn, :kg_per_m, :stiffness_n_per_m, :corrode_per_s,
+                                     :bend_per_m),
+                        sheave: :sheave, wet_by: :seepage, recap_control: :recapping,
                         renew_control: :reroping, spare: :spare_rope,
-                        endangers: ROPE_HAZARDS.fetch(catches ? :caught : :falls),
-                        damages: (catches ? {} : { parted: { shaft: 0.4 } }))
+                        endangers: ROPE_HAZARDS, damages: { parted: { shaft: 0.4 } })
       end
 
-      # **The headgear pulley**, a plain journal under both cages' weight. Its oil is what keeps
-      # it cool, and a hot sheave scores the rope running over it. Seized, it stops the winding
-      # and takes some of the rope with it.
-      def self.sheave(cage_kg:)
+      # The two sheave wheels' own weight on the journal.
+      SHEAVE_WHEELS_KG = 1_500.0
+
+      # Rope dragged through a seized sheave's iron groove, as a share of the √2 pull the journal
+      # feels: rope on iron at μ 0.25 over a quarter-turn holds back `e^(0.25·π/2) − 1` ≈ 0.48 of
+      # each side's tension (the capstan law), and 0.48 ÷ √2 ≈ 0.34.
+      GROOVE_MU = 0.34
+
+      # **The headgear pulley**, a plain journal under both ropes. Its oil is what keeps it cool,
+      # and a hot sheave scores the rope running over it. **Seized, the engine winds on and the rope
+      # drags through the dead wheel's groove** — a brake on the winding, heating the sheave and
+      # scoring the rope, which is how a headgear catches fire.
+      #
+      # **Its load is what the ropes pull on it**, read off the rope (`loaded_by:`) — both cages,
+      # whatever is in cage A and both ropes' own weight — on top of its own wheels. So a laden wind
+      # heats it more than an empty one.
+      def self.sheave
         Nodes::Bearing.new(
           id: :sheave, label: "Sheave", supports: :cage_drive, duty: :journal, material: :babbitt,
           # Up in the headframe in still air, so it holds its heat: run dry through a long spell
           # of winding it climbs past the point where it scores the rope.
           heat_capacity: 3.0e3, ambient_conductance: 4.5,
-          static_load_n: 2 * cage_kg * Units::GRAVITY_M_PER_S2,
+          static_load_n: SHEAVE_WHEELS_KG * Units::GRAVITY_M_PER_S2, loaded_by: :winding_rope,
+          slips_when_seized: { mu: GROOVE_MU, lever_m: CAGE_DRUM_RADIUS_M },
           journal_radius_m: 0.15, film_speed_m_s: 0.1, oil_charge_kg: 0.6,
           stress_rate: 200.0, wear_rate: 1.0e-6, oil_loss_kg_per_m: 1.0e-3,
           damages: { seized: { winding_rope: 0.3 } }
@@ -288,13 +350,13 @@ module ReactorSim
                              detaching_hook: hook, endangers: CAGE_HAZARDS,
                              damages: { overwound: wreckage }, rope: :winding_rope, shaft: :shaft,
                              deck: :cage_deck, boarding_hazard: CAUGHT_BOARDING,
-                             rated_speed_m_s: speed_m_s, perils: kibble ? [ RIDING_THE_KIBBLE ] : []),
+                             rated_speed_m_s: speed_m_s, perils: kibble ? [ RIDING_THE_KIBBLE ] : [],
+                             cage_kg: tier.fetch(:cage_kg), catches: hook),
             Nodes::Brake.new(id: :cage_brake, label: "Winding Brake", supports: :cage_drive,
                              capacity_nm: tier.fetch(:brake_nm), heat_capacity: 5.0e4,
                              control_id: :cage_brake_release,
                              trip: (TRIP_MARKS_M if tier.fetch(:trip))),
-            Mine.winding_rope(catches: hook, cage_kg: tier.fetch(:cage_kg)),
-            Mine.sheave(cage_kg: tier.fetch(:cage_kg)), Mine.sheave_grease, Mine.sheave_oil_line,
+            Mine.sheave, Mine.sheave_grease, Mine.sheave_oil_line,
             Mine.cage_deck(capacity_kg: tier.fetch(:deck_kg)),
             Mine.deck_loading(max_kg_per_s: LANDING_KG_PER_S),
             Mine.deck_unloading(max_kg_per_s: LANDING_KG_PER_S)
@@ -319,12 +381,12 @@ module ReactorSim
           passages: [ Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M,
                                   speed_m_s: speed_m_s, hoist: :cage_drive,
                                   staffed_by: :man_winding, driven_by: :line_shaft,
-                                  rated_omega: WORKING_OMEGA, through: :shaft,
+                                  rated_omega: WORKING_OMEGA, through: Mine::THROUGH_SHAFT,
                                   label: kibble ? "Kibble" : "Cage",
                                   rated_kg: tier.fetch(:rated_kg),
                                   marshals: { bank: :banking, pit_bottom: :onsetting }) ],
-          places: [ Place.new(id: :bank, nodes: %i[cage_drive cage_brake winding_rope sheave
-                                                   sheave_grease deck_unloading]),
+          places: [ Place.new(id: :bank, nodes: %i[cage_drive cage_brake sheave sheave_grease
+                                                   deck_unloading]),
                     Place.new(id: :pit_bottom, nodes: [ :deck_loading ]) ],
           control_points: [
             # **The post that takes knowing how**: overwinding is how you put a cage through the
@@ -347,8 +409,8 @@ module ReactorSim
                              place: :bank, internal: true),
             ControlPoint.new(id: :cage_brake_release, label: "Winding Brake", node: :cage_brake,
                              place: :bank, internal: true),
-            # **Three jobs at the headgear that raise nothing**, and they are what the rope's
-            # life is. Posted is working: like the banksman, they default to full effort.
+            # **A job at the headgear that raises nothing**, and with recapping and re-roping it is
+            # what the rope's life is. Posted is working: like the banksman, full effort by default.
             ControlPoint.new(id: :greasing, label: "Greasing the Sheave", node: :sheave_oil_line,
                              default: 100.0, place: :bank,
                              effort: { dexterity: 0.6, intelligence: 0.4 },
@@ -357,16 +419,38 @@ module ReactorSim
             # tubs on, and stops the cage being loaded past its rating there.
             ControlPoint.new(id: :onsetting, label: "Onsetter", node: :deck_loading, default: 100.0,
                              place: :pit_bottom, effort: { force: 0.5, dexterity: 0.5 },
-                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY),
-            # Only with the cage stopped at bank — cutting and re-socketing the capel.
-            ControlPoint.new(id: :recapping, label: "Recapping", node: :winding_rope, default: 100.0,
-                             place: :bank, effort: { dexterity: 0.7, force: 0.3 },
-                             exertion: 6.0e-4),
-            # A long, heavy job, and only with a spare rope in store.
-            ControlPoint.new(id: :reroping, label: "Re-roping", node: :winding_rope, default: 100.0,
-                             place: :bank, effort: { force: 0.6, dexterity: 0.4 },
-                             exertion: 9.0e-4)
+                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY)
           ]
+        )
+      end
+
+      # **The headframe**: pitch pine to start, and an iron one that will not burn. The timber it
+      # counts is the upper frame and the sheave platform, which is what a hot sheave sets alight.
+      HEADFRAMES = {
+        timber_headframe: { label: "Timber Headframe", timber_kg: 4_000.0,
+                            description: "Pitch-pine legs and a sheave platform. It burns." },
+        iron_headframe: { label: "Iron Headframe", timber_kg: 0.0,
+                          description: "Riveted wrought iron. Nothing in it to catch." }
+      }.freeze
+
+      HEADFRAMES.each do |id, tier|
+        Parts.register(id, kind: :headframe, label: tier.fetch(:label),
+                           description: tier.fetch(:description), provides: %i[headframe],
+                           stats: tier.slice(:timber_kg)) do |_spec|
+          Mine.headframe_fragment(timber_kg: tier.fetch(:timber_kg))
+        end
+      end
+
+      # In parallel with the downcast, whatever it is made of, so changing the frame never changes
+      # the pit's air.
+      def self.headframe_fragment(timber_kg:)
+        Fragment.new(
+          nodes: [ Mine.headframe(timber_kg: timber_kg), Mine.headframe_draught, Mine.headframe_smoke ],
+          links: [ Link.new(from: [ :atmosphere, :intake ], to: [ :headframe_draught, :inlet ]),
+                   Link.new(from: [ :headframe_draught, :outlet ], to: [ :headframe, :air_in ]),
+                   Link.new(from: [ :headframe, :smoke_out ], to: [ :headframe_smoke, :inlet ]),
+                   Link.new(from: [ :headframe_smoke, :outlet ], to: [ :pit_bottom, :smoke_in ]) ],
+          thermal_links: [ ThermalLink.new(a: :sheave, b: :headframe, conductance: 2.0) ]
         )
       end
 
@@ -455,9 +539,18 @@ module ReactorSim
         Mine.fan_fragment(head_pa: 5_200.0, spec: spec)
       end
 
+      # A Guibal with reversing doors in its drift: the same fan, and a lever that turns the whole
+      # circuit round — the textbook answer to a fire on the intake.
+      Parts.register(:reversible_fan, kind: :fan, label: "Reversible Fan",
+                     description: "A Guibal with reversing doors. It can blow the pit backwards.",
+                     provides: %i[upcast], instruments: %i[air_quantity],
+                     stats: { head_pa: 5_200.0, reversible: true }) do |spec|
+        Mine.fan_fragment(head_pa: 5_200.0, spec: spec, reversible: true)
+      end
+
       # In a single-shaft pit the return comes up the upcast compartment, by way of its foot, where
       # the brattice leaks into it; with two shafts it goes straight to the fan.
-      def self.fan_fragment(head_pa:, spec:)
+      def self.fan_fragment(head_pa:, spec:, reversible: false)
         return_side = if spec[:single_shaft]
           [ Link.new(from: [ :return_road, :outlet ], to: [ :upcast_foot, :air_in ]),
             Link.new(from: [ :upcast_foot, :air_out ], to: [ :upcast, :inlet ]) ]
@@ -466,7 +559,7 @@ module ReactorSim
         end
 
         Fragment.new(
-          nodes: [ Mine.upcast(head_pa: head_pa, rated_omega: WORKING_OMEGA) ],
+          nodes: [ Mine.upcast(head_pa: head_pa, rated_omega: WORKING_OMEGA, reversible: reversible) ],
           links: [
             Link.new(from: [ :district, :air_out ], to: [ :return_road, :inlet ]),
             *return_side,
@@ -474,7 +567,10 @@ module ReactorSim
           ],
           control_points: [
             ControlPoint.new(id: :ventilation, label: "Fan", node: :upcast, default: 100.0,
-                             place: :bank, stiffness: Travel::HEAVY)
+                             place: :bank, stiffness: Travel::HEAVY),
+            # Swinging the reversing doors over: past half-way it blows the other way.
+            *([ ControlPoint.new(id: :fan_reversed, label: "Reverse the Fan", node: :upcast,
+                                 default: 0.0, place: :bank, stiffness: Travel::HEAVY) ] if reversible)
           ]
         )
       end
@@ -555,17 +651,22 @@ module ReactorSim
         Mine.pump_fragment(max_kg_per_s: 14.0, efficiency: 0.5)
       end
 
+      # **The better pump brings the worse accident.** Rods down the shaft off a beam at the top,
+      # and the beam is what fails: broken, it falls into the shaft. The sinking set has none.
       Parts.register(:cornish_set, kind: :pump, label: "Cornish Set",
-                     description: "Heavy lift gear. Expensive to turn, and it holds the water down.",
-                     provides: %i[pump], instruments: %i[sump_level],
-                     stats: { max_kg_per_s: 26.0 }) do |_spec|
-        Mine.pump_fragment(max_kg_per_s: 26.0, efficiency: 0.68)
+                     description: "Beam and rods down the shaft. It holds the water down — " \
+                                  "and the beam hangs over the only way out.",
+                     provides: %i[pump pump_beam], instruments: %i[sump_level beam_condition],
+                     stats: { max_kg_per_s: 26.0 }) do |spec|
+        Mine.pump_fragment(max_kg_per_s: 26.0, efficiency: 0.68, driven_by: :pump_beam)
+            .merge(Mine.beam_fragment(pump_kg_per_s: 26.0, spec: spec))
       end
 
-      def self.pump_fragment(max_kg_per_s:, efficiency:)
+      def self.pump_fragment(max_kg_per_s:, efficiency:, driven_by: :line_shaft)
         Fragment.new(
           nodes: [ Mine.pump(max_kg_per_s: max_kg_per_s, lift_m: SHAFT_DEPTH_M,
-                             efficiency: efficiency, rated_omega: WORKING_OMEGA) ],
+                             efficiency: efficiency, rated_omega: WORKING_OMEGA,
+                             driven_by: driven_by) ],
           links: [
             Link.new(from: [ :pit_bottom, :water_out ], to: [ :pump, :inlet ]),
             Link.new(from: [ :pump, :outlet ], to: [ :drainage, :in ])
@@ -574,6 +675,24 @@ module ReactorSim
             ControlPoint.new(id: :pumping, label: "Pumping", node: :pump, default: 100.0,
                              place: :bank, stiffness: Travel::HEAVY)
           ]
+        )
+      end
+
+      # Whoever is under it when it comes down: at bank, in the cage, at the bottom. Every pit has
+      # a cage or a kibble; a man engine is optional, so its riders are not named here.
+      # TODO: riders of the man engine — needs a hazard that can name a carrier only when fitted.
+      BEAM_FALL = { tags: %i[impact crush],
+                    places: { bank: 1.2, pit_bottom: 1.6 },
+                    riders: { cage_drive: 2.6 } }.freeze
+
+      def self.beam_fragment(pump_kg_per_s:, spec:)
+        wreckage = { shaft: 1.0 }.merge(spec[:single_shaft] ? { brattice: 1.0 } : {})
+
+        Fragment.new(
+          nodes: [ Mine.pump_beam(pump_kg_per_s: pump_kg_per_s, rated_omega: WORKING_OMEGA,
+                                  endangers: { broken: BEAM_FALL }, damages: { broken: wreckage }) ],
+          drive_links: [ DriveLink.new(a: :line_shaft, b: :pump_beam, stiffness: 2.0e4) ],
+          places: [ Place.new(id: :bank, nodes: [ :pump_beam ]) ]
         )
       end
 
@@ -752,6 +871,10 @@ module ReactorSim
           # ever *adds* a faster way through a shaft that could always be climbed.
           Slot.new(id: :manriding, accepts: :manriding, label: "Man Riding", group: :shaft,
                    required: false, default: nil, when_empty: :omit),
+          Slot.new(id: :rope, accepts: :rope, label: "Winding Rope", group: :shaft,
+                   required: true, default: fitted.fetch(:rope)),
+          Slot.new(id: :headframe, accepts: :headframe, label: "Headframe", group: :shaft,
+                   required: true, default: fitted.fetch(:headframe)),
           Slot.new(id: :spare_rope, accepts: :spare_rope, label: "Spare Rope", group: :shaft,
                    required: false, default: nil, when_empty: :omit),
           Slot.new(id: :shaft_gates, accepts: :shaft_gates, label: "Shaft Gates", group: :shaft,
@@ -806,7 +929,8 @@ module ReactorSim
                                                 # The road, what moves on it and what the ground
                                                 # is making are the hole itself rather than a
                                                 # fitting, so no part can take these away.
-                                                :roof_timber, :putting, :water_make,
+                                                :roof_timber, :putting, :water_make, :survey,
+                                                :bore_holes, :goaf_weight, :fire_stink,
                                                 # Whether the district is on fire. The one
                                                 # reading no fitting may remove, because a pit
                                                 # with nothing bought can still go up.
@@ -818,10 +942,11 @@ module ReactorSim
             Mine.shaft, *([ Mine.upcast_foot ] if spec[:single_shaft]),
             Mine.atmosphere, Mine.line_shaft(rated_torque_nm: 5.4e3, rated_omega: WORKING_OMEGA),
             Mine.downcast, Mine.pit_bottom, Mine.main_road, Mine.district, Mine.return_road,
-            Mine.seam(kg: 90_000.0, firedamp_kg: 4_000.0),
+            Mine.seam(kg: SEAM_KG, firedamp_kg: 4_000.0),
             Mine.dust_source(kg: 3_000.0),
             # Deep enough that it never runs dry: a pit does not stop making blackdamp.
-            Mine.goaf(kg: 20_000.0, sour: (Mine::OldWorkings::ORDINARY_SOUR if ground)),
+            Mine.goaf(kg: 20_000.0, seam_kg: SEAM_KG, sour: (Mine::OldWorkings::ORDINARY_SOUR if ground),
+                      ground: ground),
             Mine.goaf_seep(conductance: 1.8e-5, ground: ground),
             Mine.blower(conductance: 2.5e-4, ground: ground),
             Mine.dust_line(max_kg_per_s: 0.30),
@@ -830,8 +955,12 @@ module ReactorSim
             # 18 kg/s through a broken fissure, against a sinking set's 14 and a Cornish set's
             # 26 — so the starting pump is overwhelmed by an inrush and the upgrade is what
             # holds it. That gap is the reason to buy the better set.
-            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0, ground: ground),
-            Mine.drainage
+            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0, seam_kg: SEAM_KG, ground: ground),
+            Mine.drainage,
+            # Gas held in the coal ahead, the outburst that releases it, and the auger that finds it.
+            Mine.gas_pocket(seam_kg: SEAM_KG, ground: ground), Mine.outburst, Mine.bore_line,
+            # The waste behind the face, and the air that leaks through it.
+            Mine.gob(ground: ground), Mine.gob_leak(:waste_in), Mine.gob_leak(:waste_out)
           ],
           links: [
             # Air: down the downcast, round the workings. The return side comes with the fan.
@@ -858,7 +987,15 @@ module ReactorSim
             # Water: in through the strata, downhill to the pit bottom. The lift comes with the
             # pump.
             Link.new(from: [ :strata, :out ], to: [ :seepage, :inlet ]),
-            Link.new(from: [ :seepage, :outlet ], to: [ :pit_bottom, :water_in ])
+            Link.new(from: [ :seepage, :outlet ], to: [ :pit_bottom, :water_in ]),
+            Link.new(from: [ :gas_pocket, :out ], to: [ :outburst, :inlet ]),
+            Link.new(from: [ :outburst, :outlet ], to: [ :district, :burst_in ]),
+            Link.new(from: [ :gas_pocket, :out ], to: [ :bore_line, :inlet ]),
+            Link.new(from: [ :bore_line, :outlet ], to: [ :district, :burst_in ]),
+            Link.new(from: [ :pit_bottom, :waste_out ], to: [ :waste_in, :inlet ]),
+            Link.new(from: [ :waste_in, :outlet ], to: [ :gob, :air_in ]),
+            Link.new(from: [ :gob, :air_out ], to: [ :waste_out, :inlet ]),
+            Link.new(from: [ :waste_out, :outlet ], to: [ :district, :waste_in ])
           ],
           control_points: [
             ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0,
@@ -904,7 +1041,23 @@ module ReactorSim
                              # the dexterity half is setting them true once they are up there.
                              effort: { force: 0.6, dexterity: 0.4 },
                              gated_by: %i[mining_effectiveness darkvision],
-                             exertion: 1.0e-3)
+                             exertion: 1.0e-3),
+            # **Boring ahead**: an auger driven into the face, which finds what lies in the coal and
+            # draws a gas pocket off before the face reaches it. It wins no coal and costs a hand at
+            # a face that has fewer hands than jobs, which is the trade. Posted is working.
+            ControlPoint.new(id: :boring, label: "Boring Ahead", node: :bore_line, default: 100.0,
+                             place: :district, effort: { swing: 0.6, dexterity: 0.4 },
+                             gated_by: %i[darkvision], exertion: 9.0e-4),
+            # **Packing**: stone built into the void behind the face so the roof settles on it rather
+            # than hanging until it falls. Heavy, and it wins no coal. Posted is working.
+            ControlPoint.new(id: :packing, label: "Packing", node: :goaf, default: 100.0,
+                             place: :district, effort: { force: 0.7, toughness: 0.3 },
+                             gated_by: %i[darkvision], exertion: 1.1e-3),
+            # **Sealing the waste**: stoppings built across the leakage, which starve a heating gob of
+            # air. What is built stays built. Posted is working.
+            ControlPoint.new(id: :sealing, label: "Sealing the Waste", node: :gob, default: 100.0,
+                             place: :district, effort: { force: 0.5, dexterity: 0.5 },
+                             gated_by: %i[darkvision], exertion: 8.0e-4)
           ]
         )
       end

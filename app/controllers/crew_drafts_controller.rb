@@ -16,7 +16,7 @@
 class CrewDraftsController < ApplicationController
   include CrewParams
 
-  before_action :require_operator!
+  before_action :require_operator!, :require_fittable!
 
   def create
     @crewing = Crewing.for(owner_id: current_player,

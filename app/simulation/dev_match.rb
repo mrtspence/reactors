@@ -32,6 +32,13 @@ module DevMatch
   # working 22 rad/s.
   COUPLINGS = [ { from: [ :engine, :load ], to: [ :pit, :line_shaft ], ratio: 0.78 } ].freeze
 
+  # **A developer's engine on the pit's line shaft**, with `REACTOR_DEV_ENGINE=1`: two levers set
+  # its power from 1 kW to 1 GW and nobody has to raise steam. The steam engine stays in the
+  # match, running its own mill. Never outside development and test. The rope is the line shaft's
+  # own, so it passes no more than it would from the steam engine — about 30 kW at most.
+  DEV_ENGINE = { dev_engine: :dev_engine }.freeze
+  DEV_COUPLINGS = [ { from: [ :dev_engine, :drive ], to: [ :pit, :line_shaft ] } ].freeze
+
   # Where `/` lands. The first machine, not the only one.
   PRIMARY = OPERATIONS.keys.first
 
@@ -41,10 +48,17 @@ module DevMatch
 
   module_function
 
+  # Both processes MUST read this through here, for the reason `default_chassis` gives.
+  def dev_engine? = Rails.env.local? && ENV["REACTOR_DEV_ENGINE"] == "1"
+
+  def operations = dev_engine? ? OPERATIONS.merge(DEV_ENGINE) : OPERATIONS
+
+  def couplings = dev_engine? ? DEV_COUPLINGS : COUPLINGS
+
   # **The rows that say who owns what.** Idempotent and safe to call at boot: `provision` never
   # touches an existing `owner_id`, so re-running it cannot transfer a machine.
   def provision!
-    OPERATIONS.each do |operation_id, kind|
+    operations.each do |operation_id, kind|
       Operation.provision(match_id: ID, operation_id: operation_id, kind: kind,
                           owner_id: DevPlayer::ID)
     end
@@ -61,7 +75,7 @@ module DevMatch
   # on. Ownership goes with it, which is only safe because this is the dev match and its one
   # player owns everything — a real lobby retires a machine without forgetting who held it.
   def retire_machines_no_longer_in_the_match!
-    stale = Operation.in_match(ID).reject { |row| OPERATIONS.key?(row.operation_id.to_sym) }
+    stale = Operation.in_match(ID).reject { |row| operations.key?(row.operation_id.to_sym) }
     return if stale.empty?
 
     Rails.logger.warn(
@@ -70,9 +84,13 @@ module DevMatch
     stale.each(&:destroy)
   end
 
-  def operation_ids = OPERATIONS.keys
+  def operation_ids = operations.keys
 
-  def kind_of(operation_id) = OPERATIONS.fetch(operation_id.to_sym)
+  def kind_of(operation_id) = operations.fetch(operation_id.to_sym)
+
+  # A machine with slots and seats. One without — the dev engine — has no outfitting or crew
+  # screen.
+  def fittable?(operation_id) = ReactorSim::Operations.assembler?(kind_of(operation_id))
 
   # Both processes MUST read the chassis through here, never from ENV directly. It changes which
   # diagnostics exist (`condenser_vacuum` is atmospheric-only) and the pressure gauge's
@@ -213,12 +231,14 @@ module DevMatch
   # back to what is stored, which is what a cold boot wants.
   def build(specs: {})
     ReactorSim::Match.create(
-      id: ID, seed: SEED, time_scale: time_scale, couplings: COUPLINGS,
+      id: ID, seed: SEED, time_scale: time_scale, couplings: couplings,
       operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}) }
     )
   end
 
   def operation_spec(operation_id, given)
+    return { id: operation_id, type: kind_of(operation_id) } unless fittable?(operation_id)
+
     { id: operation_id, type: kind_of(operation_id),
       chassis: given["chassis"]&.to_sym || chassis(operation_id: operation_id),
       loadout: given["loadout"]&.to_h { |slot, part| [ slot.to_sym, part&.to_sym ] } ||
@@ -324,7 +344,7 @@ module DevMatch
   # > that answers the question it was not asked. The loadout goes into the build.
   def panel(operation_id: PRIMARY, loadout: nil)
     id = operation_id.to_sym
-    parts = loadout || stored_parts(operation_id: id)
+    parts = loadout || (fittable?(id) ? stored_parts(operation_id: id) : {})
 
     (@panels ||= {})[[ id, parts ]] ||=
       build(specs: { id.to_s => { "loadout" => stringify_parts(parts) } })
@@ -345,7 +365,7 @@ module DevMatch
   # seat filled by the labour exchange, because that is what a fresh dev match starts as.
   def crew(operation_id: PRIMARY)
     id = operation_id.to_sym
-    posted = stored_crew(operation_id: id)
+    posted = fittable?(id) ? stored_crew(operation_id: id) : {}
 
     (@crews ||= {})[[ id, posted ]] ||= build.operation(id).minions.values.freeze
   end

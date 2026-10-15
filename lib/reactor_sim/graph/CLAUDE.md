@@ -175,8 +175,9 @@ Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they
   are the same ninety metres and only one of them is quick — so what a walk costs is still
   `route_metres ÷ what is running`. Routes are **shortest by distance** (Dijkstra, ties on
   declaration order), not fewest hops, because a second way out is usually the long one.
-- **A passage may run `through:` a node** — a shaft — and is closed while that node
-  `blocks_passage?`: broken, or for the shaft, with something lodged in it. Tables are keyed by
+- **A passage may run `through:` nodes** — a shaft, a pit bottom — and is closed while any of them
+  `blocks_passage?(state, content)`: broken, or for the shaft, with something lodged in it, or for
+  the pit bottom, drowned to the roof. Tables are keyed by
   the closed set as well as by capabilities, built on first use and kept, so a choked shaft
   re-routes everybody the long way round, or strands them where there is none.
 - **A ridden passage may be marshalled.** `rated_kg:` is what its cage is rated for and

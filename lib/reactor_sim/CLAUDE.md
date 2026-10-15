@@ -163,6 +163,10 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > somebody works worse before they drop and recovers by walking out; `endurance` is already its
 > divisor, **clamped by `Breath::RESERVE`** so the tireless reference crew is not immune.
 >
+> **Only the gas phase is breathed.** Water on the floor and coal in the tubs take up none of a
+> lungful. A room whose air node answers `submerged?` — the pit bottom, water to the roof — has
+> nothing to breathe at all, so drowning is the same dwell, collapse and rescue race as afterdamp.
+>
 > **Apparatus runs out, and a set with no air left is no protection at all** — no taper, because
 > there is no half a breath. `respirator:` is how well it filters, `respirator_air:` is how many
 > ticks it holds, and the two go together: `respirator` alone is inert. It is spent every tick

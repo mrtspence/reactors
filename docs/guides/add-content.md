@@ -219,10 +219,16 @@ plateau is 1.5–2.0 and both edges are outright failures. Measurements are in
     quench_per_s: 0.45   # how fast it dies when cold or starved of air
     lean_fraction: 0.05  # below this share of the volume it will not carry a flame
     rich_fraction: 0.15  # above it there is not enough air in the mixture to burn
+    autoignition_k: 573  # past this the fuel lights itself, with no flame near it
 ```
 
 **Opt-in.** A reaction without this block keeps the old bulk-temperature gate and behaves
 exactly as before, so adding it to one reaction cannot disturb another.
+
+**`autoignition_k` is a real ignition temperature, not a tuning knob** — timber's ~300 °C, not a
+figure chosen so something in a machine reaches it. A node reads it against the hotter of its own
+temperature and its `hot_spot:`, the node its fuel touches. If a machine cannot get its timber
+there when a real one did, the machine's heating is what is wrong.
 
 ### The flammability range is for mixtures, not for fuel beds
 

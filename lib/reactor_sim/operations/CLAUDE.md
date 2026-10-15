@@ -64,8 +64,24 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > deliberately exceeds what the starting fan holds** — a spread the base machine always copes
 > with is a spread that changes nothing.
 >
-> **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, or the example measures
-> which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
+> **What lies ahead of the face is drawn too** (`Mine::Ahead`): none, one or two bodies of old
+> water and, separately, none, one or two pockets of gas, each at a random depth into the face, met
+> as the face advances by coal won at a heading's 4.7 t a metre. **A pocket's size is drawn too** —
+> log-normal on the coal it throws, median 20 t, gas following the coal and gassier ground holding
+> more — so knowing one is there is not knowing how bad it is. Nobody is told; the weeping coal, the
+> plans and the borer's holes are the only warning, and the plans and the holes are read only by
+> somebody boring. Not knowing whether there is any, or whether there is another, is the tension.
+> **So are the goaf's falls**: the roof behind the face hangs by the metres won less what has been
+> packed, and falls at spans drawn per match — the first weighting largest — flushing the goaf's
+> gas out and driving a windblast down the roads. **And so is the waste the last workings left**
+> (`Mine::Gob`): a quarter of pits inherit nothing heating, the rest a zone of drawn size already
+> part-way to firing, its start temperature solved so the fire is due when a wide log-normal says —
+> most between 45 and 90 minutes, the soonest a quarter of an hour. From there it is physics: the
+> fan's trickle through the waste feeds it, sealing starves it, and alight it makes carbon
+> monoxide, breaks out at the face and fires the district's gas.
+>
+> **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, which also draws no water
+> ahead, or the example measures which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
 > down, and the failure looks identical — a physics regression that is really a bad draw.
 
 Three ways that goes wrong, all of them silent:
@@ -148,6 +164,11 @@ to the builder.
 > full-suite run**, because nothing else loads that file, so every targeted re-run of the failing
 > specs passed. `Operations.known` is everything; `Operations.catalogued` is the machines.
 
+**`dev_engine.rb` is a harness a developer plays with**: one shaft held at working speed, at up to
+`setting × 10^range` watts (1 kW–1 GW), its power injected and ledgered like a heater's. It
+declares no assembler, so it has no slots, no crew and no outfitting screen, and being a harness
+it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENGINE=1`.
+
 ## Design decisions, in order
 
 1. **What are the nodes?** A join earns a node only when it is *interesting* — it carries a
@@ -160,7 +181,10 @@ to the builder.
    *transport*, not existence — steam condensing inside a gas-only pipe is correct and
    expected. Closed loops are fine and need no special handling.
 3. **Heat and torque.** Every `Thermal` node needs an `ambient_conductance` or the operation
-   becomes a perfect heat accumulator.
+   becomes a perfect heat accumulator. **A powered fitting is a load on the operation's own shaft,
+   never an engine of its own**: the man engine and the Cornish set's beam are drive-linked to the
+   line shaft, so whatever is putting work into that shaft powers them — the steam engine, the dev
+   engine, anything roped to it.
 4. **What can the player touch?** Nodes read `ctx.controls.fetch(:id)` — the lever's **actual**
    position. `stiffness:` makes a lever travel over several ticks, in percent of its range per
    second, scaled by whoever is posted there; an unattended lever still moves at its rated
@@ -194,6 +218,12 @@ to the builder.
    `set_control`. The mine's winding engineman is the worked example (`Mine::Winding`): the player
    names where the cage goes and he works the clutches and brake. With nobody posted, those
    levers hold where they were left — the machine does not know it is unattended.
+
+   **The rope and the headframe are slots of their own.** The rope tier (hemp, iron wire, steel
+   wire) is the rope's strength, weight and wear; the cage's mass and catches stay with the hoist
+   tier, and the rope reads them off the drum, so the two slots never need to know each other. The
+   sheave reads its load off the rope. The headframe tier is timber or iron, and **both draw the
+   same share of the intake**, so buying the iron one never changes the pit's air.
 
    **Coal rides the hoist.** A deck in cage A is filled at the bottom by the onsetter and run off
    at bank by the banksman, each only while the cage stands at their landing, and its coal is the

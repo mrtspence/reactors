@@ -15,7 +15,10 @@ class MatchRunner
   # tick count says we should be, which is the one number that tells you the loop is healthy.
   HEARTBEAT_TICKS = 40
 
+  # Provisions the match's rows first, so a machine `REACTOR_DEV_ENGINE` adds or removes has a
+  # console, or stops having one, from this boot.
   def self.build(logger: Rails.logger, source: nil, sink: nil, events: nil)
+    DevMatch.provision!
     new(matches: { DevMatch::ID => DevMatch.build }, logger: logger,
         source: source || CommandConsumer.build(logger: logger),
         sink: sink || ViewBroadcaster.new(logger: logger),

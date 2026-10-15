@@ -427,7 +427,31 @@ part:
       cast_iron: 1500
       bronze: 40
       babbitt: 30
-  # A whole second rope: all steel, for something that does nothing until the day it is needed.
+  # The winding rope, by what it is made of and what ninety metres of it weighs. Hemp is free:
+  # it is what every pit starts on, and there is no hemp in the content to price it in.
+  hemp_rope:
+    materials: {}
+  iron_wire_rope:
+    materials:
+      wrought_iron: 500
+  steel_wire_rope:
+    materials:
+      steel: 520
+  # The reversible fan is a Guibal with a set of iron reversing doors in its drift.
+  reversible_fan:
+    materials:
+      cast_iron: 4200
+      wrought_iron: 1800
+      wood: 600
+  # The headframe: a pitch-pine frame every pit starts with, and the iron one that will not burn.
+  timber_headframe:
+    materials:
+      wood: 4000
+  iron_headframe:
+    materials:
+      wrought_iron: 6000
+  # A whole second rope, of whatever kind is fitted, for something that does nothing until the
+  # day it is needed.
   spare_rope:
     materials:
       steel: 1400

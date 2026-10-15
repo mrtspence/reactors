@@ -139,7 +139,8 @@ RSpec.describe "the shaft" do
 
       expect(op.state.dig(:nodes, :shaft, :jam_m)).to be_nil
       expect(events.find { |e| e[:node] == :winding_rope }).to include(mode: :parted)
-      expect(events.find { |e| e[:node] == :winding_rope }.dig(:detail, :tension_kn)).to be > 140.0
+      expect(events.find { |e| e[:node] == :winding_rope }.dig(:detail, :tension_kn))
+        .to be > op.nodes.fetch(:winding_rope).breaking_kn
     end
 
     def banksman_on_the_edge(loadout = {})

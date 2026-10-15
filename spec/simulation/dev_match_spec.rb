@@ -19,4 +19,33 @@ RSpec.describe DevMatch do
       expect { described_class.outfitting(operation_id: :pit) }.not_to raise_error
     end
   end
+
+  describe "the dev engine" do
+    def flag(value)
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("REACTOR_DEV_ENGINE").and_return(value)
+    end
+
+    it "ropes itself to the pit's line shaft in place of the steam engine" do
+      flag("1")
+
+      match = described_class.build
+
+      expect(match.operation(:dev_engine)).not_to be_nil
+      expect(match.couplings.map { |c| [ c.from, c.to ] }).to eq([ [ %i[dev_engine drive], %i[pit line_shaft] ] ])
+    end
+
+    it "is not in the match without the flag" do
+      flag(nil)
+
+      expect(described_class.operation_ids).not_to include(:dev_engine)
+    end
+
+    it "is not in the match outside development and test, flag or no flag" do
+      flag("1")
+      allow(Rails.env).to receive(:local?).and_return(false)
+
+      expect(described_class.operation_ids).not_to include(:dev_engine)
+    end
+  end
 end

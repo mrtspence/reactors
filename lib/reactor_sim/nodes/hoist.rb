@@ -54,16 +54,21 @@ module ReactorSim
       BOARDING_S = 3.0
 
       attr_reader :moment_of_inertia, :radius_m, :friction, :depth_m, :clearance_m, :sump_m, :rope,
-                  :shaft, :deck, :boarding_hazard, :rated_speed_m_s, :perils
+                  :shaft, :deck, :boarding_hazard, :rated_speed_m_s, :perils, :cage_kg
 
       # `rope:` names the rope the cage hangs on. Parted, the cage is no longer the drum's load.
+      # `cage_kg:` is each cage's own mass, and `catches:` whether they grip the guides when the
+      # rope parts — properties of the cage, which the rope reads.
       # `deck:` names a holder riding in cage A, whose contents are load like anybody aboard.
       # `boarding_hazard:` is what winding away does to somebody still getting in.
       def initialize(id:, moment_of_inertia:, radius_m:, depth_m:, label: nil, friction: 0.0,
                      position_m: 0.0, clearance_m: 6.0, sump_m: 4.0, detaching_hook: false,
                      endangers: {}, damages: {}, rope: nil, shaft: nil, deck: nil,
-                     boarding_hazard: nil, rated_speed_m_s: nil, perils: [])
+                     boarding_hazard: nil, rated_speed_m_s: nil, perils: [], cage_kg: 0.0,
+                     catches: false)
         super(id: id, label: label)
+        @cage_kg = cage_kg.to_f
+        @catches = catches
         @rope = rope&.to_sym
         @shaft = shaft&.to_sym
         @deck = deck&.to_sym
@@ -84,6 +89,8 @@ module ReactorSim
       end
 
       attr_reader :failure_hazards, :failure_damages
+
+      def catches? = @catches
 
       def base_initial_state(rng, content)
         super.merge(position_m: @position_m, slack_m: 0.0, snatch_m: 0.0, resting_n: 0.0,
@@ -143,12 +150,20 @@ module ReactorSim
         cage_speed_m_s(state).abs / @rated_speed_m_s
       end
 
-      # The imbalance, at the drum. Cage B rides empty, so it is all cage A's load — until the rope
-      # parts or the cage hangs, when cage A is no longer on the drum at all.
+      # The imbalance, at the drum. Cage B rides empty, so it is cage A's load — and the ropes', the
+      # longer side outweighing the shorter, so a heavy rope is most to lift with cage A at the
+      # bottom — until the rope parts or the cage hangs, when cage A is no longer on the drum at all.
       def drive_torque(state, ctx)
         return 0.0 if rope_parted?(ctx) || hung?(state)
 
-        Units::GRAVITY_M_PER_S2 * @radius_m * cargo_kg(ctx)
+        Units::GRAVITY_M_PER_S2 * @radius_m * (cargo_kg(ctx) + rope_imbalance_kg(state, ctx))
+      end
+
+      def rope_imbalance_kg(state, ctx)
+        rope = @rope && ctx.nodes&.[](@rope)
+        return 0.0 unless rope.respond_to?(:kg_per_m)
+
+        rope.kg_per_m * ((2.0 * cage_m(state)) - @depth_m)
       end
 
       # What a brake on this drum has to hold, as of last tick — read through `supports:`.
@@ -177,8 +192,7 @@ module ReactorSim
       def resting_n(state, ctx)
         return 0.0 unless hung?(state)
 
-        cage = @rope ? ctx.nodes.fetch(@rope).cage_kg : 0.0
-        (cage + cargo_kg(ctx)) * Units::GRAVITY_M_PER_S2
+        (@cage_kg + cargo_kg(ctx)) * Units::GRAVITY_M_PER_S2
       end
 
       # --- the ends -------------------------------------------------------------
