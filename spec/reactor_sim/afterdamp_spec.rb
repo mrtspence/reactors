@@ -104,24 +104,23 @@ RSpec.describe "afterdamp" do
       events = work!(op, 60, ventilation: 0, naked_flame: 100, hewing: 0)
       hurt = events.select { |e| e[:type] == :minion_hurt }
 
-      # **The heat beats the gas to them, and that is correct.** An ignition takes the district to
-      # 2,300 K and the roadway carries it to the pit bottom; a shift underground is burnt long
-      # before anybody could suffocate. Afterdamp is what kills whoever comes down *afterwards*,
+      # **The blast beats the gas to them, and that is correct.** The explosion hurts whoever is in
+      # the district the instant it goes off; the heat it leaves is gone into the rock within
+      # seconds. Afterdamp is what kills whoever survived it, and whoever comes down *afterwards*,
       # which is the historical case and is why rescue parties went in with apparatus — see
       # `breath_spec` for the suffocation clock itself.
       expect(hurt).not_to be_empty
       expect(hurt.map { |e| e[:cause] }.uniq).to all(be_a(Symbol))
-      expect(hurt.map { |e| e[:cause] }).to include(:burns)
+      expect(hurt.map { |e| e[:cause] }).to include(:blast)
       expect(crew(op, :crew_1)[:injury]).not_to be_nil
     end
 
     # **Who it reaches worst is decided by where they were standing**, which is the entire argument
     # for hazards belonging to places.
     #
-    # The gradient is stark rather than graded, and stating it that way is the durable claim: the
-    # face is **burnt** and the pit bottom is not burnt at all — 3.006 against exactly 0.000 — yet
-    # the putter is not safe either, because the blast still spends his hidden margin. Asserting
-    # the pit bottom's burns as some fraction of the face's would be asserting against zero.
+    # The gradient is stark rather than graded: the face is **burnt**, in the flash, and the pit
+    # bottom not at all — the gas that reaches it gives its heat to the rock on the way — yet the
+    # putter is not safe either, because the blast still reaches him and spends his hidden margin.
     it "burns the face, spends the putter's margin, and leaves the bank alone" do
       op = gassy
       intact = crew(op, :crew_2).fetch(:resilience)

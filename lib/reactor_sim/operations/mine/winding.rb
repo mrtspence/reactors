@@ -39,10 +39,12 @@ module ReactorSim
         LEAST_CLUTCH = 5.0
 
         attr_reader :hoist, :forward, :reverse, :brake_release, :shuttle, :deck, :deck_full_kg,
-                    :coal_from
+                    :coal_from, :loader, :unloader
 
+        # `loader:` and `unloader:` are the ways coal goes on and off the deck, which the signal
+        # board reads to say a deck is being worked.
         def initialize(hoist:, forward:, reverse:, brake_release:, shuttle: nil, deck: nil,
-                       deck_full_kg: 0.0, coal_from: nil)
+                       deck_full_kg: 0.0, coal_from: nil, loader: nil, unloader: nil)
           @hoist = hoist.to_sym
           @forward = forward.to_sym
           @reverse = reverse.to_sym
@@ -51,10 +53,71 @@ module ReactorSim
           @deck = deck&.to_sym
           @deck_full_kg = deck_full_kg.to_f
           @coal_from = coal_from&.to_sym
+          @loader = loader&.to_sym
+          @unloader = unloader&.to_sym
           freeze
         end
 
         def levers = [ @forward, @reverse, @brake_release ]
+
+        # **What the cage is doing and what it is waiting on**, as both landings can see it — the
+        # signal board (`design_sketches/winding-signals.md`). The first that holds wins: what has
+        # broken, then why it is not moving, then what it is waiting on. The order of this hash is
+        # the gauge's phrase list.
+        SIGNALS = {
+          rope_held: "rope parted — cage on its catches",
+          rope_fell: "rope parted — cage fallen",
+          caught: "cage caught in the headframe",
+          overwound: "overwound into the headframe",
+          crashed: "cage crashed at the bottom",
+          hung: "hung in the shaft — slack rope",
+          lodged: "tub lodged in the shaft",
+          unmanned: "no engineman at the winder",
+          fumbling: "the engineman is fumbling the levers",
+          stopped: "winding engine stopped",
+          lowering: "winding down",
+          raising: "winding up",
+          mid_shaft: "stopped in the shaft",
+          false_ready: "false ready rung — a man still getting in",
+          bell_bank: "waiting on the banksman's bell — men getting in",
+          bell_bottom: "waiting on the onsetter's bell — men getting in",
+          boarding_bank: "men getting in at bank",
+          boarding_bottom: "men getting in at the pit bottom",
+          unloading: "running off coal at bank",
+          loading: "loading coal at the pit bottom",
+          no_banksman: "no banksman to run off coal",
+          no_onsetter: "no onsetter to load coal",
+          called_bank: "men waiting at bank",
+          called_bottom: "men waiting at the pit bottom",
+          at_bank: "standing at bank",
+          at_bottom: "standing at the pit bottom"
+        }.freeze
+
+        # Slack past this and the cage is hung — the slack lamp's own first band.
+        HUNG_M = 0.3
+
+        # A parted rope's mode, as the board says it.
+        FAULTS = { parted_held: :rope_held, parted: :rope_fell }.freeze
+
+        # `landing` is `:bank`, `:pit_bottom` or nil. `marshals` are the landings with a marshal
+        # posted, `slipping` those whose marshal is slipping, `boarding` those where somebody is
+        # still getting in, `waiting` those where somebody waits to cross. `running` is whether the
+        # shaft driving the drum is turning.
+        def signal(drum:, drum_state:, states:, landing:, staffed:, fumbling:, running:, shuttling:,
+                   marshals:, slipping:, boarding:, waiting:)
+          fault = fault(drum, drum_state, states) and return fault
+          return :unmanned unless staffed
+          return :fumbling if fumbling
+          return :stopped unless running
+
+          speed = drum.speed_m_s(drum_state)
+          return speed.positive? ? :lowering : :raising if speed.abs >= Nodes::Hoist::STOPPED_M_S
+          return :mid_shaft if landing.nil?
+
+          at_landing(landing, states, shuttling:, marshals:, slipping:, boarding:, waiting:)
+        end
+
+        def signal_index(signal) = SIGNALS.keys.index(signal)
 
         # **Where he winds to**, percent of the shaft from bank. Not shuttling, the player's word.
         # Shuttling, he runs the shaft himself: `calls` — the landings men want, aboard first —
@@ -94,6 +157,45 @@ module ReactorSim
         end
 
         private
+
+        def fault(drum, drum_state, states)
+          rope = states.dig(drum.rope, :failure) if drum.rope
+          return FAULTS.fetch(rope, :rope_fell) if rope
+          return drum_state[:failure] if drum_state[:failure]
+          return :hung if drum.slack_m(drum_state) >= HUNG_M
+
+          :lodged if drum.shaft && states.dig(drum.shaft, :jam_m)
+        end
+
+        def at_landing(landing, states, shuttling:, marshals:, slipping:, boarding:, waiting:)
+          bank = landing == :bank
+          if boarding.include?(landing)
+            return :false_ready if slipping.include?(landing)
+            return bank ? :bell_bank : :bell_bottom if marshals.include?(landing)
+
+            return bank ? :boarding_bank : :boarding_bottom
+          end
+
+          coal = coal_at(landing, states, shuttling:, marshals:) and return coal
+          return :called_bottom if bank && waiting.include?(:pit_bottom)
+          return :called_bank if !bank && waiting.include?(:bank)
+
+          bank ? :at_bank : :at_bottom
+        end
+
+        # Coal moving on or off the deck here, or a shuttle stood waiting for the marshal who would
+        # move it.
+        def coal_at(landing, states, shuttling:, marshals:)
+          if landing == :bank
+            return :unloading if @unloader && states.dig(@unloader, :carried_kg).to_f.positive?
+            return :no_banksman if shuttling && !marshals.include?(:bank) && contents_kg(states, @deck) > EMPTY_KG
+          else
+            return :loading if @loader && states.dig(@loader, :carried_kg).to_f.positive?
+            return :no_onsetter if shuttling && !marshals.include?(:pit_bottom) &&
+                                   contents_kg(states, @coal_from, :coal) > EMPTY_KG
+          end
+          nil
+        end
 
         def contents_kg(states, node, resource = nil)
           parcels = node ? states.dig(node, :parcels) || [] : []

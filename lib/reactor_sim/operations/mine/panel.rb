@@ -23,7 +23,7 @@ module ReactorSim
         sump_level beam_condition water_make survey bore_holes goaf_weight fire_stink
         district_light district_fire
         roof_timber putting
-        cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
+        winding_signals cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
         coal_raised seam_remaining
       ].freeze
 
@@ -256,6 +256,16 @@ module ReactorSim
             # A minute's average: a deck comes off in about a minute and a half at a time.
             filters: [ Filters::Average.new(240), Filters::Lag.new(2) ],
             display: Displays::Needle.new(unit: "kg/s", precision: 2, min: 0.0, max: 8.0)
+          ),
+
+          # **What the cage is doing and what it is waiting on** — the bell, the men getting in, a
+          # deck being worked, a tub in the guides. A signal board rather than an instrument: it says
+          # what both landings can see, so it has no lag, no noise and nobody it is read through.
+          # The tick writes it onto the drum after the walk (`Winding#signal`).
+          winding_signals: Diagnostic.new(
+            id: :winding_signals, label: "Winding",
+            source: Sources::Field.new(:cage_drive, :signal),
+            display: Displays::Prose.new(Winding::SIGNALS.values)
           ),
 
           # **Where the cage is**, which is what an engineman winding to a mark actually watches:

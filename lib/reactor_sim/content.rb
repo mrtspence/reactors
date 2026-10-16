@@ -172,6 +172,15 @@ module ReactorSim
         end.to_f
       end
 
+      # How fast heat gets through it, for something built of it. Missing is a mistake, not a
+      # default, as for `tensile_strength_pa`: the only reason to ask is that a wall is made of it.
+      def thermal_conductivity_w_per_m_k(id)
+        resource(id).fetch(:thermal_conductivity_w_per_m_k) do
+          raise Error, "resource #{id.inspect} has no thermal_conductivity_w_per_m_k; it cannot " \
+                       "be used as a wall"
+        end.to_f
+      end
+
       # How hot a part made of this may get before it stops being structural — **not** its
       # melting point. See `content/resources/materials.yml`.
       #
@@ -239,6 +248,7 @@ module ReactorSim
 
           validate_stoichiometry!(id, spec)
           validate_pathways!(id, spec)
+          Resources::Prompt.validate!(id, spec) if spec.key?(:prompt)
         end
 
 

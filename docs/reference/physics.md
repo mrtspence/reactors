@@ -84,6 +84,18 @@ That approximation buys a lot: advection becomes exactly correct, because a parc
 carries precisely the energy its temperature implies. Things needing genuinely distinct
 temperatures are **distinct nodes**.
 
+**A room's walls are the commonest case.** The gas in a roadway and the rock round it are
+different temperatures — a blast leaves the one at 2,400 K and the other barely warm — so the rock
+is a `Nodes::Wall`: a skin of its material, linked to the gas by a convective film and the hot
+gas's radiation, and backed by conduction into the strata, which are the ambient reservoir. One
+skin has both limits a semi-infinite solid has, absorbing a blast at the face and passing heat on
+with a time constant of `ρ c skin² / k`. Lumped with the gas instead, the rock would be at the
+gas's temperature — 2,400 K walls, and a district that stayed hot for minutes. The mine's figures
+are fire gas against rough rock: a 30 W/m²K film (measured runs 25–50), a dust-laden blast's
+emissivity of 0.4, and twice a smooth bore's face. Measured on a district explosion: 2,700 K at the
+flash, 559 K five seconds on, 338 K at twenty — so whoever the blast spares is left to the
+afterdamp rather than roasted.
+
 `rebalance(state, content)` restores the single-temperature invariant after anything changes
 the mix. `add_joules` calls it for you. The engine calls it after advection, reactions and
 phase change — you rarely need to.
@@ -338,6 +350,17 @@ Five rules, each of which was got wrong first:
   Note what `quench_per_s` alone cannot do: it is multiplied by `max(chill, starved, unlit)`,
   so in a hot room with air to spare the quench term is **zero whatever figure is written**.
   A fire that will not go out is almost never a quench that is too low.
+
+  **Outside its range a flame burns what it lights and no more.** `Tick#burn_down_ignition`
+  shrinks a fire in proportion to the fuel burnt — a front consuming a lump moves on to the next
+  — but a mixture that will not carry a flame has no front, so there what burns comes off the
+  lit mass one for one. In proportion, the lit mass would outlive every tick's burn and a naked
+  light in 1% gas would burn twenty times its own seed. That is why a candle's seed is a flame cap's worth
+  (`Minion::HAND_FLAME`, `Mine::OPEN_FLAME`): in lean gas the seed *is* the burn.
+- **A premixed fuel burns with the air mixed into it.** For a reaction with a flammable range,
+  the pathway split gives the lit fuel only its share of the node's air
+  (`Reaction.premixed_share`), so a rich mixture burns rich from the first gram and its products
+  do not depend on how much of it caught in a tick. A fuel bed takes all the air there is.
 - **A fuel hot enough lights itself.** `autoignition_k`, opt-in in the `ignition:` block, seeds
   the fire at `Ignition::AUTO_SEED_KG_PER_S` while the fuel is past it — read against the hotter
   of the node's bulk temperature and its `hot_spot:` node's, as of last tick, because a lumped body
@@ -356,6 +379,40 @@ that burns away takes its share of the fire with it.
 **This does not replace modelling genuinely distinct temperatures as distinct nodes.** A
 reactor's fuel pin really is hundreds of kelvin above its coolant, and no ignited fraction can
 express that. The two answer different questions and are meant to coexist.
+
+### Prompt reactions: what happens faster than a tick is resolved
+
+`Resources::Prompt`, run by `Concerns::PromptReaction`. A reaction declaring
+`prompt: { kind: }` is not integrated once it triggers — it is **resolved** from what the node
+holds, the same call phase change makes. Integrated at its rate, an explosion splits its burn
+between pathways against the air left each tick, so its products depend on where the burn falls
+on the tick grid — **22.5 or 66.9 kg of CO from the same fuel**, measured, changed only by the size
+of the spark. Sub-stepping converges slowly and to the wrong answer: a well-mixed node burns clean
+until the air is gone, where a premixed flame burns rich throughout.
+
+- **Phase 5 asks first.** A node hosting a prompt reaction resolves whatever triggers, then the
+  rest of its reactions run at their rates as before; a resolved reaction does not run again.
+  A node hosting none takes the old path exactly.
+- **In sequence**: after each resolution every prompt reaction not yet resolved this tick is asked
+  again against the node as it now is, in declaration order, each at most once a tick.
+- **`:deflagration`** (`Resources::Deflagration`) — the only kind. Anything alight in a mixture
+  inside its range is a front, so on the next tick (the lit mass is as of last tick) the front
+  passes through the whole mixture and every kilogram of fuel burns, through
+  `Reaction.complete`: the pathway split against **all** the node's air, which is the mass-balance
+  answer. A front lights every other fuel in its range, so a gas explosion takes a dust cloud with
+  it on the air the gas left. **There is no build-up at room scale**: a lit fraction left to grow
+  at its rate first burns the mixture it is in and dilutes it — far enough, measured, to take a 9%
+  district out of its range before it goes off.
+- **The node's `reaction_throttle` is the share a front can carry through** — stone dust that is
+  two-thirds of the airborne dust carries none. In the rate path it scales `dt`; with no rate, it
+  scales the mixture.
+- Each resolution emits one `:explosion` (`mode: :explosion`) with the reactions, the fuel burnt
+  and the joules. The node's `endangers: { explosion: }` hurts whoever is in it at that instant,
+  scaled by the joules, and its `damages: { explosion: }` wrecks what the blast reaches — a walled
+  room sheds its heat long before it could wear through, so the blast has to be the harm.
+- **The kind table is a seam.** Its next callers are a fuel–coolant interaction (molten metal into
+  water, which flashes steam, splits it and burns the hydrogen — three steps of the same loop) and
+  prompt criticality. See `docs/design_sketches/prompt-reactions.md`.
 
 ### Two rules that keep the books straight
 

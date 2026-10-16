@@ -476,13 +476,15 @@ its §4.
   firedamp a tonne), **the airborne dust share (1% of the coal thrown) is a guess**, the 60 kg/s
   release, the auger's 4 m reach and 0.25 kg/s draw. Goaf: spans (first 6 m, then 3 m, σ 0.4), the
   flush (×150 for 20 s) and packing at about half a hewer's advance. The gob: the 25% with nothing
-  heating, the zone's 3 t median, the 65-minute median time to firing (σ 0.4), the 35 kW design heat
-  it is solved against (measured off running pits), `REACTIVITY` 10, sealing at about two hours, breaking out at 1000 K. **Coal's
+  heating, the zone's 3 t median, the 65-minute median time to firing (σ 0.4), the 50 kW design heat
+  and 18 kg of air it starts on (what the trickle settles to, measured; seven draws fire within 12%
+  of their drawn time), `REACTIVITY` 10, sealing at about two hours, breaking out at 1000 K. **Coal's
   CO pathway also applies on the grate**: the engine is identical at steady working (1010 K, 608 kPa,
   160 rpm, 455 kW, no CO) and makes CO only from an over-fed bed, so the engine rig's fire bed was
   retaken from the running engine
 - [ ] **Tune 3a** in the tuning pass: the door's open and shut rates, the gauze's 2.3 m/s, the
-  burst ratios (fan 1.5, pump 1.4, lamps 1.4) and the trip's 1.25, the hand flame and spark sizes
+  burst ratios (fan 1.5, pump 1.4, lamps 1.4) and the trip's 1.25, the bell spark's size (the hand
+  flame and sconces are a flame cap's worth now, which is what they burn in lean gas)
 
 *Unit 3b — designed and reviewed in [`design_sketches/mine-accidents-unit3b.md`](design_sketches/mine-accidents-unit3b.md).
 In build order:*
@@ -500,7 +502,33 @@ In build order:*
   W3); a timber/iron headframe slot in parallel with the downcast; a reversible fan tier. A
   hand-carried Davy lamp failing in a draught stays deferred: it needs a draught per place, and only
   the district's sconces measure one
-- [ ] *Playtest checkpoint*
+- [x] *Playtest checkpoint* (2026-10-15). Burns in the district within minutes, and two men who
+  never reached the cage. Replayed from the seed and the command log: **not the gob and not the
+  winder.** The heating waste started holding its cold gas charge at 670 K — 2.3 atmospheres — and
+  blew 200 kg of hot gas into the roads (it now starts at the roads' pressure); and a naked light in
+  1% gas burnt ~640 kW continuously, because a flame outside its range kept its lit mass across
+  ticks and the candle seeds were a thousand times a flame cap's (it now burns what it lights, at a
+  flame cap's rate). The men were walking: 200 m at a day-labourer's 0.64 m/s, stood down by the
+  burns 37 m short. Explosions also turned out to make products set by the tick grid, and nothing
+  cooled them — both answered by the next item
+- [x] **Winding signals** — [`design_sketches/winding-signals.md`](design_sketches/winding-signals.md).
+  One plain-words gauge on the panel saying what the cage is doing and what it is waiting on: a
+  fault, why it is not moving, the bell, men getting in, a deck being worked, men waiting across
+  the shaft
+- [x] **Prompt reactions and walls** — [`design_sketches/prompt-reactions.md`](design_sketches/prompt-reactions.md).
+  - [x] A: `Concerns::PromptReaction`, `:deflagration` on firedamp and coal dust, `:explosion`.
+    Products by the mixture's own air whatever the spark; a gas front takes the dust with it
+  - [x] B: `Nodes::Wall` — rock (`coal_measures`, in the material catalogue, which now carries
+    conductivity throughout) with its own temperature on the district and pit bottom; hot strata
+    as a `hot_spot:`. The `:explosion` is now the blast: it hurts by its joules and wrecks the door
+    and half a sound roadway, because a walled district sheds its heat before it could wear
+    through. The held specs re-measured on the new physics
+- [ ] **Tune the walls and the blast**: set against fire gas in a rough mine drift — a 30 W/m²K
+  film (measured 25–50), a dust-laden blast's emissivity of 0.4, rough rock at twice a smooth
+  bore's face — a district blast's gas is at 559 K five seconds on and 338 K at twenty. Still
+  first figures: the 2 cm skin, the fixed emissivity (a seam), the blast's 3 GJ reference and its
+  half a roadway. **Gas is not cooled in transit**: the main road is a conduit with no rock and no
+  residence, so a blast's gas reaches the pit bottom near 1,300 K for a tick or two
 - [x] 16 Sudden outburst — 0–2 hidden pockets drawn with the ground, at random depths into the
   face and of random, heavy-tailed size; the boring-ahead station, which also reads the plans
 - [x] 17 Goaf falls — falls at spans drawn at `initial_state` (log-normal, the first weighting

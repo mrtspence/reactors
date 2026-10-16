@@ -544,7 +544,8 @@ module ReactorSim
       def pit_bottom
         Sump.new(
           id: :pit_bottom, label: "Pit Bottom", volume_m3: 900.0,
-          heat_capacity: 2.0e5, ambient_conductance: 220.0,
+          # Its gear; the rock is `:pit_bottom_rock`.
+          heat_capacity: 2.0e4,
           initial_contents: [ { resource: :air, kg: 1_100.0 } ],
           # **Gas that reaches the shaft can burn there.** It is on the intake and is clear while
           # the air runs; stop the fan or breach the brattice and the district's gas backs out to
@@ -633,14 +634,52 @@ module ReactorSim
         end
       end
 
+      # **The strata round a working**, of `:coal_measures`. The roads' gas loses its heat to the
+      # rock face and the rock passes it on into the ground, which is why a blast's heat lasts
+      # seconds and the face it scorched stays warm for minutes (`Nodes::Wall`).
+      #
+      # Two centimetres: about how far heat gets into rock over the minutes a working cares about.
+      ROCK_SKIN_M = 0.02
+
+      # Fire gases against the rough rock of a mine drift, where measured coefficients run 25–50.
+      ROCK_FILM_W_PER_M2_K = 30.0
+
+      # Hot CO₂ and steam carrying the dust and soot a blast raises — a luminous cloud, where clean
+      # products a few metres deep sit near 0.2. Radiation is most of what a blast's gas loses to
+      # the walls. TODO: derived from what is in the gas — first caller is a furnace, where a
+      # luminous flame is the lever; fixed until then, and untested beyond it.
+      FLAME_GAS_EMISSIVITY = 0.4
+
+      # **Rough rock has about twice the face of a smooth bore** of the same size, and the roughness
+      # stirs the gas against it.
+      ROCK_ROUGHNESS = 2.0
+
+      def rock(id, area_m2:)
+        Nodes::Wall.new(id: id, label: "Strata", material: :coal_measures,
+                        area_m2: area_m2 * ROCK_ROUGHNESS, skin_m: ROCK_SKIN_M, content: Content.default)
+      end
+
+      def rock_face(room, rock, area_m2:)
+        face = area_m2 * ROCK_ROUGHNESS
+        ThermalLink.new(a: room, b: rock, conductance: ROCK_FILM_W_PER_M2_K * face,
+                        emissivity: FLAME_GAS_EMISSIVITY, radiating_area_m2: face)
+      end
+
+      # 200 m of roadway at about ten metres round, and the pit bottom's landing and its roads — as a
+      # smooth bore; `ROCK_ROUGHNESS` makes it rock.
+      DISTRICT_FACE_M2 = 2_100.0
+      PIT_BOTTOM_FACE_M2 = 1_350.0
+
       def district
         District.new(
           id: :district, label: "District", volume_m3: 1_400.0,
-          heat_capacity: 3.0e5, ambient_conductance: 300.0,
+          # Its props, tubs and gear. The rock is `:district_rock`.
+          heat_capacity: 2.0e4,
           initial_contents: [ { resource: :air, kg: 1_700.0 } ],
           reactions: %i[firedamp_combustion coal_dust_combustion],
-          # The waste behind the face: a gob fire hot enough fires the district's gas with no flame.
-          hot_spot: :gob,
+          # The waste behind the face and the rock round it: either hot enough fires the district's
+          # gas with no flame — a gob fire, or strata a fire has left past firedamp's ignition point.
+          hot_spot: %i[gob district_rock],
           # **No igniter of its own.** Whatever is alight in the district — an open-flame light —
           # offers itself to this air through `Tick#ignition_sources`, so with a safe tier fitted
           # the district has no ignition source at all, which is what "safe lighting" has to mean
@@ -657,14 +696,22 @@ module ReactorSim
           # district when it goes up — the deputy walking through, the man who has just been
           # stood down from his post — and the weight falls off with distance rather than with
           # what anybody was doing.
+          #
+          # **The explosion is the blast, the instant it happens**, by the energy it released — a
+          # walled district has shed its heat long before it could wear through. A rupture is the
+          # roadway itself giving way to a fire that went on burning.
           endangers: {
+            explosion: { tags: %i[blast burn], scales_with: :joules, reference: 3.0e9,
+                         places: { district: 3.2, pit_bottom: 1.1 } },
             rupture: { tags: %i[blast burn afterdamp], scales_with: :temperature_k,
                        reference: 1_400.0,
                        places: { district: 3.2, pit_bottom: 1.1 } }
           },
           # The blast goes down the roads and blows the haulage door out of its frame, so the air
-          # that might have cleared the afterdamp takes the short way back to the fan instead.
-          damages: { rupture: { door: 1.0 } },
+          # that might have cleared the afterdamp takes the short way back to the fan instead. **It
+          # wrecks the roadway too**, by force rather than heat — timbering blown out, the roof let
+          # down — so a sound district stands one explosion and one already worn does not.
+          damages: { explosion: { door: 1.0, district: 0.5 }, rupture: { door: 1.0 } },
           ports: [
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
@@ -1034,7 +1081,7 @@ module ReactorSim
 
         # The heat a waste makes on the leak's ordinary trickle — what the start temperature is solved
         # against, measured off running pits rather than assumed. The real trickle sets the real rate.
-        DESIGN_HEAT_W = 35_000.0
+        DESIGN_HEAT_W = 50_000.0
 
         # Broken coal has a great deal of surface: how much faster than lump coal it takes up oxygen.
         REACTIVITY = 10.0
@@ -1052,8 +1099,10 @@ module ReactorSim
 
         # **A waste that has been heating for days has used its air.** It holds what the trickle keeps
         # in it against the coal taking it up — the rest long since gone to blackdamp — so it does
-        # not start with a lungful of fresh oxygen to burn through in its first minutes.
-        HEATING_AIR_KG = 25.0
+        # not start with a lungful of fresh oxygen to burn through in its first minutes. **And it has
+        # breathed out as it warmed**, so it starts at the pressure of the roads, holding less gas the
+        # hotter it is.
+        HEATING_AIR_KG = 18.0
 
         def initial_state(rng, content = nil)
           state = super
@@ -1064,7 +1113,7 @@ module ReactorSim
         end
 
         def heating(state, waste, kelvin, content)
-          held = Parcel.total_kg(state.fetch(:parcels))
+          held = Parcel.total_kg(state.fetch(:parcels)) * ambient_k / kelvin
           [ Parcel.build(resource: :coal, kg: waste.fetch(:coal_kg), temperature_k: kelvin, content: content),
             Parcel.build(resource: :air, kg: HEATING_AIR_KG, temperature_k: kelvin, content: content),
             Parcel.build(resource: :blackdamp, kg: held - HEATING_AIR_KG, temperature_k: kelvin, content: content) ]
@@ -1280,9 +1329,10 @@ module ReactorSim
         end
       end
 
-      # What an open flame on the roadway offers the district: enough seed to light a mixture
-      # that will carry it, and a little heat.
-      OPEN_FLAME = { igniter_kg_per_s: 4.0e-4, flame_watts: 1.2e3 }.freeze
+      # What the open flames down the roadway offer the district: enough seed to light a mixture
+      # that will carry it, and a little heat. In gas too lean to carry it the seed is what they
+      # burn — a flame cap apiece, about a kilowatt of firedamp for the row.
+      OPEN_FLAME = { igniter_kg_per_s: 2.0e-5, flame_watts: 1.2e3 }.freeze
 
       def sconces(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0, flame: {})
         Lighting.new(

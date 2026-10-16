@@ -97,11 +97,16 @@ cast_iron:
   density_kg_per_m3: 7200
   specific_heat_j_per_kg_k: 460
   tensile_strength_pa: 150.0e6
+  thermal_conductivity_w_per_m_k: 50
   max_temperature_k: 800
 ```
 
 `tensile_strength_pa` is only required on things actually used as structural materials;
 asking for one that is missing raises rather than returning nil into a stress calculation.
+`thermal_conductivity_w_per_m_k` is the same: required of whatever a `Nodes::Wall` is built of,
+and every material in the catalogue declares one. **Rock is a material too** — `coal_measures`,
+with no strength or rating, because nothing is built of it; it is what a pit's walls are, and its
+density, specific heat and conductivity are the whole of why a blast's heat lasts seconds.
 
 What a spinning part cares about is the **ratio** of tensile strength to density. Cast iron
 does badly on it — excellent in compression, poor in tension, which is exactly the wrong way
@@ -253,6 +258,28 @@ fuel is inferred from the `:fuel` tag, so nothing has to be declared twice. See
 
 **Set `quench_per_s` above `spread_per_s`**, or a cold box can never put a fire out — at
 equilibrium the two balance, and a fire settles where its draught can support it.
+
+A flame in a mixture outside its range burns only what it lights, one for one. **An igniter's seed
+rate is therefore what a flame burns in lean gas**, so size it to the flame — a candle's flame
+cap is about a microgram a second, not the grams a firelighter on a grate wants.
+
+### `prompt:` is for whatever happens faster than a tick
+
+```yaml
+  prompt:
+    kind: deflagration
+```
+
+A reaction that declares it is **resolved, not integrated**, once it triggers (see
+[`../reference/physics.md`](../reference/physics.md#prompt-reactions-what-happens-faster-than-a-tick-is-resolved)).
+`deflagration` is the one kind: a premixed fuel in its flammable range, alight, burns the whole
+mixture on the next tick, its products set by the mixture's own air through its `alternatives:`.
+It needs an `ignition:` block with a flammable range, and `Content` refuses to load one without
+it or with a kind nobody resolves. Firedamp and coal dust declare it; a fuel bed never should —
+its air really does arrive tick by tick.
+
+`rate_per_s` still governs a prompt reaction outside its range, where a naked light burns a
+trickle of lean gas.
 
 ### `min_temperature_k` is not the ignition point
 

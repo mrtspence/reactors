@@ -44,6 +44,7 @@ module ReactorSim
       fusible_plug_melted
       fire_lit
       fire_out
+      explosion
       heater_engaged
       steam_raised
       blew_off

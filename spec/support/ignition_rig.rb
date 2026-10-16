@@ -44,7 +44,7 @@ module IgnitionRig
   # lever. `firedamp:` is given as a **fraction by volume of the gas**, because that is the
   # quantity the flammability limits are stated in and converting it here is what keeps an example
   # readable.
-  def district(firedamp: 0.0, coal_dust: 0.0, air_kg: AIR_KG)
+  def district(firedamp: 0.0, coal_dust: 0.0, air_kg: AIR_KG, igniter_kg_per_s: 4.0e-4)
     mix = [ { resource: :air, kg: air_kg } ]
     mix << { resource: :firedamp, kg: firedamp_kg(firedamp, air_kg) } if firedamp.positive?
     mix << { resource: :coal_dust, kg: coal_dust } if coal_dust.positive?
@@ -55,7 +55,7 @@ module IgnitionRig
       initial_temperature_k: AMBIENT_K,
       initial_contents: mix.map { |p| p.merge(temperature_k: AMBIENT_K) },
       reactions: %i[firedamp_combustion coal_dust_combustion],
-      heater_control_id: :naked_flame, heater_watts: 1.2e3, igniter_kg_per_s: 4.0e-4,
+      heater_control_id: :naked_flame, heater_watts: 1.2e3, igniter_kg_per_s: igniter_kg_per_s,
       max_temperature_k: MAX_TEMPERATURE_K, stress_rate: 2.4
     )
   end

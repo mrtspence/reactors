@@ -95,8 +95,8 @@ module ReactorSim
         Parts.register(id, kind: :winder, label: tier.fetch(:label),
                            description: tier.fetch(:description),
                            provides: %i[cage_drive cage_deck],
-                           instruments: %i[coal_raised cage_depth slack_rope winding_brake brake_heat
-                                           sheave_heat],
+                           instruments: %i[winding_signals coal_raised cage_depth slack_rope
+                                           winding_brake brake_heat sheave_heat],
                            stats: tier.except(:label, :description)) do |spec|
           Mine.hoist_fragment(tier: tier, spec: spec)
         end
@@ -337,7 +337,8 @@ module ReactorSim
         winding = Winding.new(hoist: :cage_drive, forward: :cage_forward, reverse: :cage_reverse,
                               brake_release: :cage_brake_release, shuttle: :coal_winding,
                               deck: :cage_deck, deck_full_kg: tier.fetch(:deck_kg) * 0.95,
-                              coal_from: :pit_bottom)
+                              coal_from: :pit_bottom, loader: :deck_loading,
+                              unloader: :deck_unloading)
         # Iron through the headframe goes down the shaft: it chokes it, and in a single shaft it
         # takes the brattice with it.
         wreckage = { shaft: 0.6 }.merge(spec[:single_shaft] ? { brattice: 0.5 } : {})
@@ -942,6 +943,8 @@ module ReactorSim
             Mine.shaft, *([ Mine.upcast_foot ] if spec[:single_shaft]),
             Mine.atmosphere, Mine.line_shaft(rated_torque_nm: 5.4e3, rated_omega: WORKING_OMEGA),
             Mine.downcast, Mine.pit_bottom, Mine.main_road, Mine.district, Mine.return_road,
+            Mine.rock(:district_rock, area_m2: Mine::DISTRICT_FACE_M2),
+            Mine.rock(:pit_bottom_rock, area_m2: Mine::PIT_BOTTOM_FACE_M2),
             Mine.seam(kg: SEAM_KG, firedamp_kg: 4_000.0),
             Mine.dust_source(kg: 3_000.0),
             # Deep enough that it never runs dry: a pit does not stop making blackdamp.
@@ -996,6 +999,11 @@ module ReactorSim
             Link.new(from: [ :waste_in, :outlet ], to: [ :gob, :air_in ]),
             Link.new(from: [ :gob, :air_out ], to: [ :waste_out, :inlet ]),
             Link.new(from: [ :waste_out, :outlet ], to: [ :district, :waste_in ])
+          ],
+          # The air of each room against the rock round it.
+          thermal_links: [
+            Mine.rock_face(:district, :district_rock, area_m2: Mine::DISTRICT_FACE_M2),
+            Mine.rock_face(:pit_bottom, :pit_bottom_rock, area_m2: Mine::PIT_BOTTOM_FACE_M2)
           ],
           control_points: [
             ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0,

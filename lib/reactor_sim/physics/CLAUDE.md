@@ -144,6 +144,22 @@ firedamp declare it.
 **It does not replace distinct nodes for distinct temperatures.** A reactor's fuel pin is
 genuinely hundreds of kelvin above its coolant; no ignited fraction expresses that.
 
+**Outside its range a flame burns what it lights, one for one** — there is no front to move on —
+so a candle's seed is a flame cap's worth. **A premixed fuel's lit share gets only its share of
+the air** (`Reaction.premixed_share`), so a rich mixture burns rich from the first gram.
+
+## Prompt reactions: faster than a tick is resolved, not integrated
+
+`Resources::Prompt` holds the kinds; `Concerns::PromptReaction` runs them in phase 5, before the
+node's rate-integrated reactions, in sequence, each at most once a tick. `:deflagration` is the
+one kind: anything alight in a mixture inside its range goes off on the next tick, and the front
+burns the whole mixture through `Reaction.complete` — the pathway split against all the node's
+air, so the products are the mass-balance answer whatever the tick or the spark. A front lights
+every other fuel in its range; `reaction_throttle` is the share it can carry through. Each
+resolution is an `:explosion` a node's `endangers:` and `damages:` can key on. The kind
+table is a seam (fuel–coolant interaction, prompt criticality). See
+[`physics.md`](../../../docs/reference/physics.md#prompt-reactions-what-happens-faster-than-a-tick-is-resolved).
+
 ## Reactions
 
 Chemistry has a **rate**; phase change does not. An instantaneous reaction has no transient,

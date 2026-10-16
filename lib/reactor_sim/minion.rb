@@ -90,8 +90,9 @@ module ReactorSim
 
     # **A naked light carried by a person** — a candle in the hat, an oil lamp on the belt — and
     # what it offers the air of the room they are standing in: a seed for a mixture that will
-    # carry it, and a little heat.
-    HAND_FLAME = { kg_per_s: 2.0e-4, watts: 200.0, cause: :open_flame }.freeze
+    # carry it, and a little heat. In gas too lean to carry it the seed is what it burns, so it is
+    # a flame cap's worth — tens of watts of firedamp.
+    HAND_FLAME = { kg_per_s: 1.0e-6, watts: 200.0, cause: :open_flame }.freeze
 
     def open_flame? = tag?(:open_flame) && Injury.numeric(tag(:open_flame)).positive?
 

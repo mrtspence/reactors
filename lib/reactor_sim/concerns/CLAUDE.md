@@ -15,6 +15,7 @@ specific heat. Reference:
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque`, `drag_conductances` |
 | `Roped` | needs `Rotating`; `rope_capacity_joules`, `control_id` (the clutch) | `supply_joules`, `remote_omega`, `remote_grip`, `rope_k` | `hear`, `receive`, `rope_report`, `rope_torque`, `rope_drags`, `grip` |
 | `Fusible` | `fusible_kg`; needs `Thermal` and a `material:` declaring `latent_heat_of_fusion_j_per_kg` | `fusible_remaining_kg` | `run_melt`, `melt_kg`, `melted_fraction`, `melted_out?`, `fusible_temperature_k` |
+| `PromptReaction` | none — inert unless a hosted reaction declares `prompt:`; needs `Thermal`, `Holds` and `reactions` | none — writes `parcels`, `joules`, `ignition`, `joules_from_reactions` | `resolve_prompt` (phase 5), emitting `:explosion`; `prompt_modes` — the `explosion:` a node's `endangers:` and `damages:` may key on, beside its failure modes |
 
 A snapshot — `ls lib/reactor_sim/concerns/` is the truth. This table drifts on a **column**, not
 just a row: adding a config key or a state key to an existing concern makes it wrong just as

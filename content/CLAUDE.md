@@ -125,6 +125,10 @@ a data file where nobody would look when conservation started failing.
   for the rest of the match. Both limits are a **share of the volume**, and both are separately
   opt-in — a fuel bed on a grate must declare neither, because a lump of coal does not stop
   burning because the firebox is roomy.
+- **`prompt: { kind: deflagration }` is for a premixed fuel**, and only one with a flammable
+  range — `Content` refuses it otherwise. Alight in its range, it burns the whole mixture on the
+  next tick, its products set by the mixture's air rather than by the tick. Firedamp and coal dust
+  declare it; a fuel bed must not.
 
 ## Materials
 
@@ -133,6 +137,10 @@ required only on things actually used as structural materials; asking for a miss
 rather than returning nil into a stress calculation.
 
 What a spinning part cares about is the **ratio** of tensile strength to density.
+
+`thermal_conductivity_w_per_m_k` is on every material, and required of anything a `Nodes::Wall`
+is built of. **Rock is in the catalogue** (`coal_measures`) as a wall's material — no strength and
+no rating, because nothing is built of it.
 
 **Safety factors do not belong here.** How far below the ideal figure a real part fails depends
 on casting quality and geometry — properties of the part. They go on the node.

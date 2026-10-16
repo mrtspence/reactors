@@ -154,14 +154,15 @@ module ReactorSim
       next_nodes, ledger = drive(next_nodes, read, settlement.drive, ledger, ctx)  # phase 4d
       next_nodes, events = apply_nodes(next_nodes, settlement.flows, delivered, ctx)
       next_nodes = transmit_torque(next_nodes, ctx)              # phase 4e
-      next_nodes = react(next_nodes, ctx)                        # phase 5
+      next_nodes, prompt_events = react(next_nodes, ctx)        # phase 5
       ledger = record_injections(ledger, next_nodes)
-      next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx)  # phase 6
-      next_minions, hurt_events = endanger(wear_events, ctx)     # phase 6b
+      next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx, prompt_events)  # phase 6
+      next_minions, hurt_events = endanger(wear_events + prompt_events, ctx)  # phase 6b
       next_minions, burn_events = scorch(next_minions, next_nodes, ctx)  # phase 6b′
       next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx)  # phase 6c
       next_minions, blunder_events = blunder(next_minions, next_nodes, fates, ctx) # phase 6d
       next_minions, carry_events = travel(next_minions, ctx)     # phase 6e
+      next_nodes = signal_winding(next_nodes, next_minions, controls)
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
 
       # Phase 8. Note that this hash IS the next state — a key not named here is silently
@@ -173,7 +174,7 @@ module ReactorSim
         minions: next_minions.freeze,
         ledger: ledger.freeze,
         mishaps: pending_mishaps(blunder_events),
-        events: (events + wear_events + hurt_events + burn_events + spent_events +
+        events: (events + prompt_events + wear_events + hurt_events + burn_events + spent_events +
                  blunder_events + carry_events).freeze }.freeze
     end
 
@@ -239,6 +240,40 @@ module ReactorSim
         )
         acc.merge(outputs.to_h { |id, value| [ id, acc.fetch(id).merge(target: value, actual: value).freeze ] })
       end
+    end
+
+    # **The signal board**: what each winder's cage is doing and waiting on, written onto its drum
+    # as `signal:` for the panel (`Winding#signal`). After the walk, over the tick that has just
+    # settled — the boarders, the marshals at their posts, the decks being worked — because no node
+    # can see the people, the same reason `advect` hands a conduit its `carried_kg`.
+    def signal_winding(states, minions_state, levers)
+      control_points.each_value.select(&:governor).reduce(states) do |acc, post|
+        governor = post.governor
+        passage = layout.passages.find { |p| p.hoist == governor.hoist } or next acc
+        drum = nodes.fetch(governor.hoist)
+        drum_state = acc.fetch(governor.hoist)
+        posted = minions_state.values.filter_map { |s| s[:station] }
+        landing = passage.ends.find { |place| drum.cage_stopped_at?(drum_state, passage.landing_m(place)) }
+        marshals = passage.marshals.select { |_, post_id| posted.include?(post_id) }.keys
+
+        signal = governor.signal(
+          drum: drum, drum_state: drum_state, states: acc, landing: landing,
+          staffed: posted.include?(post.id), fumbling: !levers.fetch(post.id)[:slip].nil?,
+          running: winding_shaft_running?(passage, acc), shuttling: shuttling?(governor, levers),
+          marshals: marshals, slipping: marshals.select { |place| levers.fetch(passage.marshals.fetch(place))[:slip] },
+          boarding: minions_state.values.filter_map { |s| s[:place] if s[:via] == governor.hoist && s.fetch(:boarding_s, 0.0).positive? },
+          waiting: minions_state.filter_map { |id, s| s[:place] if minions.key?(id) && waiting_to_cross?(id, s, passage) }
+        )
+        acc.merge(governor.hoist => drum_state.merge(signal: governor.signal_index(signal)).freeze)
+      end
+    end
+
+    # Whether what drives a ridden way is turning, the test `in_service?` makes, on settled state.
+    def winding_shaft_running?(passage, states)
+      return true unless passage.driven_by && passage.rated_omega&.positive?
+
+      shaft = nodes.fetch(passage.driven_by)
+      shaft.omega(states.fetch(passage.driven_by)).abs >= passage.rated_omega * DRIVEN_IN_SERVICE
     end
 
     def shuttling?(governor, levers)
@@ -906,22 +941,31 @@ module ReactorSim
     end
 
     # Phase 5. Local to each node — no cross-node effects, so order cannot matter.
-    # Chemistry advances at a rate; phase change snaps to equilibrium.
+    # Chemistry advances at a rate; phase change snaps to equilibrium. **So does anything faster
+    # than a tick**: a node hosting a prompt reaction resolves it first (`Concerns::PromptReaction`),
+    # and what it resolved does not then run again at its rate.
     def react(states, ctx)
-      states.to_h do |id, state|
+      events = []
+      reacted = states.to_h do |id, state|
         node = nodes.fetch(id)
         next [ id, state ] unless state.key?(:parcels) && !state.fetch(:parcels).empty?
 
-        state = run_reactions(node, state, ctx)
+        state = state.merge(joules_from_reactions: 0.0)
+        resolved = []
+        if node.respond_to?(:resolve_prompt)
+          state, resolved, prompted = node.resolve_prompt(state, ctx)
+          events.concat(prompted)
+        end
+        state = run_reactions(node, state, ctx, skip: resolved)
         state = run_phase_change(node, state, ctx)
         [ id, node.rebalance(state, content).freeze ]
       end
+
+      [ reacted, events ]
     end
 
-    def run_reactions(node, state, ctx)
-      state = state.merge(joules_from_reactions: 0.0)
-
-      node.reactions.reduce(state) do |acc, reaction_id|
+    def run_reactions(node, state, ctx, skip: [])
+      (node.reactions - skip).reduce(state) do |acc, reaction_id|
         spec = content.reaction(reaction_id)
         acc = advance_ignition(spec, reaction_id, node, acc, ctx)
 
@@ -969,10 +1013,10 @@ module ReactorSim
       with_ignition(state, reaction_id, advanced)
     end
 
-    # The temperature of the node a vessel's fuel touches, as of last tick; nil if it names none.
+    # The hottest of the nodes a vessel's fuel touches, as of last tick; nil if it names none.
     def hot_spot_k(node, ctx)
-      spot = node.respond_to?(:hot_spot) && node.hot_spot
-      spot ? ctx.node_temperature(spot) : nil
+      spots = node.respond_to?(:hot_spot) ? Array(node.hot_spot) : []
+      spots.filter_map { |spot| ctx.node_temperature(spot) }.max
     end
 
     # Kilograms of fuel alight, or nil for a reaction that does not model ignition — which is
@@ -997,6 +1041,11 @@ module ReactorSim
     #
     # Scaling by what remains keeps the lit FRACTION across a burn, and still takes the fire to
     # zero as the last of the fuel goes.
+    #
+    # **A mixture outside its flammable range has no front to move on**, so there what burns comes
+    # off the lit mass one for one: a naked light in lean gas burns what it lit and no more. In
+    # proportion, the lit mass would outlive every tick's burn and a lean district would burn many
+    # times what its lights set alight.
     def burn_down_ignition(spec, reaction_id, state, next_parcels)
       return state unless Resources::Ignition.modelled?(spec)
 
@@ -1005,8 +1054,13 @@ module ReactorSim
       return state unless before.positive? && after < before
 
       ignition = ignition_for(state, reaction_id)
-      with_ignition(state, reaction_id,
-                    ignition.merge(kg: ignition.fetch(:kg, 0.0) * (after / before)))
+      lit = ignition.fetch(:kg, 0.0)
+      left = if Resources::Ignition.carries_flame?(spec, state.fetch(:parcels), content)
+        lit * (after / before)
+      else
+        [ lit - (before - after), 0.0 ].max
+      end
+      with_ignition(state, reaction_id, ignition.merge(kg: left))
     end
 
     def with_ignition(state, reaction_id, ignition)
@@ -1038,7 +1092,8 @@ module ReactorSim
     # Phase 6. Durability depletes from operating conditions; a node fails when it hits
     # zero. Never a per-tick dice roll — the player must be able to learn "I ran it too hot
     # for too long" rather than being told the dice disliked them.
-    def stress(states, ledger, ctx)
+    # `prompt_events` are phase 5's — an explosion takes its `damages:` with it the way a failure does.
+    def stress(states, ledger, ctx, prompt_events = [])
       states, events = suffer_mishaps(states, ctx)
       before = rotating_kinetic_joules(states)
 
@@ -1057,7 +1112,7 @@ module ReactorSim
         [ id, worn.freeze ]
       end
 
-      next_states = spread_damage(next_states, events)
+      next_states = spread_damage(next_states, events + prompt_events)
 
       # The energy that wheel was carrying went into wrecking the shop. Ledgered rather than
       # dropped, for the same reason belt slip is: an explicit line nobody can miss beats a

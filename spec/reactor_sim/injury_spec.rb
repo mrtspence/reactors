@@ -375,9 +375,11 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
         op.nodes.each_value do |node|
           next unless node.respond_to?(:failure_hazards)
 
+          # A failure's modes, and the `:explosion` a node hosting a prompt reaction can have.
+          prompt = node.respond_to?(:prompt_modes) ? node.prompt_modes(op.content) : {}
           node.failure_hazards.each do |mode, declared|
-            expect(node.failure_modes).to have_key(mode),
-                                          "#{node.id} endangers on #{mode}, which it cannot enter"
+            expect(node.failure_modes.merge(prompt)).to have_key(mode),
+                                                        "#{node.id} endangers on #{mode}, which it cannot enter"
             (declared[:stations] || {}).each_key do |station|
               expect(op.control_points).to have_key(station),
                                            "#{node.id} endangers #{station}, which does not exist"
@@ -405,9 +407,13 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
             # flat — which is safe, and silent. This is the check that stops it being silent.
             next unless declared[:scales_with]
 
-            expect(node.failure_detail(op.state.fetch(:nodes).fetch(node.id), ctx_for(op)))
-              .to have_key(declared[:scales_with]),
-                  "#{node.id} scales on #{declared[:scales_with]}, which it never reports"
+            reported = if prompt.key?(mode)
+              ReactorSim::Concerns::PromptReaction::EXPLOSION_DETAIL
+            else
+              node.failure_detail(op.state.fetch(:nodes).fetch(node.id), ctx_for(op)).keys
+            end
+            expect(reported).to include(declared[:scales_with]),
+                                "#{node.id} scales on #{declared[:scales_with]}, which it never reports"
           end
         end
       end

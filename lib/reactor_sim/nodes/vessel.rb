@@ -18,6 +18,7 @@ module ReactorSim
       include Concerns::Obstructs
       include Concerns::Wearing
       include Concerns::Pressurized
+      include Concerns::PromptReaction
 
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
                   :reactions, :heater_control_id, :heater_watts, :igniter_kg_per_s,
@@ -36,11 +37,11 @@ module ReactorSim
                      stress_rate: 0.0, damages: {}, endangers: {},
                      emissivity: 0.0, radiating_area_m2: 0.0, hot_spot: nil)
         super(id: id, label: label, ports: ports)
-        # **A node this one's contents touch**, whose temperature is what the fuel against it
-        # reaches — a timber headframe's bearers on the sheave. A lumped body has no local hot
-        # spot of its own, so a fuel that lights itself (`autoignition_k`) reads the hotter of the
-        # two. Nil for nearly everything.
-        @hot_spot = hot_spot&.to_sym
+        # **The nodes this one's contents touch**, whose temperature is what the fuel against them
+        # reaches — a timber headframe's bearers on the sheave, a district's gas on its rock. A
+        # lumped body has no local hot spot of its own, so a fuel that lights itself
+        # (`autoignition_k`) reads the hottest of them and itself. Empty for nearly everything.
+        @hot_spot = Array(hot_spot).map(&:to_sym).freeze
         # Radiant loss to the environment, on top of whatever `ambient_conductance` carries.
         # Both default to nothing, so a vessel that has not been given a surface behaves exactly
         # as it did before radiation existed.

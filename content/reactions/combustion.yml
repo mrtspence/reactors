@@ -167,14 +167,19 @@ firedamp_combustion:
     # **The explosive range, and the reason a pit is not permanently alight.** Methane carries
     # a flame between about 5% and 15% by volume and does nothing at all either side. Below the
     # lean figure a naked light burns calmly in gas a lamp can already read — which is what
-    # makes the flame cap worth looking at — and an ignition goes out when it has burnt the
-    # mixture back down through it, rather than settling in to burn every kilogram that seeps
-    # in afterwards.
+    # makes the flame cap worth looking at — and burns only what it lights, rather than
+    # settling in to burn every kilogram that seeps in afterwards.
     lean_fraction: 0.05
     rich_fraction: 0.15
     # A hot enough surface lights it with no flame — a gob fire against the district's air. Nothing
     # else in a pit gets there.
     autoignition_k: 870
+  # **Inside the range, a flame that has taken hold crosses the district faster than a tick**, so
+  # it is resolved rather than run at `rate_per_s`: the front burns the whole mixture, and its
+  # products are set by the mixture's own air. `rate_per_s` and `spread_per_s` govern the flare
+  # before it — see `Resources::Deflagration`.
+  prompt:
+    kind: deflagration
   # **A gas explosion in a working with the air already used up does not go out — it goes
   # wrong.** Methane burnt with three-quarters of the oxygen it wants makes carbon monoxide
   # instead of carbon dioxide, which is why the survivors of a firedamp ignition in a badly
@@ -219,6 +224,10 @@ coal_dust_combustion:
     # No rich limit. There is no such thing as a coal dust cloud too thick to burn in any
     # roadway anybody would survive being in.
     lean_fraction: 0.0000625
+  # A cloud in its range is taken by a gas front passing through it in the same instant, which is
+  # how an ignition that starts in gas becomes a dust explosion.
+  prompt:
+    kind: deflagration
   # **And this is the one that made the rescue parties turn back.** A dust explosion consumes
   # the air of the whole length it runs, so most of it burns in air it has already spent —
   # carbon to CO rather than CO2, which is nine kilojoules a gram instead of thirty-three.

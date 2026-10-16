@@ -80,6 +80,11 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > fan's trickle through the waste feeds it, sealing starves it, and alight it makes carbon
 > monoxide, breaks out at the face and fires the district's gas.
 >
+> **The district and pit bottom have rock round them** (`Mine.rock`, `Nodes::Wall` of
+> `coal_measures`), so a room's gas cools against its walls and a room's own `heat_capacity` is its
+> gear's. A blast's harm is therefore its `:explosion` (`endangers:`/`damages:` keyed `explosion:`),
+> not the roadway wearing through on heat it no longer holds.
+>
 > **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, which also draws no water
 > ahead, or the example measures which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
 > down, and the failure looks identical — a physics regression that is really a bad draw.
@@ -233,7 +238,12 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    **One person's report can drive another person's lever.** The engineman winds away from a
    landing only on its marshal's bell — the banksman at bank, the onsetter below — and a marshal
    out of their depth slips and rings a **false ready** while somebody is still getting in. A good
-   engineman paired with a bad onsetter is a crew problem nobody near the winding can see.
+   engineman paired with a bad onsetter is a crew problem nobody near the winding can see — **so
+   the panel's `winding_signals` board says it in words**: what the cage is doing and what it is
+   waiting on, the first that holds of a fault, why it is not moving, the bell, men getting in, a
+   deck being worked, men waiting across the shaft. `Winding#signal` sits beside `dispatch` and
+   `govern`, so the rules and the report of them cannot drift, and the tick writes it onto the drum
+   after the walk.
 5. **What can the player see?** The interesting design work. Give the two things that will
    kill the player the best instruments — and even those late.
 

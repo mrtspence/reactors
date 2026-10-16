@@ -517,10 +517,14 @@ sweep, and accept that the first figures are guesses.
   CO come out where people are, not up an airway nobody breathes. **It is inherited**: 25% of pits
   nothing; otherwise a zone of log-normal coal (median 3 t) whose start temperature is solved, by
   Newton's law of cooling against a design heat, to fire at a log-normal time (median 65 min, σ 0.4,
-  never under 15 min). A heating waste starts **oxygen-depleted** — 25 kg of air, the rest blackdamp —
+  never under 15 min). A heating waste starts **oxygen-depleted** — little air, the rest blackdamp —
   because a full charge of fresh air burnt in its first minutes put 90–250 K on the zone at once and
   fired it five times early. The design heat was then **calibrated off running pits** (70 kW assumed,
-  ~35 kW measured). Self-heating needs no Arrhenius term: with a temperature-independent rate the
+  ~35 kW measured). **Revised after the playtest**: the waste kept its cold gas charge at its hot
+  start temperature — 2.3 atmospheres at 670 K — and blew 200 kg of hot gas into the roads in its
+  first minute, which is what burnt the district. It now starts at the roads' pressure, holding less
+  gas the hotter it is, on the 18 kg of air the trickle settles to and the 50 kW it then makes;
+  seven draws fire within 12% of their drawn time. Self-heating needs no Arrhenius term: with a temperature-independent rate the
   window is still emergent — too little air starves it, too much carries its heat away. Alight, it
   smoulders on `coal_combustion`'s new air-starved pathway to whitedamp; past 1000 K it **breaks
   out** (an immediate overload, burning the district); past 870 K it fires the district's gas through

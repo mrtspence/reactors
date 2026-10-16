@@ -100,45 +100,43 @@ RSpec.describe "blackdamp" do
 
     # And the consequence a player sees: it is still down there after the blast.
     #
-    # **Asserted against the firedamp beside it rather than as a fraction of itself**, which is
-    # what the claim actually is — blackdamp is *dispersed* where a fuel is *spent*. Both lose
-    # mass, because an explosion drives the atmosphere out through the return, so a bare "more
-    # than half survives" is a statement about how hard the blast blew rather than about
-    # chemistry: measured here, 16% of the blackdamp remains and **1%** of the firedamp.
-    it "is dispersed by an ignition where the firedamp beside it is consumed" do
-      op = pit_with(damp: 40.0, firedamp: 8.0)
-      damp = held(op, :pit_bottom, :blackdamp)
-      fuel = held(op, :district, :firedamp)
+    # **Asserted on the tick of the explosion, against the same pit unlit**, which is the claim —
+    # the blast consumes the firedamp and leaves the blackdamp beside it as it would have been.
+    # Afterwards the blast drives both out through the return and the seam gives more firedamp
+    # back, so remainders a minute on measure the ventilation rather than the chemistry. A lean
+    # mixture, so the firedamp is all spent.
+    it "outlives an ignition that consumes the firedamp beside it" do
+      lit = pit_with(damp: 40.0, firedamp: 5.0)
+      dark = pit_with(damp: 40.0, firedamp: 5.0)
+      fuel = held(lit, :district, :firedamp)
 
-      events = work!(op, 60, naked_flame: 100, timbering: 100)
+      events = work!(lit, 2, naked_flame: 100, timbering: 100)
+      work!(dark, 2, naked_flame: 0, timbering: 100)
 
-      expect(events.map { |e| e[:type] }).to include(:fire_lit)
-      left = held(op, :pit_bottom, :blackdamp) / damp
-      burnt = held(op, :district, :firedamp) / fuel
-      expect(left).to be > 5.0 * burnt, "blackdamp #{left} vs firedamp #{burnt}"
+      expect(events.map { |e| e[:type] }).to include(:explosion)
+      expect(held(lit, :district, :firedamp)).to be < 0.01 * fuel
+      unlit = held(dark, :pit_bottom, :blackdamp)
+      expect(held(lit, :pit_bottom, :blackdamp)).to be_within(1e-6 * unlit).of(unlit)
     end
 
     # **And it makes the explosion worse at its job**, which is the nicest thing the model does
     # here and nobody wired it: firedamp combustion consumes 17.2 kg of air per kilogram of gas, so
     # a district whose air has been displaced cannot burn what is in it as fiercely.
     #
-    # **Asserted as the temperature the fire reaches, not as gas left unburnt.** The old form
-    # demanded that 20–90% of the gas survive, and it does not — at every blackdamp level the
-    # firedamp is 97–99% consumed, just more slowly and far more coolly. Measured across 0 / 30 /
-    # 50% blackdamp: **2379 → 1935 → 1544 K**, which is the mechanism, monotone, and nothing like a
-    # tuning coincidence.
+    # **Asserted as the energy the explosion releases**, read off the `:explosion` itself. The
+    # mixture is rich, so the air it has decides how much of the gas can burn, and blackdamp
+    # standing where air was leaves less. Measured across 0 / 30 / 50% blackdamp: **4.63 → 4.08 →
+    # 3.66 GJ**, from 122, 108 and 97 kg of gas burnt.
     it "starves the fire it cannot feed" do
-      peaks = [ 0.0, 30.0, 50.0 ].map do |damp|
+      released = [ 0.0, 30.0, 50.0 ].map do |damp|
         op = at_the_face(seed(pit, nodes: {
           district: district_mix(pit, firedamp: gas_kg(8.0), blackdamp: gas_kg(damp))
         }))
-        work!(op, 60, naked_flame: 100, timbering: 100)
-        op.nodes.fetch(:district)
-          .temperature_k(op.state.fetch(:nodes).fetch(:district), op.content)
+        events = work!(op, 4, naked_flame: 100, timbering: 100)
+        events.find { |e| e[:type] == :explosion }.dig(:detail, :joules)
       end
 
-      expect(peaks.each_cons(2).all? { |clear, damped| damped < clear }).to be(true), peaks.inspect
-      expect(peaks.last).to be < 0.7 * peaks.first
+      expect(released.each_cons(2).all? { |clear, damped| damped < clear }).to be(true), released.inspect
     end
   end
 

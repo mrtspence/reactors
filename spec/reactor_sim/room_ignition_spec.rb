@@ -79,7 +79,9 @@ RSpec.describe "ignition as a property of the room" do
     it "offers a flame that goes with the lever, named for it" do
       offered = sconces(:tallow_candles).ignition({}, { naked_flame: 50.0 })
 
-      expect(offered).to eq(kg_per_s: 2.0e-4, watts: 600.0, cause: :naked_flame)
+      flame = ReactorSim::Operations::Mine::OPEN_FLAME
+      expect(offered).to eq(kg_per_s: flame.fetch(:igniter_kg_per_s) * 0.5,
+                            watts: flame.fetch(:flame_watts) * 0.5, cause: :naked_flame)
     end
 
     it "offers nothing from a safe tier in still air, however hard it is lit" do
