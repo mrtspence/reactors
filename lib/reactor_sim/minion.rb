@@ -88,6 +88,20 @@ module ReactorSim
 
     def daftness = Injury.numeric(tag(:boneheaded))**DAFT_POWER
 
+    # **How often somebody reads a thing wrongly that they can see perfectly well** — a fizzled shot
+    # taken for a spent one. A sound hand at full wits does it one time in ten, and it climbs as
+    # wits fall; `boneheaded` adds to it steeply, so a 1.0 bonehead all but always does. Read by a
+    # peril that is `judged:` (`Peril#judgement`).
+    MISJUDGE = 0.1
+    DAFT_MISJUDGE = 0.8
+    MIN_WITS = 0.1
+
+    # `ambient:` is the room's light: a fizzle misread in the dark is the commonest misreading.
+    def misjudges(state, ambient: nil)
+      seen = [ wits(state, ambient: ambient), MIN_WITS ].max
+      ((MISJUDGE / seen) + (DAFT_MISJUDGE * daftness)).clamp(0.0, 1.0)
+    end
+
     # **A naked light carried by a person** — a candle in the hat, an oil lamp on the belt — and
     # what it offers the air of the room they are standing in: a seed for a mixture that will
     # carry it, and a little heat. In gas too lean to carry it the seed is what it burns, so it is

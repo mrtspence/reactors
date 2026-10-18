@@ -24,7 +24,7 @@ module ReactorSim
     # Which severities reach the player's incident feed. See `#incidents`.
     REPORTED_SEVERITIES = %i[warning critical].freeze
 
-    attr_reader :id, :type, :nodes, :links, :paths, :thermal_links, :drive_links, :layout,
+    attr_reader :id, :type, :nodes, :links, :paths, :gas_neighbours, :thermal_links, :drive_links, :layout,
                 :control_points, :diagnostics, :minions, :state, :content, :time_scale,
                 :options, :rngs, :routing
 
@@ -58,6 +58,7 @@ module ReactorSim
       # Routes are derived from the graph, which is configuration rather than state, so this
       # is computed once here and never per tick.
       @paths = Path.resolve(nodes: @nodes, links: @links)
+      @gas_neighbours = Path.gas_neighbours(@paths, @nodes)
       @rngs = rngs || build_rngs(seed)
       @state = state ? restore(state) : build_initial_state
     end

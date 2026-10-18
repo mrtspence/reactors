@@ -46,15 +46,15 @@ than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-In use at the time of writing: `bearing`, `breathable`, `coolant`, `damp`, `dust`, `exhaust`,
-`fuel`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`, `oxidiser`, `solid`,
-`structural`, `waste`, `working_fluid`.
+In use at the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`,
+`exhaust`, `explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`,
+`moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 **A tag does one of three jobs and the word does not say which**, so say it when you add one:
 
 | Job | Examples | Read by |
 |---|---|---|
-| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust` | `Port#accepts?` |
+| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust`, `explosive` | `Port#accepts?` |
 | Reaction — what a substance can do in one | `fuel`, `oxidiser`, `inert` | reactions, ignition, a node's `reaction_throttle` |
 | Physiology — what it does to a person | `breathable` | `Breath` |
 
@@ -234,6 +234,16 @@ exactly as before, so adding it to one reaction cannot disturb another.
 figure chosen so something in a machine reaches it. A node reads it against the hotter of its own
 temperature and its `hot_spot:`, the node its fuel touches. If a machine cannot get its timber
 there when a real one did, the machine's heating is what is wrong.
+
+**The same fuel in a different configuration is a different reaction**, named for it.
+`coal_layer_combustion` is coal's chemistry with a 25 mm layer's hot-surface ignition point
+(483 K) for spillage packed against a drum, beside `coal_combustion`'s 700 K for a heating in bulk.
+The figure belongs to the geometry, so the geometry is in the name.
+
+**A fire-resistant grade is two figures, not a flag**: an `autoignition_k` past what the hot
+part can reach, and a `quench_per_s` well above `spread_per_s`, so that even lit by something
+else it cannot carry a flame along itself. `fire_resistant_belting` beside `belting` is the
+worked pair.
 
 ### The flammability range is for mixtures, not for fuel beds
 

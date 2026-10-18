@@ -261,6 +261,22 @@ cage that is 32 kN with no slack, 90 kN at 0.2 m and 178 kN at a metre: a slack 
 140 kN rope. The rope parts when this passes `breaking_kn × integrity`; the energy of the fall is
 not booked, since the drum never stored the cage's potential energy to begin with.
 
+### A haulage rope's tension, on an incline
+
+A rope haulage's rope (`Mine::HaulageRope`) carries a set down the road's gradient. Its standing
+tension is the set's weight along the incline plus its rolling resistance:
+
+```
+T = m·g·(sin θ + μ_r)        sin θ ≈ rise ÷ length
+```
+
+A 2.6 t set on a 12 m rise over 200 m at rolling 0.02 is about 2.0 kN. **A sound rope never parts
+under that.** What parts a worn one is the **snatch** of a set started hard, eight times the
+standing tension, against `breaking_kn × integrity`. A 60 kN rope survives it until it is worn
+below about a quarter. Nothing is in the drive solve: the haulage engine pays its shaft for the
+traffic as a lift (`lift_m:` on the road's conduit), and the rope only reads what the road
+carried last tick.
+
 ### A rope between operations
 
 Two operations cannot share a drive solve, so a shaft in one is joined to a shaft in another by a
@@ -403,6 +419,17 @@ until the air is gone, where a premixed flame burns rich throughout.
   it on the air the gas left. **There is no build-up at room scale**: a lit fraction left to grow
   at its rate first burns the mixture it is in and dilutes it — far enough, measured, to take a 9%
   district out of its range before it goes off.
+- **A front travels, a room a tick.** A node whose front burnt anything records `front: true`.
+  Next tick that front arrives in every holder sharing a gas path with it, in either direction
+  (`Operation#gas_neighbours`, derived once from the paths), and goes off there if that holder's
+  own mixture is in range. It is read from N−1, so it is order-independent.
+  - It travels both ways because a front leaves a room through every road out of it and runs back
+    up the stream that fed it.
+  - It stops where nothing is in range, and a burnt-out room it comes back to has nothing left to
+    burn.
+  - The arriving front is the explosion's cause (`:front_from_neighbour`, `detail: { from: }`).
+  - **Without this a furnace fired its own 30 m³ chamber every nine seconds**, refilling from a
+    return in its range, while the district beside it, full of the same mixture, never lit.
 - **The node's `reaction_throttle` is the share a front can carry through** — stone dust that is
   two-thirds of the airborne dust carries none. In the rate path it scales `dt`; with no rate, it
   scales the mixture.

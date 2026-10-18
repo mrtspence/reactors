@@ -511,6 +511,10 @@ In build order:*
   flame cap's rate). The men were walking: 200 m at a day-labourer's 0.64 m/s, stood down by the
   burns 37 m short. Explosions also turned out to make products set by the tick grid, and nothing
   cooled them — both answered by the next item
+- [x] **Shifts and the pit bottom refuge** — [`design_sketches/roadway-shift.md`](design_sketches/roadway-shift.md).
+  Who starts underground is fitted, not the frame's: three at the face and three at the pit
+  bottom by default, five of either with the back shift and the underground stable; and a refuge
+  at the pit bottom with room for one
 - [x] **Winding signals** — [`design_sketches/winding-signals.md`](design_sketches/winding-signals.md).
   One plain-words gauge on the panel saying what the cage is doing and what it is waiting on: a
   fault, why it is not moving, the bell, men getting in, a deck being worked, men waiting across
@@ -553,14 +557,60 @@ set against this pass, not against today's single hewer.
 - [ ] **Better tubs as blueprints**, scaling the putters' throughput
 - [ ] **Blasting** as a powerful, dangerous way to raise output — unit 4's shotfiring (item 20)
 
-**Unit 4 — new production tiers.** Design deferred until unit 3 lands.
+**Unit 4 — new production tiers.** Drafted for review in
+[`design_sketches/mine-accidents-unit4.md`](design_sketches/mine-accidents-unit4.md).
 
-- [ ] 19 Rope haulage, and runaway tubs
-- [ ] 20 Shotfiring
-- [ ] Furnace ventilation as a tier — a fire at the upcast foot, the classic igniter of return gas
-  (unit 3's restart slug in the return), answered by the dumb drift
-- [ ] Water sprays on the cutter as a tier, against frictional sparks
-- [ ] Conveyors, and belt fires on the intake (unit 3's slipping drive)
+- [x] 19 Rope haulage, and runaway tubs — a `haulage` slot (hand putting, rope haulage at four
+  times the rate off the line shaft), the road rising 12 m to the district, `HaulageRope` worn by
+  traffic and parted by a set's snatch or a set breaking away, and the runaway as an `along:`
+  hazard: by where on the road somebody is, manholes for a near miss, the crush well down it; the
+  haulage stopped until spliced. **Two new dice per person** (`road:`, `caught:`), which moved
+  every person's stream — `peril_spec`'s pairing examples re-seeded. **Tune**: the set's 2.6 t, the
+  snatch's 8×, the rope's 60 kN and six hours, the splice's 600 s, the runaway's weight 3.0 and its
+  crush (0.5, ×2), the breakaway rate 0.08, the haulage engine's lift-equivalent of 10 m.
+  **Not built**: a runaway's coal spilled at the pit bottom (the set's coal is in a conduit, which
+  holds nothing). **The runaway catch**, added in the completeness pass: a `runaway_catch` slot
+  (catch points at 0.15 of the way down holding 0.8, drags at 0.05 holding 0.95) that informs
+  the rope haulage, so a runaway reaches `1 − holds` of its share below the catch and spares the
+  door. **Tune**: both catches' `at` and `holds`
+- [x] 20 Shotfiring — the `blasting` slot (black powder, permitted explosives), a magazine at bank,
+  a ticketed shotfirer at the shot holes; a tonne and a half a shot, its fumes and dust. Blown-out
+  shots flash in the room; a misfire is judged — dug out all or nothing, or left live in the face
+  for the hewer to strike. **Tune**: the shot's 900 s and the clearing's 1,200 s, the peril rates
+  (blow-out 0.6 / 0.05, misfire 0.4, premature 0.12, set off 0.6, struck 1.2), the misjudgement's
+  0.1 and 0.8, the blow-out flame (0.4 kg/s, 4 MW for a tick), a charge of 0.5 kg
+- [x] Furnace ventilation — a `furnace` slot beside the fan (fire basket, brick furnace, double
+  furnace) and a `dumb_drift` slot.
+  - The furnace's flue warms the upcast foot, now a fixture in both frames, and the upcast's
+    90 m of stack draws by buoyancy. Unpowered it draws 11× a cold pit, and with the fan it adds
+    about 22% to the air.
+  - The return feeds it, so return gas in its range fires there. The dumb drift feeds it intake
+    through a regulator, and tells it so by `informs:`, the new slot mechanism.
+  - **Flame fronts now travel**: a deflagration lights the in-range mixture of every holder
+    sharing a gas path with it next tick, so a furnace firing its return fires the district.
+  - **Tune**: the tiers' stoking rates (0.015 / 0.05 / 0.10 kg/s) and bores, the dumb drift's
+    regulator (a fifth of the bore), the furnace's heat capacities. **Not built**: a furnace
+    drift as a place of its own (the furnaceman works at the pit bottom).
+- [x] Water sprays on the cutter — a `cutter_sprays` slot. A small pump off the line shaft lifts
+  sump water to the face and it drains back. While the face is fully wet the cutter's picks offer
+  no spark at all, and 0.7 of the dust is laid; a sump pumped bare leaves only the seepage's
+  trickle, which is no protection. The spark seeds (cutter, bell) are now a spark's 1e-7 kg/s.
+  **Tune**: the spray's 0.4 kg/s at three bar, full wetting at half its rating, the dust laid
+  (0.7). **Not built**: the design's "much later" ignition under sprays — a seed of any size fires
+  band gas, so the quench is all or nothing
+- [x] Conveyors, and belt fires on the intake — two more `haulage` tiers (a belt conveyor, and a
+  fire-resistant one), the belt carrying with nobody on the road and its feed a lever. Fed past
+  what the drum grips — less with water on the pit bottom — it stalls, and the drum heats under it.
+  The drum lights the spillage packed round the drive head (a 25 mm layer's 483 K), and the
+  burning spillage lights the belt (672 K, the Bureau of Mines' figure). The belt road is a second
+  intake, so the smoke and CO go inbye. A belt attendant shovels the spillage back and reads the
+  drum. Fitting a belt raises the pit's air about 8%, as a new road would. **Tune**: the drum's
+  30 kg/s grip and the loading point's 40, the wet-grip loss of 0.6, the spillage's 0.2% of
+  traffic and the attendant's 0.3 kg/s, the belt road's half-a-main-road conductance, the belt's
+  4 t and 28 MJ/kg. The drum is real figures, not tuning: 11.5 kN of slip at 2 m/s (23 kW), a
+  55 kg shell (2.7×10⁴ J/K), 48 W/K, about 8 minutes from a stall to the spillage lighting in the
+  spec rig. **Not built**: a belt wetted by anything but the sump, a torn or jammed belt, and a
+  deposit whose ignition point falls as it thickens
 
 **Last — brattices and stoppings as hazards.** Design deferred to the end, because each tier's
 character is an interaction with something built earlier.
@@ -576,6 +626,11 @@ character is an interaction with something built earlier.
   screen offers the mine's Lamp Cabin and Pit Head Baths in the steam engine's quarters slot (both
   are `crew_quarters`), and fitting one refuses to build. Wants an owning operation on the part,
   read by `Outfitting#available` and the hazard walk in `injury_spec`.
+- [ ] **Hot-spot bodies, when a caller needs them** (`design_sketches/hot-spots.md` §4): `heats:`
+  on a heat source, so a `Bearing` books its drag into a named node, and `behind:` on
+  `Nodes::Wall`, so a skin conducts into a body rather than to the earth. The first candidate is
+  the headframe, whose timber reads the sheave journal's own temperature where the bearers sit
+  under the cooler housing. That abstraction is good enough today, so this is deferred.
 - [ ] **Split `tick.rb`, much later.** It is past 1,800 lines and most of it is pure functions over
   the frozen state — routing and riding, the marshal and boarding rules, mishaps, ignition sources,
   the drive bookkeeping — that move out into modules with no behaviour change. Not part of the mine
@@ -2397,6 +2452,18 @@ documented where they matter and collected here because the collection is worth 
   produces silently vanish. Build clients lazily, memoised per process id.
 - **Never close an rdkafka handle inside a signal trap.** FFI plus a background polling thread
   means it deadlocks. A handler may only set a flag.
+- **A smaller spark is no safer in band gas.** A deflagration triggers on any lit seed above
+  1e-12 kg, so scaling an igniter down by ten fires a mixture in range on the same tick. A
+  protection against ignition has to remove the igniter, as the cutter sprays' quench does, never
+  shrink it.
+- **A small vessel with a fire in it reaches flame temperature unless it carries its structure.**
+  A belt's drive head with 1×10³ J/K ran a burning deposit to 2,150 K, coal's adiabatic flame
+  temperature, and would have lit anything near it. Give a room that can burn the heat capacity of
+  what it is built of (a drive frame's half-tonne of steel), or its rock as a `Nodes::Wall`.
+- **A room that cannot pass a front on fires itself over and over.** Before fronts travelled, a
+  furnace fed by a return in its range went off every nine seconds, refilling from the district,
+  while the district (full of the same mixture) never lit. If an explosion repeats on a short
+  period, look for the neighbour it should have reached.
 
 ---
 

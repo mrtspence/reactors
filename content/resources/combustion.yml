@@ -35,6 +35,18 @@ wood:
   specific_heat_j_per_kg_k: 1700
   density_kg_per_m3: 400
 
+# **Conveyor belting**: rubber on cotton duck, about 28 MJ/kg. It burns, and slowly along its length.
+belting:
+  tags: [solid, fuel]
+  specific_heat_j_per_kg_k: 1600
+  density_kg_per_m3: 1200
+
+# PVC belting, the fire-resistant kind: hard to light and it will not carry a flame of its own.
+fire_resistant_belting:
+  tags: [solid, fuel]
+  specific_heat_j_per_kg_k: 1000
+  density_kg_per_m3: 1400
+
 # Flows through a pipe instead of needing a stoker, and burns hotter still (~42 MJ/kg).
 # The convenience is the upgrade; it is a liquid, so it routes through different ports.
 fuel_oil:

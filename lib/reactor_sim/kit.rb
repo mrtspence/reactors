@@ -210,6 +210,15 @@ module ReactorSim
                       stats: { intelligence: 0.1 },
                       tags: { certificated: true, practised: true })
 
+    # **A ticket of its own, apart from the engineman's**: a shotfirer holds the face's lives in a
+    # fuse, and a hand without it at the shot holes is out of their depth — more blown-out shots,
+    # more misfires, more fired early.
+    Training.register(:shotfirers_ticket, label: "Shotfirer's Ticket",
+                      description: "Certificated to charge and fire shots underground.",
+                      mass_kg: 0.0,
+                      stats: { intelligence: 0.1 },
+                      tags: { shotfirer: true, practised: true })
+
     Training.register(:steady_hands, label: "Steady Hands",
                       description: "A year of not dropping things.",
                       mass_kg: 0.0,

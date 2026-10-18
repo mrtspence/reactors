@@ -98,8 +98,10 @@ module ReactorSim
     # hewer whose roof comes in while his district is full of afterdamp is in both.
     # And the third: the hoist somebody is riding, because a cage hitting the headframe hurts the
     # men in it and not the men standing at the landing it passed.
-    Exposure = Struct.new(:stations, :places, :riders, keyword_init: true) do
-      def empty? = stations.empty? && places.empty? && riders.empty?
+    # `alongs` are hazards that run down a passage (`along:`), whose weight depends on where on it
+    # somebody is — resolved per person in `endanger`, not indexed.
+    Exposure = Struct.new(:stations, :places, :riders, :alongs, keyword_init: true) do
+      def empty? = stations.empty? && places.empty? && riders.empty? && alongs.empty?
 
       # Severity ADDS and tags union, the same rule two failures at one post already follow.
       def at(station, place, via = nil)
@@ -121,6 +123,7 @@ module ReactorSim
       @nodes = operation.nodes
       @links = operation.links
       @paths = operation.paths
+      @gas_neighbours = operation.gas_neighbours
       @thermal_links = operation.thermal_links
       @drive_links = operation.drive_links
       @control_points = operation.control_points
@@ -134,7 +137,7 @@ module ReactorSim
 
     # Returns the next state. The operation installs it; nothing is mutated here.
     def call(tick:, dt:)
-      fates = draw_fates                                        # phase 0
+      fates = @fates = draw_fates                               # phase 0
       controls = actuate(dt, fates)                             # phase 0
       read = state.fetch(:nodes)                                # phase 1
       # `control_values` builds `@ignition` from the same lever positions, so it comes first.
@@ -944,16 +947,21 @@ module ReactorSim
     # Chemistry advances at a rate; phase change snaps to equilibrium. **So does anything faster
     # than a tick**: a node hosting a prompt reaction resolves it first (`Concerns::PromptReaction`),
     # and what it resolved does not then run again at its rate.
+    #
+    # **A front travels a room a tick**: one that resolved in a neighbour last tick (`front:` in
+    # its N−1 state) arrives here this tick, through any path that carries gas.
     def react(states, ctx)
       events = []
       reacted = states.to_h do |id, state|
         node = nodes.fetch(id)
-        next [ id, state ] unless state.key?(:parcels) && !state.fetch(:parcels).empty?
+        # A front lasts the tick it resolved in, so one left over from an emptied room is spent.
+        next [ id, state[:front] ? state.merge(front: false) : state ] unless state.key?(:parcels) &&
+                                                                              !state.fetch(:parcels).empty?
 
         state = state.merge(joules_from_reactions: 0.0)
         resolved = []
         if node.respond_to?(:resolve_prompt)
-          state, resolved, prompted = node.resolve_prompt(state, ctx)
+          state, resolved, prompted = node.resolve_prompt(state, ctx, arriving: front_from(id, ctx))
           events.concat(prompted)
         end
         state = run_reactions(node, state, ctx, skip: resolved)
@@ -962,6 +970,11 @@ module ReactorSim
       end
 
       [ reacted, events ]
+    end
+
+    # The first neighbour, by sorted id, whose front resolved last tick; nil if none did.
+    def front_from(id, ctx)
+      @gas_neighbours.fetch(id, []).find { |neighbour| ctx.node_state(neighbour)&.fetch(:front, false) }
     end
 
     def run_reactions(node, state, ctx, skip: [])
@@ -1182,7 +1195,10 @@ module ReactorSim
         # the same blast. **A place outlives a station**: being stood down clears the post but
         # not the room, so somebody carried out of a district full of afterdamp is still in it.
         hazard = exposure.at(minion_state[:station], minion_state[:place], carried_by(minion_state))
-        next [ id, minion_state ] if minion.nil? || hazard.nil?
+        next [ id, minion_state ] if minion.nil?
+
+        hazard = along(exposure.alongs, minion, minion_state, hazard, events, ctx)
+        next [ id, minion_state ] if hazard.nil?
 
         hurt, mode = Injury.check(minion, minion_state, hazard)
         events << hurt_event(minion, hurt, mode, hazard, ctx) if mode
@@ -1191,6 +1207,100 @@ module ReactorSim
 
       [ next_states, events ]
     end
+
+    # **A hazard that runs down a passage** — a runaway set on an incline — and reaches each person
+    # by where on it they are: `share` of the way from the top, the harm growing with it as the
+    # energy does. At the foot it is everybody; at the top, little. Stations may be placed on the
+    # way (`positions:`), and those who work the road itself (`roaming:`) are somewhere on it by
+    # their `road:` die. **Anybody on the road** may reach the refuge the place has fitted, by its
+    # effectiveness and their wits — a near miss — or, worse, be **crushed** by a fast set, a
+    # chance that rises as the square of the share.
+    def along(alongs, minion, minion_state, hazard, events, ctx)
+      alongs.reduce(hazard) do |acc, (declared, scale, source)|
+        run = declared.fetch(:along)
+        placed = run_share(run, minion, minion_state) or next acc
+        share, on_road = placed
+        share = past_the_catch(run, share)
+        next acc unless share.positive?
+
+        if on_road && (guard = refuge_reached(minion, minion_state))
+          events << near_miss_event(minion, minion_state, source, guard, ctx)
+          next acc
+        end
+
+        hit = run_hit(run, declared, scale * share, on_road && caught?(run, minion, share), source)
+        acc ? acc.merge(hit) { |key, x, y| key == :severity ? x + y : merged(x, y) } : hit
+      end
+    end
+
+    def merged(first, second) = first.is_a?(Array) ? first | second : first
+
+    # **A run with a `catch:` stops most of what passes it**: further down than `at`, what is left
+    # of the share is `1 − holds` of it. Above the catch, unchanged.
+    def past_the_catch(run, share)
+      stop = run[:catch] or return share
+      share > stop.fetch(:at) ? share * (1.0 - stop.fetch(:holds)) : share
+    end
+
+    # `[share, on_road]`, or nil for somebody nowhere on the run.
+    def run_share(run, minion, minion_state)
+      station = minion_state[:station]
+      place = minion_state[:place]
+      return [ run.fetch(:positions).fetch(station), false ] if run.fetch(:positions, {}).key?(station)
+      return [ fate_of(minion, :road), true ] if Array(run[:roaming]).include?(station)
+
+      walking = walking_share(run, minion, minion_state)
+      return [ walking, true ] if walking
+      return [ 1.0, false ] if place == run.fetch(:to)
+      return [ run.fetch(:top_share, 0.0), false ] if place == run.fetch(:from)
+
+      nil
+    end
+
+    # How far down the run somebody walking it has got, or nil if they are not on it.
+    def walking_share(run, minion, minion_state)
+      return nil unless minion_state.fetch(:progress, 0.0).positive?
+
+      here = minion_state[:place]
+      ends = [ run.fetch(:from), run.fetch(:to) ]
+      return nil unless ends.include?(here)
+
+      going = posted_place(minion, minion_state) or return nil
+      hop = layout.next_hop(here, going, routing.fetch(minion.id, []), closed_ways)
+      return nil unless ends.include?(hop) && hop != here
+
+      metres = layout.passages_between(here, hop).first&.metres or return nil
+      gone = (minion_state.fetch(:progress) / metres).clamp(0.0, 1.0)
+      here == run.fetch(:from) ? gone : 1.0 - gone
+    end
+
+    # The refuge somebody on the road reached, or nil.
+    def refuge_reached(minion, minion_state)
+      fitted = safety_equipment[minion_state[:place]] or return nil
+      effectiveness, source = fitted
+      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
+      Blunder.accident_avoided?(effectiveness, wits, fate_of(minion, :dodge)) ? source : nil
+    end
+
+    def caught?(run, minion, share)
+      crushed = run[:crushed] or return false
+      fate_of(minion, :caught) < crushed.fetch(:chance) * (share**2)
+    end
+
+    def run_hit(run, declared, weight, crushed, source)
+      severity = run.fetch(:weight) * weight
+      tags = Array(declared[:tags])
+      cause = nil
+      if crushed
+        severity *= run.dig(:crushed, :factor)
+        tags = Array(run.dig(:crushed, :tags)) | tags
+        cause = run.dig(:crushed, :cause)
+      end
+      { severity: severity, tags: tags, sources: [ source ], cause: cause }.compact
+    end
+
+    # This tick's die for somebody, thrown in phase 0 (`draw_fates`).
+    def fate_of(minion, key) = (@fates || {}).dig(minion.id, key) || 1.0
 
     # Phase 6c. What the work does to the people doing it — and what the air does to them,
     # which is the same pool and deliberately so. Bad air derates capability on the way down, so
@@ -1252,7 +1362,8 @@ module ReactorSim
       minions.keys.to_h do |id|
         rng = rngs.fetch(id)
         [ id, { margin: Blunder.roll(rng), slip: rng.float,
-                kind: rng.float, victim: rng.float, dodge: rng.float, peril: rng.float } ]
+                kind: rng.float, victim: rng.float, dodge: rng.float, peril: rng.float,
+                road: rng.float, caught: rng.float } ]
       end
     end
 
@@ -1285,12 +1396,13 @@ module ReactorSim
       end
       after, peril = Blunder.advance(mine, minion, minion_state, ctx.dt,
                                      fates.dig(minion.id, :margin) || 1.0,
-                                     fates.dig(minion.id, :peril) || 0.0)
+                                     fates.dig(minion.id, :peril) || 0.0,
+                                     ambient: ambient_before[minion_state[:place]])
       return after if peril.nil?
 
       guarded = guarding(minion, minion_state, fates)
       if guarded
-        events << near_miss_event(minion, minion_state, peril, guarded, ctx)
+        events << near_miss_event(minion, minion_state, peril.id, guarded, ctx)
         return after
       end
 
@@ -1345,9 +1457,10 @@ module ReactorSim
     #
     # A `warning`, so it reaches the incident feed rather than only the durable log: a near
     # miss is the operation telling the player exactly where its next casualty comes from.
-    def near_miss_event(minion, state, peril, source, ctx)
+    # `cause` is the peril's id, or the part whose failure it was.
+    def near_miss_event(minion, state, cause, source, ctx)
       Event.build(type: :minion_near_miss, node: minion.id, label: minion.name,
-                  severity: :warning, tick: ctx.tick, cause: peril.id,
+                  severity: :warning, tick: ctx.tick, cause: cause,
                   detail: { minion: minion.minion, place: state[:place], saved_by: source })
     end
 
@@ -1849,7 +1962,7 @@ module ReactorSim
     # in each, which is what lets a machine be moved onto places without moving all of them at
     # once. See `docs/design_sketches/breathable-air.md` §5.
     def hazards_from(wear_events)
-      exposure = Exposure.new(stations: {}, places: {}, riders: {})
+      exposure = Exposure.new(stations: {}, places: {}, riders: {}, alongs: [])
 
       wear_events.each do |event|
         node = nodes[event[:node]]
@@ -1858,6 +1971,7 @@ module ReactorSim
         declared = node.failure_hazards[event[:mode]] or next
         scale = hazard_scale(declared, event)
 
+        exposure.alongs << [ declared, scale, event[:node] ] if declared[:along]
         accrue(exposure.stations, :station, declared[:stations], declared, scale, event[:node])
         accrue(exposure.places, :place, declared[:places], declared, scale, event[:node])
         accrue(exposure.riders, :via, declared[:riders], declared, scale, event[:node])
@@ -1916,7 +2030,7 @@ module ReactorSim
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: mode == :minor ? :warning : :critical,
                   tick: ctx.tick, mode: mode,
-                  cause: hazard[:tags].first || hazard[:sources].first,
+                  cause: hazard[:cause] || hazard[:tags].first || hazard[:sources].first,
                   detail: { minion: minion.minion,
                             lasting: Injury.lasting?(mode),
                             station: hazard[:station],

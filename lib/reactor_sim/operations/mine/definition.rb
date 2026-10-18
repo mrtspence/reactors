@@ -33,23 +33,13 @@ module ReactorSim
       # at when it is bought from an engine at 1.0. See `Match#validate_couplings!`.
       DEFAULT_TIME_SCALE = 1.0
 
-      # **The shift that is already down when the whistle goes.**
-      #
-      # Bank to the face is minutes, and a player who has to spend all of them before anything
-      # can happen is a player watching a loading bar. A few hands already in the district are
-      # the mine's opening move: coal can be cut on tick one while the rest of the shift walks.
-      #
-      # **The last seats, not the first**, so seat one is still somebody at bank and a roster
-      # that fills only the top of the list gets a shift that has to be sent down.
-      #
-      # TODO: first caller of a *fitted* version is the blueprint tree — this belongs on a part
-      # (a night shift, a lodging house, an underground stable) so a player buys the head start
-      # rather than being given it, and so a frame can offer more than one arrangement. Declared
-      # on the chassis today because nothing yet sells it.
-      ADVANCE_SHIFT = { seats: 3, place: :district }.freeze
-
+      # **The shifts already down when the whistle goes** are fitted, not given: three at the face
+      # and three at the pit bottom to start with, five of either for the back shift and the
+      # underground stable (`Mine::SHIFTS`). Bank to the face is minutes, and a player who has to
+      # spend all of them before anything can happen is a player watching a loading bar.
       STARTING_PARTS = {
         cutting: :hand_picks,
+        haulage: :hand_putting,
         lighting: :tallow_candles,
         winder: :steam_whim,
         rope: :hemp_rope,
@@ -57,7 +47,10 @@ module ReactorSim
         fan: :waddle_fan,
         pump: :sinking_set,
         quarters: :lamp_cabin,
-        rest: :refuge_hole
+        rest: :refuge_hole,
+        pit_bottom_rest: :pit_bottom_refuge,
+        face_shift: :advance_shift,
+        pit_bottom_shift: :pit_bottom_shift
       }.freeze
 
       # **The starting pit has one shaft.** It carries the ways up and down and both halves of the
@@ -69,12 +62,10 @@ module ReactorSim
       CHASSIS = {
         single_shaft: {
           parts: STARTING_PARTS.merge(brattice: :canvas_brattice).freeze,
-          single_shaft: true,
-          advance: ADVANCE_SHIFT
+          single_shaft: true
         }.freeze,
         two_shaft: {
-          parts: STARTING_PARTS,
-          advance: ADVANCE_SHIFT
+          parts: STARTING_PARTS
         }.freeze
       }.freeze
 
@@ -103,7 +94,7 @@ module ReactorSim
           diagnostics: assembly.diagnostics,
           minions: crew_for(roster, content || Content.default,
                             station: assembly.crew_origin, place: :bank,
-                            advance: CHASSIS.fetch(chassis)[:advance])
+                            advance: assembly.advance_shifts)
         )
       end
 
@@ -318,17 +309,18 @@ module ReactorSim
         end
       end
 
-      # A spark at the contacts: a little seed for a mixture that will carry it, and almost no heat.
-      BELL_SPARK = { igniter_kg_per_s: 2.0e-4, watts: 50.0 }.freeze
+      # A spark at the contacts: a spark's seed for a mixture that will carry it, and almost no heat.
+      BELL_SPARK = { igniter_kg_per_s: 1.0e-7, watts: 50.0 }.freeze
 
       def signal_bell(spark:, label:)
         SignalBell.new(id: :signal_bell, label: label, hoist: :cage_drive, landing_m: SHAFT_DEPTH_M,
                        spark: spark)
       end
 
-      # **The foot of the upcast compartment**, on the far side of the brattice: where the return
-      # air arrives, and where whatever leaks through the brattice joins it on the way to the fan.
-      # Only a single-shaft pit has one — two shafts have no brattice between them.
+      # **The foot of the upcast**: where the return air arrives on its way to the fan. In a single
+      # shaft it is the upcast compartment's, on the far side of the brattice, and whatever leaks
+      # through the brattice joins it here. A furnace's flue warms it, and a warm foot is what draws
+      # the whole upcast column (`stack_height_m:` on the fan's conduit).
       def upcast_foot
         Nodes::Vessel.new(
           id: :upcast_foot, label: "Upcast Foot", volume_m3: 300.0,
@@ -337,9 +329,58 @@ module ReactorSim
           ports: [
             Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :leak_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            Port.new(id: :flue_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
             Port.new(id: :air_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0)
           ]
         )
+      end
+
+      # **A ventilating furnace at the upcast foot**: a coal fire whose flue warms the foot, and a
+      # warm foot draws the whole upcast (`upcast`'s stack). It needs no power, only stoking, and its
+      # draught follows its fire. **Its air is the return's**, gas and all, unless a dumb drift feeds
+      # it from the intake instead (`furnace_fed_from:`, informed by the dumb drift's slot). Return
+      # firedamp in its range fires here: lit by the furnaceman's work, or by the furnace's own heat
+      # past the gas's ignition point.
+      def furnace(volume_m3:, heat_capacity:)
+        Nodes::Vessel.new(
+          id: :furnace, label: "Furnace", volume_m3: volume_m3, heat_capacity: heat_capacity,
+          ambient_conductance: 100.0, initial_contents: [ { resource: :air, kg: volume_m3 * 1.2 } ],
+          reactions: %i[coal_combustion firedamp_combustion],
+          # His shovel keeps it alight: whoever is stoking it is a light at the grate.
+          heater_control_id: :furnace_stoking, igniter_kg_per_s: 0.002,
+          # No temperature rating: its coal fire is the furnace working. Its gas going off is the
+          # blast in the furnace drift, at the shaft bottom.
+          endangers: { explosion: { tags: %i[blast burn], scales_with: :joules, reference: 1.0e8,
+                                    places: { pit_bottom: 1.6 } } },
+          ports: [ Port.new(id: :fuel_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 1.0),
+                   Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+                   Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0) ]
+        )
+      end
+
+      def furnace_bunker(kg:)
+        Nodes::Vessel.new(
+          id: :furnace_bunker, label: "Furnace Coal", volume_m3: kg / COAL_BULK_KG_M3, ambient_conductance: 0.0,
+          initial_contents: [ { resource: :coal, kg: kg } ],
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 1.0) ]
+        )
+      end
+
+      # The furnaceman's shovel, an effort station like the engine's stoker.
+      def furnace_stoke(max_kg_per_s:)
+        Nodes::Conduit.new(id: :furnace_stoke, label: "Stoking the Furnace", accepts: [ :fuel ],
+                           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e3, control_id: :furnace_stoking)
+      end
+
+      # Through the furnace's grate and arch, which is what a bigger furnace widens.
+      def furnace_draught(conductance:)
+        Nodes::Conduit.new(id: :furnace_draught, label: "Furnace Drift", accepts: [ :gas ],
+                           max_kg_per_s: 40.0, conductance: conductance, heat_capacity: 2.0e3)
+      end
+
+      def furnace_flue
+        Nodes::Conduit.new(id: :furnace_flue, label: "Furnace Flue", accepts: [ :gas ],
+                           max_kg_per_s: 40.0, conductance: 1.2, heat_capacity: 2.0e3)
       end
 
       # **A leak from the intake straight to the return**: whatever it passes is air that never
@@ -565,7 +606,8 @@ module ReactorSim
             # Its own inlet, not the downcast's: a port filters on tags and cannot tell two
             # gases apart, so a seep sharing the intake would be a seep the ventilation drives.
             Port.new(id: :damp_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 2.0),
-            Port.new(id: :coal_in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: 12.0),
+            # Wide enough for a rope haulage's sets or a belt, as well as the putters' tubs.
+            Port.new(id: :coal_in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: 40.0),
             Port.new(id: :coal_out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 12.0),
             # The sump is the pit bottom's own low corner rather than a node of its own: water
             # collects where the shaft does, and a second vessel would add a tick of lag between
@@ -676,7 +718,8 @@ module ReactorSim
           # Its props, tubs and gear. The rock is `:district_rock`.
           heat_capacity: 2.0e4,
           initial_contents: [ { resource: :air, kg: 1_700.0 } ],
-          reactions: %i[firedamp_combustion coal_dust_combustion],
+          # And a fired charge, which reacts the tick it lands and leaves its fumes here.
+          reactions: %i[firedamp_combustion coal_dust_combustion black_powder_firing permitted_firing],
           # The waste behind the face and the rock round it: either hot enough fires the district's
           # gas with no flame — a gob fire, or strata a fire has left past firedamp's ignition point.
           hot_spot: %i[gob district_rock],
@@ -718,15 +761,23 @@ module ReactorSim
             Port.new(id: :gas_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 2.0),
             # What comes out of the coal ahead: an outburst's gas and dust, or the borer's draw.
             Port.new(id: :burst_in, direction: :inlet, accepts: [], max_kg_per_s: 60.0),
+            # What a shot brings: its charge, the coal it brings down and the dust it raises.
+            Port.new(id: :shot_in, direction: :inlet, accepts: [], max_kg_per_s: 120.0),
             # What has leaked through the waste behind the face — and its smoke, if it is heating.
             Port.new(id: :waste_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 5.0),
+            # The share of the intake that has passed a belt road — its smoke, when it is burning.
+            Port.new(id: :smoke_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+            # The cutter's spray water, and the road it runs back down to the sump.
+            Port.new(id: :spray_in, direction: :inlet, accepts: [ :liquid ], max_kg_per_s: 2.0),
+            Port.new(id: :water_out, direction: :outlet, accepts: [ :liquid ], max_kg_per_s: 2.0),
             # **Inlets only.** Dust that has settled in a district has no way out of it: no
             # conduit here accepts `:dust`, so it neither rides out on the tubs nor blows away
             # up the return. It goes when it burns or when it is covered over.
             Port.new(id: :dust_in, direction: :inlet, accepts: [ :dust ], max_kg_per_s: 2.0),
             Port.new(id: :stone_in, direction: :inlet, accepts: [ :dust ], max_kg_per_s: 2.0),
             Port.new(id: :coal_in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: 12.0),
-            Port.new(id: :coal_out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 12.0)
+            # Wide enough for a rope haulage's sets and a belt's loading point.
+            Port.new(id: :coal_out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 40.0)
           ]
         )
       end
@@ -746,10 +797,13 @@ module ReactorSim
       # the operation and the pressure it put there dissipates into the stream, unlike the pump,
       # whose water genuinely leaves.
       # A rotor flying apart in the fan house throws iron across the bank.
+      #
+      # **Its conduit is the upcast column too**, the shaft's depth of it, so a foot warmer than the
+      # air outside draws by buoyancy whether the fan turns or not.
       def upcast(head_pa:, rated_omega:, reversible: false)
         Fan.new(
           id: :upcast, label: "Upcast Fan", accepts: [ :gas ],
-          max_kg_per_s: 40.0, conductance: 1.2, heat_capacity: 5.0e4,
+          max_kg_per_s: 40.0, conductance: 1.2, heat_capacity: 5.0e4, stack_height_m: SHAFT_DEPTH_M,
           control_id: :ventilation, head_pa: head_pa,
           reverse_control_id: (:fan_reversed if reversible),
           driven_by: :line_shaft, efficiency: 0.55, rated_omega: rated_omega,
@@ -781,7 +835,9 @@ module ReactorSim
                               { resource: :firedamp, kg: firedamp_kg } ],
           ports: [
             Port.new(id: :out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 12.0),
-            Port.new(id: :gas_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 2.0)
+            Port.new(id: :gas_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 2.0),
+            # What a shot brings down, faster than any pick.
+            Port.new(id: :fall_out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 60.0)
           ]
         )
       end
@@ -792,8 +848,9 @@ module ReactorSim
         Nodes::Vessel.new(
           id: :dust_source, label: "Face Dust", volume_m3: 2_000.0, ambient_conductance: 0.0,
           initial_contents: [ { resource: :coal_dust, kg: kg } ],
-          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :dust ],
-                            max_kg_per_s: 2.0) ]
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :dust ], max_kg_per_s: 2.0),
+                   # What a shot raises.
+                   Port.new(id: :raised_out, direction: :outlet, accepts: [ :dust ], max_kg_per_s: 5.0) ]
         )
       end
 
@@ -801,8 +858,21 @@ module ReactorSim
       # there or not; dust is made by cutting, so this one is on the hewing lever — which makes
       # driving a face hard the thing that fills the district with it. Rate-driven, because what
       # limits it is how hard the coal is being worked rather than any gradient.
+      #
+      # **Sprays lay most of it** where it is made, by how wet they have the face (`SprayLine`).
+      class DustLine < Nodes::Conduit
+        LAID_WET = 0.7
+
+        def initialize(sprayed_by: :spray_line, **opts)
+          @sprayed_by = sprayed_by.to_sym
+          super(**opts)
+        end
+
+        def throughput_kg(state, ctx) = super * (1.0 - (LAID_WET * SprayLine.wetting(ctx, @sprayed_by)))
+      end
+
       def dust_line(max_kg_per_s:)
-        Nodes::Conduit.new(
+        DustLine.new(
           id: :dust_line, label: "Dust", accepts: [ :dust ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e3,
           control_id: :hewing
@@ -1350,32 +1420,38 @@ module ReactorSim
       # **A cutter's picks strike sparks** off the pyrite and sandstone in the seam, in the room they
       # are cutting in, for as long as they are cutting — read off what it cut last tick. A hand
       # pick declares no `sparks:` and strikes none.
+      #
+      # **Wet, they strike none that can light anything.** Water sprayed on the picks quenches the hot
+      # streak behind each one below what fires methane, so while the sprays (`SprayLine`) are
+      # wetting the face fully the cutter offers no spark. A spray running short is no protection: a
+      # spark quenched part way is still a spark.
       class PickLine < Nodes::Conduit
-        def initialize(sparks: nil, **opts)
+        def initialize(sparks: nil, sprayed_by: :spray_line, **opts)
           @sparks = sparks&.freeze
+          @sprayed_by = sprayed_by.to_sym
           @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
           super(**opts)
         end
 
-        attr_reader :sparks
+        attr_reader :sparks, :sprayed_by
 
         def ignition(state, _levers)
           cutting = state.fetch(:cutting, 0.0)
-          return nil unless @sparks && cutting.positive?
+          return nil unless @sparks && cutting.positive? && !state.fetch(:quenched, false)
 
           { kg_per_s: @sparks.fetch(:kg_per_s) * cutting, watts: @sparks.fetch(:watts) * cutting,
             cause: :cutter_sparks }
         end
 
-        # How hard it was cutting this tick, against its rating.
+        # How hard it was cutting this tick, against its rating, and whether the sprays had it wet.
         def apply(state, ctx, grant)
           cut = state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * ctx.dt)
-          super.merge(cutting: cut.clamp(0.0, 1.0))
+          super.merge(cutting: cut.clamp(0.0, 1.0), quenched: SprayLine.wetting(ctx, @sprayed_by) >= 1.0)
         end
       end
 
-      # A frictional spark: enough seed to fire a mixture in the band, almost no heat.
-      CUTTER_SPARKS = { kg_per_s: 1.0e-4, watts: 30.0 }.freeze
+      # A frictional spark: a spark's seed, enough to fire a mixture in the band, almost no heat.
+      CUTTER_SPARKS = { kg_per_s: 1.0e-7, watts: 30.0 }.freeze
 
       def pick_line(max_kg_per_s:, sparks: nil)
         PickLine.new(
@@ -1383,6 +1459,245 @@ module ReactorSim
           max_kg_per_s: max_kg_per_s, heat_capacity: 2.0e3,
           control_id: :hewing, sparks: sparks
         )
+      end
+
+      # **Water sprays on the cutter**, from the sump: a small pump off the line shaft lifts it to the
+      # face, where it wets the picks and lays the dust they make, and runs back down the road to the
+      # sump. So it runs while the sump has water and the shaft turns, and a sump pumped bare stops
+      # it. **How wet the face is** is what it passed last tick against what it is rated for: at half
+      # its rating and above, fully.
+      class SprayLine < Nodes::Conduit
+        FULL_AT = 0.5
+
+        def initialize(**opts)
+          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
+          super
+        end
+
+        def wetting(state, dt)
+          share = state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * dt)
+          (share / FULL_AT).clamp(0.0, 1.0)
+        end
+
+        # Zero where no sprays are fitted.
+        def self.wetting(ctx, id)
+          node = ctx.nodes&.[](id)
+          state = ctx.node_state(id)
+          node.respond_to?(:wetting) && state ? node.wetting(state, ctx.dt) : 0.0
+        end
+      end
+
+      # About 24 litres a minute through the cutter's jets, at three bar.
+      SPRAY_KG_PER_S = 0.4
+      SPRAY_HEAD_PA = 3.0e5
+
+      def spray_line
+        SprayLine.new(id: :spray_line, label: "Cutter Sprays", accepts: [ :liquid ],
+                      max_kg_per_s: SPRAY_KG_PER_S, heat_capacity: 500.0, control_id: :spraying,
+                      driven_by: :line_shaft, displacement: true, rated_omega: WORKING_OMEGA,
+                      head_pa: SPRAY_HEAD_PA, lift_m: ROAD_RISE_M, efficiency: 0.5)
+      end
+
+      # The spray water running back down the road to the sump.
+      def face_drain
+        Nodes::Conduit.new(id: :face_drain, label: "Face Drain", accepts: [ :liquid ],
+                           max_kg_per_s: 2.0, heat_capacity: 500.0)
+      end
+
+      # **The shot hole: drilled, charged and fired by the shotfirer**, a tonne and a half of coal at
+      # a time (`design_sketches/mine-accidents-unit4.md` §3). The conduit is the charge line from
+      # the magazine: it passes one charge on the tick after the hole is ready, and the charge reacts
+      # in the district's air the tick it lands, leaving its fumes. The coal and dust it brings down
+      # follow through `ShotYield`, off the running total in `brought_down_kg`.
+      #
+      # **Its accidents are mishaps of the shotfirer's post**, so a poor hand has more of them: a
+      # shot that blows out of its hole is, for a tick, a flame in the room; a charge that misfires
+      # stays in the hole. **What then happens to a misfire is the shotfirer's judgement**:
+      #
+      # - recognised, it is a known misfire he digs out, **all or nothing** — its hazard is at full
+      #   weight while any of it remains, and the clearing completes in one tick;
+      # - taken for a spent shot, it is a **live charge left in the face** nobody knows of, which a
+      #   hewer working the face can strike and set off on himself.
+      #
+      # Either going off is a blast to whoever set it off and a flame in the room for a tick.
+      class ShotHole < Nodes::Conduit
+        # Seconds of a sound shotfirer's work to drill, charge and fire one hole.
+        SHOT_S = 900.0
+
+        # And to dig out a charge that did not go off. Slower than drilling a fresh hole, because
+        # it is done with a wooden scraper and nobody hurries it.
+        CLEAR_S = 1_200.0
+
+        # What one shot brings down, kg; a blown-out shot brings down this share of it.
+        SHOT_COAL_KG = 1_500.0
+        BLOWN_OUT_YIELD = 0.25
+
+        # How long a shot reads as just fired, s.
+        FIRED_S = 30.0
+
+        STATUSES = %i[idle charging fired misfire clearing].freeze
+
+        attr_reader :charge_kg, :blowout, :perils
+
+        # `blowout:` is the flame a blown-out shot offers the room for its one tick.
+        def initialize(charge_kg:, blowout:, perils:, **opts)
+          @charge_kg = charge_kg.to_f
+          @blowout = blowout.freeze
+          @perils = perils.freeze
+          super(**opts)
+        end
+
+        def base_initial_state(rng, content)
+          super.merge(progress: 0.0, firing: false, misfires: 0, live: 0, clearing: 0.0,
+                      brought_down_kg: 0.0, blew_out: false, blowout_pending: false,
+                      misfire_pending: false, misjudged_pending: false, work: 0.0, hewing: 0.0,
+                      since_fired_s: FIRED_S, status: 0)
+        end
+
+        # One charge, on the tick the hole is ready; nothing otherwise.
+        def throughput_kg(state, _ctx) = state.fetch(:firing) ? @charge_kg : 0.0
+
+        def ignition(state, _levers) = state.fetch(:blew_out) ? @blowout : nil
+
+        # `:misfired` is a known misfire, at full weight until it is dug out; `:live` a charge left in
+        # the face, struck by working it — so it scales with the hewing as well.
+        def activity(state, quantity, _dt)
+          case quantity
+          when :firing then state.fetch(:work).clamp(0.0, 1.0)
+          when :misfired then state.fetch(:misfires).positive? ? 1.0 : 0.0
+          when :live then state.fetch(:live).positive? ? state.fetch(:hewing).clamp(0.0, 1.0) : 0.0
+          end
+        end
+
+        MISHAPS = %i[blowout misfire misjudged set_off struck].freeze
+
+        def suffers?(kind) = MISHAPS.include?(kind) || super
+
+        # `misfire` and `misjudged` mark the charge being made; `set_off` and `struck` fire a known
+        # misfire and a live charge, which is a flame in the room for a tick and a little coal.
+        def suffer(state, mishap, ctx)
+          case mishap.fetch(:kind)
+          when :blowout then [ state.merge(blowout_pending: true), [] ]
+          when :misfire then [ state.merge(misfire_pending: true), [] ]
+          when :misjudged then [ state.merge(misjudged_pending: true), [] ]
+          when :set_off then [ went_off(state, :misfires), [] ]
+          when :struck then [ went_off(state, :live), [] ]
+          else super
+          end
+        end
+
+        def apply(state, ctx, grant)
+          work = (ctx.controls.fetch(:shotfiring, 0.0) / 100.0).clamp(0.0, 2.0)
+          hewing = (ctx.controls.fetch(:hewing, 0.0) / 100.0).clamp(0.0, 2.0)
+          shot = fired(super, ctx).merge(work: work, hewing: hewing)
+          shot = shot.fetch(:misfires).positive? ? dig_out(shot, work, ctx) : charge(shot, work, ctx)
+          shot.merge(status: STATUSES.index(status(shot)))
+        end
+
+        private
+
+        # What last tick's firing did, now the charge line has passed what the magazine had.
+        def fired(state, ctx)
+          since = state.fetch(:since_fired_s) + ctx.dt
+          return state.merge(blew_out: false, since_fired_s: since) unless state.fetch(:firing)
+
+          share = (state.fetch(:carried_kg, 0.0) / @charge_kg).clamp(0.0, 1.0)
+          blew = state.fetch(:blowout_pending) && share.positive?
+          coal = SHOT_COAL_KG * share * (blew ? BLOWN_OUT_YIELD : 1.0)
+          state.merge(firing: false, blew_out: blew, blowout_pending: false, since_fired_s: 0.0,
+                      brought_down_kg: state.fetch(:brought_down_kg) + coal)
+        end
+
+        # A charge that misfires stays where it is: known, it waits to be dug out; misjudged, it is
+        # left live in the face and the shotfirer goes on to the next hole.
+        def charge(state, work, ctx)
+          progress = state.fetch(:progress) + (work * ctx.dt / SHOT_S)
+          return state.merge(progress: progress) if progress < 1.0
+
+          done = state.merge(progress: 0.0, misfire_pending: false, misjudged_pending: false)
+          return done.merge(live: state.fetch(:live) + 1) if state.fetch(:misjudged_pending)
+          return done.merge(misfires: state.fetch(:misfires) + 1) if state.fetch(:misfire_pending)
+
+          done.merge(firing: true)
+        end
+
+        def went_off(state, which)
+          return state unless state.fetch(which).positive?
+
+          state.merge(which => state.fetch(which) - 1, blew_out: true, clearing: which == :misfires ? 0.0 : state.fetch(:clearing),
+                      brought_down_kg: state.fetch(:brought_down_kg) + (SHOT_COAL_KG * BLOWN_OUT_YIELD))
+        end
+
+        def dig_out(state, work, ctx)
+          clearing = state.fetch(:clearing) + (work * ctx.dt / CLEAR_S)
+          return state.merge(clearing: clearing) if clearing < 1.0
+
+          state.merge(clearing: 0.0, misfires: state.fetch(:misfires) - 1)
+        end
+
+        def status(state)
+          if state.fetch(:misfires).positive?
+            state.fetch(:work).positive? ? :clearing : :misfire
+          elsif state.fetch(:since_fired_s) < FIRED_S
+            :fired
+          else
+            state.fetch(:work).positive? ? :charging : :idle
+          end
+        end
+      end
+
+      # **What a shot brings down, coming down**: coal off the seam, or the dust it raises, at
+      # `share` of what the shot hole's shots have brought down in all, as fast as it can fall.
+      # Passes what is still owed against what it has passed already, so a shot's yield arrives
+      # whatever ticks it lands on.
+      class ShotYield < Nodes::Conduit
+        def initialize(shot_hole:, share:, **opts)
+          @shot_hole = shot_hole.to_sym
+          @share = share.to_f
+          super(**opts)
+        end
+
+        def base_initial_state(rng, content) = super.merge(owed_kg: 0.0, passed_kg: 0.0)
+
+        def throughput_kg(state, ctx) = [ state.fetch(:owed_kg), super ].min
+
+        def apply(state, ctx, grant)
+          passed = state.fetch(:passed_kg) + state.fetch(:carried_kg, 0.0)
+          down = ctx.node_state(@shot_hole)&.fetch(:brought_down_kg, 0.0).to_f * @share
+          super.merge(passed_kg: passed, owed_kg: [ down - passed, 0.0 ].max)
+        end
+      end
+
+      # **The shot's flame for the tick it blows out**: a seed and real heat, black powder's long
+      # and hot, a permitted explosive's short and cool — the difference is in the peril's rate, and
+      # the flame itself is what a blown-out shot is.
+      BLOWN_OUT_SHOT = { kg_per_s: 0.4, watts: 4.0e6, cause: :blown_out_shot }.freeze
+
+      # **The magazine**, at bank: the charges a pit has, which run down as it fires.
+      def magazine(resource:, kg:)
+        Nodes::Vessel.new(
+          id: :magazine, label: "Magazine", volume_m3: 2.0, ambient_conductance: 0.0,
+          initial_contents: [ { resource: resource, kg: kg } ],
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :explosive ], max_kg_per_s: 40.0) ]
+        )
+      end
+
+      def shot_hole(charge_kg:, perils:)
+        ShotHole.new(
+          id: :shot_hole, label: "Shot Holes", accepts: [ :explosive ], max_kg_per_s: 40.0,
+          heat_capacity: 1.0e3, charge_kg: charge_kg, blowout: BLOWN_OUT_SHOT, perils: perils
+        )
+      end
+
+      def shot_fall
+        ShotYield.new(id: :shot_fall, label: "Shot Coal", accepts: [ :solid ], max_kg_per_s: 60.0,
+                      heat_capacity: 1.0e3, shot_hole: :shot_hole, share: 1.0)
+      end
+
+      # A hundredth of the coal a shot brings down goes up as dust it raises.
+      def shot_dust
+        ShotYield.new(id: :shot_dust, label: "Shot Dust", accepts: [ :dust ], max_kg_per_s: 5.0,
+                      heat_capacity: 1.0e3, shot_hole: :shot_hole, share: 0.01)
       end
 
       # **A roadway that can come in on top of you.**
@@ -1417,7 +1732,10 @@ module ReactorSim
         # beside it is a general idea nothing else has needed yet and a roadway coming in is
         # not. `Tick#hazards_from` only asks whether a node responds to `failure_hazards`, so a
         # subclass answering is enough.
-        def initialize(advanced_by:, supported_by:, endangers: {}, perils: [], **opts)
+        # `rope:` names the haulage rope a road's sets are drawn on, if it has one: parted, the road
+        # carries nothing until it is spliced.
+        def initialize(advanced_by:, supported_by:, endangers: {}, perils: [], rope: nil, **opts)
+          @rope = rope&.to_sym
           @advanced_by = advanced_by.to_sym
           @supported_by = supported_by.to_sym
           @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
@@ -1429,6 +1747,12 @@ module ReactorSim
         end
 
         attr_reader :failure_hazards, :perils
+
+        def throughput_kg(state, ctx)
+          return 0.0 if @rope && ctx.node_state(@rope)&.fetch(:failure, nil)
+
+          super
+        end
 
         # **The difference, floored at zero, never the ratio.** A ratio makes a face nobody is
         # working still consume timber to stand still, and a district standing idle does not
@@ -1448,10 +1772,13 @@ module ReactorSim
         # traffic, not the clock — the tub going past is the danger, so a road being worked
         # flat out is a road that hurts people and an idle one is a corridor.
         def activity(state, quantity, dt)
-          return nil unless quantity == :tubs
+          return nil unless quantity == self.class::TRAFFIC
 
           (state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * dt)).clamp(0.0, 1.0)
         end
+
+        # What its perils scale with: the tubs going past.
+        TRAFFIC = :tubs
 
         def failure_modes = { roof_fall: { derates: { throughput: 0.12 } } }
 
@@ -1490,8 +1817,137 @@ module ReactorSim
         Guard.new(id: :shaft_gates, label: label, effectiveness: effectiveness, places: %i[bank])
       end
 
-      def tub_road(max_kg_per_s:)
+      # **The haulage road rises from the pit bottom to the district**, the sump being the lowest
+      # point in the pit: full sets come down to the shaft and empties go back up. Gentle enough
+      # that putting is unchanged on it; steep enough that a set loose on it runs.
+      ROAD_RISE_M = 12.0
+      ROAD_M = 200.0
+
+      # **The rope a haulage engine draws its sets on**, and what happens when it lets go. Its
+      # tension is a set down the incline — `m·g·(sin θ + rolling)` — and it wears with the
+      # traffic it hauls. Sound, it never parts under a set's weight; what parts a worn one is the
+      # **snatch** as a set is started, several times the standing tension. Parted, the set runs
+      # back down to the shaft (`RUNAWAY`) and the haulage stops until the hauling hands splice it.
+      #
+      # A set breaking away is the other way: a hooker-on coupling a set without its backstay, a
+      # mishap of the haulage post (`:breakaway`).
+      class HaulageRope < Node
+        include Concerns::Wearing
+
+        # Ten tubs: two tonnes of coal and their own iron.
+        SET_KG = 2_600.0
+        ROLLING = 0.02
+
+        # A set started hard: what a worn rope parts under.
+        SNATCH = 8.0
+
+        # Durability per second at full traffic: about six hours' hauling from new.
+        WEAR_PER_S = 0.046
+
+        # Seconds of a hauling hand's work to splice a parted rope.
+        SPLICE_S = 600.0
+
+        attr_reader :road, :breaking_kn, :splice_control, :perils, :failure_hazards, :failure_damages
+
+        def initialize(id:, road:, breaking_kn:, splice_control:, perils: [], endangers: {}, damages: {},
+                       label: nil)
+          super(id: id, label: label)
+          @road = road.to_sym
+          @breaking_kn = breaking_kn.to_f
+          @splice_control = splice_control.to_sym
+          @perils = perils.freeze
+          @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          @failure_damages = damages.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
+          freeze
+        end
+
+        def base_initial_state(rng, content) = super.merge(traffic: 0.0, splicing: 0.0)
+
+        def self.tension_n = SET_KG * Units::GRAVITY_M_PER_S2 * ((ROAD_RISE_M / ROAD_M) + ROLLING)
+
+        def hauling?(state) = state.fetch(:traffic).positive?
+
+        def stress_per_second(state, _ctx) = WEAR_PER_S * state.fetch(:traffic)
+
+        def overload?(state, _ctx, integrity)
+          hauling?(state) && SNATCH * HaulageRope.tension_n > @breaking_kn * 1_000.0 * integrity
+        end
+
+        def failure_modes = { parted: {} }
+
+        def failure_detail(_state, _ctx) = { set_kg: SET_KG }
+
+        def activity(state, quantity, _dt) = quantity == :hauling ? state.fetch(:traffic) : nil
+
+        def suffers?(kind) = kind == :breakaway || super
+
+        def suffer(state, mishap, ctx)
+          return super unless mishap.fetch(:kind) == :breakaway
+
+          broken?(state) ? [ state, [] ] : break_part(state, ctx, :mishap)
+        end
+
+        # How busy the road is, as of last tick, and — parted — the splice coming on.
+        def apply(state, ctx, _grant)
+          road = ctx.node_state(@road) || {}
+          rated = ctx.nodes&.[](@road)&.port(:outlet)&.capacity_kg(ctx.dt).to_f
+          traffic = rated.positive? ? (road.fetch(:carried_kg, 0.0) / rated).clamp(0.0, 1.0) : 0.0
+          state = state.merge(traffic: traffic)
+          return state unless broken?(state)
+
+          splice(state, ctx)
+        end
+
+        private
+
+        def splice(state, ctx)
+          work = (ctx.controls.fetch(@splice_control, 0.0) / 100.0).clamp(0.0, 2.0)
+          progress = state.fetch(:splicing) + (work * ctx.dt / SPLICE_S)
+          return state.merge(splicing: progress) if progress < 1.0
+
+          state.merge(failure: nil, durability: state.fetch(:initial_durability), splicing: 0.0)
+        end
+      end
+
+      # **A set loose on the incline**: it runs back down to the shaft, gathering speed, and what
+      # it does to somebody is where on the road they are (`Tick#along`). The district end meets it
+      # as it breaks away; the trapper at the doors near the foot, near its fastest; and at the pit
+      # bottom it is off its rails and amongst everybody there — the onsetter, whoever is waiting to
+      # ride. The hands working the road are somewhere along it, may reach a manhole, and, well down
+      # it, may be pinned against the side or between it and a standing tub.
+      RUNAWAY = {
+        tags: %i[impact], scales_with: :set_kg, reference: HaulageRope::SET_KG,
+        along: { from: :district, to: :pit_bottom, weight: 3.0, top_share: 0.1,
+                 positions: { trapping: 0.9 }, roaming: %i[haulage],
+                 crushed: { chance: 0.5, factor: 2.0, tags: %i[crush], cause: :crushed_by_runaway } }
+      }.freeze
+
+      # **A hooker-on coupling a set without its backstay**, by how hard the road is worked.
+      SET_BREAKS_AWAY = Peril.new(id: :set_broke_away, rate: 0.08, scales_with: :hauling,
+                                  stations: %i[haulage], mishap: { node: :haulage_rope, kind: :breakaway })
+
+      # `catch:` is a fitted runaway catch (`{ at:, holds: }`): the run stops most sets at it, and
+      # what it stops never reaches the door.
+      def haulage_rope(breaking_kn:, catch: nil)
+        runaway = catch ? RUNAWAY.merge(along: RUNAWAY.fetch(:along).merge(catch: catch.freeze).freeze).freeze : RUNAWAY
+        door = 1.0 - (catch ? catch.fetch(:holds) : 0.0)
+        HaulageRope.new(id: :haulage_rope, label: "Haulage Rope", road: :tub_road, breaking_kn: breaking_kn,
+                        splice_control: :haulage, perils: [ SET_BREAKS_AWAY ],
+                        endangers: { parted: runaway }, damages: { parted: { door: door } })
+      end
+
+      # What the haulage engine pays per kilogram of coal, as a lift: the empties drawn back up the
+      # rise and both ways' rolling, less nothing for the full sets it lets down under the brake.
+      HAULED_LIFT_M = 10.0
+
+      # `driven:` makes it a rope haulage: a haulage engine off the line shaft drawing sets on
+      # `rope:`, moving coal only while the shaft turns and paying the shaft for the empties it
+      # draws back up. Without it the road is put by hand.
+      def tub_road(max_kg_per_s:, driven: false, rope: nil)
         Roadway.new(
+          rope: rope,
+          **(driven ? { driven_by: :line_shaft, displacement: true, rated_omega: WORKING_OMEGA,
+                        lift_m: HAULED_LIFT_M, efficiency: 0.6 } : {}),
           advanced_by: :hewing, supported_by: :timbering,
           id: :tub_road, label: "Haulage Road", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 4.0e3,
@@ -1526,6 +1982,187 @@ module ReactorSim
                       unless_tagged: :hulking, places: %i[pit_bottom district])
           ]
         )
+      end
+
+      # **A belt conveyor on the road**, off the line shaft, carrying with no hand on it. The drive
+      # drum pulls the belt by friction, `grip_kg_per_s` of coal's worth; a loading point pushing more
+      # onto it than that **stalls** it, and a slipping belt does not recover, because a belt sliding
+      # on its drum grips less than one standing on it. Stalled, it carries nothing and the drum turns
+      # on under it, its friction the drive's heat (`bearing_load_n`, the drum's `loaded_by:`). Water
+      # on the pit bottom wets the drum and takes grip away.
+      class Conveyor < Roadway
+        TRAFFIC = :belt
+
+        # The pull at which the belt slips, and slipping it drags at about that: a 4.4 kN slack side
+        # round 210° of drum at rubber-on-steel μ 0.35 holds 11.5 kN by the capstan law, which is a
+        # five-ply 30-inch cotton belt at its working tension.
+        SLIP_FORCE_N = 11_500.0
+        BELT_MU = 0.35
+
+        # Wet rubber on steel grips at about 0.2, which takes most of the capstan's margin.
+        WET_GRIP_LOSS = 0.6
+
+        def initialize(grip_kg_per_s:, fed_from:, wetted_by:, **opts)
+          @grip_kg_per_s = grip_kg_per_s.to_f
+          @fed_from = fed_from.to_sym
+          @wetted_by = wetted_by.to_sym
+          super(**opts)
+        end
+
+        attr_reader :grip_kg_per_s, :fed_from, :wetted_by
+
+        def throughput_kg(state, ctx) = stalled?(ctx) ? 0.0 : super
+
+        # **What the loading point pushes on, against what the drum can pull.** Both at the belt's
+        # speed, since a slower belt carries its load deeper for the same pull.
+        def stalled?(ctx)
+          share = displacement_fraction(ctx)
+          return false unless share.positive?
+
+          pushed = port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx) * share
+          [ pushed, waiting_kg(ctx) ].min > grip_kg_per_s_now(ctx) * share * ctx.dt
+        end
+
+        def grip_kg_per_s_now(ctx) = @grip_kg_per_s * (1.0 - (WET_GRIP_LOSS * wetness(ctx)))
+
+        # Slipping at `BELT_MU`, the drum drags at `SLIP_FORCE_N`; gripping, it does not rub at all.
+        def bearing_load_n(ctx) = stalled?(ctx) ? SLIP_FORCE_N / BELT_MU : 0.0
+
+        private
+
+        def waiting_kg(ctx)
+          parcels = ctx.node_state(@fed_from)&.fetch(:parcels, nil) || []
+          Parcel.total_kg(Parcel.matching(parcels, port(:inlet).accepts, ctx.content))
+        end
+
+        def wetness(ctx)
+          node = ctx.nodes&.[](@wetted_by)
+          state = ctx.node_state(@wetted_by)
+          node.respond_to?(:flooding) && state ? node.flooding(state, ctx.content) : 0.0
+        end
+      end
+
+      # The belt's speed at the line shaft's working speed.
+      BELT_M_PER_S = 2.0
+
+      # What the belt drive pays per kilogram of coal, as a lift: its idlers' drag both ways, the
+      # coal's descent being taken by the drive's brake rather than given back.
+      BELT_LIFT_M = 6.0
+
+      def conveyor(max_kg_per_s:, grip_kg_per_s:)
+        Conveyor.new(
+          grip_kg_per_s: grip_kg_per_s, fed_from: :district, wetted_by: :pit_bottom,
+          driven_by: :line_shaft, displacement: true, rated_omega: WORKING_OMEGA,
+          lift_m: BELT_LIFT_M, efficiency: 0.7,
+          advanced_by: :hewing, supported_by: :timbering,
+          id: :tub_road, label: "Belt Road", accepts: [ :solid ],
+          max_kg_per_s: max_kg_per_s, heat_capacity: 4.0e3, control_id: :haulage,
+          endangers: { roof_fall: { tags: %i[rockfall crush], scales_with: :unsupported, reference: 30.0,
+                                    places: { pit_bottom: 2.6, district: 1.6 } } },
+          # Caught in the belt where it runs onto the drum: the attendant, clearing spillage at
+          # the drive head.
+          perils: [ Peril.new(id: :caught_in_the_belt, tags: %i[crush], severity: 2.4, scales_with: :belt,
+                              stations: %i[belt_attending]) ]
+        )
+      end
+
+      # **The drive drum**, rubbing only while the belt is stalled on it (`Conveyor#bearing_load_n`):
+      # dry, at the belt's friction, its heat the drive's 23 kW at working speed. A gate-end drum,
+      # 16 inches across and 0.7 m wide in an 8 mm steel shell, is about 55 kg. It sheds heat so
+      # that under a belt stalled for good it settles about 773 K, the most stalled drums are
+      # measured at — and lower as the drag slows the shaft.
+      DRUM_HEAT_CAPACITY_J_PER_K = 2.7e4
+
+      def belt_drive
+        Nodes::Bearing.new(
+          id: :belt_drive, label: "Belt Drive", supports: :line_shaft, duty: :journal, material: :steel,
+          heat_capacity: DRUM_HEAT_CAPACITY_J_PER_K, ambient_conductance: 46.0,
+          loaded_by: :tub_road, static_load_n: 0.0, journal_radius_m: BELT_M_PER_S / WORKING_OMEGA,
+          mu_film: Conveyor::BELT_MU, mu_boundary: Conveyor::BELT_MU, oil_charge_kg: 0.0, viscous_c: 0.0
+        )
+      end
+
+      # **Coal spilt off the belt where it runs over the drive head**: a share of what it carries, a
+      # tick behind. A conduit holds nothing, so it carries the share of the belt's last tick.
+      class Spillage < Nodes::Conduit
+        def initialize(belt:, share:, **opts)
+          @belt = belt.to_sym
+          @share = share.to_f
+          super(**opts)
+        end
+
+        def throughput_kg(state, ctx)
+          [ ctx.node_state(@belt)&.fetch(:carried_kg, 0.0).to_f * @share, super ].min
+        end
+      end
+
+      SPILT_SHARE = 0.002
+
+      def belt_spillage
+        Spillage.new(id: :belt_spillage, label: "Spillage", accepts: [ :solid ], max_kg_per_s: 1.0,
+                     heat_capacity: 1.0e3, belt: :tub_road, share: SPILT_SHARE)
+      end
+
+      # **What lies packed round the drive head**: spillage and the grease off its bearings, against
+      # the drum (`hot_spot:`). It lights at a layer's ignition point, far below the belt's, and
+      # burning it is the belt's hot spot. On the belt road's air, so it breathes and its smoke goes
+      # inbye. The belt attendant shovels it back onto the coal (`belt_clearing`).
+      def drive_head
+        Nodes::Vessel.new(
+          # Its heat capacity is the drive frame's half-tonne of steel, which the deposit burns against.
+          id: :drive_head, label: "Drive Head", volume_m3: 20.0, heat_capacity: 2.5e5,
+          initial_contents: [ { resource: :air, kg: 24.5 } ],
+          reactions: %i[coal_layer_combustion], hot_spot: :belt_drive,
+          # A finite rating, so a fire in it is reported as an incident rather than as telemetry.
+          max_temperature_k: 1_400.0,
+          ports: [ Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+                   Port.new(id: :smoke_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+                   Port.new(id: :spill_in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: 1.0),
+                   Port.new(id: :spill_out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 1.0) ]
+        )
+      end
+
+      # The attendant's shovel: the spillage back onto the pit bottom's coal, as hard as he works.
+      def belt_clearing
+        Nodes::Conduit.new(id: :belt_clearing, label: "Clearing the Drive Head", accepts: [ :solid ],
+                           max_kg_per_s: 0.3, heat_capacity: 1.0e3, control_id: :belt_attending)
+      end
+
+      # 400 m of belt, both runs, at ten kilograms a metre.
+      BELT_KG = 4_000.0
+
+      # **The belt, lying along the road on the intake**, and the share of the intake that passes it:
+      # drawn off the pit bottom past the drive head and on into the district. It lights from what it
+      # lies on (`hot_spot:`) — a burning deposit at the drive head, or its stalled drum — and
+      # burning, its smoke and its carbon monoxide go inbye to the face. Its rock is
+      # `:belt_road_rock`: 200 m of road, as the district's.
+      BELT_ROAD_FACE_M2 = 2_000.0
+
+      def belt_road(belting:, reaction:)
+        Nodes::Vessel.new(
+          id: :belt_road, label: "Belt Road", volume_m3: 200.0, heat_capacity: 5.0e3,
+          initial_contents: [ { resource: :air, kg: 245.0 }, { resource: belting, kg: BELT_KG } ],
+          reactions: [ reaction ], hot_spot: %i[belt_drive drive_head],
+          # A finite rating, so a fire in it is reported as an incident rather than as telemetry.
+          max_temperature_k: 1_400.0,
+          ports: [ Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
+                   Port.new(id: :smoke_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0) ]
+        )
+      end
+
+      # **The belt road is an intake of its own** beside the main road, which is how a conveyor was
+      # laid: in series, these three are half the main road's conductance.
+      BELT_ROAD_CONDUCTANCE = 1.2
+
+      def belt_draught = belt_airway(:belt_draught, "Belt Road Draught")
+
+      def drive_head_draught = belt_airway(:drive_head_draught, "Past the Drive Head")
+
+      def belt_smoke = belt_airway(:belt_smoke, "Belt Road Smoke")
+
+      def belt_airway(id, label)
+        Nodes::Conduit.new(id: id, label: label, accepts: [ :gas ], max_kg_per_s: 40.0,
+                           conductance: BELT_ROAD_CONDUCTANCE, heat_capacity: 2.0e3)
       end
 
       # **Coal rides the cage**, on a deck that is the hoist's load like anybody in it — so lifting
@@ -2113,18 +2750,18 @@ module ReactorSim
         def failure_modes = { main_burst: { derates: { throughput: 0.0 } } }
       end
 
-      def crew_for(roster, content, station:, place:, advance: nil)
+      def crew_for(roster, content, station:, place:, advance: [])
         below = advance_seats(roster, advance)
 
         roster.map do |seat, posting|
           sheet = Crew.resolve(posting, content: content)
-          # **Already down, and posted to nothing.** Standing in the district is the head start;
-          # which face they work is still the player's first decision, and giving them a station
-          # as well would put a gang on one lever before anybody had asked for it.
-          underground = below.include?(seat)
+          # **Already down, and posted to nothing.** Standing there is the head start; which post
+          # they take is still the player's first decision, and giving them a station as well
+          # would put a gang on one lever before anybody had asked for it.
+          underground = below[seat]
 
           Minion.new(id: seat, station: underground ? nil : station,
-                     place: underground ? advance.fetch(:place) : place,
+                     place: underground || place,
                      name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
                      stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
@@ -2132,12 +2769,15 @@ module ReactorSim
         end
       end
 
-      # Never more than the roster holds, so a small quarters is a shift that is entirely at
-      # bank rather than one with nobody left to send.
+      # `{ seat => place }`, **dealt from the end of the roster, the first shift first** — so seat
+      # one is still somebody at bank and a roster filled from the top has its named hands there.
+      # Never more than the roster holds: a small quarters seats the face before the pit bottom,
+      # and bank keeps whoever is left.
       def advance_seats(roster, advance)
-        return [] if advance.nil? || !advance.fetch(:seats, 0).positive?
-
-        roster.keys.last(advance.fetch(:seats)).freeze
+        free = roster.keys.reverse
+        Array(advance).each_with_object({}) do |shift, dealt|
+          free.shift(shift.fetch(:seats)).each { |seat| dealt[seat] = shift.fetch(:place) }
+        end.freeze
       end
     end
   end

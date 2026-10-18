@@ -22,10 +22,17 @@ module ReactorSim
   # Check; a `mishap:` — `{ node:, kind:, share: }` — is something the person does to a part, which
   # that part suffers on the next tick (`Concerns::Wearing#suffer`). The clumsy banksman letting a
   # tub into the shaft is unhurt; the shaft is not.
+  #
+  # **`judged:` splits one event between the hand who reads it rightly and the one who does not.**
+  # `:rightly` takes `1 − m` of the rate and `:wrongly` takes `m`, where `m` is
+  # `Minion#misjudges` — so the pair happens as often as one peril would, and who is posted decides
+  # which it is. A misfire is the case: recognised, it is dug out; taken for a spent shot, it is
+  # left live in the face.
   Peril = Struct.new(:id, :tags, :severity, :rate, :mishap, :scales_with, :when_tagged,
-                     :unless_tagged, :places, :stations, :riders, keyword_init: true) do
+                     :unless_tagged, :places, :stations, :riders, :judged, keyword_init: true) do
     def initialize(id:, severity: 0.0, rate: nil, mishap: nil, tags: [], scales_with: nil,
-                   when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil)
+                   when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil,
+                   judged: nil)
       super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
             mishap: Peril.mishap(mishap),
             tags: Array(tags).map(&:to_sym).freeze,
@@ -33,7 +40,11 @@ module ReactorSim
             when_tagged: when_tagged&.to_sym, unless_tagged: unless_tagged&.to_sym,
             places: Array(places).map(&:to_sym).freeze,
             stations: Array(stations).map(&:to_sym).freeze,
-            riders: Array(riders).map(&:to_sym).freeze)
+            riders: Array(riders).map(&:to_sym).freeze,
+            judged: judged&.to_sym)
+      if judged && !Peril::JUDGEMENTS.include?(self.judged)
+        raise Error, "peril #{id}: judged #{judged.inspect} is neither of #{Peril::JUDGEMENTS.inspect}"
+      end
       raise Error, "peril #{id}: hurts nobody and breaks nothing" unless hurts? || mishap?
       raise Error, "peril #{id}: a rate of zero never happens" unless self.rate.positive?
 
@@ -66,11 +77,21 @@ module ReactorSim
     #
     # So the two road perils are **complementary rather than exclusive**, and only the extremes
     # are a clean either/or. `severity` is therefore the figure for a *fully* tagged creature.
-    def weight_for(minion)
+    #
+    # With `state`, a `judged:` peril also takes its share of the judgement; without it — asking
+    # only whether a peril can reach this person at all — it does not.
+    def weight_for(minion, state = nil, ambient: nil)
       want = when_tagged ? Injury.numeric(minion.tag(when_tagged)) : 1.0
       avoid = unless_tagged ? 1.0 - Injury.numeric(minion.tag(unless_tagged)) : 1.0
 
-      (want * avoid).clamp(0.0, 1.0)
+      (want * avoid * judgement(minion, state, ambient)).clamp(0.0, 1.0)
+    end
+
+    def judgement(minion, state, ambient)
+      return 1.0 if judged.nil? || state.nil?
+
+      wrong = minion.misjudges(state, ambient: ambient)
+      judged == :wrongly ? wrong : 1.0 - wrong
     end
 
     # `riders:` names what carries somebody through a shaft — a cage's drum, a man engine's rods —
@@ -81,6 +102,8 @@ module ReactorSim
       stations.include?(station) || places.include?(place)
     end
   end
+
+  Peril::JUDGEMENTS = %i[rightly wrongly].freeze
 
   # The hidden margin of safety every worker carries, and what spends it.
   #
@@ -150,10 +173,11 @@ module ReactorSim
     # What this tick's exposure costs, and what each peril took of it: `[total, bites]`.
     #
     # **Spent by `rate`, never by `severity`** — how often a thing happens is not how bad it is.
-    def spend(reaching, minion, state, dt)
+    def spend(reaching, minion, state, dt, ambient: nil)
       exposed = susceptibility(minion, state)
       bites = reaching.filter_map do |peril, activity|
-        bite = peril.rate * peril.weight_for(minion) * activity * exposed * SPEND_PER_S * dt
+        bite = peril.rate * peril.weight_for(minion, state, ambient: ambient) * activity * exposed *
+               SPEND_PER_S * dt
         [ peril, bite ] if bite.positive?
       end
 
@@ -211,8 +235,9 @@ module ReactorSim
     # as a haulage road nobody could be hurt on, with no failing assertion anywhere.
     #
     # `which` is this tick's `peril:` fate, used only if the margin crosses here.
-    def advance(reaching, minion, state, dt, rolled, which = 0.0)
-      spent, bites = spend(reaching, minion, state, dt)
+    # `ambient:` is the light of the room they are in, which their judgement reads.
+    def advance(reaching, minion, state, dt, rolled, which = 0.0, ambient: nil)
+      spent, bites = spend(reaching, minion, state, dt, ambient: ambient)
       full = state.fetch(:margin_full, 1.0)
       was = state.fetch(:margin, 1.0)
       margin = was - spent

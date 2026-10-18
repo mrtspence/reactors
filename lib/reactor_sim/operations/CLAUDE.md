@@ -29,10 +29,15 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > quarters and is sent somewhere.
 >
 > **Except where the operation says otherwise.** A spatial operation may start part of its shift
-> somewhere else — the mine's `ADVANCE_SHIFT` puts the last three seats in the district, posted
-> to nothing, so there is work to do before anybody has walked anywhere. It is a property of the
-> SEAT, decided by the chassis at build, so a draft roster never changes the answer; the crew
-> screen reads it back off the built minions' `default_place`.
+> somewhere else — the mine's **shift parts** (`Mine::SHIFTS`, in the `face_shift` and
+> `pit_bottom_shift` slots) put three seats in the district and three at the pit bottom to start
+> with, five of either upgraded, posted to nothing, so there is work to do before anybody has
+> walked anywhere. A part declares `stats: { advance_seats:, advance_place: }`;
+> `Assembly#advance_shifts` reads them in slot order and `Mine.crew_for` deals them from the end of
+> the roster, face first, so the first seats stay at bank. It is a property of the SEAT, decided
+> by the loadout at build, so a draft roster never changes the answer; the crew screen reads it
+> back off the built minions' `default_place`. The pit bottom has its own refuge
+> (`pit_bottom_rest`, room for one) beside the district's.
 
 > **A place is worth declaring even where nobody walks.** The steam engine is one room with no
 > passages at all — a mill engine's boiler, cylinder and flywheel stand together and the
@@ -229,6 +234,47 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    tier, and the rope reads them off the drum, so the two slots never need to know each other. The
    sheave reads its load off the rope. The headframe tier is timber or iron, and **both draw the
    same share of the intake**, so buying the iron one never changes the pit's air.
+
+   **A ventilating furnace is a slot beside the fan** (`furnace`: fire basket, brick furnace,
+   double furnace). The return comes up by way of the upcast foot in either frame, and the fan's
+   conduit carries the shaft's depth of stack, so the furnace's flue warming the foot draws the
+   whole upcast with no power at all. A furnaceman stokes it. **Its air is the return's**, so
+   return gas in its range fires at the furnace, and the front runs back into the district.
+   **The dumb drift** (its own slot) feeds the fire from the intake through a regulator instead.
+   It does it by `informs: { furnace_fed_from: :intake }`, the one way a fitting shapes another
+   slot's wiring.
+
+   **What moves the coal to the shaft is the `haulage` slot**: hand putting, or a rope haulage — the
+   same roadway and roof, driven off the line shaft at four times the rate, its sets on
+   `Mine::HaulageRope`. The road rises from the pit bottom to the district (`ROAD_RISE_M`), so a set
+   the rope lets go — worn and snatched, or a set coupled without its backstay — runs back down to
+   the shaft: `RUNAWAY`, an `along:` hazard hurting each person by where on the road they are, then
+   the haulage stopped until the hauling hands splice it. **A runaway catch** (its own slot: catch
+   points or drags) informs the rope haulage where it stands on the road and how much it holds.
+   Below it a runaway reaches `1 − holds` of what it would have, and the door's wreck scales the
+   same way. **A belt conveyor** (`Mine::Conveyor`)
+   carries with nobody on the road, its feed a lever. Fed past what its drum grips — less with water
+   on the pit bottom — it stalls, and the drum (a `Bearing` loaded by the belt) turns on under it and
+   heats. **The drum lights the spillage, and the spillage the belt**, each through a `hot_spot:`:
+   the `drive_head` vessel holds coal spilt off the belt (`Mine::Spillage`, a share of its traffic),
+   which lights as a layer far below the belt's own point, and burning is the belt road's hot spot.
+   The belt attendant shovels it back. The belt road is an intake of its own beside the main road,
+   so the smoke goes inbye to the face; fire-resistant belting does not carry the fire.
+
+   **Shotfiring is a slot of its own** (`blasting`, empty to start: black powder or permitted
+   explosives). A ticketed shotfirer works `Mine::ShotHole`, a conduit from the magazine that
+   passes one charge when the hole is ready; the charge's fumes land in the district and the coal and
+   dust the shot brings down follow through `ShotYield` conduits, off its running total. **Its
+   accidents are perils of his post**: a blown-out shot is a flame in the room for a tick, and a
+   misfire is `judged:` — recognised and dug out all or nothing, or misjudged and left live in the
+   face for the hewer to strike.
+
+   **Cutter sprays are a slot of their own** (`cutter_sprays`, empty to start). `Mine::SprayLine`
+   pumps sump water to the face, and it drains back to the sump. While the face is fully wet the
+   cutter's picks offer no spark (`PickLine` records `quenched`) and `DustLine` lays most of the
+   dust. The quench is all or nothing on purpose: a deflagration triggers on any seed, so a smaller
+   spark is no safer than a large one. Both readers name `:spray_line` and read a pit with no
+   sprays as dry.
 
    **Coal rides the hoist.** A deck in cage A is filled at the bottom by the onsetter and run off
    at bank by the banksman, each only while the cage stands at their landing, and its coal is the

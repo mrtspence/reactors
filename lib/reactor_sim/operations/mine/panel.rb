@@ -19,10 +19,10 @@ module ReactorSim
       PANEL_ORDER = %i[
         flame_cap lamp_flame canary
         shaft_speed shaft_supply
-        air_quantity district_air
-        sump_level beam_condition water_make survey bore_holes goaf_weight fire_stink
+        air_quantity furnace_fire district_air
+        sump_level beam_condition water_make survey shot_holes bore_holes goaf_weight fire_stink
         district_light district_fire
-        roof_timber putting
+        roof_timber putting rope_on_the_road drum_heat
         winding_signals cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
         coal_raised seam_remaining
       ].freeze
@@ -240,6 +240,37 @@ module ReactorSim
           # the decision the gauge exists to inform.
           #
           # Prose and heavily lagged, because it is a walk and a judgement, not a measurement.
+          # **The hauling hands' word on their rope**: worn by the traffic, and below about a quarter
+          # of its strength a set started hard parts it. Through them, so with nobody on the road
+          # nobody is looking at it.
+          rope_on_the_road: Diagnostic.new(
+            id: :rope_on_the_road, label: "Haulage Rope", observer: :haulage,
+            source: Sources::Derived.new(:haulage_rope, :integrity),
+            filters: [ Filters::Lag.new(4), Filters::Bands.new([ 0.01, 0.3, 0.6 ]) ],
+            display: Displays::Prose.new([ "parted — splicing it", "broken wires, and stretched",
+                                           "wearing", "a good rope" ])
+          ),
+
+          # **The furnaceman's word on his fire**, which is the draught: a furnace draws as hard as it
+          # burns. Through him, so with nobody stoking nobody is watching it go down.
+          furnace_fire: Diagnostic.new(
+            id: :furnace_fire, label: "Furnace", observer: :furnace_stoking,
+            source: Sources::Derived.new(:furnace, :temperature_k),
+            filters: [ Filters::Lag.new(4), Filters::Bands.new([ 450.0, 700.0, 950.0 ]) ],
+            display: Displays::Prose.new([ "out", "burning low", "a good fire", "roaring" ])
+          ),
+
+          # **The belt attendant's word on the drive drum**: it warms only while the belt is stalled
+          # on it, and past the belt's ignition point the belt lights. Through him, so with nobody at
+          # the drive head nobody is feeling the drum.
+          drum_heat: Diagnostic.new(
+            id: :drum_heat, label: "Belt Drive", observer: :belt_attending,
+            source: Sources::Derived.new(:belt_drive, :temperature_k),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 330.0, 420.0, 540.0 ]) ],
+            display: Displays::Prose.new([ "cool", "warm — the belt is slipping on it", "too hot to touch",
+                                           "smoking" ])
+          ),
+
           roof_timber: Diagnostic.new(
             id: :roof_timber, label: "Roof", source: Sources::Derived.new(:tub_road, :integrity),
             filters: [ Filters::Lag.new(6), Filters::Noise.new(0.04, deadband: 0.05),
@@ -385,6 +416,16 @@ module ReactorSim
 
           # **What the auger is finding**: the gas in a pocket within its reach, by what comes out of
           # the holes. Nothing within reach and a pocket nobody has got near read the same — dry holes.
+          # **The shotfirer's word on his holes**: drilling, fired, a misfire left in, digging it out.
+          # Through him, so with nobody at the shot holes nobody is saying.
+          shot_holes: Diagnostic.new(
+            id: :shot_holes, label: "Shot Holes", observer: :shotfiring,
+            source: Sources::Field.new(:shot_hole, :status),
+            display: Displays::Prose.new([ "no shot charged", "drilling and charging",
+                                           "shot fired — coal down", "a misfire in the hole",
+                                           "digging out a misfire" ])
+          ),
+
           bore_holes: Diagnostic.new(
             id: :bore_holes, label: "Bore Holes", observer: :boring,
             source: Sources::Field.new(:bore_line, :found_kg),

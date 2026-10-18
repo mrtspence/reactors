@@ -19,8 +19,8 @@
 #   * **`materials: {}` means genuinely free**, and has to be written out. That is the difference
 #     between "decided to be free" and "nobody filled it in".
 #   * **Material names are resource ids the simulation knows** (`content/resources/`), checked at
-#     catalogue build. There is no `copper` — the six metals are cast_iron, wrought_iron, steel,
-#     bronze, babbitt and fusible_alloy. Quantities are kilograms.
+#     catalogue build: the metals in `materials.yml`, and anything else a part is made of, such as
+#     a conveyor's belting. Quantities are kilograms.
 #   * **`requires` names an achievement** (`Achievement.known`, derived from the definitions in
 #     `app/models/achievement.rb`), also checked. Optional — and no longer decorative: the gate
 #     reads the `awards` table, so a blueprint naming one is genuinely locked until it is earned.
@@ -159,6 +159,8 @@ training:
     materials: {}
     requires: ran_an_hour_without_blowing_off
   winding_ticket:
+    materials: {}
+  shotfirers_ticket:
     materials: {}
 
 part:
@@ -390,6 +392,66 @@ part:
       steel: 1400
       cast_iron: 900
       babbitt: 22
+  # Haulage. Putting is tubs and rails, which every pit has; a rope haulage is an engine, its drum
+  # and a thousand yards of wire rope.
+  hand_putting:
+    materials: {}
+  rope_haulage:
+    materials:
+      steel: 900
+      cast_iron: 700
+      wrought_iron: 300
+  # Ventilating furnaces: firebars and their bearers, by the grate. The brickwork is the pit's own
+  # labour and no material in the catalogue. A dumb drift is a drift and its doors.
+  fire_basket:
+    materials:
+      wrought_iron: 120
+  brick_furnace:
+    materials:
+      cast_iron: 600
+      wrought_iron: 200
+  double_furnace:
+    materials:
+      cast_iron: 1200
+      wrought_iron: 400
+  dumb_drift:
+    materials:
+      wrought_iron: 60
+  # Cutter sprays: a small pump, a pipe range up the road and bronze jets.
+  water_sprays:
+    materials:
+      steel: 120
+      bronze: 15
+  # Runaway catches: a sprung set of points, or a backstay for every set.
+  catch_points:
+    materials:
+      steel: 150
+  drags:
+    materials:
+      wrought_iron: 220
+  # A belt conveyor is a drive head, idlers the length of the road and the belt itself; the
+  # fire-resistant one is the same structure with PVC belting.
+  belt_conveyor:
+    materials:
+      steel: 2200
+      cast_iron: 900
+      belting: 4000
+  fire_resistant_conveyor:
+    materials:
+      steel: 2200
+      cast_iron: 900
+      fire_resistant_belting: 4000
+  # Shotfiring: drills, tamping bars and a magazine. The permitted kind costs more for the same
+  # coal, and what it buys is a flame that does not fire the district.
+  powder_shots:
+    materials:
+      steel: 60
+      wrought_iron: 30
+  permitted_shots:
+    materials:
+      steel: 60
+      wrought_iron: 30
+      copper: 20          # the electric firing it was used with
   # The hoist. A whim is a drum, a rope and a bucket; a cage is the same drum with steel guides
   # and a deck, which is where the steel goes.
   steam_whim:
@@ -523,6 +585,23 @@ part:
     materials:
       wood: 340
       wrought_iron: 120
+  pit_bottom_refuge:
+    materials:
+      wood: 90
+  # Who is already down when the match starts. The starting arrangements are how the pit works,
+  # not a thing it builds; the upgrades are a cabin at the face and a stable at the pit bottom.
+  advance_shift:
+    materials: {}
+  pit_bottom_shift:
+    materials: {}
+  back_shift:
+    materials:
+      wood: 260
+      wrought_iron: 40
+  underground_stable:
+    materials:
+      wood: 420
+      wrought_iron: 60
   # The haulage door. Wood and a hinge; what costs is hanging it so it shuts itself, and twice.
   plain_door:
     materials: {}

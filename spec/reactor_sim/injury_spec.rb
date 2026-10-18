@@ -399,9 +399,22 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
                                   "#{node.id} endangers riders of #{carrier}, which nobody rides"
             end
 
-            expect(declared.values_at(:stations, :places, :riders).compact).not_to be_empty,
-                                                                         "#{node.id} endangers " \
-                                                                         "nobody on #{mode}"
+            # A hazard that runs down a passage reaches people by where on it they are, so its ends
+            # must be places and the stations it places or roams must exist.
+            if (run = declared[:along])
+              run.slice(:from, :to).each do |end_of_run, place|
+                expect(op.layout.declared?(place)).to be(true),
+                                                      "#{node.id} runs #{end_of_run} #{place}, which is not a place"
+              end
+              (run.fetch(:positions, {}).keys + Array(run[:roaming])).each do |station|
+                expect(op.control_points).to have_key(station),
+                                             "#{node.id} runs past #{station}, which does not exist"
+              end
+            end
+
+            expect(declared.values_at(:stations, :places, :riders, :along).compact).not_to be_empty,
+                                                                                  "#{node.id} endangers " \
+                                                                                  "nobody on #{mode}"
 
             # A part that declares a scale and then never reports the figure falls back to
             # flat — which is safe, and silent. This is the check that stops it being silent.

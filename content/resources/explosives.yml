@@ -1,0 +1,21 @@
+# **What a shot is charged with.** Kept in the magazine at bank and carried to the face a charge at
+# a time; fired, it reacts in the district's air the tick it arrives and leaves its fumes there.
+#
+# Tagged `explosive` and nothing else, because the tag governs transport: only the charge line
+# carries it, and nothing that carries solids or gases will. Not `fuel` — a charge is fired, it does
+# not catch.
+
+# Saltpetre, charcoal and sulphur. Over half of it fires to solid salts; the gas it makes is carbon
+# dioxide with a good deal of carbon monoxide in it, which is what fouls a district after firing.
+black_powder:
+  tags: [explosive]
+  specific_heat_j_per_kg_k: 1100
+  density_kg_per_m3: 1700
+
+# **The permitted explosives**: ammonium nitrate and a cooling salt, tested against firedamp and
+# coal dust in a gallery before a pit might use them. Its flame is short and cool, which is the whole
+# of why it rarely fires the gas, and it fires mostly to gas and steam with little monoxide.
+permitted_explosive:
+  tags: [explosive]
+  specific_heat_j_per_kg_k: 1300
+  density_kg_per_m3: 1100

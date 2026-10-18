@@ -123,6 +123,63 @@ wood_combustion:
     # wooden headframe. Read against the hottest point the wood touches (`Vessel#hot_spot`).
     autoignition_k: 573
 
+# **Coal lying as a layer on a hot surface**: spillage packed round a belt's drive head, with the
+# grease off its bearings. The same coal as `coal_combustion`, which is a heating in bulk; a layer
+# against hot steel lights far lower, and lower the thicker it lies. ASTM E2021 gives Pittsburgh
+# bituminous dust 300 °C at 6.4 mm and 210 °C at 25.4 mm; this is the 25 mm figure.
+coal_layer_combustion:
+  consumes: { coal: 1.0, air: 11.0 }
+  produces: { flue_gas: 11.9, ash: 0.1 }
+  enthalpy_j_per_unit: -30000000
+  rate_per_s: 1.5
+  min_temperature_k: 500
+  ignition:
+    spread_per_s: 0.30
+    quench_per_s: 0.45
+    autoignition_k: 483
+  limited_by: air
+  alternatives:
+    - consumes: { coal: 1.0, air: 5.5 }
+      produces: { flue_gas: 4.07, whitedamp: 2.33, ash: 0.1 }
+      enthalpy_j_per_unit: -8400000
+
+# **A conveyor belt.** It lights from what it lies on (`Vessel#hot_spot`): a burning deposit at the
+# drive head, or, hotter, the drum it has stalled on. A rubber belt fire creeps along the belt:
+# slower to take than timber, and slower to let go.
+belt_combustion:
+  consumes: { belting: 1.0, air: 10.0 }
+  produces: { flue_gas: 10.95, ash: 0.05 }
+  enthalpy_j_per_unit: -28000000
+  rate_per_s: 1.2
+  min_temperature_k: 450
+  ignition:
+    spread_per_s: 0.25
+    quench_per_s: 0.50
+    # About 400 °C (750 °F), the least the US Bureau of Mines found rubber belting lit at of itself
+    # in air. Raw rubber goes nearer 300 °C; the cotton carcass and the fillers hold a belt off longer.
+    autoignition_k: 672
+  # Short of air, a belt fire smoulders to carbon monoxide, which is what a belt fire on the intake
+  # sends inbye to the face.
+  limited_by: air
+  alternatives:
+    - consumes: { belting: 1.0, air: 7.0 }
+      produces: { flue_gas: 6.45, whitedamp: 1.5, ash: 0.05 }
+      enthalpy_j_per_unit: -13000000
+
+# **Fire-resistant belting**: PVC lights of itself only a little hotter than rubber belting, at about
+# 454 °C. What makes it fire-resistant is that alight it goes out by itself: its chlorine starves the
+# flame, so it cannot carry one along the belt.
+fire_resistant_belt_combustion:
+  consumes: { fire_resistant_belting: 1.0, air: 6.0 }
+  produces: { flue_gas: 6.9, ash: 0.1 }
+  enthalpy_j_per_unit: -18000000
+  rate_per_s: 0.8
+  min_temperature_k: 700
+  ignition:
+    spread_per_s: 0.10
+    quench_per_s: 1.50
+    autoignition_k: 727
+
 oil_combustion:
   consumes: { fuel_oil: 1.0, air: 14.0 }
   produces: { flue_gas: 15.0 }

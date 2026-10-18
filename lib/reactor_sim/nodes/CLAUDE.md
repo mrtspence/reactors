@@ -196,7 +196,7 @@ same commit.**
 | `Atmosphere` | Thermal, Holds | The outside world: unlimited source and sink, fixed pressure reference. **Two inlets** — `:exhaust` books `mass_vented`, `:spill` books `mass_spilled`, because a safety valve lifting and a boiler bursting must not be the same number. **Receipts at `:intake` are booked too**, because a link is two-way: an operation whose draught falls away pushes air back up the way it came, and this node resets to baseline every tick, so a port nobody counts destroys mass silently. |
 | `Delivery` | Thermal, Holds | **Where the operation's output goes** — screens at the pit bank, a gas main, a wagon on the weighbridge. Shaped like `Atmosphere` and separate from it because what leaves here left *because the operation did its job*: the only writer of `mass_delivered`. Not a source and not a pressure reference. |
 | `Flywheel` | Rotating, Wearing | Any heavy spinning mass. Bursts on overspeed. `material:` from content. |
-| `Bearing` | Thermal, Holds, Wearing | A **friction interface** worth modelling — a journal, a piston in its bore, a rope on a pulley. `supports:` is the shaft it drags on, `duty:` supplies sliding speed and load, `loaded_by:` names what pushes through it. Not `Rotating`: the shaft turns, this is the stationary half, and it is a separate node precisely so it can be hot while the shaft is not. Its drag heats **itself** rather than the ledger, which is what lets it cook. `wiped` then `seized`, off temperature. Holds its own oil and **declares its draw even when it is full** — return `Intent.none` there and the path drives the flow, filling the housing instead of the charge. Wears two ways, and they are two things: Archard against boundary friction power (hours) and heat above the service limit (minutes). `mu_film:`/`mu_boundary:` let a fitting override the duty's curve, which is how a roller says it does not care about oil. **Wiped, it rubs metal on metal** (`METAL_ON_METAL_MU`). `loaded_by:` may also name a node answering `bearing_load_n(ctx)` — a rope over its sheave. `slips_when_seized: { mu:, lever_m: }` makes a seizure a slip rather than a lock: what it carries drags over it — a rope through a seized sheave's groove. |
+| `Bearing` | Thermal, Holds, Wearing | A **friction interface** worth modelling — a journal, a piston in its bore, a rope on a pulley. `supports:` is the shaft it drags on, `duty:` supplies sliding speed and load, `loaded_by:` names what pushes through it. Not `Rotating`: the shaft turns, this is the stationary half, and it is a separate node precisely so it can be hot while the shaft is not. Its drag heats **itself** rather than the ledger, which is what lets it cook. `wiped` then `seized`, off temperature. Holds its own oil and **declares its draw even when it is full** — return `Intent.none` there and the path drives the flow, filling the housing instead of the charge. Wears two ways, and they are two things: Archard against boundary friction power (hours) and heat above the service limit (minutes). `mu_film:`/`mu_boundary:` let a fitting override the duty's curve, which is how a roller says it does not care about oil. **Wiped, it rubs metal on metal** (`METAL_ON_METAL_MU`). `loaded_by:` may also name a node answering `bearing_load_n(ctx)` — a rope over its sheave, or a belt stalled on its drive drum. `slips_when_seized: { mu:, lever_m: }` makes a seizure a slip rather than a lock: what it carries drags over it — a rope through a seized sheave's groove. |
 | `Brake` | Thermal, Wearing | A spring-applied brake held off by its lever; heats itself. **Sticks while it can hold the shaft's load torque, slips past it** — linearised as `τ/ω` it could never hold anything at rest. Sliding, it is capped at the shaft's `I/dt` only when it cannot hold the load; capped while it could, it let a cage creep for ever at `load ÷ (I/dt)`. Fades hot, glazes past a limit, and its rod fatigues until it parts; `trip:` throws it on past the ends and cuts the drive (`cuts_drive?`, for a drive link's `cut_by:`). |
 | `Hoist` | Rotating, Wearing | A drum and two balanced cages. Gravity on cage A's cargo is a **torque source inside the drive solve**, so a brake can hold it; its work is booked as it is done, never stored. `position_m` is rope paid out and `cage_m` is where the cage is — they differ by the slack while it hangs on a jam. The ends of the shaft are failures (`caught`, `overwound`, `crashed`). A `deck:` holder in cage A is load like its riders, which is how coal is wound. `cage_kg:` and `catches:` are the cage's, and the rope reads them. The ropes' own weight is load too: the longer side outweighs the shorter. |
 | `Rope` | Wearing | A winding rope. What it is made of is config — `breaking_kn`, `kg_per_m`, `stiffness_n_per_m`, its wear rates — so hemp and steel are one node. Its weight below the sheave is in its tension. Wears by bending, corrosion, a hot sheave and kinks; parts when tension — or a snatch — passes what is left of its breaking strain: `parted`, or `parted_held` where the drum's cage has catches. Answers `bearing_load_n` for its sheave. Recapped at bank, renewed from a `SpareRope`. |
@@ -310,9 +310,25 @@ at 5% water is **not high** — it is the same saturation temperature as a drum 
 smaller mass. **A dry boiler in a lumped model is not hot, merely empty**, so no rating on the
 node could ever trip however far the water fell.
 
-When the hazard is a *place* rather than the body, derive that place's own temperature and
-override `stress_per_second`. `Boiler#crown_temperature_k` blends the water it is meant to be
-under with the fire it is over, by `crown_exposure`. Two details worth copying:
+**When the hazard is a place on a part, the place is its own body by default.** The heat source
+names it (a drag heats the node it is keyed to), a `ThermalLink` carries the heat into the bulk,
+and `hot_spot:` or a rating reads it — as `Gob` and `district_rock` are to the district, and a
+`Bearing` to its shaft. One more body in the one implicit solve is conserved and stable at any
+`dt`, and **a body that settles faster than a tick lands at `T_bulk + P/G` within it**, so a fast
+hot spot needs no special path either. A geometry that changes is a link whose conductance
+changes, as a radiant `ThermalLink`'s already does per tick. **Do not write a second solve for
+it**, however tempting a mode switch looks ("while stalled, compute it this way"): it moves no
+energy and cannot be ledgered, or it moves energy and is operator splitting; it needs a clock that
+survives snapshots, and each geometry is a new formula. Full reasoning:
+[`design_sketches/hot-spots.md`](../../../docs/design_sketches/hot-spots.md).
+
+Check first whether it is needed at all: if `P/G_spot` is a few kelvin, the bulk node *is* the hot
+spot. A stalled belt's face sits about a kelvin above its steel drum, because 96% of the heat goes
+into the steel.
+
+**The one exception is a derived reading that blends two temperatures already known**, not a
+stored heat. `Boiler#crown_temperature_k` blends the water the plate is meant to be under with the
+fire it is over, by `crown_exposure`, and overrides `stress_per_second`. Two details worth copying:
 
 - It reads the **true** fill while the gauge glass shows the **swelled** one, so the needle reads
   comfortable exactly when a hard pull is uncovering the plate. That gap is the mechanic, not an

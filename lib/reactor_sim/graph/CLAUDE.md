@@ -21,6 +21,9 @@ depends on hash order.
 
 ## Mass settles over paths, not links
 
+`Path.gas_neighbours` is the one other thing derived from them: the holders each holder shares a
+gas path with, either way, which is where a flame front travels next (`Operation#gas_neighbours`).
+
 A `Path` runs from one holder's outlet to the next holder's inlet through zero or more
 **transport** nodes (`Node#transport?`). Resolved once at construction by `Path.resolve`,
 because the graph is configuration rather than state.
@@ -199,7 +202,7 @@ Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they
   post. Nodes that are not in a room have no place and need none: a seam is rock.
 - **Places are declared, unioned by id, and validated at build.** A fitting names only the
   machinery it installs (`Place.new(id: :bank, nodes: [:cage_drive])`) and the chassis owns the
-  room; `Layout` unions them, first label winning. It refuses a place that names a node the
+  room; `Layout` unions them, first label and first declared `air:` winning. It refuses a place that names a node the
   operation does not have, a node two places both claim, and a passage endpoint or station in a
   place nobody declared — because for a hazard system **silence must never be the safe answer**.
   An operation declaring no places skips all of it and keys its hazards by station as before.

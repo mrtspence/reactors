@@ -68,6 +68,12 @@ module PerilCrew
   # inside an example group lands on `Object`, where it collides with every other spec file's idea
   # of what that name means.
   ON_THE_EDGE = 0.05
+
+  # **A pit whose crossing the manholes have something to show for**: whether a given accident is
+  # saved is the dodge die's, so the pairing examples need a seed where at least one is — and the
+  # cap means not all of them. Two of its three are. A seed is a fixture; which one shows the
+  # mechanism moves whenever the dice thrown per person do.
+  SAVED_SEED = 7
 end
 
 RSpec.describe "perils" do
@@ -380,15 +386,14 @@ RSpec.describe "perils" do
     # crossing, at one tick, to one man, and asserting them against each other is what makes
     # this a claim about the fitting rather than about how a shift happened to go.
     it "tells the player when it kept somebody out of trouble" do
-      bare, = shift(:poor, edge: true)
-      hurt = bare.first
-      expect(hurt).not_to be_nil, "the bare pit must hurt somebody or this proves nothing"
+      saved, = shift(:poor, edge: true, seed: PerilCrew::SAVED_SEED,
+                            loadout: { manholes: :whitewashed_manholes }, causes: %i[minion_near_miss])
+      bare, = shift(:poor, edge: true, seed: PerilCrew::SAVED_SEED)
+      miss = saved.first
+      expect(miss).not_to be_nil, "the fitted pit must save somebody or this proves nothing"
+      hurt = bare.find { |e| e[:tick] == miss[:tick] && e[:node] == miss[:node] }
 
-      saved, = shift(:poor, edge: true, loadout: { manholes: :whitewashed_manholes },
-                     causes: %i[minion_near_miss])
-      miss = saved.find { |e| e[:tick] == hurt[:tick] }
-
-      expect(miss).not_to be_nil, "the fitting must change this accident, not displace it"
+      expect(hurt).not_to be_nil, "the fitting must change this accident, not displace it"
       expect(miss[:severity]).to eq(:warning), "a near miss must reach the incident feed"
       expect(miss[:node]).to be(hurt[:node])
       expect(miss[:cause]).to be(hurt[:cause])
@@ -401,10 +406,12 @@ RSpec.describe "perils" do
     # never swapped for another. Whether each is saved is the dodge's business, and the cap means
     # not all of them always are.
     it "changes the whole crossing rather than displacing part of it" do
-      bare, = shift(:poor, edge: true)
-      fitted_hurt, = shift(:poor, edge: true, loadout: { manholes: :whitewashed_manholes })
-      fitted_misses, = shift(:poor, edge: true, loadout: { manholes: :whitewashed_manholes },
-                             causes: %i[minion_near_miss])
+      bare, = shift(:poor, edge: true, seed: PerilCrew::SAVED_SEED)
+      fitted_hurt, = shift(:poor, edge: true, seed: PerilCrew::SAVED_SEED,
+                                  loadout: { manholes: :whitewashed_manholes })
+      fitted_misses, = shift(:poor, edge: true, seed: PerilCrew::SAVED_SEED,
+                                    loadout: { manholes: :whitewashed_manholes },
+                                    causes: %i[minion_near_miss])
       accident = ->(e) { [ e[:tick], e[:node], e[:cause] ] }
 
       expect(bare.length).to be > 0

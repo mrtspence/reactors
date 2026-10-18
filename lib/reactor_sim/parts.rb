@@ -21,10 +21,10 @@ module ReactorSim
 
     class << self
       def register(id, kind:, label: nil, description: nil, stats: {},
-                   provides: [], instruments: [], wip: false, &builder)
+                   provides: [], instruments: [], wip: false, informs: {}, &builder)
         part = Part.new(id: id, kind: kind, label: label, description: description,
                         stats: stats, provides: provides, instruments: instruments,
-                        wip: wip, &builder)
+                        wip: wip, informs: informs, &builder)
 
         # Ids are the address a loadout uses, so a silent overwrite would mean a snapshot
         # rebuilding a different machine from the same name.

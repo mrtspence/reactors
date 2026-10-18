@@ -223,13 +223,15 @@ module ReactorSim
 
     # **A room is named once and furnished by whoever brings the furniture.** The chassis
     # declares the pit bank; fitting a cage puts its drive there. Same id, node lists unioned,
-    # first label wins — the same concatenate-don't-replace rule `Fragment#merge` follows, and
-    # the reason a fitting need not know what else is in the room it is installed in.
+    # first label and first declared air win — the same concatenate-don't-replace rule
+    # `Fragment#merge` follows, and the reason a fitting need not know what else is in the room
+    # it is installed in.
     def merge_places(places)
       places.each_with_object({}) do |place, acc|
         known = acc[place.id]
         acc[place.id] = known.nil? ? place : Place.new(id: place.id, label: known.label,
-                                                       nodes: known.nodes + place.nodes)
+                                                       nodes: known.nodes + place.nodes,
+                                                       air: known.air || place.air)
       end
     end
 

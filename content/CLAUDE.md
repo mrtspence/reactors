@@ -26,10 +26,17 @@ snapshot rather than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-At the time of writing: `bearing`, `breathable`, `coolant`, `damp`, `dust`, `exhaust`, `fuel`,
-`gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`, `oxidiser`, `solid`, `structural`,
-`waste`, `working_fluid`. (`inert` is descriptive — it marks what cannot burn, and nothing reads
-it: a reaction names its reagents, so being left out of one is what makes a substance inert.)
+At the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`, `exhaust`,
+`explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`,
+`oxidiser`, `solid`, `structural`, `waste`, `working_fluid`. (`inert` is descriptive — it marks
+what cannot burn, and nothing reads it: a reaction names its reagents, so being left out of one is
+what makes a substance inert.)
+
+> **`explosive` is a transport tag and nothing else**, the way `dust` is: only the charge line from
+> the magazine carries it, so a shot's charge never rides out on the tubs or up the return. Its
+> resources (`black_powder`, `permitted_explosive`) are not `fuel` — a charge is fired, it does not
+> catch — and each fires by a reaction with no ignition block and no temperature gate, so it reacts
+> the tick it lands and leaves its fumes.
 
 **A tag does one of three jobs, and which one is not obvious from the word.** Most govern
 *transport*, because ports filter on them. A few govern *reactions* (`oxidiser`, `fuel`). One
@@ -58,12 +65,17 @@ governs *physiology*: `breathable`. Say which when you add one.
 > `content/resources/damps.yml` holds firedamp, blackdamp and whitedamp. **Afterdamp needs no
 > entry** — it is `flue_gas` in a place with people in it. Whitedamp arrives two ways and both
 > are emergent rather than declared: a fire that could not get air makes it (the second
-> `alternatives:` pathway on firedamp, coal dust and coal — so a smouldering gob and an over-fed
-> grate both make it), and the goaf makes a little of it on its own, in a share drawn per match.
+> `alternatives:` pathway on firedamp, coal dust, coal and conveyor `belting` — so a smouldering
+> gob, an over-fed grate and a belt fire on the intake all make it), and the goaf makes a little of
+> it on its own, in a share drawn per match. `fire_resistant_belting` is the same fuel made hard
+> to light and unable to carry a flame (a high `autoignition_k`, `quench_per_s` far over
+> `spread_per_s`).
 >
 > **Coal also oxidises cold** (`coal_oxidation`): no flame, oxygen taken up by broken coal into
 > blackdamp and heat. Where the heat cannot get away the coal climbs to its `autoignition_k` and
-> lights of itself — a gob fire. Blackdamp is therefore a product of one reaction, and still a
+> lights of itself — a gob fire. **Coal lying as a layer on a hot surface lights far lower**
+> (`coal_layer_combustion`, 483 K, a 25 mm layer) — the spillage at a belt's drive head. It is the
+> same coal: the geometry is in the reaction's name. Blackdamp is therefore a product of one reaction, and still a
 > reagent in none, which is what keeps it inert.
 >
 > **Blackdamp is firedamp's opposite and is modelled by where it is wired, not by its density.**
@@ -219,6 +231,8 @@ something the simulation may know about. `Registry#sheet(id)` returns the first 
   likelier in the first place — pulling the wrong lever is not the same failing as dropping it.
   Both feed the accident margin; only one feeds the Danger Check. `boneheaded` is read **cubed**
   (`Minion#daftness`): 0.3 is daft on occasion, 1.0 is an accident waiting to happen.
+- **`shotfirer` is what the Shotfirer's Ticket buys**, the shotfiring post's `requires:` — a ticket
+  of its own, apart from the engineman's `certificated`.
 - **`open_flame` on anybody's kit is an igniter**: they offer a naked light to the air of the room
   they stand in, which is why safety lamps are a progression item. **`diminutive`** marks the
   smallest creatures and aids the stations that want somebody little — the haulage trapper —

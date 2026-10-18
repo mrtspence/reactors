@@ -15,7 +15,7 @@ specific heat. Reference:
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque`, `drag_conductances` |
 | `Roped` | needs `Rotating`; `rope_capacity_joules`, `control_id` (the clutch) | `supply_joules`, `remote_omega`, `remote_grip`, `rope_k` | `hear`, `receive`, `rope_report`, `rope_torque`, `rope_drags`, `grip` |
 | `Fusible` | `fusible_kg`; needs `Thermal` and a `material:` declaring `latent_heat_of_fusion_j_per_kg` | `fusible_remaining_kg` | `run_melt`, `melt_kg`, `melted_fraction`, `melted_out?`, `fusible_temperature_k` |
-| `PromptReaction` | none — inert unless a hosted reaction declares `prompt:`; needs `Thermal`, `Holds` and `reactions` | none — writes `parcels`, `joules`, `ignition`, `joules_from_reactions` | `resolve_prompt` (phase 5), emitting `:explosion`; `prompt_modes` — the `explosion:` a node's `endangers:` and `damages:` may key on, beside its failure modes |
+| `PromptReaction` | none — inert unless a hosted reaction declares `prompt:`; needs `Thermal`, `Holds` and `reactions` | `front` — and writes `parcels`, `joules`, `ignition`, `joules_from_reactions` | `resolve_prompt(state, ctx, arriving:)` (phase 5), emitting `:explosion`; a gas neighbour's `front` last tick arrives as a front this tick; `prompt_modes` — the `explosion:` a node's `endangers:` and `damages:` may key on, beside its failure modes |
 
 A snapshot — `ls lib/reactor_sim/concerns/` is the truth. This table drifts on a **column**, not
 just a row: adding a config key or a state key to an existing concern makes it wrong just as
@@ -228,6 +228,16 @@ geometry at all — the machine knows which levers sit beside which parts — an
 when volumes arrive. A station's figure is a **weight**; `scales_with:` names a key in the failure
 event's own `detail:` so the size of the event comes from the part rather than from a constant.
 
+**`along:` is a hazard that runs down a passage** — a runaway set on an incline — and reaches each
+person by their share of the way from `from` to `to` (`Tick#along`). At `to` it is everybody at the
+full `weight`; at `from`, `top_share`; `positions:` places stations on the way; walkers count by
+their real progress; `roaming:` stations are on the road at their `road:` die. Anybody on the road
+may reach the place's fitted refuge — a near miss on their `dodge:` die, by its effectiveness and
+their wits — or be `crushed:`, a heavier blow under its own cause, with a chance rising as the share
+squared on their `caught:` die. A `catch: { at:, holds: }` stops most of the run where it stands:
+anybody further down than `at` meets `1 − holds` of their share (`Tick#past_the_catch`).
+`injury_spec`'s walker checks the run's places and stations exist.
+
 ## `perils` is the other half: harm with nothing broken
 
 `failure_hazards` answers *"a part broke, who was near it"*. A **peril** answers the half that
@@ -264,6 +274,11 @@ later one of them catches somebody. Declared on the node that embodies the dange
 - **Which accident fires is a pick weighted by this tick's bites** (`Blunder.pick`, the `peril:`
   fate, walked by sorted id), so every peril that reaches somebody can happen to them. One margin
   with a weighted pick gives the same long-run mix a margin per peril would.
+- **`judged:` splits one event between reading it rightly and wrongly.** A pair of perils, one
+  `:rightly` and one `:wrongly`, take `1 − m` and `m` of the rate, `m` being `Minion#misjudges` —
+  wits in the room's light, plus `boneheaded` steeply — so together they happen as often as one
+  would and who is posted decides which. A misfire is the case: recognised it is dug out, taken for
+  a spent shot it is left live in the face for a hewer to strike.
 - **A peril may hurt the person, the machine, or both.** A positive `severity` is a Danger Check;
   a `mishap: { node:, kind:, share: }` is something the person does to a part. Phase 6d emits
   `:minion_mishap` and writes the mishap to `state[:mishaps]`, and the part suffers it at the

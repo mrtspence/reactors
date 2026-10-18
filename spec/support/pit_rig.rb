@@ -80,9 +80,14 @@ module PitRig
   # **The two-shaft frame unless an example asks otherwise**, pinned for the reason `ground:` is:
   # a mine spec measures the machine, and the starting frame's brattice leaks some of every
   # ventilation figure away.
+  #
+  # **No pit bottom shift unless an example asks for one.** Where the crew starts is the rig's to
+  # lay out, the way `at_the_face` constructs their arrivals: its hands and engineman fill the
+  # first seats at bank, and the pit bottom shift would deal seats five to seven underground and
+  # take the winder's man with them. `shifts_spec` fits it.
   def build_match(id:, seed:, crew: CREW, ground: ORDINARY, loadout: nil, chassis: :two_shaft, **opts)
     operation = { id: "pit", type: :mine, ground: ground, crew: crew, chassis: chassis, **opts }
-    operation[:loadout] = loadout if loadout
+    operation[:loadout] = { pit_bottom_shift: nil }.merge(loadout || {})
 
     ReactorSim::Match.create(id: id, seed: seed, operations: [ operation ])
   end

@@ -37,6 +37,28 @@ module ReactorSim
     def direct? = @conduits.empty?
 
     class << self
+      # **Which holders share air**: both ends of every path that can carry gas, either way, as
+      # sorted id lists. A flame front leaves a room through every gas path out of it, and runs
+      # back up the one that fed it, so direction does not narrow it.
+      def gas_neighbours(paths, nodes)
+        found = {}
+        paths.each do |path|
+          next unless carries_gas?(path, nodes)
+
+          (found[path.from_node] ||= []) << path.to_node
+          (found[path.to_node] ||= []) << path.from_node
+        end
+        found.transform_values { |ids| ids.uniq.sort.freeze }.freeze
+      end
+
+      # Every port on the way must take gas: one dry port and nothing gaseous crosses.
+      def carries_gas?(path, nodes)
+        path.links.all? do |link|
+          [ nodes.fetch(link.from_node).port(link.from_port), nodes.fetch(link.to_node).port(link.to_port) ]
+            .all? { |port| port.accepts.empty? || port.accepts.include?(:gas) }
+        end
+      end
+
       # Every path in the graph, in declaration order.
       #
       # Derived once at construction and never recomputed: the graph is configuration, not

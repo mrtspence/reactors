@@ -138,8 +138,9 @@ Four things that were each got wrong first, and will be again:
 Spread is closed-form logistic — exact at any `dt`, cannot overshoot, and from exactly zero
 stays at zero, which is what makes an igniter a match rather than a switch. **The one exception
 is `autoignition_k`**: past it the fuel seeds itself, read against the hotter of the node and its
-`hot_spot:` (a vessel's contents touching something hotter than their own bulk). Wood, coal and
-firedamp declare it.
+`hot_spot:` (a vessel's contents touching something hotter than their own bulk). Wood, coal,
+firedamp and belting declare it. **A hot spot is a node**, never a second solve; see
+[`nodes/CLAUDE.md`](../nodes/CLAUDE.md#a-lumped-body-cannot-express-a-hazard-that-is-positional).
 
 **It does not replace distinct nodes for distinct temperatures.** A reactor's fuel pin is
 genuinely hundreds of kelvin above its coolant; no ignited fraction expresses that.
@@ -155,8 +156,11 @@ node's rate-integrated reactions, in sequence, each at most once a tick. `:defla
 one kind: anything alight in a mixture inside its range goes off on the next tick, and the front
 burns the whole mixture through `Reaction.complete` — the pathway split against all the node's
 air, so the products are the mass-balance answer whatever the tick or the spark. A front lights
-every other fuel in its range; `reaction_throttle` is the share it can carry through. Each
-resolution is an `:explosion` a node's `endangers:` and `damages:` can key on. The kind
+every other fuel in its range; `reaction_throttle` is the share it can carry through. **And it
+travels**: a node whose front burnt anything records `front:`, and next tick the front arrives in
+every holder sharing a gas path with it (`Operation#gas_neighbours`), going off there if that
+mixture is in range. Each resolution is an `:explosion` a node's `endangers:` and `damages:` can
+key on. The kind
 table is a seam (fuel–coolant interaction, prompt criticality). See
 [`physics.md`](../../../docs/reference/physics.md#prompt-reactions-what-happens-faster-than-a-tick-is-resolved).
 
