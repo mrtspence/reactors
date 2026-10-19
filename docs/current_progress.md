@@ -336,6 +336,11 @@ of feedback is folded in. What remains is sequenced in
 Still owed on the mine itself: a separate man-riding shaft, buoyancy inside a volume so firedamp
 collects in the roof, and the advance shift as a fitting rather than a chassis constant.
 
+**Next operation: an open-pit iron ore mine.** Research only, awaiting review:
+[`design_sketches/open-pit-iron-research.md`](design_sketches/open-pit-iron-research.md). Its §6.3
+lists the decisions a design sketch needs first (mobile steam against the line-shaft rule,
+weather, ore grade, chassis geography, ore choice, rail scope, contract stripping).
+
 ### Mine accidents — four units, designed one draft at a time
 
 Twenty accident modalities, all greenlit, in four units. **Only units 1 and 2 are designed**, in
