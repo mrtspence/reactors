@@ -18,12 +18,13 @@ module ReactorSim
       include Concerns::Obstructs
       include Concerns::Wearing
       include Concerns::Pressurized
+      include Concerns::PromptReaction
 
       attr_reader :volume_m3, :heat_capacity, :ambient_conductance, :ambient_k,
                   :reactions, :heater_control_id, :heater_watts, :igniter_kg_per_s,
                   :max_pressure_pa, :max_temperature_k, :stress_rate, :material,
                   :shell_radius_m, :wall_thickness_m, :safety_factor,
-                  :emissivity, :radiating_area_m2
+                  :emissivity, :radiating_area_m2, :hot_spot
 
       def initialize(id:, label: nil, volume_m3:, ports: [],
                      heat_capacity: 5.0e5, ambient_conductance: 0.0,
@@ -34,8 +35,13 @@ module ReactorSim
                      shell_radius_m: nil, wall_thickness_m: nil, safety_factor: 1.0,
                      max_pressure_pa: Float::INFINITY, max_temperature_k: Float::INFINITY,
                      stress_rate: 0.0, damages: {}, endangers: {},
-                     emissivity: 0.0, radiating_area_m2: 0.0)
+                     emissivity: 0.0, radiating_area_m2: 0.0, hot_spot: nil)
         super(id: id, label: label, ports: ports)
+        # **The nodes this one's contents touch**, whose temperature is what the fuel against them
+        # reaches — a timber headframe's bearers on the sheave, a district's gas on its rock. A
+        # lumped body has no local hot spot of its own, so a fuel that lights itself
+        # (`autoignition_k`) reads the hottest of them and itself. Empty for nearly everything.
+        @hot_spot = Array(hot_spot).map(&:to_sym).freeze
         # Radiant loss to the environment, on top of whatever `ambient_conductance` carries.
         # Both default to nothing, so a vessel that has not been given a surface behaves exactly
         # as it did before radiation existed.
@@ -158,20 +164,21 @@ module ReactorSim
 
       private
 
-      # Note this reads the lever's *actual* position, so a dial a minion is still turning up
-      # delivers only the power it has actually reached.
+      # Two sources, summed: this vessel's own heater lever, and whatever is alight in the room
+      # it is the air of (`Tick#ignition_sources`). The lever is read at its *actual* position,
+      # so a dial a minion is still turning up delivers only the power it has actually reached.
       def run_heater(state, ctx)
-        if @heater_control_id.nil? || broken?(state)
-          return state.merge(joules_injected: 0.0, ignition_seed_kg: 0.0)
-        end
+        return state.merge(joules_injected: 0.0, ignition_seed_kg: 0.0) if broken?(state)
 
-        fraction = (ctx.controls.fetch(@heater_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
-        joules = @heater_watts * fraction * ctx.dt
+        fraction = heater_fraction(ctx)
+        room = ctx.room_ignition(id) || {}
+        joules = ((@heater_watts * fraction) + room.fetch(:watts, 0.0)) * ctx.dt
 
         # A pilot light sets a little fuel alight; it does not heat the whole firebox to
         # ignition. Recorded here and consumed in phase 5, the same way `joules_injected` is —
         # a node reports what it did and the tick decides what that means.
-        state = state.merge(ignition_seed_kg: @igniter_kg_per_s * fraction * ctx.dt)
+        seed = ((@igniter_kg_per_s * fraction) + room.fetch(:kg_per_s, 0.0)) * ctx.dt
+        state = state.merge(ignition_seed_kg: seed)
         return state.merge(joules_injected: 0.0) if joules <= 0.0
 
         # Recorded, not just applied. Energy entering the system is declared in the ledger
@@ -212,7 +219,7 @@ module ReactorSim
           fire = { node: id, label: label, tick: ctx.tick,
                    detail: { ignited_kg: ignited_kg(state).round(3) } }
           events << (alight ? Event.build(type: :fire_lit, severity: fire_severity,
-                                          cause: ignition_cause(engaged), **fire)
+                                          cause: ignition_cause(engaged, ctx), **fire)
                             : Event.build(type: :fire_out, severity: :info, **fire))
         end
 
@@ -258,10 +265,19 @@ module ReactorSim
       # **What lit it, named for the feed.** The console renders a missing `cause:` as the
       # literal word "unknown", so a critical event owes one. A lever the player pulled is the
       # most useful answer there is — "the district caught, naked flame" tells them what to
-      # stop doing — and a fire that caught with no igniter engaged did so off the heat already
-      # in the vessel.
-      def ignition_cause(engaged)
-        engaged && @heater_control_id ? @heater_control_id : :self_ignition
+      # stop doing — so the vessel's own heater names its lever and a source in the room names
+      # whatever it reports. A fire that caught with neither did so off the heat already in the
+      # vessel.
+      def ignition_cause(engaged, ctx)
+        return @heater_control_id if engaged && @heater_control_id
+
+        ctx.room_ignition(id)&.fetch(:cause, nil) || :self_ignition
+      end
+
+      def heater_fraction(ctx)
+        return 0.0 if @heater_control_id.nil?
+
+        (ctx.controls.fetch(@heater_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
       end
 
       # A vessel hosting no ignited reaction — most of them — answers 0.0 and therefore never

@@ -81,6 +81,35 @@ module ReactorSim
 
     def tag?(key) = !@tags.fetch(key.to_sym, nil).nil?
 
+    # **How daft somebody is, and it climbs steeply.** `boneheaded` cubed: a 0.3 hand is daft on
+    # occasion, a kobold at 0.5 several times as often, and a 1.0 is an accident waiting to happen.
+    # Slips and the accident margin both read this, never the tag directly.
+    DAFT_POWER = 3
+
+    def daftness = Injury.numeric(tag(:boneheaded))**DAFT_POWER
+
+    # **How often somebody reads a thing wrongly that they can see perfectly well** — a fizzled shot
+    # taken for a spent one. A sound hand at full wits does it one time in ten, and it climbs as
+    # wits fall; `boneheaded` adds to it steeply, so a 1.0 bonehead all but always does. Read by a
+    # peril that is `judged:` (`Peril#judgement`).
+    MISJUDGE = 0.1
+    DAFT_MISJUDGE = 0.8
+    MIN_WITS = 0.1
+
+    # `ambient:` is the room's light: a fizzle misread in the dark is the commonest misreading.
+    def misjudges(state, ambient: nil)
+      seen = [ wits(state, ambient: ambient), MIN_WITS ].max
+      ((MISJUDGE / seen) + (DAFT_MISJUDGE * daftness)).clamp(0.0, 1.0)
+    end
+
+    # **A naked light carried by a person** — a candle in the hat, an oil lamp on the belt — and
+    # what it offers the air of the room they are standing in: a seed for a mixture that will
+    # carry it, and a little heat. In gas too lean to carry it the seed is what it burns, so it is
+    # a flame cap's worth — tens of watts of firedamp.
+    HAND_FLAME = { kg_per_s: 1.0e-6, watts: 200.0, cause: :open_flame }.freeze
+
+    def open_flame? = tag?(:open_flame) && Injury.numeric(tag(:open_flame)).positive?
+
     # Health and fatigue start fixed rather than rolled: a minion who begins already tired would
     # be indistinguishable from one the player has worn out.
     #
@@ -92,7 +121,8 @@ module ReactorSim
       { health: 1.0, fatigue: 0.0, spent: false, asphyxia: 0.0, burns: 0.0,
         apparatus: Injury.numeric(tag(:respirator_air)), carrying: [],
         posting: @default_station, station: @default_station,
-        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0 }
+        place: @default_place, progress: 0.0, remaining: 0.0, journey: 0.0, via: nil,
+        boarding_s: 0.0, riding: nil }
         .merge(Injury.initial_state(rng, toughness))
         # **After `Injury`, never before.** Both draw from this minion's stream, so inserting a
         # draw ahead of one shifts every roll after it and a whole crew comes out different.

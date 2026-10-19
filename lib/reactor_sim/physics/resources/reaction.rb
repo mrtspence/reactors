@@ -61,6 +61,30 @@ module ReactorSim
           -spec.fetch(:enthalpy_j_per_unit, 0.0).to_f * extent ]
       end
 
+      # **As far as the reagents allow, with no rate**: what a prompt event does with a reaction
+      # (`Resources::Prompt`). Every reagent in the node is available, so the pathway split spends
+      # exactly the gated reagent there is — a rich mixture makes CO in proportion to how rich it
+      # is, whatever the tick. `share` is how much of the fuel it reaches, taking its share of the
+      # air with it. Returns [new_parcels, joules_released].
+      def complete(spec, parcels, content:, share: 1.0)
+        held = parcels.to_h { |p| [ p.fetch(:resource), p ] }
+        reached = spec.fetch(:consumes).keys.sum { |r| fuel?(r, content) ? held[r]&.fetch(:kg) || 0.0 : 0.0 } * share
+        unless Array(spec[:alternatives]).empty?
+          return cascade(spec, parcels, held, temperature_k: nil, dt: Float::INFINITY,
+                                              content: content, ignited_fuel_kg: reached)
+        end
+
+        limit = spec.fetch(:consumes).map { |r, ratio|
+          available = held[r]&.fetch(:kg) || 0.0
+          available = [ available, reached ].min if fuel?(r, content)
+          available / ratio.to_f
+        }.min
+        return [ parcels, 0.0 ] if limit.nil? || limit <= Parcel::EPSILON
+
+        [ apply_stoichiometry(spec, parcels, limit, nil, content),
+          -spec.fetch(:enthalpy_j_per_unit, 0.0).to_f * limit ]
+      end
+
       def fuel?(resource, content) = content.tags(resource).include?(:fuel)
 
       # --- pathways -----------------------------------------------------------------------
@@ -82,13 +106,27 @@ module ReactorSim
         wanted = demand(spec, held, gate, dt, content, ignited_fuel_kg)
         return [ parcels, 0.0 ] if wanted <= Parcel::EPSILON
 
-        shares = allocate(pathways(spec), gate, wanted, held[gate]&.fetch(:kg) || 0.0, held)
+        supply = (held[gate]&.fetch(:kg) || 0.0) * premixed_share(spec, held, content, ignited_fuel_kg)
+        shares = allocate(pathways(spec), gate, wanted, supply, held)
         return [ parcels, 0.0 ] if shares.empty?
 
         shares.reduce([ parcels, 0.0 ]) do |(acc, released), (pathway, extent)|
           [ apply_stoichiometry(pathway, acc, extent, temperature_k, content),
             released + (-pathway.fetch(:enthalpy_j_per_unit, 0.0).to_f * extent) ]
         end
+      end
+
+      # **A premixed fuel burns with the air that is mixed into it, not with all the air in the
+      # room.** Gas or dust in a volume — a reaction with a flammable range — carries its share of
+      # the air with it, so whatever part of it is alight gets only that share: a rich mixture burns
+      # rich from the first gram, and its products do not depend on how much of it caught this tick.
+      # A fuel bed declares no range and takes all the air there is.
+      def premixed_share(spec, held, content, ignited_fuel_kg)
+        limits = spec[:ignition]
+        return 1.0 unless ignited_fuel_kg && limits && (limits[:lean_fraction] || limits[:rich_fraction])
+
+        fuel_kg = spec.fetch(:consumes).keys.sum { |r| fuel?(r, content) ? held[r]&.fetch(:kg) || 0.0 : 0.0 }
+        fuel_kg.positive? ? (ignited_fuel_kg / fuel_kg).clamp(0.0, 1.0) : 0.0
       end
 
       # The preferred pathway first, then the declared alternatives. Each is a whole reaction

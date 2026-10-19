@@ -60,6 +60,9 @@ class Operation < ApplicationRecord
   # point this widens and the other does not.
   def viewable_by?(candidate) = operable_by?(candidate)
 
+  # Whether it has slots and seats to fit — the dev engine has neither.
+  def fittable? = ReactorSim::Operations.assembler?(kind)
+
   # For `Match.create(operations: [...])`. The sim takes a symbol for both.
   def to_spec = { id: operation_id.to_sym, type: kind.to_sym }
 end

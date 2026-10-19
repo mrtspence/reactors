@@ -19,10 +19,10 @@ require "support/conservation"
 # arrival straight into state. That is sound only while a real walk still gets there — a
 # constructed arrival cannot fail when the walking breaks. So the guards live here:
 #
-# - a **complete** walk, start to station. The putter's is 167 ticks by cage, which exercises
-#   posting, travel, arrival and taking up a station on the whole of the same machinery the face
-#   crew use over a longer road.
-# - the face crew's journey **advancing**, since theirs is 834 ticks by cage and 1,267 down the
+# - a **complete** walk, start to station. The putter's is 117 ticks by the wound cage, which
+#   exercises posting, boarding, riding, alighting and taking up a station on the same machinery
+#   the face crew use over a longer road.
+# - the face crew's journey **advancing**, since theirs is well over a thousand ticks down the
 #   ladderway, and watching it tick down is the same claim as watching it finish.
 # - a constructed arrival being **field-for-field identical** to a walked one, which is what makes
 #   `at_the_face` honest everywhere else.
@@ -37,7 +37,12 @@ RSpec.describe "the mine" do
   # ladderway and `describe "the shift has to get there"` has something to measure.
   def mine(**opts) = build_pit(id: "m", seed: 11, **opts)
 
-  def caged = mine(loadout: { manriding: :cage_gear })
+  # A cage with a ticketed engineman at the post, which is what makes it a way down at all.
+  def caged
+    op = mine(loadout: { winder: :cage_gear }, crew: PitRig::WOUND_CREW)
+    engineman!(op)
+    op
+  end
 
   # Send the shift underground the long way, and open everything up.
   def work!(op)
@@ -45,7 +50,7 @@ RSpec.describe "the mine" do
     op.assign_minion(:crew_2, :haulage)
     op.set_control(:hewing, 100)
     op.set_control(:haulage, 100)
-    op.set_control(:winding, 100)
+    op.set_control(:coal_winding, 100)
     op
   end
 
@@ -58,7 +63,7 @@ RSpec.describe "the mine" do
   # A pit already at work, for the claims that are not about getting there.
   def worked(ticks, hewing: 100, supply: PitRig::SUPPLY_J, from: 0, **levers)
     op = at_the_face(mine)
-    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: 100, **levers)
     [ op, run!(op, ticks, supply: supply, from: from) ]
   end
@@ -67,8 +72,8 @@ RSpec.describe "the mine" do
     op = mine
 
     expect(op.layout.places).to contain_exactly(:bank, :pit_bottom, :district)
-    expect(op.control_points.keys).to include(:hewing, :haulage, :winding, :ventilation,
-                                              :pumping, :quarters)
+    expect(op.control_points.keys).to include(:hewing, :haulage, :man_winding, :coal_winding,
+                                              :ventilation, :pumping, :quarters)
     expect(held(op, :seam, :coal)).to be > 0.0
   end
 
@@ -91,15 +96,13 @@ RSpec.describe "the mine" do
       expect(held(op, :seam, :coal)).to eq(90_000.0)
     end
 
-    # **A walk, all the way through.** The putter's road is the short one — 167 ticks by cage
-    # against the hewer's 834 — and it is a *complete* journey rather than a shortened one, so it
-    # exercises every part of the machinery the longer roads use.
+    # **A walk, all the way through.** The putter's road is the short one — 117 ticks by the wound
+    # cage — and it is a *complete* journey rather than a shortened one, so it exercises every part
+    # of the machinery the longer roads use.
     it "puts a hand at their post once their walk is done" do
       op = caged
-      op.set_control(:winding, 100)
-      op.set_control(:man_winding, 100)
       op.assign_minion(:crew_2, :haulage)
-      run!(op, 200)
+      run!(op, 200, wind: true)
 
       expect(crew(op, :crew_2)[:place]).to be(:pit_bottom)
       expect(crew(op, :crew_2)[:station]).to be(:haulage)
@@ -124,14 +127,12 @@ RSpec.describe "the mine" do
     # suite built on constructed arrivals can notice.
     it "arrives in exactly the state at_the_face constructs" do
       walked = caged
-      walked.set_control(:winding, 100)
-      walked.set_control(:man_winding, 100)
       walked.assign_minion(:crew_2, :haulage)
-      run!(walked, 200)
+      run!(walked, 200, wind: true)
 
       built = at_the_face(caged, hewing: nil, timbering: nil)
 
-      %i[posting station place progress remaining journey].each do |field|
+      %i[posting station place progress remaining journey via].each do |field|
         expect(crew(built, :crew_2).fetch(field)).to eq(crew(walked, :crew_2).fetch(field)),
                                                      "#{field} differs"
       end
@@ -200,7 +201,7 @@ RSpec.describe "the mine" do
     it "drowns the workings once the pump stops" do
       paid, = worked(200)
       unpaid = at_the_face(seed(mine, nodes: { line_shaft: { angular_momentum: 0.0 } }))
-      levers!(unpaid, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+      levers!(unpaid, hewing: 100, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                       ventilation: 100)
       run!(unpaid, 200, supply: 0.0)
 
@@ -209,19 +210,44 @@ RSpec.describe "the mine" do
       expect(held(unpaid, :pit_bottom, :water)).to be > 20.0
     end
 
-    # A winding drum is positive displacement: it raises coal because it is turning, and at rest
-    # raises none. Without `displacement:` on the fitting, `driven_by:` is only a *bill* — the pump
-    # lifted its water 90 m for nothing with the shaft stopped, and the winder did the same.
-    it "stops raising coal, because a drum that is not turning raises nothing" do
-      op = at_the_face(seed(mine, nodes: { line_shaft: { angular_momentum: 0.0 } }))
-      levers!(op, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100,
-                  ventilation: 100)
-      before = op.ledger.fetch(:mass_delivered)
-      run!(op, 100, supply: 0.0)
+    # **Coal rides the hoist, and the hoist is lifted by the line shaft.** A laden deck at the
+    # bottom with everybody at their posts and nothing turning the shaft never reaches bank.
+    it "stops raising coal, because a drum with nothing turning it lifts nothing" do
+      op = seed(mine(crew: PitRig::WOUND_CREW),
+                nodes: { line_shaft: { angular_momentum: 0.0 }, cage_drive: { position_m: 90.0 },
+                         cage_deck: { parcels: parcels_at(292.0, coal: 280.0) } },
+                minions: { crew_5: { place: :bank, posting: :man_winding, station: :man_winding },
+                           crew_3: { place: :pit_bottom, posting: :onsetting, station: :onsetting },
+                           crew_4: { place: :bank, posting: :banking, station: :banking } })
+      levers!(op, coal_winding: 100)
+      raised = Array.new(100) do |i|
+        run!(op, 1, supply: 0.0, from: i)
+        op.state.dig(:nodes, :deck_unloading, :carried_kg).to_f
+      end.sum
 
-      expect(omega(op)).to be < 0.5
-      expect(op.state.fetch(:nodes).fetch(:winder).fetch(:carried_kg)).to be < 0.01
-      expect(op.ledger.fetch(:mass_delivered) - before).to be < 1.0
+      expect(raised).to eq(0.0)
+      expect(op.nodes.fetch(:cage_drive).cage_m(op.state.dig(:nodes, :cage_drive))).to be > 80.0
+    end
+
+    # The same deck and posts with the shaft paid for, constructed just short of bank: it comes the
+    # rest of the way up and is run off there.
+    it "raises a laden deck to bank and runs it off there with the shaft turning" do
+      pit = mine(crew: PitRig::WOUND_CREW)
+      line = pit.nodes.fetch(:line_shaft)
+      op = seed(pit,
+                nodes: { cage_drive: { position_m: 3.0 },
+                         line_shaft: { angular_momentum: line.moment_of_inertia * line.rated_omega },
+                         cage_deck: { parcels: parcels_at(292.0, coal: 280.0) } },
+                minions: { crew_5: { place: :bank, posting: :man_winding, station: :man_winding },
+                           crew_3: { place: :pit_bottom, posting: :onsetting, station: :onsetting },
+                           crew_4: { place: :bank, posting: :banking, station: :banking } })
+      levers!(op, coal_winding: 100)
+      raised = Array.new(40) do |i|
+        run!(op, 1, from: i)
+        op.state.dig(:nodes, :deck_unloading, :carried_kg).to_f
+      end.sum
+
+      expect(raised).to be > 50.0
     end
   end
 
@@ -289,7 +315,7 @@ RSpec.describe "the mine" do
       mass0 = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
       joules0 = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
-      levers!(op, hewing: 100, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+      levers!(op, hewing: 100, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                   ventilation: 100)
       run!(op, 200)
 

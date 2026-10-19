@@ -31,12 +31,19 @@
 # `Vessel#stress_per_second` and `Conduit#stress_per_second` had therefore never once fired.**
 # Both defaulted to `Float::INFINITY`, which is a silent off switch: the mechanic was complete,
 # wired, and inert. If you add a material something is built from, give it a rating.
+#
+# ## `thermal_conductivity_w_per_m_k` — how fast heat gets through it
+#
+# Read by a `Nodes::Wall` built of the material: with its density and specific heat it sets how
+# much heat a wall's skin soaks up and how fast it passes it on into what is behind it. Asking
+# for one a material does not declare raises, as `tensile_strength_pa` does.
 
 cast_iron:
   tags: [solid, metal, structural]
   density_kg_per_m3: 7200
   specific_heat_j_per_kg_k: 460
   tensile_strength_pa: 150.0e6
+  thermal_conductivity_w_per_m_k: 50
   # Grey cast iron holds its strength well to a dull red and then goes quickly. It is also
   # brittle, so a hot casting that is suddenly cooled cracks — which is why firebars and
   # cylinder covers were cast iron and pressure shells were not.
@@ -47,6 +54,7 @@ wrought_iron:
   density_kg_per_m3: 7700
   specific_heat_j_per_kg_k: 500
   tensile_strength_pa: 250.0e6
+  thermal_conductivity_w_per_m_k: 59
   # What boilers were actually made of in the high-pressure era, and it is the *lower* figure
   # of the two irons on temperature despite being the stronger in tension: the slag stringers
   # that make it tough cold are what open up when it is worked hot.
@@ -57,6 +65,7 @@ steel:
   density_kg_per_m3: 7850
   specific_heat_j_per_kg_k: 490
   tensile_strength_pa: 500.0e6
+  thermal_conductivity_w_per_m_k: 50
   # Begins creeping around 700 K; by 900 most of the cold strength is gone. Taken as the point
   # a plate can no longer be relied on rather than the point it fails outright.
   max_temperature_k: 900
@@ -68,6 +77,7 @@ bronze:
   density_kg_per_m3: 8800
   specific_heat_j_per_kg_k: 380
   tensile_strength_pa: 250.0e6
+  thermal_conductivity_w_per_m_k: 60
   max_temperature_k: 700
 
 # Windings and cable. Soft and weak as structure, which is why nothing is *built* from it —
@@ -78,6 +88,7 @@ copper:
   density_kg_per_m3: 8960
   specific_heat_j_per_kg_k: 385
   tensile_strength_pa: 210.0e6
+  thermal_conductivity_w_per_m_k: 390
   # Annealed copper loses its temper long before it melts, and a winding that has annealed is
   # a winding that has shorted.
   max_temperature_k: 650
@@ -89,6 +100,7 @@ babbitt:
   density_kg_per_m3: 7400
   specific_heat_j_per_kg_k: 230
   tensile_strength_pa: 70.0e6
+  thermal_conductivity_w_per_m_k: 55
   # It melts at about this temperature, and that is the point of it.
   max_temperature_k: 520
   # **What it costs to melt a kilogram of it**, and it is what stops a seized bearing's
@@ -108,7 +120,17 @@ fusible_alloy:
   density_kg_per_m3: 8000
   specific_heat_j_per_kg_k: 200
   tensile_strength_pa: 30.0e6
+  thermal_conductivity_w_per_m_k: 19
   max_temperature_k: 620
   # A plug does not trip, it **melts** — so this is what it costs to run one out, and it is why a
   # plug takes a moment to go rather than switching. Lead–tin–bismuth alloys sit near this.
   latent_heat_of_fusion_j_per_kg: 45_000
+
+# **The rock a pit is cut through**: the sandstones, shales and mudstones of the coal measures.
+# Nothing is built of it, so it has no strength or rating here — it is a wall's material, a heat
+# sink a working's gas loses its heat to, and it warms slowly and holds it.
+coal_measures:
+  tags: [solid]
+  density_kg_per_m3: 2400
+  specific_heat_j_per_kg_k: 850
+  thermal_conductivity_w_per_m_k: 2.0

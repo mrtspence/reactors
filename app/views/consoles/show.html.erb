@@ -10,9 +10,11 @@
   <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
     <h1 class="text-sm uppercase tracking-widest text-slate-300">
       <%= @operation_id.to_s.titleize %>
-      <span class="text-slate-500">
-        / <%= DevMatch.chassis(operation_id: @operation_id).to_s.tr("_", " ") %>
-      </span>
+      <% if @fittable %>
+        <span class="text-slate-500">
+          / <%= DevMatch.chassis(operation_id: @operation_id).to_s.tr("_", " ") %>
+        </span>
+      <% end %>
     </h1>
 
     <%# **The hatch says when it is open.** A development affordance that looks identical to the
@@ -51,17 +53,19 @@
                   }" %>
     <% end %>
 
-    <%= link_to "Outfitting",
-                edit_loadout_path(match_id: @match_id, operation_id: @operation_id),
-                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                       "ring-1 ring-slate-700" %>
+    <% if @fittable %>
+      <%= link_to "Outfitting",
+                  edit_loadout_path(match_id: @match_id, operation_id: @operation_id),
+                  class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                         "ring-1 ring-slate-700" %>
 
-    <%# Separate from outfitting, because they are separate decisions: what the machine IS, and
-        who is working it. Both rebuild the engine from cold. %>
-    <%= link_to "Crew",
-                edit_crew_path(match_id: @match_id, operation_id: @operation_id),
-                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                       "ring-1 ring-slate-700" %>
+      <%# Separate from outfitting, because they are separate decisions: what the machine IS, and
+          who is working it. Both rebuild the engine from cold. %>
+      <%= link_to "Crew",
+                  edit_crew_path(match_id: @match_id, operation_id: @operation_id),
+                  class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                         "ring-1 ring-slate-700" %>
+    <% end %>
 
     <button type="button" data-action="console#reset"
             class="text-xs px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 ring-1 ring-rose-700">

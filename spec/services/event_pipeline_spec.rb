@@ -16,10 +16,10 @@ require "support/reference_crew"
 #
 # So this drives the real simulation rather than hand-built records, and asserts on what a
 # player would actually receive.
-# **`content:` is passed explicitly rather than using the `crew: :reference` hook**, because the
-# expensive cold start runs in a `before(:all)` — which fires before any `before(:each)`, so the
-# stub is not installed yet. Passing it at build works here because nothing in this file restores
-# a snapshot; a spec that does must use the hook, since `Operation.from_h` resolves against
+# **The run stubs `Content.default` inside `RSpec::Mocks.with_temporary_scope`** rather than using
+# the `crew: :reference` hook, because it happens in a `before(:all)` — which fires before any
+# `before(:each)`, so the hook's stub is not installed yet. Passing `content:` at build is not
+# enough: the engine is seeded through a snapshot restore, and `Operation.from_h` resolves against
 # `Content.default` and never sees a `content:` argument.
 RSpec.describe "the event pipeline" do
   include EngineRig
@@ -43,25 +43,28 @@ RSpec.describe "the event pipeline" do
   # achievement that needed an integration test apiece would make the suite unusable, which is
   # the whole reason the digest takes records rather than an operation.
   def working_engine(ticks: 30)
-    match = ReactorSim::Match.create(
-      id: "p", seed: 42,
-      operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure,
-                      loadout: ReferenceCrew.loadout,
-                      content: ReferenceCrew::CONTENT }.merge(ReferenceCrew.options) ]
-    )
-    seeded = seed_match(match, :eng, nodes: at_work_nodes(match.operation(:eng)))
-    op = seeded.operation(:eng)
-    # The opening move of a match: crew start in the quarters, so an engine with nobody sent to
-    # the shovel makes nothing whatever of its fire.
-    ReferenceCrew.deploy!(op)
-    EngineRig::WORKING.each { |id, value| op.set_control(id, value) }
+    RSpec::Mocks.with_temporary_scope do
+      allow(ReactorSim::Content).to receive(:default).and_return(ReferenceCrew::CONTENT)
 
-    events = []
-    ticks.times do |i|
-      op.set_control(:igniter, i.zero? ? 100 : 0)
-      events.concat(seeded.step!)
+      match = ReactorSim::Match.create(
+        id: "p", seed: 42,
+        operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure,
+                        loadout: ReferenceCrew.loadout }.merge(ReferenceCrew.options) ]
+      )
+      seeded = seed_match(match, :eng, nodes: at_work_nodes(match.operation(:eng)))
+      op = seeded.operation(:eng)
+      # The opening move of a match: crew start in the quarters, so an engine with nobody sent to
+      # the shovel makes nothing whatever of its fire.
+      ReferenceCrew.deploy!(op)
+      EngineRig::WORKING.each { |id, value| op.set_control(id, value) }
+
+      events = []
+      ticks.times do |i|
+        op.set_control(:igniter, i.zero? ? 100 : 0)
+        events.concat(seeded.step!)
+      end
+      [ seeded, events ]
     end
-    [ seeded, events ]
   end
 
   # Exactly what `EventProducer#fact` puts on the wire, round-tripped through JSON — because
@@ -125,12 +128,12 @@ RSpec.describe "the event pipeline" do
     # without them. `node:` is the SEAT — the post outlives whoever was standing in it — and a
     # consumer given only that could not put anybody on the injury list at all.
     it "carries the person and the verdict on a real injury, not just the seat" do
+      allow(ReactorSim::Content).to receive(:default).and_return(ReferenceCrew::CONTENT)
       match = ReactorSim::Match.create(
         id: "p", seed: 42,
         operations: [ { id: "eng", type: :steam_engine,
                         loadout: ReferenceCrew.loadout(fusible_plug: nil),
-                        crew: { crew_1: { minion: :test_hand_a } },
-                        content: ReferenceCrew::CONTENT } ]
+                        crew: { crew_1: { minion: :test_hand_a } } } ]
       )
       # **The drum is built on the edge of letting go**, rather than fired for 7,000 ticks until
       # it does. With no plug fitted, 400 kg of water, the feed shut and a shell already worked,

@@ -102,4 +102,16 @@ RSpec.describe "the kit catalogue" do
       expect(course.tags).to include(heat_resistance: 0.2, licensed: true)
     end
   end
+
+  # **A hazard tag nothing resists is unresistable, silently.** The shaft hurts people with four,
+  # and each needs something a player can buy against it.
+  it "sells something against each of the shaft's hazards" do
+    resisted = (ReactorSim::Equipment.known.map { |id| ReactorSim::Equipment.fetch(id) } +
+                ReactorSim::Training.known.map { |id| ReactorSim::Training.fetch(id) })
+               .flat_map { |kit| kit.tags.keys }
+
+    %i[crush fall impact rockfall].each do |tag|
+      expect(resisted).to include(:"#{tag}_resistance"), "nothing resists #{tag}"
+    end
+  end
 end

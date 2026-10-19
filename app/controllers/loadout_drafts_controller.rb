@@ -16,7 +16,7 @@
 class LoadoutDraftsController < ApplicationController
   include LoadoutParams
 
-  before_action :require_operator!
+  before_action :require_operator!, :require_fittable!
 
   def create
     @outfitting = Outfitting.for(owner_id: current_player,

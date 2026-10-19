@@ -9,11 +9,13 @@ specific heat. Reference:
 |---|---|---|---|
 | `Thermal` | `heat_capacity`, `ambient_conductance`, `ambient_k`, `initial_temperature_k`; optional `material`, `max_temperature_k`, `emissivity`, `radiating_area_m2` | `joules` | `temperature_k`, `add_joules`, `rebalance`, `total_heat_capacity`, `rated_temperature_k`, `radiative_conductance` |
 | `Holds` | `volume_m3` | `parcels` | `contents_kg`, `room_m3`, `contents_volume`, `bulk_density_kg_m3` |
-| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating` |
+| `Wearing` | `durability_range`, `stress_per_second`, `overload?`, `failure_modes`, `failure_mode`, `failure_damages` | `durability`, `initial_durability`, `failure` | `apply_wear`, `integrity`, `break_part`, `escalate_to`, `derating`, `suffer`, `suffers?` |
 | `Pressurized` | needs `Holds` + `Thermal`; optional `material`, `shell_radius_m`, `wall_thickness_m`, `safety_factor`, `max_pressure_pa` | none — derived | `pressure_pa`, `gas_headroom_kg`, `rated_pressure_pa` |
 | `Obstructs` | `obstruction_volume_m3`, `obstruction_tags` (needs `Holds`) | none — derived | `occupancy`, `obstructing_volume_m3` |
 | `Rotating` | `moment_of_inertia`, `radius_m`, `friction`, `initial_omega` | `angular_momentum` | `omega`, `rpm`, `kinetic_joules`, `apply_torque`, `drag_conductances` |
+| `Roped` | needs `Rotating`; `rope_capacity_joules`, `control_id` (the clutch) | `supply_joules`, `remote_omega`, `remote_grip`, `rope_k` | `hear`, `receive`, `rope_report`, `rope_torque`, `rope_drags`, `grip` |
 | `Fusible` | `fusible_kg`; needs `Thermal` and a `material:` declaring `latent_heat_of_fusion_j_per_kg` | `fusible_remaining_kg` | `run_melt`, `melt_kg`, `melted_fraction`, `melted_out?`, `fusible_temperature_k` |
+| `PromptReaction` | none — inert unless a hosted reaction declares `prompt:`; needs `Thermal`, `Holds` and `reactions` | `front` — and writes `parcels`, `joules`, `ignition`, `joules_from_reactions` | `resolve_prompt(state, ctx, arriving:)` (phase 5), emitting `:explosion`; a gas neighbour's `front` last tick arrives as a front this tick; `prompt_modes` — the `explosion:` a node's `endangers:` and `damages:` may key on, beside its failure modes |
 
 A snapshot — `ls lib/reactor_sim/concerns/` is the truth. This table drifts on a **column**, not
 just a row: adding a config key or a state key to an existing concern makes it wrong just as
@@ -214,7 +216,9 @@ itself and what only the machine knows:
   a derating means is the node's business. `0.0` is how a mode says "no longer does that thing at
   all", in the same vocabulary rather than a second flag beside it.
 - **`failure_damages`** — `{ mode => { node_id => share } }` — is what the part takes with it,
-  spent by `Tick#spread_damage` as a share of each bystander's *starting* durability.
+  spent by `Tick#spread_damage` as a share of each bystander's *starting* durability. **A part it
+  empties fails on its next evaluation with `cause: :damage`** rather than waiting for a stress of
+  its own — the mine's shaft has none, and is wrecked only by what comes down it.
 
 **`failure_hazards` is `failure_damages` pointed at people**, declared the same way and for the
 same reason, and spent in phase 6b immediately after `spread_damage`. It names **stations**, never
@@ -223,6 +227,16 @@ would be naming something it cannot know. That also makes it a coarse notion of 
 geometry at all — the machine knows which levers sit beside which parts — and it upgrades cleanly
 when volumes arrive. A station's figure is a **weight**; `scales_with:` names a key in the failure
 event's own `detail:` so the size of the event comes from the part rather than from a constant.
+
+**`along:` is a hazard that runs down a passage** — a runaway set on an incline — and reaches each
+person by their share of the way from `from` to `to` (`Tick#along`). At `to` it is everybody at the
+full `weight`; at `from`, `top_share`; `positions:` places stations on the way; walkers count by
+their real progress; `roaming:` stations are on the road at their `road:` die. Anybody on the road
+may reach the place's fitted refuge — a near miss on their `dodge:` die, by its effectiveness and
+their wits — or be `crushed:`, a heavier blow under its own cause, with a chance rising as the share
+squared on their `caught:` die. A `catch: { at:, holds: }` stops most of the run where it stands:
+anybody further down than `at` meets `1 − holds` of their share (`Tick#past_the_catch`).
+`injury_spec`'s walker checks the run's places and stations exist.
 
 ## `perils` is the other half: harm with nothing broken
 
@@ -253,6 +267,30 @@ later one of them catches somebody. Declared on the node that embodies the dange
 - **There is no `absent_when:`.** A fitting removes a peril by not declaring it — railings are
   a part, and a fitted part contributes a fragment without the fall in it. That is how every
   other purchase works and it needs no second rule.
+- **`rate:` is how often, `severity:` is how badly, and they are separate.** `rate` spends the
+  margin and so also decides how often a peril is the one picked; `severity` is the Danger Check
+  and nothing else. It defaults to `severity`. Minor accidents outnumber deadly ones, so a
+  place's worst peril usually wants a low rate.
+- **Which accident fires is a pick weighted by this tick's bites** (`Blunder.pick`, the `peril:`
+  fate, walked by sorted id), so every peril that reaches somebody can happen to them. One margin
+  with a weighted pick gives the same long-run mix a margin per peril would.
+- **`judged:` splits one event between reading it rightly and wrongly.** A pair of perils, one
+  `:rightly` and one `:wrongly`, take `1 − m` and `m` of the rate, `m` being `Minion#misjudges` —
+  wits in the room's light, plus `boneheaded` steeply — so together they happen as often as one
+  would and who is posted decides which. A misfire is the case: recognised it is dug out, taken for
+  a spent shot it is left live in the face for a hewer to strike.
+- **A peril may hurt the person, the machine, or both.** A positive `severity` is a Danger Check;
+  a `mishap: { node:, kind:, share: }` is something the person does to a part. Phase 6d emits
+  `:minion_mishap` and writes the mishap to `state[:mishaps]`, and the part suffers it at the
+  start of the **next** tick's `stress`. Its own state key, because events are not snapshotted.
+  `Wearing#suffer` understands `kind: :damage` (a share of starting durability, breaking with
+  `cause: :mishap`); a part with a structural consequence overrides `suffer` and `suffers?` — the
+  mine's shaft suffers `:obstruction`, a tub lodging in it. A peril aimed at a part that cannot
+  suffer its kind is refused at build.
+- **`riders:` reaches whoever something is carrying through a shaft** — `via` a cage's drum or
+  `riding` a man engine's rods — wherever they are, beside `places:` and `stations:`.
+- **`boneheaded` spends the margin through `Minion#daftness`, its cube**, scaled by
+  `Blunder::DAFT_SPEND`: a kobold at 0.5 half as fast again as a sound hand, a 1.0 five times.
 
 ### `safety_equipment` is the other way to buy out of one
 
@@ -332,6 +370,25 @@ Stores `angular_momentum`; `omega`, `rpm`, `kinetic_joules` and `rim_speed` all 
 Coupling is a `DriveLink`, settled by the same relaxation as heat. `stiffness` is how hard the
 ends are held to a common speed — a keyed shaft is stiff, a leather belt is not, and the
 difference is one number rather than one class.
+
+## Roped: one end of a rope to another operation
+
+A shaft in one operation cannot share a drive solve with a shaft in another, so the two are joined
+by a rope whose ends each see the other's speed as of last tick (`Match#exchange!` calls `hear`).
+Slower than the far end, an end is a **driver** paid from `supply_joules`; faster, a **brake**
+declared as `:rope` and sent to the far end. Throwing either clutch slackens it. See
+[`docs/reference/physics.md`](../../../docs/reference/physics.md#a-rope-between-operations) for
+the stability bound and [`settlement.md`](../../../docs/reference/settlement.md) for the books.
+
+- **The braking end sends everything its rope drag took**, and the driven end spends only what its
+  shaft measurably gained. The difference — the slip — overflows the driven end's buffer to
+  friction. Sending only `τ·ω_far` cannot start a stopped shaft: at rest it is zero.
+- **`:rope` is its own drag destination**, booked to `joules_roped`, because every other `:work`
+  drag on that shaft is the operation's own and must not cross.
+- **`Load` and `Import` both include it.** A load a coupling names brakes by the rope instead of
+  its curve; an uncoupled `Import` treats `rated_omega` as a steady far end.
+- **An end whose state says `tripped` has its clutch out** whatever the lever says — in its own
+  grip and in what it reports to the far end. `Import` sets it from an overspeed trip.
 
 ### Drag is declared, never applied
 

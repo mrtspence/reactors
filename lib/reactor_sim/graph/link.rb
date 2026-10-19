@@ -81,29 +81,50 @@ module ReactorSim
   # shaft compliance and is what makes transmitted torque a real quantity: `transferred / dt` is
   # what a shaft's wear should be driven by and what a belt should snap from.
   #
-  # TODO: **the steam engine's coupling dissipates 60% of its shaft power, and the cause is not
-  # here.** `Load#apply` integrates its brake explicitly and runs past the stability limit at
-  # working speed, so the mill is spun up and slammed to a standstill every tick; the coupling
-  # then slips ~100% against a load that is stationary whenever it is read. Measured: flywheel
-  # 18.24 rad/s, load 0.13 rad/s, yet the load extracting 40 kJ a tick — which is 14.1 rad/s of
-  # kinetic energy, not 0.13.
+  # **Geared**: with `ratio` g the torque is `k·(g·ω_a − ω_b)`, `b` gains `τ·dt` of momentum and
+  # `a` loses `g·τ·dt`, because a gear multiplies torque. Momentum is not conserved across a gear;
+  # energy is, and the slip is `τ·(g·ω_a − ω_b)`, never negative. A reverser is `g = −1`.
   #
-  # **Fix the integrator first and re-measure before touching `stiffness:`.** Stiffening a
-  # coupling into a ratchet transmits more torque and dissipates more. See
-  # `docs/design_sketches/bearings.md` §1.1.
+  # **Clutched**: `control_id` scales the conductance by the lever, and a disengaged link drops out
+  # of the network. Two links between one pair — forward and reverse — need their own `id`.
+  # `cut_by:` names a node that can throw the clutch out whatever the lever says — an overwind
+  # trip cutting the drive — by answering `cuts_drive?(ctx)`.
   class DriveLink
-    attr_reader :a, :b, :conductance, :max_torque
+    attr_reader :a, :b, :conductance, :max_torque, :ratio, :control_id, :id, :cut_by
 
-    def initialize(a:, b:, stiffness:, max_torque: Float::INFINITY)
+    def initialize(a:, b:, stiffness:, max_torque: Float::INFINITY, ratio: 1.0, control_id: nil,
+                   id: nil, cut_by: nil)
       @a = a.to_sym
       @b = b.to_sym
       @conductance = stiffness.to_f
       @max_torque = max_torque.to_f
+      @ratio = ratio.to_f
+      @control_id = control_id&.to_sym
+      @id = (id || :"#{@a}=#{@b}").to_sym
+      @cut_by = cut_by&.to_sym
       raise Error, "stiffness must be positive" unless @conductance.positive?
+      raise Error, "drive link #{@id}: ratio must not be zero" if @ratio.zero?
 
       freeze
     end
 
-    def id = :"#{@a}=#{@b}"
+    # This link as the solve sees it this tick: its conductance scaled by the clutch, or nil when
+    # the clutch is out or cut.
+    def engaged(controls, ctx = nil)
+      return nil if cut?(ctx)
+      return self unless @control_id
+
+      fraction = (controls.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
+      return nil unless fraction.positive?
+
+      DriveLink.new(a: @a, b: @b, stiffness: @conductance * fraction, max_torque: @max_torque,
+                    ratio: @ratio, id: @id)
+    end
+
+    def cut?(ctx)
+      return false unless @cut_by && ctx
+
+      ctx.nodes[@cut_by]&.cuts_drive?(ctx) || false
+    end
   end
 end

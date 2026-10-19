@@ -31,14 +31,19 @@ module ReactorSim
   class Slot
     WHEN_EMPTY = %i[omit bypass].freeze
 
-    attr_reader :id, :accepts, :label, :group, :default, :when_empty, :bypass
+    attr_reader :id, :accepts, :label, :group, :default, :when_empty, :bypass, :informs
 
     # `group:` is presentation, and the only thing here that is. An outfitting screen reads down
     # a machine by system — fire, then water, then steam, then the engine — because that is how
     # somebody thinks about a machine, and alphabetical or graph order would scatter the four
     # fittings on the boiler across the page. Nothing in the simulation reads it.
+    #
+    # `informs:` names the spec keys this slot's fitting may set for every other part's builder —
+    # the one way a fitting can shape another slot's wiring, and named here so the dependency is
+    # visible in the slot list rather than hidden in a builder. A dumb drift tells the furnace where
+    # its air comes from. It reaches part builders, not the chassis fixtures.
     def initialize(id:, accepts:, label: nil, group: :other, required: false, default: nil,
-                   when_empty: :omit, bypass: nil)
+                   when_empty: :omit, bypass: nil, informs: [])
       @id = id.to_sym
       @accepts = accepts.to_sym
       @label = label || @id.to_s.tr("_", " ").capitalize
@@ -47,6 +52,7 @@ module ReactorSim
       @default = default&.to_sym
       @when_empty = when_empty.to_sym
       @bypass = normalise_bypass(bypass)
+      @informs = Array(informs).map(&:to_sym).freeze
 
       validate!
       freeze

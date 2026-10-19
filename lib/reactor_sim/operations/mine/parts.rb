@@ -7,6 +7,13 @@ module ReactorSim
       # rather than being repeated in three fittings that could disagree.
       SHAFT_DEPTH_M = 90.0
 
+      # What every way up and down the shaft runs through: the shaft, choked or jammed, and the
+      # pit bottom at its foot, drowned.
+      THROUGH_SHAFT = %i[shaft pit_bottom].freeze
+
+      # The district's coal. At a heading's 4.7 t a metre (`Ahead`), about nineteen metres of face.
+      SEAM_KG = 90_000.0
+
       # What the line shaft turns at when the supply is healthy. Driven fittings are rated
       # against it, so a fitting's declared duty means "at working speed" rather than "always".
       WORKING_OMEGA = 22.0
@@ -48,47 +55,52 @@ module ReactorSim
       #       puts op.nodes.keys.reject { |n| op.layout.place_of_node(n) }.inspect'
       PLACES = [
         Place.new(id: :bank, label: "Pit Bank",
-                  nodes: %i[atmosphere screens winder line_shaft upcast drainage dust_store]),
-        Place.new(id: :pit_bottom, label: "Pit Bottom", nodes: %i[pit_bottom pump]),
+                  nodes: %i[atmosphere screens line_shaft upcast drainage dust_store]),
+        # Its air named, because a furnace fitted there is a gas volume too.
+        Place.new(id: :pit_bottom, label: "Pit Bottom", nodes: %i[pit_bottom pump], air: :pit_bottom),
         Place.new(id: :district, label: "The District",
                   nodes: %i[district pick_line dust_line blower])
       ].freeze
 
       # ---------------------------------------------------------------- winding
 
-      Parts.register(:steam_whim, kind: :winder, label: "Steam Whim",
-                     description: "A drum, a rope, and a kibble. One load at a time.",
-                     provides: %i[winder], instruments: %i[coal_raised winding_gear],
-                     stats: { max_kg_per_s: 2.2 }) do |_spec|
-        Mine.winding_fragment(max_kg_per_s: 2.2)
-      end
+      # **The hoist winds men and coal alike**: a drum and two balanced cages — or kibbles — off
+      # the line shaft, coal on the deck, men in it. One engineman works it, certificated, to
+      # wherever the player names or, with `coal_winding` on, shuttling coal and taking men first.
+      #
+      # **Four tiers.** The steam whim's kibble is a bucket on a rope: small, slow, unguided, and
+      # ridden by men standing in it at their peril. The cages are guided and quick, and what each
+      # buys over the last is what an overwind ends as: through the sheaves, hung in the catch
+      # plate by King's detaching hook (1867), or stopped short by a trip — which is only as good as
+      # the brake. Hooked and tripped cages carry safety catches for a parted rope.
+      HOISTS = {
+        steam_whim: { label: "Steam Whim", kibble: true, hook: false, trip: false,
+                      speed_m_s: 2.0, brake_nm: 12_000.0, deck_kg: 300.0, rated_kg: 220.0,
+                      cage_kg: 300.0,
+                      description: "A drum, a rope and a kibble. Men ride it standing in the bucket." },
+        cage_gear: { label: "Cage", kibble: false, hook: false, trip: false,
+                     speed_m_s: 4.2, brake_nm: 30_000.0, deck_kg: 1_000.0, rated_kg: 420.0,
+                     cage_kg: 1_500.0,
+                     description: "Guided cage on a rope. Quick, and nothing to stop an overwind." },
+        hooked_cage: { label: "Cage, Detaching Hook", kibble: false, hook: true, trip: false,
+                       speed_m_s: 4.2, brake_nm: 30_000.0, deck_kg: 1_000.0, rated_kg: 420.0,
+                       cage_kg: 1_500.0,
+                       description: "King's hook: an overwind hangs the cage in the headframe." },
+        tripped_cage: { label: "Cage, Hook and Trip", kibble: false, hook: true, trip: true,
+                        speed_m_s: 4.2, brake_nm: 30_000.0, deck_kg: 1_000.0, rated_kg: 420.0,
+                        cage_kg: 1_500.0,
+                        description: "The hook, and a trip that throws the brake on past the marks." }
+      }.freeze
 
-      Parts.register(:cage_winder, kind: :winder, label: "Cage Winder",
-                     description: "Guided cage on wire rope. Takes tubs by the deck.",
-                     provides: %i[winder], instruments: %i[coal_raised winding_gear],
-                     stats: { max_kg_per_s: 7.0 }) do |_spec|
-        Mine.winding_fragment(max_kg_per_s: 7.0)
-      end
-
-      def self.winding_fragment(max_kg_per_s:)
-        Fragment.new(
-          nodes: [ Mine.winder(max_kg_per_s: max_kg_per_s, lift_m: SHAFT_DEPTH_M,
-                               rated_omega: WORKING_OMEGA) ],
-          links: [
-            Link.new(from: [ :pit_bottom, :coal_out ], to: [ :winder, :inlet ]),
-            Link.new(from: [ :winder, :outlet ], to: [ :screens, :in ])
-          ],
-          control_points: [
-            # **The one post in this pit that takes knowing how.** A winding engineman worked
-            # to signals he could not see the meaning of, with men on the rope, and the job
-            # was certificated for exactly that reason — overwinding is how you put a cage
-            # through the headgear. Every other lever here is a valve: it goes where you put
-            # it and who put it there is irrelevant.
-            ControlPoint.new(id: :winding, label: "Winding", node: :winder, default: 0.0,
-                             place: :bank, stiffness: Travel::STEADY,
-                             complexity: 1.1, requires: :certificated)
-          ]
-        )
+      HOISTS.each do |id, tier|
+        Parts.register(id, kind: :winder, label: tier.fetch(:label),
+                           description: tier.fetch(:description),
+                           provides: %i[cage_drive cage_deck],
+                           instruments: %i[winding_signals coal_raised cage_depth slack_rope
+                                           winding_brake brake_heat sheave_heat],
+                           stats: tier.except(:label, :description)) do |spec|
+          Mine.hoist_fragment(tier: tier, spec: spec)
+        end
       end
 
       # ---------------------------------------------------------------- winning
@@ -111,12 +123,237 @@ module ReactorSim
                      description: "A rail-mounted disc that undercuts the seam. Loud, and tireless.",
                      provides: %i[pick_line],
                      stats: { max_kg_per_s: 5.6 }) do |_spec|
-        Mine.cutting_fragment(max_kg_per_s: 5.6, exertion: 3.0e-4)
+        # And its picks strike sparks off the seam while it cuts.
+        Mine.cutting_fragment(max_kg_per_s: 5.6, exertion: 3.0e-4, sparks: Mine::CUTTER_SPARKS)
       end
 
-      def self.cutting_fragment(max_kg_per_s:, exertion:)
+      # **Water sprays on the cutter**, from the sump (`Mine::SprayLine`): wetting the face fully, they
+      # leave the picks no spark that can fire gas, and they lay most of the dust. Meaningful only
+      # with a cutter fitted, since hand picks strike no sparks.
+      Parts.register(:water_sprays, kind: :sprays, label: "Cutter Sprays",
+                     description: "Jets on the cutter, fed from the sump. No water, no sprays.",
+                     provides: %i[spray_line face_drain]) do |_spec|
         Fragment.new(
-          nodes: [ Mine.pick_line(max_kg_per_s: max_kg_per_s) ],
+          nodes: [ Mine.spray_line, Mine.face_drain ],
+          links: [ Link.new(from: [ :pit_bottom, :water_out ], to: [ :spray_line, :inlet ]),
+                   Link.new(from: [ :spray_line, :outlet ], to: [ :district, :spray_in ]),
+                   Link.new(from: [ :district, :water_out ], to: [ :face_drain, :inlet ]),
+                   Link.new(from: [ :face_drain, :outlet ], to: [ :pit_bottom, :water_in ]) ],
+          # The cutter's water valve: a lever, open unless somebody shuts it.
+          control_points: [ ControlPoint.new(id: :spraying, label: "Cutter Sprays", node: :spray_line,
+                                             default: 100.0, place: :district) ]
+        )
+      end
+
+      # ---------------------------------------------------------------- haulage
+      #
+      # **What moves the coal from the face to the shaft**: putters shoving tubs by hand, or a
+      # haulage engine off the line shaft drawing sets on a rope at four times the rate — and the
+      # rope is what can let a set go (`Mine::HaulageRope`). The road and its roof are the same
+      # either way; `:haulage` is the post that works it, so its perils and gauges do not move.
+      Parts.register(:hand_putting, kind: :haulage, label: "Hand Putting",
+                     description: "Putters and their tubs. Slow, and nothing on a rope to let go.",
+                     provides: %i[tub_road], stats: { max_kg_per_s: 6.0 }) do |_spec|
+        Fragment.new(
+          nodes: [ Mine.tub_road(max_kg_per_s: 6.0) ],
+          control_points: [
+            # **Gated, not merely aided** where it matters, at the face; here **`force`, because a
+            # loaded tub is friction and leverage** — the job where sheer mass pays most, and where
+            # an outrageously muscular pixie still shifts nothing. **Not `endurance`**, however much
+            # putting is an endurance job — it is a divisor in `Fatigue.accrual` and enters no
+            # capability blend, which is what lets the reference crew set it to 1e6.
+            ControlPoint.new(id: :haulage, label: "Putting", node: :tub_road, default: 0.0,
+                             place: :pit_bottom, effort: { force: 0.8, toughness: 0.2 },
+                             aided_by: :shovelling, exertion: 9.0e-4)
+          ]
+        )
+      end
+
+      # A wire haulage rope, broken at about this: a worn one parts under a set started hard.
+      HAULAGE_ROPE_KN = 60.0
+
+      Parts.register(:rope_haulage, kind: :haulage, label: "Rope Haulage",
+                     description: "An engine and a rope drawing sets of tubs. Four times the coal.",
+                     provides: %i[tub_road haulage_rope], instruments: %i[rope_on_the_road],
+                     stats: { max_kg_per_s: 24.0 }) do |spec|
+        Fragment.new(
+          nodes: [ Mine.tub_road(max_kg_per_s: 24.0, driven: true, rope: :haulage_rope),
+                   Mine.haulage_rope(breaking_kn: HAULAGE_ROPE_KN, catch: spec[:runaway_catch]) ],
+          control_points: [
+            # **The hauling hands** — hookers-on coupling and uncoupling the sets along the road —
+            # and with the rope parted, its splicers. Knack and attention rather than force: the
+            # engine does the pulling.
+            ControlPoint.new(id: :haulage, label: "Hauling", node: :tub_road, default: 0.0,
+                             place: :pit_bottom, effort: { dexterity: 0.6, intelligence: 0.4 },
+                             exertion: 5.0e-4)
+          ]
+        )
+      end
+
+      # **What stops a runaway set** before it gathers speed down the incline, which only a rope
+      # haulage has. Each tells the rope haulage where on the road it stands (`at`, a share of the
+      # way down) and how much of a runaway it stops (`holds`); what it stops reaches nobody below
+      # it and never reaches the door.
+      CATCHES = {
+        catch_points: { label: "Catch Points", at: 0.15, holds: 0.8,
+                        description: "Sprung points near the top of the incline. A runaway is derailed." },
+        drags: { label: "Drags", at: 0.05, holds: 0.95,
+                 description: "A backstay on every set. It digs in within a few yards." }
+      }.freeze
+
+      CATCHES.each do |id, tier|
+        Parts.register(id, kind: :runaway_catch, label: tier.fetch(:label), description: tier.fetch(:description),
+                           stats: tier.slice(:holds), informs: { runaway_catch: tier.slice(:at, :holds) }) do |_spec|
+          Fragment.empty
+        end
+      end
+
+      # **A belt conveyor**, the tier after the rope: it carries continuously with no hand on the road,
+      # and what it brings is the intake fire. A drum the belt has stalled on lights the spillage
+      # packed round it, the burning spillage lights the belt, and the smoke goes inbye. The
+      # fire-resistant tier's belting does not carry the fire. Rated by what the drum grips; the
+      # loading point can push a third more than that onto it.
+      BELTS = {
+        belt_conveyor: { label: "Belt Conveyor", belting: :belting, reaction: :belt_combustion,
+                         description: "A rubber belt the length of the road. No putters, and it burns." },
+        fire_resistant_conveyor: { label: "Fire-Resistant Conveyor", belting: :fire_resistant_belting,
+                                   reaction: :fire_resistant_belt_combustion,
+                                   description: "PVC belting. It chars where it burns and carries no fire." }
+      }.freeze
+
+      BELT_GRIP_KG_PER_S = 30.0
+      BELT_FEED_KG_PER_S = 40.0
+
+      BELTS.each do |id, tier|
+        Parts.register(id, kind: :haulage, label: tier.fetch(:label), description: tier.fetch(:description),
+                           provides: %i[tub_road belt_drive drive_head belt_road belt_road_rock],
+                           instruments: %i[drum_heat],
+                           stats: { max_kg_per_s: BELT_GRIP_KG_PER_S }) do |_spec|
+          Mine.belt_fragment(belting: tier.fetch(:belting), reaction: tier.fetch(:reaction))
+        end
+      end
+
+      def self.belt_fragment(belting:, reaction:)
+        Fragment.new(
+          nodes: [ Mine.conveyor(max_kg_per_s: BELT_FEED_KG_PER_S, grip_kg_per_s: BELT_GRIP_KG_PER_S),
+                   Mine.belt_drive, Mine.drive_head, Mine.belt_spillage, Mine.belt_clearing,
+                   Mine.belt_road(belting: belting, reaction: reaction),
+                   Mine.rock(:belt_road_rock, area_m2: Mine::BELT_ROAD_FACE_M2),
+                   Mine.belt_draught, Mine.drive_head_draught, Mine.belt_smoke ],
+          links: [ Link.new(from: [ :pit_bottom, :air_out ], to: [ :belt_draught, :inlet ]),
+                   Link.new(from: [ :belt_draught, :outlet ], to: [ :drive_head, :air_in ]),
+                   Link.new(from: [ :drive_head, :smoke_out ], to: [ :drive_head_draught, :inlet ]),
+                   Link.new(from: [ :drive_head_draught, :outlet ], to: [ :belt_road, :air_in ]),
+                   Link.new(from: [ :belt_road, :smoke_out ], to: [ :belt_smoke, :inlet ]),
+                   Link.new(from: [ :belt_smoke, :outlet ], to: [ :district, :smoke_in ]),
+                   Link.new(from: [ :district, :coal_out ], to: [ :belt_spillage, :inlet ]),
+                   Link.new(from: [ :belt_spillage, :outlet ], to: [ :drive_head, :spill_in ]),
+                   Link.new(from: [ :drive_head, :spill_out ], to: [ :belt_clearing, :inlet ]),
+                   Link.new(from: [ :belt_clearing, :outlet ], to: [ :pit_bottom, :coal_in ]) ],
+          thermal_links: [ ThermalLink.new(a: :belt_drive, b: :drive_head, conductance: 2.0),
+                           Mine.rock_face(:belt_road, :belt_road_rock, area_m2: Mine::BELT_ROAD_FACE_M2) ],
+          places: [ Place.new(id: :pit_bottom, nodes: %i[belt_drive]) ],
+          control_points: [
+            # **The loading point's feed**: a lever, not a post — the belt carries with nobody on the
+            # road. Past what the drum grips, it stalls.
+            ControlPoint.new(id: :haulage, label: "Belt Feed", node: :tub_road, default: 0.0,
+                             place: :pit_bottom),
+            # **The belt attendant** at the drive head, shovelling the spillage back onto the coal and
+            # watching the drum. Its gauge is his word on the drum.
+            ControlPoint.new(id: :belt_attending, label: "Belt Attendant", node: :belt_clearing,
+                             default: 100.0, place: :pit_bottom,
+                             effort: { force: 0.5, intelligence: 0.3, dexterity: 0.2 },
+                             aided_by: :shovelling, exertion: 4.0e-4)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- shotfiring
+      #
+      # **Powder, between picks and cutters**: a shotfirer drills, charges and fires, and a hole
+      # brings down a tonne and a half at once (`Mine::ShotHole`). What separates the tiers is the
+      # flame: black powder's blows out of its hole readily and fires whatever gas or dust is there,
+      # a permitted explosive's is short and cool. `blow_out` is the rate of that peril.
+      EXPLOSIVES = {
+        powder_shots: { label: "Black Powder", resource: :black_powder, blow_out: 0.6,
+                        description: "Powder and a fuse. It brings the coal down; it brings the gas up." },
+        permitted_shots: { label: "Permitted Explosives", resource: :permitted_explosive, blow_out: 0.05,
+                           description: "Tested against firedamp in a gallery. A short, cool flame." }
+      }.freeze
+
+      # A charge, kg: about a pound of powder to the tonne and a half it brings down.
+      SHOT_CHARGE_KG = 0.5
+
+      # Fifty shots in the magazine.
+      MAGAZINE_KG = 25.0
+
+      EXPLOSIVES.each do |id, tier|
+        Parts.register(id, kind: :explosives, label: tier.fetch(:label),
+                           description: tier.fetch(:description), instruments: %i[shot_holes],
+                           stats: { blow_out: tier.fetch(:blow_out) }) do |_spec|
+          Mine.shotfiring_fragment(resource: tier.fetch(:resource), blow_out: tier.fetch(:blow_out))
+        end
+      end
+
+      # **Every accident a shot has is a peril of the shotfirer's post**, so a poor hand has more of
+      # them, by how hard the holes are being worked.
+      #
+      # **A misfire is one peril split by his judgement** (`judged:`): recognised, it waits in the
+      # hole to be dug out, and digging it out may set it off on him; taken for a spent shot — oftener
+      # the less his wits, and all but always for a bonehead — it is left live in the face, where
+      # **the hewer working the face strikes it** and it goes off on him. Each going off is a blast to
+      # whoever did it, and a flame in the room.
+      def self.shot_perils(blow_out)
+        [
+          Peril.new(id: :blown_out_shot, rate: blow_out, scales_with: :firing, stations: %i[shotfiring],
+                    mishap: { node: :shot_hole, kind: :blowout }),
+          Peril.new(id: :misfired_shot, rate: MISFIRE_RATE, judged: :rightly, scales_with: :firing,
+                    stations: %i[shotfiring], mishap: { node: :shot_hole, kind: :misfire }),
+          Peril.new(id: :misjudged_misfire, rate: MISFIRE_RATE, judged: :wrongly, scales_with: :firing,
+                    stations: %i[shotfiring], mishap: { node: :shot_hole, kind: :misjudged }),
+          Peril.new(id: :premature_shot, tags: %i[blast burn], severity: 2.4, rate: 0.12,
+                    scales_with: :firing, stations: %i[shotfiring]),
+          Peril.new(id: :set_off_misfire, tags: %i[blast], severity: 3.0, rate: 0.6,
+                    scales_with: :misfired, stations: %i[shotfiring],
+                    mishap: { node: :shot_hole, kind: :set_off }),
+          Peril.new(id: :struck_live_charge, tags: %i[blast], severity: 3.6, rate: 1.2,
+                    scales_with: :live, stations: %i[hewing],
+                    mishap: { node: :shot_hole, kind: :struck })
+        ]
+      end
+
+      # How often a charge misfires, split between the two ways it can be read.
+      MISFIRE_RATE = 0.4
+
+      def self.shotfiring_fragment(resource:, blow_out:)
+        Fragment.new(
+          nodes: [ Mine.magazine(resource: resource, kg: MAGAZINE_KG),
+                   Mine.shot_hole(charge_kg: SHOT_CHARGE_KG, perils: shot_perils(blow_out)),
+                   Mine.shot_fall, Mine.shot_dust ],
+          links: [
+            Link.new(from: [ :magazine, :out ], to: [ :shot_hole, :inlet ]),
+            Link.new(from: [ :shot_hole, :outlet ], to: [ :district, :shot_in ]),
+            Link.new(from: [ :seam, :fall_out ], to: [ :shot_fall, :inlet ]),
+            Link.new(from: [ :shot_fall, :outlet ], to: [ :district, :shot_in ]),
+            Link.new(from: [ :dust_source, :raised_out ], to: [ :shot_dust, :inlet ]),
+            Link.new(from: [ :shot_dust, :outlet ], to: [ :district, :shot_in ])
+          ],
+          places: [ Place.new(id: :district, nodes: %i[shot_hole shot_fall shot_dust]),
+                    Place.new(id: :bank, nodes: %i[magazine]) ],
+          control_points: [
+            # **The post that takes a ticket of its own**, and the shot is worked as hard as he can
+            # manage: posted is working.
+            ControlPoint.new(id: :shotfiring, label: "Shotfiring", node: :shot_hole, default: 100.0,
+                             place: :district, effort: { dexterity: 0.6, intelligence: 0.4 },
+                             gated_by: %i[darkvision], exertion: 6.0e-4,
+                             complexity: 1.0, requires: :shotfirer)
+          ]
+        )
+      end
+
+      def self.cutting_fragment(max_kg_per_s:, exertion:, sparks: nil)
+        Fragment.new(
+          nodes: [ Mine.pick_line(max_kg_per_s: max_kg_per_s, sparks: sparks) ],
           links: [
             Link.new(from: [ :seam, :out ], to: [ :pick_line, :inlet ]),
             Link.new(from: [ :pick_line, :outlet ], to: [ :district, :coal_in ])
@@ -138,41 +375,375 @@ module ReactorSim
 
       # ---------------------------------------------------------------- man riding
 
-      # **Its own slot, because raising coal and raising men are different machines.** A man
-      # engine winds no coal at all, and a colliery that bought one bought it precisely so that
-      # shift change would stop costing it winding time. Optional: with nothing fitted there are
-      # still the ladders, which is where every mine starts.
+      # **Its own slot, because a man engine winds no coal at all**, and a colliery that bought one
+      # bought it precisely so that shift change would stop costing it winding time. Optional: with
+      # nothing fitted there are still the hoist and the ladders.
 
       # A reciprocating rod down the shaft with steps on it: you ride twelve feet, step off onto
       # a sollar, wait, and step on again. Slower than a cage and far cheaper to turn — at
       # Tresavean it cut the journey from an hour to twenty-four minutes and put a fifth on the
       # shift's output.
+      #
+      # **Two tiers, and what the second buys is catches on the rod** — which hold a rod whose strap
+      # wore through and do nothing for one torn out by an overspeed, because the same breakage
+      # knocks them out of line (Levant, 1919).
       Parts.register(:man_engine, kind: :manriding, label: "Man Engine",
                      description: "Stepped rods and sollars. You ride it twelve feet at a time.",
-                     provides: %i[cage_drive], instruments: %i[cage_speed],
-                     stats: { speed_m_s: 1.8, max_torque: 520.0 }) do |_spec|
-        Mine.manriding_fragment(speed_m_s: 1.8, max_torque: 520.0, label: "Man Engine")
+                     provides: %i[man_engine], instruments: %i[rod_speed],
+                     stats: { speed_m_s: 1.8, max_torque: 520.0, catches: false }) do |spec|
+        Mine.manriding_fragment(speed_m_s: 1.8, max_torque: 520.0, label: "Man Engine",
+                                catches: false, spec: spec)
       end
 
-      # Quick, and it costs the whole mine while it runs.
-      Parts.register(:cage_gear, kind: :manriding, label: "Cage",
-                     description: "Guided cage and safety catches. Quick, and heavy on the shaft.",
-                     provides: %i[cage_drive], instruments: %i[cage_speed],
-                     stats: { speed_m_s: 4.2, max_torque: 1_600.0 }) do |_spec|
-        Mine.manriding_fragment(speed_m_s: 4.2, max_torque: 1_600.0, label: "Cage")
+      Parts.register(:caught_man_engine, kind: :manriding, label: "Man Engine, Rod Catches",
+                     description: "The same rods, with catches to hold them if the strap goes.",
+                     provides: %i[man_engine], instruments: %i[rod_speed],
+                     stats: { speed_m_s: 1.8, max_torque: 520.0, catches: true }) do |spec|
+        Mine.manriding_fragment(speed_m_s: 1.8, max_torque: 520.0, label: "Man Engine",
+                                catches: true, spec: spec)
       end
 
-      def self.manriding_fragment(speed_m_s:, max_torque:, label:)
+      # **Who a falling rod hurts.** Everybody on it falls with it — unless catches hold a rod
+      # whose strap wore through, when it drops a foot and stops.
+      ROD_FALL = { tags: %i[fall crush], riders: { man_engine: 3.0 } }.freeze
+      ROD_CAUGHT = { tags: %i[impact], riders: { man_engine: 0.4 } }.freeze
+
+      def self.rod_hazards(catches)
+        { parted: catches ? ROD_CAUGHT : ROD_FALL, torn_out: ROD_FALL }
+      end
+
+      # **The hoist: a drum and two balanced cages, wound by an engineman.** The player names where
+      # cage A goes (`man_winding`, percent of the shaft from bank), or turns `coal_winding` on and
+      # lets him shuttle; he works a forward clutch, a reversing clutch and the brake to get there,
+      # and with nobody at the post they hold where they were left. The drum hangs off the line
+      # shaft through both clutches, so a laden cage running down drives the shaft back.
+      CAGE_DRUM_RADIUS_M = 1.5
+
+      # Where the trip throws the brake on: a little past either landing.
+      TRIP_MARKS_M = [ -1.0, SHAFT_DEPTH_M + 1.0 ].freeze
+
+      # **Who an end of the shaft hurts**, by what they are riding: hung in the catch plate is a
+      # jolt, the baulks at the bottom are as bad as the speed, and through the sheaves is a fall.
+      # Wreckage from the headframe goes down the shaft and reaches the bank too.
+      CAGE_HAZARDS = {
+        caught: { tags: %i[impact], scales_with: :speed_m_s, reference: 4.0,
+                  riders: { cage_drive: 0.6 } },
+        crashed: { tags: %i[impact], scales_with: :speed_m_s, reference: 4.0,
+                   riders: { cage_drive: 2.6 } },
+        overwound: { tags: %i[fall impact], riders: { cage_drive: 3.4 }, places: { bank: 0.3 } }
+      }.freeze
+
+      # **A parted rope drops the cage**, and what happens next is whether it has catches. Without
+      # them it falls to the sump and takes the shaft's guides with it; with them it is a jolt.
+      # Hooked and tripped cages carry catches, which is what the tier buys besides the hook.
+      ROPE_HAZARDS = {
+        parted: { tags: %i[fall impact], riders: { cage_drive: 3.4 } },
+        parted_held: { tags: %i[impact], riders: { cage_drive: 0.5 } }
+      }.freeze
+
+      # **The winding rope, and what it is made of.** Flat hemp first; wrought-iron wire from the
+      # 1840s; steel wire from the 1870s. A ~40 mm rope of each: hemp is light, stretchy — so a
+      # snatch is softer — weak, and rots in a wet shaft; iron is four times as strong and five times
+      # the weight; steel is stronger again, stiffest, and rusts least. Cheaper rope is likelier to
+      # part, and the drum lifts its weight.
+      ROPES = {
+        hemp_rope: { label: "Hemp Rope", breaking_kn: 110.0, kg_per_m: 1.1, stiffness_n_per_m: 8.0e4,
+                     corrode_per_s: 0.06, bend_per_m: 0.025,
+                     description: "Flat hemp. Light and cheap, and it rots in a wet shaft." },
+        iron_wire_rope: { label: "Iron Wire Rope", breaking_kn: 400.0, kg_per_m: 5.5,
+                          stiffness_n_per_m: 6.5e5, corrode_per_s: 0.03, bend_per_m: 0.025,
+                          description: "Wrought-iron wire, laid. Strong, heavy, and it rusts." },
+        steel_wire_rope: { label: "Steel Wire Rope", breaking_kn: 1_000.0, kg_per_m: 5.8,
+                           stiffness_n_per_m: 8.0e5, corrode_per_s: 0.02, bend_per_m: 0.02,
+                           description: "Plough-steel wire. The strongest rope there is." }
+      }.freeze
+
+      ROPES.each do |id, tier|
+        Parts.register(id, kind: :rope, label: tier.fetch(:label), description: tier.fetch(:description),
+                           provides: %i[winding_rope], instruments: %i[rope_condition],
+                           stats: tier.except(:label, :description)) do |_spec|
+          Mine.rope_fragment(tier: tier)
+        end
+      end
+
+      # The rope, and the two jobs at bank that keep it: recapping and re-roping.
+      def self.rope_fragment(tier:)
         Fragment.new(
-          nodes: [ Mine.cage_drive(max_torque: max_torque, rated_omega: WORKING_OMEGA) ],
-          drive_links: [ DriveLink.new(a: :line_shaft, b: :cage_drive, stiffness: 2.2e3) ],
-          passages: [ Mine.cage_passage(speed_m_s: speed_m_s, rated_omega: WORKING_OMEGA,
-                                        label: label) ],
+          nodes: [ Mine.winding_rope(tier: tier) ],
+          places: [ Place.new(id: :bank, nodes: [ :winding_rope ]) ],
+          control_points: [
+            # Only with the cage stopped at bank — cutting and re-socketing the capel.
+            ControlPoint.new(id: :recapping, label: "Recapping", node: :winding_rope, default: 100.0,
+                             place: :bank, effort: { dexterity: 0.7, force: 0.3 },
+                             exertion: 6.0e-4),
+            # A long, heavy job, and only with a spare rope in store.
+            ControlPoint.new(id: :reroping, label: "Re-roping", node: :winding_rope, default: 100.0,
+                             place: :bank, effort: { force: 0.6, dexterity: 0.4 },
+                             exertion: 9.0e-4)
+          ]
+        )
+      end
+
+      # **Riding the kibble**: standing in an unguided bucket that swings and catches the shaft
+      # side, worse the faster it is wound. What the cage buys besides speed.
+      RIDING_THE_KIBBLE = Peril.new(id: :riding_the_kibble, tags: %i[fall impact], severity: 1.8,
+                                    rate: 0.5, scales_with: :swing, riders: %i[cage_drive])
+
+      # Wound away while somebody is still getting in: caught between the deck and the shaft side.
+      CAUGHT_BOARDING = { tags: %i[crush], severity: 2.0 }.freeze
+
+      # **The marshals' posts take some knowing**: a hand out of their depth slips, and a marshal
+      # slipping rings a false ready.
+      MARSHAL_COMPLEXITY = 0.7
+
+      # Without catches a parted rope takes the cage down the shaft, and the shaft's guides with it.
+      def self.winding_rope(tier:)
+        Nodes::Rope.new(id: :winding_rope, label: tier.fetch(:label), hoist: :cage_drive,
+                        **tier.slice(:breaking_kn, :kg_per_m, :stiffness_n_per_m, :corrode_per_s,
+                                     :bend_per_m),
+                        sheave: :sheave, wet_by: :seepage, recap_control: :recapping,
+                        renew_control: :reroping, spare: :spare_rope,
+                        endangers: ROPE_HAZARDS, damages: { parted: { shaft: 0.4 } })
+      end
+
+      # The two sheave wheels' own weight on the journal.
+      SHEAVE_WHEELS_KG = 1_500.0
+
+      # Rope dragged through a seized sheave's iron groove, as a share of the √2 pull the journal
+      # feels: rope on iron at μ 0.25 over a quarter-turn holds back `e^(0.25·π/2) − 1` ≈ 0.48 of
+      # each side's tension (the capstan law), and 0.48 ÷ √2 ≈ 0.34.
+      GROOVE_MU = 0.34
+
+      # **The headgear pulley**, a plain journal under both ropes. Its oil is what keeps it cool,
+      # and a hot sheave scores the rope running over it. **Seized, the engine winds on and the rope
+      # drags through the dead wheel's groove** — a brake on the winding, heating the sheave and
+      # scoring the rope, which is how a headgear catches fire.
+      #
+      # **Its load is what the ropes pull on it**, read off the rope (`loaded_by:`) — both cages,
+      # whatever is in cage A and both ropes' own weight — on top of its own wheels. So a laden wind
+      # heats it more than an empty one.
+      def self.sheave
+        Nodes::Bearing.new(
+          id: :sheave, label: "Sheave", supports: :cage_drive, duty: :journal, material: :babbitt,
+          # Up in the headframe in still air, so it holds its heat: run dry through a long spell
+          # of winding it climbs past the point where it scores the rope.
+          heat_capacity: 3.0e3, ambient_conductance: 4.5,
+          static_load_n: SHEAVE_WHEELS_KG * Units::GRAVITY_M_PER_S2, loaded_by: :winding_rope,
+          slips_when_seized: { mu: GROOVE_MU, lever_m: CAGE_DRUM_RADIUS_M },
+          journal_radius_m: 0.15, film_speed_m_s: 0.1, oil_charge_kg: 0.6,
+          stress_rate: 200.0, wear_rate: 1.0e-6, oil_loss_kg_per_m: 1.0e-3,
+          damages: { seized: { winding_rope: 0.3 } }
+        )
+      end
+
+      def self.sheave_grease
+        Nodes::Vessel.new(
+          id: :sheave_grease, label: "Sheave Grease", volume_m3: 0.05,
+          initial_contents: [ { resource: :bearing_oil, kg: 30.0 } ], ambient_conductance: 6.0,
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :lubricant ],
+                            max_kg_per_s: 0.2) ]
+        )
+      end
+
+      def self.sheave_oil_line
+        Nodes::Conduit.new(id: :sheave_oil_line, label: "Sheave Oil Line", accepts: [ :lubricant ],
+                           max_kg_per_s: 0.03, heat_capacity: 40.0, ambient_conductance: 0.0,
+                           control_id: :greasing)
+      end
+
+      # Tubs on or off the deck, kg/s, at either landing: a couple of tubs a minute.
+      LANDING_KG_PER_S = 12.0
+
+      def self.hoist_fragment(tier:, spec:)
+        speed_m_s = tier.fetch(:speed_m_s)
+        hook = tier.fetch(:hook)
+        kibble = tier.fetch(:kibble)
+        gear = speed_m_s / (CAGE_DRUM_RADIUS_M * WORKING_OMEGA)
+        winding = Winding.new(hoist: :cage_drive, forward: :cage_forward, reverse: :cage_reverse,
+                              brake_release: :cage_brake_release, shuttle: :coal_winding,
+                              deck: :cage_deck, deck_full_kg: tier.fetch(:deck_kg) * 0.95,
+                              coal_from: :pit_bottom, loader: :deck_loading,
+                              unloader: :deck_unloading)
+        # Iron through the headframe goes down the shaft: it chokes it, and in a single shaft it
+        # takes the brattice with it.
+        wreckage = { shaft: 0.6 }.merge(spec[:single_shaft] ? { brattice: 0.5 } : {})
+
+        Fragment.new(
+          nodes: [
+            Nodes::Hoist.new(id: :cage_drive, label: kibble ? "Whim Drum" : "Cage Drum",
+                             moment_of_inertia: 4_000.0, radius_m: CAGE_DRUM_RADIUS_M,
+                             depth_m: SHAFT_DEPTH_M, friction: 20.0,
+                             detaching_hook: hook, endangers: CAGE_HAZARDS,
+                             damages: { overwound: wreckage }, rope: :winding_rope, shaft: :shaft,
+                             deck: :cage_deck, boarding_hazard: CAUGHT_BOARDING,
+                             rated_speed_m_s: speed_m_s, perils: kibble ? [ RIDING_THE_KIBBLE ] : [],
+                             cage_kg: tier.fetch(:cage_kg), catches: hook),
+            Nodes::Brake.new(id: :cage_brake, label: "Winding Brake", supports: :cage_drive,
+                             capacity_nm: tier.fetch(:brake_nm), heat_capacity: 5.0e4,
+                             control_id: :cage_brake_release,
+                             trip: (TRIP_MARKS_M if tier.fetch(:trip))),
+            Mine.sheave, Mine.sheave_grease, Mine.sheave_oil_line,
+            Mine.cage_deck(capacity_kg: tier.fetch(:deck_kg)),
+            Mine.deck_loading(max_kg_per_s: LANDING_KG_PER_S),
+            Mine.deck_unloading(max_kg_per_s: LANDING_KG_PER_S)
+          ],
+          links: [
+            Link.new(from: [ :sheave_grease, :out ], to: [ :sheave_oil_line, :inlet ]),
+            Link.new(from: [ :sheave_oil_line, :outlet ], to: [ :sheave, :oil_in ]),
+            Link.new(from: [ :pit_bottom, :coal_out ], to: [ :deck_loading, :inlet ]),
+            Link.new(from: [ :deck_loading, :outlet ], to: [ :cage_deck, :coal_in ]),
+            Link.new(from: [ :cage_deck, :coal_out ], to: [ :deck_unloading, :inlet ]),
+            Link.new(from: [ :deck_unloading, :outlet ], to: [ :screens, :in ])
+          ],
+          # **Stiff enough to lift a full deck**: a clutch carries torque only as stiffness × slip,
+          # and a tonne of coal is 14 kN·m at the drum, so at 4×10³ the slip it needed was more
+          # than the drum's whole rated speed and a laden cage ran backwards into the sump.
+          drive_links: [
+            DriveLink.new(id: :forward_gear, a: :line_shaft, b: :cage_drive, stiffness: 3.0e4,
+                          ratio: gear, control_id: :cage_forward, cut_by: :cage_brake),
+            DriveLink.new(id: :reverse_gear, a: :line_shaft, b: :cage_drive, stiffness: 3.0e4,
+                          ratio: -gear, control_id: :cage_reverse, cut_by: :cage_brake)
+          ],
+          passages: [ Passage.new(a: :bank, b: :pit_bottom, metres: SHAFT_DEPTH_M,
+                                  speed_m_s: speed_m_s, hoist: :cage_drive,
+                                  staffed_by: :man_winding, driven_by: :line_shaft,
+                                  rated_omega: WORKING_OMEGA, through: Mine::THROUGH_SHAFT,
+                                  label: kibble ? "Kibble" : "Cage",
+                                  rated_kg: tier.fetch(:rated_kg),
+                                  marshals: { bank: :banking, pit_bottom: :onsetting }) ],
+          places: [ Place.new(id: :bank, nodes: %i[cage_drive cage_brake sheave sheave_grease
+                                                   deck_unloading]),
+                    Place.new(id: :pit_bottom, nodes: [ :deck_loading ]) ],
+          control_points: [
+            # **The post that takes knowing how**: overwinding is how you put a cage through the
+            # headgear. A destination, so it moves the moment it is set — the engineman is what
+            # takes time.
+            ControlPoint.new(id: :man_winding, label: "Winding", node: :cage_drive,
+                             default: 0.0, place: :bank, complexity: 1.1, requires: :certificated,
+                             governor: winding),
+            # On, and the engineman runs the shaft himself: men first, coal otherwise.
+            ControlPoint.new(id: :coal_winding, label: "Wind Coal", node: :cage_drive,
+                             default: 0.0, place: :bank),
+            # **The banksman**, who runs the tubs off the deck at the top of the shaft and stops the
+            # cage being loaded past its rating there. A clumsy one lets a tub into the shaft.
+            ControlPoint.new(id: :banking, label: "Banksman", node: :deck_unloading, default: 100.0,
+                             place: :bank, effort: { force: 0.5, dexterity: 0.5 },
+                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY),
+            ControlPoint.new(id: :cage_forward, label: "Lowering Clutch", node: :cage_drive,
+                             place: :bank, internal: true),
+            ControlPoint.new(id: :cage_reverse, label: "Raising Clutch", node: :cage_drive,
+                             place: :bank, internal: true),
+            ControlPoint.new(id: :cage_brake_release, label: "Winding Brake", node: :cage_brake,
+                             place: :bank, internal: true),
+            # **A job at the headgear that raises nothing**, and with recapping and re-roping it is
+            # what the rope's life is. Posted is working: like the banksman, full effort by default.
+            ControlPoint.new(id: :greasing, label: "Greasing the Sheave", node: :sheave_oil_line,
+                             default: 100.0, place: :bank,
+                             effort: { dexterity: 0.6, intelligence: 0.4 },
+                             aided_by: :oiling, exertion: 3.7e-4),
+            # **The onsetter**, the banksman's opposite number at the pit bottom: he runs the full
+            # tubs on, and stops the cage being loaded past its rating there.
+            ControlPoint.new(id: :onsetting, label: "Onsetter", node: :deck_loading, default: 100.0,
+                             place: :pit_bottom, effort: { force: 0.5, dexterity: 0.5 },
+                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY)
+          ]
+        )
+      end
+
+      # **The headframe**: pitch pine to start, and an iron one that will not burn. The timber it
+      # counts is the upper frame and the sheave platform, which is what a hot sheave sets alight.
+      HEADFRAMES = {
+        timber_headframe: { label: "Timber Headframe", timber_kg: 4_000.0,
+                            description: "Pitch-pine legs and a sheave platform. It burns." },
+        iron_headframe: { label: "Iron Headframe", timber_kg: 0.0,
+                          description: "Riveted wrought iron. Nothing in it to catch." }
+      }.freeze
+
+      HEADFRAMES.each do |id, tier|
+        Parts.register(id, kind: :headframe, label: tier.fetch(:label),
+                           description: tier.fetch(:description), provides: %i[headframe],
+                           stats: tier.slice(:timber_kg)) do |_spec|
+          Mine.headframe_fragment(timber_kg: tier.fetch(:timber_kg))
+        end
+      end
+
+      # In parallel with the downcast, whatever it is made of, so changing the frame never changes
+      # the pit's air.
+      def self.headframe_fragment(timber_kg:)
+        Fragment.new(
+          nodes: [ Mine.headframe(timber_kg: timber_kg), Mine.headframe_draught, Mine.headframe_smoke ],
+          links: [ Link.new(from: [ :atmosphere, :intake ], to: [ :headframe_draught, :inlet ]),
+                   Link.new(from: [ :headframe_draught, :outlet ], to: [ :headframe, :air_in ]),
+                   Link.new(from: [ :headframe, :smoke_out ], to: [ :headframe_smoke, :inlet ]),
+                   Link.new(from: [ :headframe_smoke, :outlet ], to: [ :pit_bottom, :smoke_in ]) ],
+          thermal_links: [ ThermalLink.new(a: :sheave, b: :headframe, conductance: 2.0) ]
+        )
+      end
+
+      # **The shaft signals.** Every pit has a bell; what the upgrade buys is one that does not spark
+      # in the pit bottom's air.
+      Parts.register(:electric_bells, kind: :signals, label: "Electric Bells",
+                     description: "Battery bells on a bare wire. They spark every time they ring.",
+                     provides: %i[signal_bell], stats: { sparks: true }) do |_spec|
+        Fragment.new(nodes: [ Mine.signal_bell(spark: Mine::BELL_SPARK, label: "Electric Bells") ],
+                     places: [ Place.new(id: :pit_bottom, nodes: [ :signal_bell ]) ])
+      end
+
+      Parts.register(:flameproof_bells, kind: :signals, label: "Flameproof Bells",
+                     description: "The same bells, the contacts sealed in a cast case.",
+                     provides: %i[signal_bell], stats: { sparks: false }) do |_spec|
+        Fragment.new(nodes: [ Mine.signal_bell(spark: nil, label: "Flameproof Bells") ],
+                     places: [ Place.new(id: :pit_bottom, nodes: [ :signal_bell ]) ])
+      end
+
+      # **Gates across the shaft at bank.** Bought down rather than removed: a gate somebody has
+      # left open stops nothing, so how much it saves depends on whoever is at the bank seeing to
+      # it.
+      Parts.register(:shaft_gates, kind: :shaft_gates, label: "Shaft Gates",
+                     description: "Swing gates at the shaft top. They work when they are shut.",
+                     provides: %i[shaft_gates], stats: { effectiveness: 0.7 }) do |_spec|
+        Fragment.new(nodes: [ Mine.shaft_gates(effectiveness: 0.7, label: "Shaft Gates") ],
+                     places: [ Place.new(id: :bank, nodes: [ :shaft_gates ]) ])
+      end
+
+      # **An overspeed trip on the line shaft**: past its setting it throws the clutch out, which
+      # saves the fan, the pump and the lamps from a surge — and sheds the whole mine at once, a load
+      # rejection that runs the engine house away harder. Both halves are the point.
+      Parts.register(:overspeed_trip, kind: :overspeed_trip, label: "Overspeed Trip",
+                     description: "A flyball trip on the line shaft. Saves the plant; drops the load.",
+                     provides: %i[overspeed_trip], stats: { trip_ratio: 1.25 }) do |_spec|
+        Fragment.new(nodes: [ Mine::OverspeedTrip.new(id: :overspeed_trip, label: "Overspeed Trip",
+                                                      trip_ratio: 1.25) ],
+                     places: [ Place.new(id: :bank, nodes: [ :overspeed_trip ]) ])
+      end
+
+      # **Reliability, and nothing else.** A coil of new rope in the store wins no coal and shows on
+      # no gauge until the day the rope parts; then it is the difference between re-roping and a
+      # shaft out of service for the rest of the match.
+      Parts.register(:spare_rope, kind: :spare_rope, label: "Spare Rope",
+                     description: "A new winding rope, coiled in the store against the day.",
+                     provides: %i[spare_rope], stats: {}) do |_spec|
+        Fragment.new(nodes: [ Nodes::SpareRope.new(id: :spare_rope, label: "Spare Rope",
+                                                   rope: :winding_rope) ],
+                     places: [ Place.new(id: :bank, nodes: [ :spare_rope ]) ])
+      end
+
+      def self.manriding_fragment(speed_m_s:, max_torque:, label:, catches:, spec:)
+        # A rod down the shaft wrecks it whichever way it went; in a single shaft the brattice too.
+        wreckage = { shaft: 0.6 }.merge(spec[:single_shaft] ? { brattice: 0.5 } : {})
+
+        Fragment.new(
+          nodes: [ Mine.man_engine(max_torque: max_torque, rated_omega: WORKING_OMEGA,
+                                   endangers: rod_hazards(catches),
+                                   damages: { parted: wreckage, torn_out: wreckage }) ],
+          drive_links: [ DriveLink.new(a: :line_shaft, b: :man_engine, stiffness: 2.2e3) ],
+          passages: [ Mine.rod_passage(speed_m_s: speed_m_s, rated_omega: WORKING_OMEGA,
+                                       label: label) ],
           # The gear it brings stands at bank. A fitting names only what it installs; the room
           # is the chassis's and the two declarations are unioned.
-          places: [ Place.new(id: :bank, nodes: [ :cage_drive ]) ],
+          places: [ Place.new(id: :bank, nodes: [ :man_engine ]) ],
           control_points: [
-            ControlPoint.new(id: :man_winding, label: "Man Winding", node: :cage_drive,
+            ControlPoint.new(id: :rods, label: "Man Engine", node: :man_engine,
                              default: 0.0, place: :bank, stiffness: Travel::STEADY)
           ]
         )
@@ -194,19 +765,170 @@ module ReactorSim
         Mine.fan_fragment(head_pa: 5_200.0)
       end
 
-      def self.fan_fragment(head_pa:)
+      # A Guibal with reversing doors in its drift: the same fan, and a lever that turns the whole
+      # circuit round — the textbook answer to a fire on the intake.
+      Parts.register(:reversible_fan, kind: :fan, label: "Reversible Fan",
+                     description: "A Guibal with reversing doors. It can blow the pit backwards.",
+                     provides: %i[upcast], instruments: %i[air_quantity],
+                     stats: { head_pa: 5_200.0, reversible: true }) do |_spec|
+        Mine.fan_fragment(head_pa: 5_200.0, reversible: true)
+      end
+
+      # **A ventilating furnace**, its own slot beside the fan: a coal fire at the upcast foot that
+      # draws by buoyancy with no power at all, for the price of a fire in the return
+      # (`Mine.furnace`). The tiers are the grate and the arch — what a furnace can burn, and how
+      # much of the return can reach it.
+      FURNACES = {
+        fire_basket: { label: "Fire Basket", stoke_kg_per_s: 0.015, conductance: 0.15, volume_m3: 8.0,
+                       heat_capacity: 3.0e4,
+                       description: "An iron basket of burning coal hung at the shaft foot." },
+        brick_furnace: { label: "Ventilating Furnace", stoke_kg_per_s: 0.05, conductance: 0.4, volume_m3: 30.0,
+                         heat_capacity: 1.5e5,
+                         description: "A brick-arched grate across the return. It draws the pit for coal." },
+        double_furnace: { label: "Double Furnace", stoke_kg_per_s: 0.10, conductance: 0.8, volume_m3: 60.0,
+                          heat_capacity: 3.0e5,
+                          description: "Two grates under one arch. Twice the fire, twice the risk." }
+      }.freeze
+
+      FURNACE_COAL_KG = 20_000.0
+
+      FURNACES.each do |id, tier|
+        Parts.register(id, kind: :furnace, label: tier.fetch(:label), description: tier.fetch(:description),
+                           provides: %i[furnace furnace_bunker furnace_stoke furnace_draught furnace_flue],
+                           instruments: %i[furnace_fire],
+                           stats: tier.slice(:stoke_kg_per_s)) do |spec|
+          Mine.furnace_fragment(tier: tier, fed_from: spec.fetch(:furnace_fed_from, :return))
+        end
+      end
+
+      # The return off the district, or with a dumb drift the intake off the pit bottom.
+      FURNACE_AIR = { return: [ :district, :air_out ], intake: [ :pit_bottom, :air_out ] }.freeze
+
+      # **A dumb drift feeds the fire through a regulator**: about what the grate burns, rather than
+      # the whole bore. Fed open from the intake, a brick furnace took 6.5 kg/s of fresh air off the
+      # face; regulated, it takes about a fifth of that.
+      DUMB_DRIFT_REGULATOR = 0.2
+
+      def self.furnace_fragment(tier:, fed_from:)
+        bore = tier.fetch(:conductance) * (fed_from.to_sym == :intake ? DUMB_DRIFT_REGULATOR : 1.0)
         Fragment.new(
-          nodes: [ Mine.upcast(head_pa: head_pa, rated_omega: WORKING_OMEGA) ],
+          nodes: [ Mine.furnace(volume_m3: tier.fetch(:volume_m3), heat_capacity: tier.fetch(:heat_capacity)),
+                   Mine.furnace_bunker(kg: FURNACE_COAL_KG),
+                   Mine.furnace_stoke(max_kg_per_s: tier.fetch(:stoke_kg_per_s)),
+                   Mine.furnace_draught(conductance: bore), Mine.furnace_flue ],
+          links: [ Link.new(from: FURNACE_AIR.fetch(fed_from.to_sym), to: [ :furnace_draught, :inlet ]),
+                   Link.new(from: [ :furnace_draught, :outlet ], to: [ :furnace, :air_in ]),
+                   Link.new(from: [ :furnace, :flue_out ], to: [ :furnace_flue, :inlet ]),
+                   Link.new(from: [ :furnace_flue, :outlet ], to: [ :upcast_foot, :flue_in ]),
+                   Link.new(from: [ :furnace_bunker, :out ], to: [ :furnace_stoke, :inlet ]),
+                   Link.new(from: [ :furnace_stoke, :outlet ], to: [ :furnace, :fuel_in ]) ],
+          places: [ Place.new(id: :pit_bottom, nodes: %i[furnace furnace_bunker]) ],
+          control_points: [
+            # **The furnaceman**, shovelling coal onto the grate: the fire, and so the draught, is
+            # what he puts on it.
+            ControlPoint.new(id: :furnace_stoking, label: "Furnaceman", node: :furnace_stoke, default: 100.0,
+                             place: :pit_bottom, effort: { force: 0.6, toughness: 0.2, dexterity: 0.2 },
+                             aided_by: :shovelling, exertion: 6.0e-4)
+          ]
+        )
+      end
+
+      # **The dumb drift**: the return carried past the furnace into the upcast above it, and the
+      # fire fed from the intake, so no return gas reaches the flame. It costs a little of the air,
+      # since what the furnace burns is intake that never reaches the face. Only meaningful with a
+      # furnace fitted: what it does is tell the furnace where its air comes from.
+      Parts.register(:dumb_drift, kind: :dumb_drift, label: "Dumb Drift",
+                     description: "The return led past the furnace. The fire burns intake air.",
+                     informs: { furnace_fed_from: :intake }) do |_spec|
+        Fragment.empty
+      end
+
+      # The return comes up the upcast by way of its foot, in either frame: in a single shaft the
+      # brattice leaks into it, and a furnace's flue warms it.
+      def self.fan_fragment(head_pa:, reversible: false)
+        Fragment.new(
+          nodes: [ Mine.upcast(head_pa: head_pa, rated_omega: WORKING_OMEGA, reversible: reversible) ],
           links: [
             Link.new(from: [ :district, :air_out ], to: [ :return_road, :inlet ]),
-            Link.new(from: [ :return_road, :outlet ], to: [ :upcast, :inlet ]),
+            Link.new(from: [ :return_road, :outlet ], to: [ :upcast_foot, :air_in ]),
+            Link.new(from: [ :upcast_foot, :air_out ], to: [ :upcast, :inlet ]),
             Link.new(from: [ :upcast, :outlet ], to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
             ControlPoint.new(id: :ventilation, label: "Fan", node: :upcast, default: 100.0,
-                             place: :bank, stiffness: Travel::HEAVY)
+                             place: :bank, stiffness: Travel::HEAVY),
+            # Swinging the reversing doors over: past half-way it blows the other way.
+            *([ ControlPoint.new(id: :fan_reversed, label: "Reverse the Fan", node: :upcast,
+                                 default: 0.0, place: :bank, stiffness: Travel::HEAVY) ] if reversible)
           ]
         )
+      end
+
+      # ---------------------------------------------------------------- the haulage door
+
+      # **The door every pit has, and what the tier buys is who shuts it.** A plain door needs a
+      # trapper or it stands open behind the last tub. A self-closing door shuts itself on its
+      # weight. An air lock is two of them, so the way is open only when both are at once.
+      DOORS = {
+        plain_door: { label: "Trap Door", self_closing_per_s: 0.0, doors: 1,
+                      description: "A canvas-faced door across the road. Somebody has to shut it." },
+        self_closing_door: { label: "Self-Closing Door", self_closing_per_s: 0.6, doors: 1,
+                             description: "Hung on a slant, so it swings shut on its own weight." },
+        air_lock: { label: "Air Lock", self_closing_per_s: 0.6, doors: 2,
+                    description: "Two self-closing doors a tub's length apart." }
+      }.freeze
+
+      DOORS.each do |id, tier|
+        Parts.register(id, kind: :door, label: tier.fetch(:label), description: tier.fetch(:description),
+                           provides: %i[door], stats: tier.slice(:self_closing_per_s, :doors)) do |_spec|
+          Mine.door_fragment(**tier.slice(:label, :self_closing_per_s, :doors))
+        end
+      end
+
+      def self.door_fragment(label:, self_closing_per_s:, doors:)
+        Fragment.new(
+          nodes: [ Mine.door(label: label, self_closing_per_s: self_closing_per_s, doors: doors) ],
+          links: [ Link.new(from: [ :pit_bottom, :door_out ], to: [ :door, :inlet ]),
+                   Link.new(from: [ :door, :outlet ], to: [ :return_road, :inlet ]) ],
+          places: [ Place.new(id: :pit_bottom, nodes: [ :door ]) ],
+          control_points: [
+            # **The trapper**, and the job nobody needs to be strong for: light, sitting work by the
+            # door in the dark. Small hands are better at it (`diminutive`), which is how a pit came
+            # to give it to its children — the incentive is the node's, not an archetype's.
+            ControlPoint.new(id: :trapping, label: "Trapper", node: :door, default: 100.0,
+                             place: :pit_bottom, effort: { dexterity: 0.6, intelligence: 0.4 },
+                             aided_by: :diminutive, exertion: 2.0e-4)
+          ]
+        )
+      end
+
+      # ---------------------------------------------------------------- the brattice
+
+      # **How much a sound brattice leaks is the tier**, and nothing else differs in this pass.
+      # What each does when it comes down — canvas barely obstructs, concrete is devastating — and
+      # in a fire — creosote is a fire load — is deferred to the last pass of the mine accidents.
+      # TODO: brattice hazards — first callers are the shaft's obstructions and fire on the intake.
+      BRATTICES = {
+        canvas_brattice: { label: "Canvas Brattice", leak: 0.12,
+                           description: "Sheeting on battens. Cheap, temporary, and it lets the air by." },
+        creosoted_brattice: { label: "Creosoted Brattice", leak: 0.07,
+                              description: "Tarred canvas. Tighter than plain, and it will burn." },
+        timber_brattice: { label: "Timber Brattice", leak: 0.045,
+                           description: "Plank partition the depth of the shaft. Leaks a fair bit." },
+        concrete_brattice: { label: "Concrete Walling", leak: 0.006,
+                             description: "A wall down the shaft. Barely leaks, and is a great weight." }
+      }.freeze
+
+      BRATTICES.each do |id, spec|
+        Parts.register(id, kind: :brattice, label: spec.fetch(:label),
+                           description: spec.fetch(:description), provides: %i[brattice],
+                           stats: { leak: spec.fetch(:leak) }) do |_spec|
+          Fragment.new(
+            nodes: [ Mine.brattice(leak_fraction: spec.fetch(:leak)) ],
+            links: [ Link.new(from: [ :pit_bottom, :brattice_out ], to: [ :brattice, :inlet ]),
+                     Link.new(from: [ :brattice, :outlet ], to: [ :upcast_foot, :leak_in ]) ]
+          )
+        end
       end
 
       # ---------------------------------------------------------------- drainage
@@ -218,17 +940,22 @@ module ReactorSim
         Mine.pump_fragment(max_kg_per_s: 14.0, efficiency: 0.5)
       end
 
+      # **The better pump brings the worse accident.** Rods down the shaft off a beam at the top,
+      # and the beam is what fails: broken, it falls into the shaft. The sinking set has none.
       Parts.register(:cornish_set, kind: :pump, label: "Cornish Set",
-                     description: "Heavy lift gear. Expensive to turn, and it holds the water down.",
-                     provides: %i[pump], instruments: %i[sump_level],
-                     stats: { max_kg_per_s: 26.0 }) do |_spec|
-        Mine.pump_fragment(max_kg_per_s: 26.0, efficiency: 0.68)
+                     description: "Beam and rods down the shaft. It holds the water down — " \
+                                  "and the beam hangs over the only way out.",
+                     provides: %i[pump pump_beam], instruments: %i[sump_level beam_condition],
+                     stats: { max_kg_per_s: 26.0 }) do |spec|
+        Mine.pump_fragment(max_kg_per_s: 26.0, efficiency: 0.68, driven_by: :pump_beam)
+            .merge(Mine.beam_fragment(pump_kg_per_s: 26.0, spec: spec))
       end
 
-      def self.pump_fragment(max_kg_per_s:, efficiency:)
+      def self.pump_fragment(max_kg_per_s:, efficiency:, driven_by: :line_shaft)
         Fragment.new(
           nodes: [ Mine.pump(max_kg_per_s: max_kg_per_s, lift_m: SHAFT_DEPTH_M,
-                             efficiency: efficiency, rated_omega: WORKING_OMEGA) ],
+                             efficiency: efficiency, rated_omega: WORKING_OMEGA,
+                             driven_by: driven_by) ],
           links: [
             Link.new(from: [ :pit_bottom, :water_out ], to: [ :pump, :inlet ]),
             Link.new(from: [ :pump, :outlet ], to: [ :drainage, :in ])
@@ -237,6 +964,24 @@ module ReactorSim
             ControlPoint.new(id: :pumping, label: "Pumping", node: :pump, default: 100.0,
                              place: :bank, stiffness: Travel::HEAVY)
           ]
+        )
+      end
+
+      # Whoever is under it when it comes down: at bank, in the cage, at the bottom. Every pit has
+      # a cage or a kibble; a man engine is optional, so its riders are not named here.
+      # TODO: riders of the man engine — needs a hazard that can name a carrier only when fitted.
+      BEAM_FALL = { tags: %i[impact crush],
+                    places: { bank: 1.2, pit_bottom: 1.6 },
+                    riders: { cage_drive: 2.6 } }.freeze
+
+      def self.beam_fragment(pump_kg_per_s:, spec:)
+        wreckage = { shaft: 1.0 }.merge(spec[:single_shaft] ? { brattice: 1.0 } : {})
+
+        Fragment.new(
+          nodes: [ Mine.pump_beam(pump_kg_per_s: pump_kg_per_s, rated_omega: WORKING_OMEGA,
+                                  endangers: { broken: BEAM_FALL }, damages: { broken: wreckage }) ],
+          drive_links: [ DriveLink.new(a: :line_shaft, b: :pump_beam, stiffness: 2.0e4) ],
+          places: [ Place.new(id: :bank, nodes: [ :pump_beam ]) ]
         )
       end
 
@@ -286,23 +1031,33 @@ module ReactorSim
                      description: "Candles on nails down the roadway. An open flame, in a pit.",
                      provides: %i[sconces], instruments: %i[district_light],
                      stats: { illumination: 0.35 }) do |_spec|
-        Mine.lighting_fragment(illumination: 0.35, control_id: :naked_flame)
+        Mine.lighting_fragment(illumination: 0.35, control_id: :naked_flame,
+                               flame: Mine::OPEN_FLAME)
       end
 
       Parts.register(:oil_flares, kind: :lighting, label: "Oil Flares",
                      description: "Open oil flares on brackets. You can see; so can the gas.",
                      provides: %i[sconces], instruments: %i[district_light],
                      stats: { illumination: 0.75 }) do |_spec|
-        Mine.lighting_fragment(illumination: 0.75, control_id: :naked_flame)
+        Mine.lighting_fragment(illumination: 0.75, control_id: :naked_flame,
+                               flame: Mine::OPEN_FLAME)
       end
 
-      # **The first tier that is not an ignition source**, because its lever is not the one the
-      # district's igniter names. Dimmer than the flares it replaces, which is the trade.
+      # **The first tier that is not an ignition source in still air.** Dimmer than the flares it
+      # replaces, which is the trade — and a gauze passes its flame in a fast enough draught, so a
+      # stronger fan can make it a naked light again. Measured past the sconces on a worked pit with
+      # its haulage door shut, the waddle fan makes 1.84 m/s in a single shaft and 2.02 in two, the
+      # Guibal 2.54 and 3.03, and natural draught alone about 1.9 — so the Guibal is what defeats the
+      # gauze, and electric lamps are what answer it. (Historically an unbonneted Davy lamp passed
+      # flame at about six feet a second; this is a little above, so the starting fan stays safe.)
+      GAUZE_PASSES_M_S = 2.3
+
       Parts.register(:gauze_lanterns, kind: :lighting, label: "Gauze Lanterns",
-                     description: "Davy gauze on the roadway side. Safe, and you see less by it.",
+                     description: "Davy gauze on the roadway side. Safe, until the air is too quick for it.",
                      provides: %i[sconces], instruments: %i[district_light],
-                     stats: { illumination: 0.5 }) do |_spec|
-        Mine.lighting_fragment(illumination: 0.5, control_id: :safe_light)
+                     stats: { illumination: 0.5, gauze_passes_m_s: GAUZE_PASSES_M_S }) do |_spec|
+        Mine.lighting_fragment(illumination: 0.5, control_id: :safe_light,
+                               flame: { gauze_passes_m_s: GAUZE_PASSES_M_S })
       end
 
       # Hung off the same line shaft as the fan, the pump and the winder — so the best light in
@@ -316,10 +1071,11 @@ module ReactorSim
                                max_torque: 210.0, rated_omega: WORKING_OMEGA)
       end
 
-      def self.lighting_fragment(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0)
+      def self.lighting_fragment(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0,
+                                 flame: {})
         Fragment.new(
           nodes: [ Mine.sconces(illumination: illumination, control_id: control_id,
-                                max_torque: max_torque, rated_omega: rated_omega) ],
+                                max_torque: max_torque, rated_omega: rated_omega, flame: flame) ],
           # Only a powered tier hangs off the shaft. The rest are a flame on a bracket.
           drive_links: rated_omega.positive? ?
             [ DriveLink.new(a: :line_shaft, b: :sconces, stiffness: 1.4e3) ] : [],
@@ -376,15 +1132,50 @@ module ReactorSim
         Fragment.new(nodes: [ Mine.manholes(effectiveness: 0.85, label: "Whitewashed Manholes") ])
       end
 
-      # **In the district, which is the entire point**, and a control point with no `node:` —
-      # somewhere to stand, not something to set.
-      def self.rest_fragment(capacity:, recovery_rate:, label:)
+      # **The pit bottom's own**, for the putters, the onsetter and the trapper: the refuge hole's
+      # twin, so a roadway hand can rest without a ride to bank.
+      Parts.register(:pit_bottom_refuge, kind: :pit_bottom_rest, label: "Pit Bottom Refuge",
+                     description: "A cut-out off the pit bottom. Room for one.",
+                     stats: { rest_capacity: 1, recovery_rate: 1.4 }) do |_spec|
+        Mine.rest_fragment(capacity: 1, recovery_rate: 1.4, label: "Pit Bottom Refuge",
+                           id: :pit_bottom_rest, place: :pit_bottom)
+      end
+
+      # **Somewhere to stand, not something to set**: a control point with no `node:`. In the
+      # district unless it says otherwise, which is where the work that spends people is.
+      def self.rest_fragment(capacity:, recovery_rate:, label:, id: :rest, place: :district)
         Fragment.new(
           control_points: [
-            ControlPoint.new(id: :rest, label: label, place: :district, capacity: capacity,
+            ControlPoint.new(id: id, label: label, place: place, capacity: capacity,
                              recovery: Fatigue::BASE_RECOVERY * recovery_rate)
           ]
         )
+      end
+
+      # --- shifts ---------------------------------------------------------------------------
+      #
+      # **Who is already down when the match starts**, posted to nothing, so there is work to do
+      # before anybody has walked anywhere. A part in a slot rather than a property of the frame,
+      # because it is what a player buys: `advance_seats:` hands at `advance_place:`, dealt from
+      # the end of the roster (`Mine.crew_for`). It contributes nothing to the graph.
+      SHIFTS = {
+        advance_shift: { kind: :face_shift, label: "Advance Shift", seats: 3, place: :district,
+                         description: "Three hands at the face before the first cage comes down." },
+        back_shift: { kind: :face_shift, label: "Back Shift", seats: 5, place: :district,
+                      description: "The night's hewers, still at the face when the day comes down." },
+        pit_bottom_shift: { kind: :pit_bottom_shift, label: "Pit Bottom Shift", seats: 3, place: :pit_bottom,
+                            description: "Three hands at the pit bottom to start the roads." },
+        underground_stable: { kind: :pit_bottom_shift, label: "Underground Stable", seats: 5,
+                              place: :pit_bottom,
+                              description: "Ostlers and pony lads who live below. Five at the pit bottom." }
+      }.freeze
+
+      SHIFTS.each do |id, shift|
+        Parts.register(id, kind: shift.fetch(:kind), label: shift.fetch(:label),
+                           description: shift.fetch(:description),
+                           stats: { advance_seats: shift.fetch(:seats), advance_place: shift.fetch(:place) }) do |_spec|
+          Fragment.new
+        end
       end
 
       # ---------------------------------------------------------------- slots
@@ -397,6 +1188,16 @@ module ReactorSim
         [
           Slot.new(id: :cutting, accepts: :cutting, label: "Cutting", group: :face,
                    required: true, default: fitted.fetch(:cutting)),
+          Slot.new(id: :haulage, accepts: :haulage, label: "Haulage", group: :face,
+                   required: true, default: fitted.fetch(:haulage)),
+          # Only a rope haulage has a runaway to catch.
+          Slot.new(id: :runaway_catch, accepts: :runaway_catch, label: "Runaway Catch", group: :face,
+                   required: false, default: fitted[:runaway_catch], informs: %i[runaway_catch]),
+          # **Empty is where every pit starts**: shotfiring is bought, and so is its ticket.
+          Slot.new(id: :blasting, accepts: :explosives, label: "Shotfiring", group: :face,
+                   required: false, default: fitted[:blasting]),
+          Slot.new(id: :cutter_sprays, accepts: :sprays, label: "Cutter Sprays", group: :face,
+                   required: false, default: fitted[:cutter_sprays]),
           Slot.new(id: :winder, accepts: :winder, label: "Winder", group: :shaft,
                    required: true, default: fitted.fetch(:winder)),
           # **Empty is where every mine starts**, and there are still the ladders. Nothing has
@@ -404,10 +1205,30 @@ module ReactorSim
           # ever *adds* a faster way through a shaft that could always be climbed.
           Slot.new(id: :manriding, accepts: :manriding, label: "Man Riding", group: :shaft,
                    required: false, default: nil, when_empty: :omit),
+          Slot.new(id: :rope, accepts: :rope, label: "Winding Rope", group: :shaft,
+                   required: true, default: fitted.fetch(:rope)),
+          Slot.new(id: :headframe, accepts: :headframe, label: "Headframe", group: :shaft,
+                   required: true, default: fitted.fetch(:headframe)),
+          Slot.new(id: :spare_rope, accepts: :spare_rope, label: "Spare Rope", group: :shaft,
+                   required: false, default: nil, when_empty: :omit),
+          Slot.new(id: :shaft_gates, accepts: :shaft_gates, label: "Shaft Gates", group: :shaft,
+                   required: false, default: nil, when_empty: :omit),
+          Slot.new(id: :signals, accepts: :signals, label: "Signals", group: :shaft,
+                   required: false, default: :electric_bells, when_empty: :omit),
+          Slot.new(id: :overspeed_trip, accepts: :overspeed_trip, label: "Overspeed Trip",
+                   group: :shaft, required: false, default: nil, when_empty: :omit),
+          # Every pit has a door where the haulage crosses the return; what is bought is who shuts it.
+          Slot.new(id: :door, accepts: :door, label: "Haulage Door", group: :air,
+                   required: true, default: :plain_door),
           Slot.new(id: :lighting, accepts: :lighting, label: "Lighting", group: :face,
                    required: true, default: fitted.fetch(:lighting)),
           Slot.new(id: :fan, accepts: :fan, label: "Fan", group: :air,
                    required: true, default: fitted.fetch(:fan)),
+          # Beside the fan, not instead of it: transitional pits ran both.
+          Slot.new(id: :furnace, accepts: :furnace, label: "Furnace", group: :air,
+                   required: false, default: fitted[:furnace]),
+          Slot.new(id: :dumb_drift, accepts: :dumb_drift, label: "Dumb Drift", group: :air,
+                   required: false, default: fitted[:dumb_drift], informs: %i[furnace_fed_from]),
           Slot.new(id: :pump, accepts: :pump, label: "Pump", group: :water,
                    required: true, default: fitted.fetch(:pump)),
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Lamp Cabin", group: :crew,
@@ -417,10 +1238,22 @@ module ReactorSim
           # rest station decide how many hands the pit can field.
           Slot.new(id: :rest, accepts: :rest_station, label: "Rest Station", group: :crew,
                    required: true, default: fitted.fetch(:rest)),
+          Slot.new(id: :pit_bottom_rest, accepts: :pit_bottom_rest, label: "Pit Bottom Refuge",
+                   group: :crew, required: false, default: fitted[:pit_bottom_rest]),
+          # Who starts underground, face first: `Assembly#advance_shifts` reads them in this order.
+          Slot.new(id: :face_shift, accepts: :face_shift, label: "Face Shift", group: :crew,
+                   required: false, default: fitted[:face_shift]),
+          Slot.new(id: :pit_bottom_shift, accepts: :pit_bottom_shift, label: "Pit Bottom Shift",
+                   group: :crew, required: false, default: fitted[:pit_bottom_shift]),
           # Not required, and defaulted to nothing. A pit that has bought no refuges is the
           # starting pit, and the first a player hears of it is a man caught in the haulage.
           Slot.new(id: :manholes, accepts: :haulage_refuge, label: "Manholes", group: :crew,
-                   required: false, default: fitted[:manholes])
+                   required: false, default: fitted[:manholes]),
+          # Only a single shaft has one: two shafts have nothing between them to partition.
+          *(if spec[:single_shaft]
+              [ Slot.new(id: :brattice, accepts: :brattice, label: "Brattice", group: :air,
+                         required: true, default: fitted.fetch(:brattice)) ]
+            end)
         ]
       end
 
@@ -442,31 +1275,40 @@ module ReactorSim
                                                 # The road, what moves on it and what the ground
                                                 # is making are the hole itself rather than a
                                                 # fitting, so no part can take these away.
-                                                :roof_timber, :putting, :water_make,
+                                                :roof_timber, :putting, :water_make, :survey,
+                                                :bore_holes, :goaf_weight, :fire_stink,
                                                 # Whether the district is on fire. The one
                                                 # reading no fitting may remove, because a pit
                                                 # with nothing bought can still go up.
                                                 :district_fire),
           # Every shaft can be climbed. Only one that has bought the gear can be ridden.
-          passages: Mine.passages,
+          passages: Mine.passages(spec),
           places: PLACES,
           nodes: [
+            Mine.shaft, Mine.upcast_foot,
             Mine.atmosphere, Mine.line_shaft(rated_torque_nm: 5.4e3, rated_omega: WORKING_OMEGA),
             Mine.downcast, Mine.pit_bottom, Mine.main_road, Mine.district, Mine.return_road,
-            Mine.seam(kg: 90_000.0, firedamp_kg: 4_000.0),
+            Mine.rock(:district_rock, area_m2: Mine::DISTRICT_FACE_M2),
+            Mine.rock(:pit_bottom_rock, area_m2: Mine::PIT_BOTTOM_FACE_M2),
+            Mine.seam(kg: SEAM_KG, firedamp_kg: 4_000.0),
             Mine.dust_source(kg: 3_000.0),
             # Deep enough that it never runs dry: a pit does not stop making blackdamp.
-            Mine.goaf(kg: 20_000.0, sour: (Mine::OldWorkings::ORDINARY_SOUR if ground)),
+            Mine.goaf(kg: 20_000.0, seam_kg: SEAM_KG, sour: (Mine::OldWorkings::ORDINARY_SOUR if ground),
+                      ground: ground),
             Mine.goaf_seep(conductance: 1.8e-5, ground: ground),
             Mine.blower(conductance: 2.5e-4, ground: ground),
             Mine.dust_line(max_kg_per_s: 0.30),
             Mine.dust_store(kg: 6_000.0), Mine.dusting_line(max_kg_per_s: 0.55),
-            Mine.tub_road(max_kg_per_s: 6.0), Mine.screens,
+            Mine.screens,
             # 18 kg/s through a broken fissure, against a sinking set's 14 and a Cornish set's
             # 26 — so the starting pump is overwhelmed by an inrush and the upgrade is what
             # holds it. That gap is the reason to buy the better set.
-            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0, ground: ground),
-            Mine.drainage
+            Mine.strata(kg: 5.0e5), Mine.seepage(inrush_kg_per_s: 18.0, seam_kg: SEAM_KG, ground: ground),
+            Mine.drainage,
+            # Gas held in the coal ahead, the outburst that releases it, and the auger that finds it.
+            Mine.gas_pocket(seam_kg: SEAM_KG, ground: ground), Mine.outburst, Mine.bore_line,
+            # The waste behind the face, and the air that leaks through it.
+            Mine.gob(ground: ground), Mine.gob_leak(:waste_in), Mine.gob_leak(:waste_out)
           ],
           links: [
             # Air: down the downcast, round the workings. The return side comes with the fan.
@@ -493,7 +1335,20 @@ module ReactorSim
             # Water: in through the strata, downhill to the pit bottom. The lift comes with the
             # pump.
             Link.new(from: [ :strata, :out ], to: [ :seepage, :inlet ]),
-            Link.new(from: [ :seepage, :outlet ], to: [ :pit_bottom, :water_in ])
+            Link.new(from: [ :seepage, :outlet ], to: [ :pit_bottom, :water_in ]),
+            Link.new(from: [ :gas_pocket, :out ], to: [ :outburst, :inlet ]),
+            Link.new(from: [ :outburst, :outlet ], to: [ :district, :burst_in ]),
+            Link.new(from: [ :gas_pocket, :out ], to: [ :bore_line, :inlet ]),
+            Link.new(from: [ :bore_line, :outlet ], to: [ :district, :burst_in ]),
+            Link.new(from: [ :pit_bottom, :waste_out ], to: [ :waste_in, :inlet ]),
+            Link.new(from: [ :waste_in, :outlet ], to: [ :gob, :air_in ]),
+            Link.new(from: [ :gob, :air_out ], to: [ :waste_out, :inlet ]),
+            Link.new(from: [ :waste_out, :outlet ], to: [ :district, :waste_in ])
+          ],
+          # The air of each room against the rock round it.
+          thermal_links: [
+            Mine.rock_face(:district, :district_rock, area_m2: Mine::DISTRICT_FACE_M2),
+            Mine.rock_face(:pit_bottom, :pit_bottom_rock, area_m2: Mine::PIT_BOTTOM_FACE_M2)
           ],
           control_points: [
             ControlPoint.new(id: :clutch, label: "Clutch", node: :line_shaft, default: 100.0,
@@ -503,22 +1358,6 @@ module ReactorSim
             # does nothing whatever until the day the gas goes up.
             ControlPoint.new(id: :stone_dusting, label: "Stone Dusting", node: :dusting_line,
                              default: 0.0, place: :bank, stiffness: Travel::HEAVY),
-            # **The two effort stations, and they are underground.** Somebody has to be sent
-            # there, which is the whole point of the geometry.
-            # **Gated, not merely aided.** An ogre with no pick gets no coal out of a seam
-            # however strong they are, and nobody gets any in the dark — so these two multiply
-            # and a missing one is a zero. It is the single biggest reason to spend anything on
-            # equipment, and the reason a kobold's innate darkvision is worth something.
-            # **Not `endurance`**, however much putting is an endurance job — it is a divisor in
-            # `Fatigue.accrual` and enters no capability blend, which is what lets the reference
-            # crew set it to 1e6. See the traps list.
-            ControlPoint.new(id: :haulage, label: "Putting", node: :tub_road, default: 0.0,
-                             place: :pit_bottom,
-                             # **`force`, because a loaded tub is friction and leverage** — this
-                             # is the job where sheer mass pays most, and where an outrageously
-                             # muscular pixie still shifts nothing.
-                             effort: { force: 0.8, toughness: 0.2 },
-                             aided_by: :shovelling, exertion: 9.0e-4),
             # **The third effort station, and the one that produces nothing.** Setting timber
             # wins no coal and raises no water; all it does is stop the roof taking up the slack
             # behind a face that is being cut. Against a crew of four and four other jobs, that
@@ -539,7 +1378,23 @@ module ReactorSim
                              # the dexterity half is setting them true once they are up there.
                              effort: { force: 0.6, dexterity: 0.4 },
                              gated_by: %i[mining_effectiveness darkvision],
-                             exertion: 1.0e-3)
+                             exertion: 1.0e-3),
+            # **Boring ahead**: an auger driven into the face, which finds what lies in the coal and
+            # draws a gas pocket off before the face reaches it. It wins no coal and costs a hand at
+            # a face that has fewer hands than jobs, which is the trade. Posted is working.
+            ControlPoint.new(id: :boring, label: "Boring Ahead", node: :bore_line, default: 100.0,
+                             place: :district, effort: { swing: 0.6, dexterity: 0.4 },
+                             gated_by: %i[darkvision], exertion: 9.0e-4),
+            # **Packing**: stone built into the void behind the face so the roof settles on it rather
+            # than hanging until it falls. Heavy, and it wins no coal. Posted is working.
+            ControlPoint.new(id: :packing, label: "Packing", node: :goaf, default: 100.0,
+                             place: :district, effort: { force: 0.7, toughness: 0.3 },
+                             gated_by: %i[darkvision], exertion: 1.1e-3),
+            # **Sealing the waste**: stoppings built across the leakage, which starve a heating gob of
+            # air. What is built stays built. Posted is working.
+            ControlPoint.new(id: :sealing, label: "Sealing the Waste", node: :gob, default: 100.0,
+                             place: :district, effort: { force: 0.5, dexterity: 0.5 },
+                             gated_by: %i[darkvision], exertion: 8.0e-4)
           ]
         )
       end

@@ -84,8 +84,10 @@ ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle, default
 
 Nodes read `ctx.controls.fetch(:throttle_open)` — the lever's **actual** position. A control
 point with `stiffness:` travels toward its target over several ticks; the default is
-instantaneous. Work stations (shovelling, stoking) are ordinary control points today; minions
-will drive `actual` later without anything else changing.
+instantaneous. An **effort** station (`effort:`) reads as its position scaled by whoever is posted
+there, and nothing at all with nobody there. A **governor** post (`governor:`) drives other,
+`internal:` levers from its own — the mine's winding engineman works the clutches and brake to
+send the cage where the player names. See [`operations/CLAUDE.md`](../../lib/reactor_sim/operations/CLAUDE.md).
 
 ### 5. What can the player see?
 
@@ -101,6 +103,7 @@ Give the two things that will kill the player the best instruments — and even 
 ```ruby
 stations = control_points.select(&:effort?)   # what needs doing — DERIVED, never declared
 assembly.crew_capacity                        # what you can bring — from the fitted quarters
+assembly.advance_shifts                       # who starts elsewhere — [{ seats:, place: }], slot order
 ```
 
 Your operation declares **no roles at all**. It declares a slot that accepts `:crew_quarters`,
@@ -126,11 +129,13 @@ Five things to know:
 - **Nobody starts at a working station, and it has to stay that way.** A machine that lets an
   effort station be a starting post hands the player a shift already at the face for free — which
   for a mine is most of the operation given away. Deploying the shift is the opening move.
-- **A seat may start in a different PLACE, which is a different statement.** `Mine::ADVANCE_SHIFT`
-  starts the last three seats in the district with **no station at all**: they are somewhere
-  useful and still posted to nothing, so the opening move is still the player's. Without it a
-  spatial operation's first five minutes are a walk. Build it the same way — `place:` on the
-  `Minion`, decided by the chassis, never by the roster.
+- **A seat may start in a different PLACE, which is a different statement.** The mine's shift
+  parts start the last seats in the district and at the pit bottom with **no station at all**:
+  they are somewhere useful and still posted to nothing, so the opening move is still the
+  player's. Without them a spatial operation's first five minutes are a walk. Build it the same
+  way — a fitted part declaring `stats: { advance_seats:, advance_place: }`, read by
+  `assembly.advance_shifts` in slot order and dealt onto `place:` on the `Minion` at build, never
+  by the roster. Being a part is what lets a player buy a bigger head start.
 - **A station may have room for only so many.** `capacity:` on a `ControlPoint` is how many
   people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
   posting nobody can walk to. Every lever but one declares none and takes a crowd; the mine's
@@ -214,6 +219,18 @@ ReactorSim::Match.create(
 Extra keys in the spec hash are passed through to the builder. **Anything that changes the
 graph's shape must also be in `options:`**, or a restored snapshot rebuilds the wrong machine.
 
+To sell one operation's work to another, rope a `Load` in one to an `Import` (or any rope end) in
+the other:
+
+```ruby
+couplings: [ { from: [ :engine, :load ], to: [ :pit, :line_shaft ], ratio: 0.78 } ]
+```
+
+`ratio:` is the `from` end's speed per unit of the `to` end's. `stiffness:` is optional and
+defaults to what the `to` end declares; past either end's own `I/dt` the rope rings and `Match`
+refuses it. Both operations must share a `time_scale`. The rope is felt at both ends — see
+[`physics.md`](../reference/physics.md#a-rope-between-operations).
+
 Three ways that goes wrong, each of them silent, and all three have bitten:
 
 - **Symbols as values do not survive JSON.** `deep_symbolize` converts keys only, so a loadout
@@ -247,6 +264,11 @@ CHASSIS = {
 in `fixtures` rather than in a slot deliberately: fitting a condenser does not add a branch, it
 **reroutes** the exhaust, and "absent means rerouted" is a frame decision rather than a fitting.
 
+**The first chassis in `CHASSIS` is the default**, so order the hash starting machine first. The
+mine starts on `single_shaft` — one shaft carrying both halves of the air, split by a brattice
+slot, so whatever chokes it traps the shift — and `two_shaft` is the upgrade that brings a second
+way out.
+
 **A loadout is what is bolted to it.** Each part registers a builder returning a `Fragment` —
 its nodes, its links, its levers — plus the ids it promises and the gauges that arrive with it.
 
@@ -260,7 +282,7 @@ Slot.new(id: :safety_valve, accepts: :safety_valve, required: false, when_empty:
          default: :ramsbottom_safety_valve)
 ```
 
-Four rules that are easy to get wrong:
+Five rules that are easy to get wrong:
 
 - **`provides:` names the ids the part must build, and the id belongs to the role.** Every
   boiler names its drum `:boiler`, so the wiring, the gauges and the rng stream survive a swap.
@@ -271,6 +293,14 @@ Four rules that are easy to get wrong:
   the machine and moves every balance number.
 - **Slot order is the panel's lever order**, so order it by the cab. Instruments come from the
   panel catalogue in *its* order instead, so reordering slots cannot move the dials.
+- **One fitting shapes another's wiring only through `informs:`.** A part builder sees the spec,
+  never the loadout. A slot declares the spec keys its fitting may set
+  (`Slot.new(id: :dumb_drift, …, informs: %i[furnace_fed_from])`), the part sets their values
+  (`Parts.register(:dumb_drift, …, informs: { furnace_fed_from: :intake })`), and `Assembly` folds
+  them into the spec before any slot builds, so build order cannot matter. A key a slot does not
+  allow, or two slots informing one key, refuses the build. It reaches part builders and not the
+  chassis fixtures. The mine's dumb drift telling its furnace where its air comes from is the
+  first case.
 
 This is the test the architecture was built to pass: if two machines that look nothing alike
 are the same definition with parts swapped, the abstractions are right.

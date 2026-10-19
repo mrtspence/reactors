@@ -13,6 +13,15 @@ module ReactorSim
   #   requires     a minion tag without which this way cannot be taken at all
   #   control_id   a lever that scales it: a cage nobody has called does not move
   #   driven_by    a shaft that scales it, against `rated_omega`. **A way that costs power.**
+  #   hoist        a drum whose cage you **ride**: you board at your landing when the cage is
+  #                there and stopped, you are wherever the cage is, and you get off at the far
+  #                landing. `staffed_by` is the post that winds it, and with nobody there it is
+  #                not running at all. `a` is the landing at the top of the drum's travel.
+  #   through      the nodes this way runs through — a shaft, a pit bottom. Any one of them
+  #                blocking closes the way, and routing finds another if there is one.
+  #   rated_kg     what a ridden way's cage is rated to carry. Only a marshal enforces it.
+  #   marshals     `{ landing => station }`: who stands at each landing and stops boarding at the
+  #                rating. With nobody there, everybody waiting gets on.
   #
   # Two-way. A passage that is genuinely one-way is a different thing (a chute, a fall) and can
   # have its own declaration when something needs one.
@@ -21,22 +30,38 @@ module ReactorSim
   # cage is quick and costs a shaft. That is the trade a man engine was built to make, and a
   # passage that can be driven is what lets a player buy their way out of it.
   Passage = Struct.new(:a, :b, :metres, :speed_m_s, :requires, :control_id, :driven_by,
-                       :rated_omega, :label, keyword_init: true) do
+                       :rated_omega, :label, :hoist, :staffed_by, :through, :rated_kg, :marshals,
+                       keyword_init: true) do
     def initialize(a:, b:, metres:, speed_m_s: 1.2, requires: nil, control_id: nil,
-                   driven_by: nil, rated_omega: nil, label: nil)
+                   driven_by: nil, rated_omega: nil, label: nil, hoist: nil, staffed_by: nil,
+                   through: nil, rated_kg: nil, marshals: {})
       super(a: a.to_sym, b: b.to_sym, metres: metres.to_f, speed_m_s: speed_m_s.to_f,
             requires: requires&.to_sym, control_id: control_id&.to_sym,
-            driven_by: driven_by&.to_sym, rated_omega: rated_omega&.to_f, label: label)
+            driven_by: driven_by&.to_sym, rated_omega: rated_omega&.to_f, label: label,
+            hoist: hoist&.to_sym, staffed_by: staffed_by&.to_sym,
+            through: Array(through).map(&:to_sym).freeze,
+            rated_kg: rated_kg&.to_f,
+            marshals: marshals.to_h { |landing, station| [ landing.to_sym, station.to_sym ] }.freeze)
       raise Error, "passage #{a}->#{b}: metres must be positive" unless metres.to_f.positive?
       raise Error, "passage #{a}->#{b}: speed must be positive" unless speed_m_s.to_f.positive?
 
       freeze
     end
 
+    def ridden? = !hoist.nil?
+
+    # Where on the drum's travel a landing is: `a` at the top, `b` at the bottom.
+    def landing_m(place) = place == a ? 0.0 : metres
+
     # What this way is good for **right now**. A cage with no lever pulled and no shaft turning
     # is not a slow way down, it is not a way down at all — and a shift underground when the
     # winder stops is exactly the situation the ladderway exists for.
+    #
+    # A ridden way runs at its rated speed whenever it is in service; whether its cage is here is
+    # the rider's business, not the route's.
     def speed_in(ctx)
+      return speed_m_s if ridden?
+
       speed = speed_m_s
       speed *= lever(ctx) if control_id
       speed *= drive(ctx) if driven_by && rated_omega&.positive?
@@ -54,6 +79,8 @@ module ReactorSim
     def other(place) = place == a ? b : a
 
     def touches?(place) = a == place || b == place
+
+    def closed_by?(closed) = through.intersect?(Array(closed))
 
     # Seconds for a competent, unaided human. What a particular minion manages is this divided
     # by their pace, which is where fatigue and injury get their say.
@@ -108,14 +135,15 @@ module ReactorSim
       @passages.select { |p| p.touches?(from) && p.touches?(to) && p.a != p.b }
     end
 
-    # The first step from `from` toward `to`, for somebody carrying `capabilities`.
+    # The first step from `from` toward `to`, for somebody carrying `capabilities`, avoiding every
+    # passage that runs `through:` a node in `closed` — a shaft choked with wreckage.
     #
-    # Precomputed per capability set rather than searched per tick, and memoised on the set
-    # rather than on the minion because most of a shift shares one. Nil when there is no way
-    # through, which `Operation#assign_minion` treats as a refusal rather than as a minion who
-    # walks into a wall.
-    def next_hop(from, to, capabilities)
-      table_for(capabilities).dig(from&.to_sym, to&.to_sym)&.first
+    # Computed per distinct (capability set, closed set) and memoised, never searched per tick:
+    # most of a shift shares one capability set, and the closed set changes only when something
+    # in the way of a passage fails. Nil when there is no way through, which
+    # `Operation#assign_minion` treats as a refusal rather than as a minion who walks into a wall.
+    def next_hop(from, to, capabilities, closed = [])
+      table_for(capabilities, closed).dig(from&.to_sym, to&.to_sym)&.first
     end
 
     # How far it is, following the route `next_hop` actually takes. Nil when there is no way
@@ -124,17 +152,20 @@ module ReactorSim
     # **Geometry, not duration** — a cage and a ladderway are the same ninety metres and only one
     # of them is quick, so what a walk *costs* is this divided by what is running. Precomputed
     # with the routing table, so asking is a lookup.
-    def route_metres(from, to, capabilities)
+    def route_metres(from, to, capabilities, closed = [])
       return 0.0 if from == to
 
-      table_for(capabilities).dig(from&.to_sym, to&.to_sym)&.last
+      table_for(capabilities, closed).dig(from&.to_sym, to&.to_sym)&.last
     end
 
-    def reachable?(from, to, capabilities)
+    def reachable?(from, to, capabilities, closed = [])
       return true if from == to
 
-      !next_hop(from, to, capabilities).nil?
+      !next_hop(from, to, capabilities, closed).nil?
     end
+
+    # The nodes some passage runs through, which are the only ones whose failure can close a way.
+    def through_nodes = @passages.flat_map(&:through).uniq
 
     # Every table this layout will ever need, built once. Called at operation build so nothing
     # is computed during a tick.
@@ -145,56 +176,62 @@ module ReactorSim
 
     private
 
-    def table_for(capabilities)
-      key = Array(capabilities).map(&:to_sym).uniq.sort.freeze
-      @routes[key] ||= build_table(key).freeze
+    def table_for(capabilities, closed = [])
+      key = [ Array(capabilities).map(&:to_sym).uniq.sort, Array(closed).map(&:to_sym).uniq.sort ]
+      @routes[key] ||= build_table(*key).freeze
     end
 
-    # Breadth-first from every place, recording the first step toward each destination **and how
-    # far the whole way is**. Passages are walked in declaration order so the table is
-    # deterministic where two routes tie.
-    def build_table(capabilities)
+    def build_table(capabilities, closed)
       usable = @adjacency.transform_values do |neighbours|
-        neighbours.select { |_, passage| passable?(passage, capabilities) }.freeze
+        neighbours.select { |_, passage| passable?(passage, capabilities, closed) }.freeze
       end
 
       @places.to_h { |origin| [ origin, first_steps(origin, usable) ] }
     end
 
-    # `{ destination => [first step, metres] }`. Distance accumulates along the route the search
-    # settles on rather than over the shortest one by length, so it is the way somebody will
-    # actually be walked.
+    # `{ destination => [first step, metres] }` along the **shortest** route by length, so a long
+    # way round — an escape up the far shaft — is taken only when the short one is closed. Settled
+    # nearest-first; ties break on declaration order, which keeps the table deterministic.
     def first_steps(origin, usable)
       steps = {}
-      queue = usable.fetch(origin, {}).map { |n, passage| [ n, n, passage.metres ] }
-      queue.each { |place, step, metres| steps[place] ||= [ step, metres ] }
+      # `[metres, order, place, first step]`; `order` is unique, so the nearest entry is too.
+      frontier = [ [ 0.0, 0, origin, nil ] ]
+      order = 0
 
-      until queue.empty?
-        place, step, metres = queue.shift
+      until frontier.empty?
+        nearest = frontier.min_by { |metres, seq, _, _| [ metres, seq ] }
+        frontier.delete(nearest)
+        metres, _, place, step = nearest
+        next if steps.key?(place)
+
+        steps[place] = [ step, metres ] unless place == origin
         usable.fetch(place, {}).each do |neighbour, passage|
           next if neighbour == origin || steps.key?(neighbour)
 
-          steps[neighbour] = [ step, metres + passage.metres ]
-          queue << [ neighbour, step, metres + passage.metres ]
+          order += 1
+          frontier << [ metres + passage.metres, order, neighbour, step || neighbour ]
         end
       end
 
       steps.freeze
     end
 
-    def passable?(passage, capabilities)
-      passage.requires.nil? || capabilities.include?(passage.requires)
+    def passable?(passage, capabilities, closed)
+      (passage.requires.nil? || capabilities.include?(passage.requires)) &&
+        !passage.closed_by?(closed)
     end
 
     # **A room is named once and furnished by whoever brings the furniture.** The chassis
     # declares the pit bank; fitting a cage puts its drive there. Same id, node lists unioned,
-    # first label wins — the same concatenate-don't-replace rule `Fragment#merge` follows, and
-    # the reason a fitting need not know what else is in the room it is installed in.
+    # first label and first declared air win — the same concatenate-don't-replace rule
+    # `Fragment#merge` follows, and the reason a fitting need not know what else is in the room
+    # it is installed in.
     def merge_places(places)
       places.each_with_object({}) do |place, acc|
         known = acc[place.id]
         acc[place.id] = known.nil? ? place : Place.new(id: place.id, label: known.label,
-                                                       nodes: known.nodes + place.nodes)
+                                                       nodes: known.nodes + place.nodes,
+                                                       air: known.air || place.air)
       end
     end
 
@@ -249,7 +286,20 @@ module ReactorSim
       undeclared = (@places - @declared.keys)
       raise Error, "undeclared place(s): #{undeclared.join(', ')}" if undeclared.any?
 
+      validate_marshals!
       validate_air!(nodes)
+    end
+
+    # A marshal who is not a station at that landing stops nobody.
+    def validate_marshals!
+      @passages.each do |passage|
+        passage.marshals.each do |landing, station|
+          next if passage.touches?(landing) && @stations[station] == landing
+
+          raise Error, "passage #{passage.label || passage.a}: marshal #{station} is not a station " \
+                       "at #{landing}"
+        end
+      end
     end
 
     def validate_air!(nodes)

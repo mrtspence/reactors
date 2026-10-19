@@ -7,7 +7,7 @@
 class LoadoutsController < ApplicationController
   include LoadoutParams
 
-  before_action :require_operator!
+  before_action :require_operator!, :require_fittable!
 
   def edit
     @outfitting = Outfitting.for(owner_id: current_player, operation_id: operation_id)

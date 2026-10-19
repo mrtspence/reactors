@@ -42,6 +42,7 @@ module ReactorSim
       @registry = registry
       @given = (loadout || {}).to_h { |slot_id, part_id| [ slot_id.to_sym, part_id ] }.freeze
       @loadout = resolve_loadout.freeze
+      @spec = spec.merge(informed).freeze
     end
 
     # The `Part` fitted in a slot, or nil. `#loadout` is the same thing by id — every slot,
@@ -80,6 +81,18 @@ module ReactorSim
       slot = quarters_slot or return 0
 
       part(slot.id)&.stats&.fetch(:crew_capacity, 0).to_i
+    end
+
+    # **Who starts somewhere other than the quarters**: every fitted part declaring
+    # `advance_seats:` and `advance_place:`, as `[{ seats:, place: }]` in slot order — the order the
+    # operation deals seats in.
+    def advance_shifts
+      @slots.filter_map do |slot|
+        stats = part(slot.id)&.stats or next
+        next unless stats[:advance_seats].to_i.positive?
+
+        { seats: stats.fetch(:advance_seats).to_i, place: stats.fetch(:advance_place).to_sym }.freeze
+      end.freeze
     end
 
     # Where the shift starts. Nil for an operation with no quarters, which `Operation` then
@@ -159,6 +172,36 @@ module ReactorSim
 
     def fitted_parts = @slots.filter_map { |slot| part(slot.id) }
 
+    # **What the fitted parts tell every builder**, under the keys their slots allow. Resolved
+    # before any slot builds, so a builder sees the same spec whichever order the slots are in.
+    # Keys a slot does not allow are left out here and refused by `informs_errors`.
+    def informed
+      @slots.each_with_object({}) do |slot, acc|
+        next if slot.informs.empty?
+
+        acc.merge!((part(slot.id)&.informs || {}).slice(*slot.informs))
+      end
+    end
+
+    def informs_errors
+      errors = []
+      owners = {}
+
+      @slots.each do |slot|
+        slot.informs.each do |key|
+          errors << "#{slot.label} and #{owners.fetch(key)} both inform #{key.inspect}" if owners.key?(key)
+          owners[key] ||= slot.label
+        end
+
+        stray = (part(slot.id)&.informs || {}).keys - slot.informs
+        next if stray.empty?
+
+        errors << "#{part(slot.id).label} informs #{stray.map(&:inspect).join(', ')}, which #{slot.label} " \
+                  "does not allow"
+      end
+      errors
+    end
+
     # Built once per slot and reused: the validator needs every part's ids and the fragment
     # needs its nodes, and building twice would hand the graph different objects from the ones
     # that were checked.
@@ -209,6 +252,7 @@ module ReactorSim
         end
       end
 
+      errors.concat(informs_errors) if errors.empty?
       errors.concat(id_collisions) if errors.empty?
       errors
     end

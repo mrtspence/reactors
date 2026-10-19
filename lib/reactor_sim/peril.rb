@@ -5,23 +5,62 @@ module ReactorSim
   #
   # `failure_hazards` answers "a part broke, who was near it". A peril answers the other half:
   # nothing broke, the haulage road is simply a place where tubs go past and sooner or later one
-  # of them catches somebody. Declared on the node that embodies the danger, keyed by `places:`
-  # or `stations:` exactly as `failure_hazards` is, so the two resolve through one mechanism.
+  # of them catches somebody. Declared on the node that embodies the danger, keyed by `places:`,
+  # `stations:` or `riders:` exactly as `failure_hazards` is, so the two resolve through one
+  # mechanism.
   #
   # **A fitting removes a peril by not declaring it.** There is no `absent_when:` — railings are
   # a part, and a part that is fitted contributes a fragment without the fall in it. That is how
   # every other purchase in this engine works and it needs no second rule.
-  Peril = Struct.new(:id, :tags, :severity, :scales_with, :when_tagged, :unless_tagged,
-                     :places, :stations, keyword_init: true) do
-    def initialize(id:, severity:, tags: [], scales_with: nil, when_tagged: nil,
-                   unless_tagged: nil, places: nil, stations: nil)
-      super(id: id.to_sym, severity: severity.to_f, tags: Array(tags).map(&:to_sym).freeze,
+  #
+  # **How often and how badly are two figures.** `rate` is what spends the margin, and so also how
+  # often this is the accident picked; `severity` is the Danger Check and nothing else. Minor
+  # accidents vastly outnumber deadly ones, and the deadly ones are often the rare ones. `rate`
+  # defaults to `severity`.
+  #
+  # **A peril may hurt the person, the machine, or both.** A positive `severity` is a Danger
+  # Check; a `mishap:` — `{ node:, kind:, share: }` — is something the person does to a part, which
+  # that part suffers on the next tick (`Concerns::Wearing#suffer`). The clumsy banksman letting a
+  # tub into the shaft is unhurt; the shaft is not.
+  #
+  # **`judged:` splits one event between the hand who reads it rightly and the one who does not.**
+  # `:rightly` takes `1 − m` of the rate and `:wrongly` takes `m`, where `m` is
+  # `Minion#misjudges` — so the pair happens as often as one peril would, and who is posted decides
+  # which it is. A misfire is the case: recognised, it is dug out; taken for a spent shot, it is
+  # left live in the face.
+  Peril = Struct.new(:id, :tags, :severity, :rate, :mishap, :scales_with, :when_tagged,
+                     :unless_tagged, :places, :stations, :riders, :judged, keyword_init: true) do
+    def initialize(id:, severity: 0.0, rate: nil, mishap: nil, tags: [], scales_with: nil,
+                   when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil,
+                   judged: nil)
+      super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
+            mishap: Peril.mishap(mishap),
+            tags: Array(tags).map(&:to_sym).freeze,
             scales_with: scales_with&.to_sym,
             when_tagged: when_tagged&.to_sym, unless_tagged: unless_tagged&.to_sym,
             places: Array(places).map(&:to_sym).freeze,
-            stations: Array(stations).map(&:to_sym).freeze)
+            stations: Array(stations).map(&:to_sym).freeze,
+            riders: Array(riders).map(&:to_sym).freeze,
+            judged: judged&.to_sym)
+      if judged && !Peril::JUDGEMENTS.include?(self.judged)
+        raise Error, "peril #{id}: judged #{judged.inspect} is neither of #{Peril::JUDGEMENTS.inspect}"
+      end
+      raise Error, "peril #{id}: hurts nobody and breaks nothing" unless hurts? || mishap?
+      raise Error, "peril #{id}: a rate of zero never happens" unless self.rate.positive?
+
       freeze
     end
+
+    def self.mishap(spec)
+      return nil if spec.nil?
+
+      { node: spec.fetch(:node).to_sym, kind: spec.fetch(:kind, :damage).to_sym,
+        share: spec.fetch(:share, 0.0).to_f }.freeze
+    end
+
+    def hurts? = severity.positive?
+
+    def mishap? = !mishap.nil?
 
     # **A tag can select a kind of accident rather than only making one likelier.** A hulking
     # minion gets wedged in a narrow roadway where nobody else could; a small one is missed by
@@ -38,15 +77,33 @@ module ReactorSim
     #
     # So the two road perils are **complementary rather than exclusive**, and only the extremes
     # are a clean either/or. `severity` is therefore the figure for a *fully* tagged creature.
-    def weight_for(minion)
+    #
+    # With `state`, a `judged:` peril also takes its share of the judgement; without it — asking
+    # only whether a peril can reach this person at all — it does not.
+    def weight_for(minion, state = nil, ambient: nil)
       want = when_tagged ? Injury.numeric(minion.tag(when_tagged)) : 1.0
       avoid = unless_tagged ? 1.0 - Injury.numeric(minion.tag(unless_tagged)) : 1.0
 
-      (want * avoid).clamp(0.0, 1.0)
+      (want * avoid * judgement(minion, state, ambient)).clamp(0.0, 1.0)
     end
 
-    def reaches?(station, place) = stations.include?(station) || places.include?(place)
+    def judgement(minion, state, ambient)
+      return 1.0 if judged.nil? || state.nil?
+
+      wrong = minion.misjudges(state, ambient: ambient)
+      judged == :wrongly ? wrong : 1.0 - wrong
+    end
+
+    # `riders:` names what carries somebody through a shaft — a cage's drum, a man engine's rods —
+    # and reaches whoever it is carrying, wherever they are.
+    def reaches?(station, place, carried = nil)
+      return true if carried && riders.include?(carried)
+
+      stations.include?(station) || places.include?(place)
+    end
   end
+
+  Peril::JUDGEMENTS = %i[rightly wrongly].freeze
 
   # The hidden margin of safety every worker carries, and what spends it.
   #
@@ -100,6 +157,10 @@ module ReactorSim
     EXPONENT = 2.0
     SPENT_WEIGHT = 4.0
 
+    # What full `Minion#daftness` adds to how fast the margin is spent: a 1.0 hand spends it five
+    # times as fast as a sound one, a kobold at 0.5 half as fast again.
+    DAFT_SPEND = 4.0
+
     module_function
 
     def roll(rng) = rng.between(SPREAD.begin, SPREAD.end)
@@ -109,26 +170,49 @@ module ReactorSim
       { margin: full, margin_full: full }
     end
 
-    # What this tick's exposure costs, and which peril is doing the most of it.
+    # What this tick's exposure costs, and what each peril took of it: `[total, bites]`.
     #
-    # **One margin rather than one per peril**, so the state stays a single number — and the
-    # accident that fires is whichever contributed most at the moment it crossed, which is also
-    # the legible answer: a man who has spent his shift beside the haulage gets caught in it.
-    def spend(reaching, minion, state, dt)
+    # **Spent by `rate`, never by `severity`** — how often a thing happens is not how bad it is.
+    def spend(reaching, minion, state, dt, ambient: nil)
       exposed = susceptibility(minion, state)
       bites = reaching.filter_map do |peril, activity|
-        bite = peril.severity * peril.weight_for(minion) * activity * exposed * SPEND_PER_S * dt
+        bite = peril.rate * peril.weight_for(minion, state, ambient: ambient) * activity * exposed *
+               SPEND_PER_S * dt
         [ peril, bite ] if bite.positive?
       end
 
-      [ bites.sum { |_, bite| bite }, bites.max_by { |_, bite| bite }&.first ]
+      [ bites.sum { |_, bite| bite }, bites ]
+    end
+
+    # **Which accident it was, picked in proportion to what each peril took this tick.**
+    #
+    # One margin reproduces the mix a margin per peril would give: each fires in the long run in
+    # proportion to its share of the spend, with one number in state rather than one per peril.
+    #
+    # This tick's bites rather than the episode's, so only what reaches somebody *now* can happen
+    # to them: once the margin is gone, whatever arrives next is what gets you.
+    #
+    # **Walked by sorted id**, because a cumulative pick depends on the order it walks in and the
+    # perils arrive in node declaration order, which `graph_spec` shuffles.
+    def pick(bites, roll)
+      ordered = bites.sort_by { |peril, _| peril.id }
+      total = ordered.sum { |_, bite| bite }
+      return nil unless total.positive?
+
+      threshold = roll * total
+      ordered.each do |peril, bite|
+        return peril if threshold < bite
+
+        threshold -= bite
+      end
+      ordered.last.first
     end
 
     # How much of a peril actually reaches this person. Everything here already existed and was
     # pointed at severity; `hazard_sense` in particular belongs mostly here — pit sense is about
     # not being there, not about absorbing it better.
     def susceptibility(minion, state)
-      careless = 1.0 + tag(minion, :clumsy) + tag(minion, :green) + tag(minion, :boneheaded)
+      careless = 1.0 + tag(minion, :clumsy) + tag(minion, :green) + (DAFT_SPEND * minion.daftness)
       wary = 1.0 + tag(minion, :hazard_sense) + tag(minion, :practised)
       tired = 1.0 + (SPENT_WEIGHT * (state.fetch(:fatigue, 0.0)**EXPONENT))
 
@@ -149,14 +233,17 @@ module ReactorSim
     # anything, so every tick at a quiet moment re-rolled the margin back to full and no
     # exposure ever accumulated: the whole mechanic was a clock that reset itself. It showed up
     # as a haulage road nobody could be hurt on, with no failing assertion anywhere.
-    def advance(reaching, minion, state, dt, rolled)
-      spent, worst = spend(reaching, minion, state, dt)
+    #
+    # `which` is this tick's `peril:` fate, used only if the margin crosses here.
+    # `ambient:` is the light of the room they are in, which their judgement reads.
+    def advance(reaching, minion, state, dt, rolled, which = 0.0, ambient: nil)
+      spent, bites = spend(reaching, minion, state, dt, ambient: ambient)
       full = state.fetch(:margin_full, 1.0)
       was = state.fetch(:margin, 1.0)
       margin = was - spent
       margin += MEND_PER_S * dt unless endangered?(reaching, minion)
 
-      return [ renew(state, rolled), worst ] if margin <= 0.0
+      return [ renew(state, rolled), pick(bites, which) ] if margin <= 0.0
       return [ renew(state, rolled), nil ] if margin >= full && was < full
 
       [ state.merge(margin: [ margin, full ].min), nil ]

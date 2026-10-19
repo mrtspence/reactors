@@ -16,6 +16,7 @@ class ConsolesController < ApplicationController
     @minions = DevMatch.crew(operation_id: operation.operation_id)
     @match_id = operation.match_id
     @operation_id = operation.operation_id
+    @fittable = operation.fittable?
     # **The console says when the hatch is open.** A development affordance that looks identical
     # to the real thing is how somebody debugs the wrong rule for an afternoon.
     @borrowed = Operator.bypass? && !operation.owner_id.eql?(current_player)

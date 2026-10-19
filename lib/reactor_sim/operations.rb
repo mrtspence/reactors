@@ -22,7 +22,7 @@ module ReactorSim
       # it, and a builder still takes `chassis:` as an ordinary option.
       #
       # `harness: true` marks a registration that exists only to exercise the engine — a spec
-      # rig, not a machine anyone plays. It builds and runs like any other operation; what it
+      # rig or the developer's `DevEngine`, not a machine anyone plays. It builds and runs like any other operation; what it
       # does not do is appear anywhere enumerating *machines*.
       #
       # It is needed because a rig must register globally for `Match.create` to find it, while

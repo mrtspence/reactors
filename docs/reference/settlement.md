@@ -256,8 +256,21 @@ coupling carries `k·Δp`, which over a step is one linear system:
 transfer_ab     = k · (p′ₐ + head − p′_b) · dt
 ```
 
-Solved per connected component by Gaussian elimination — the matrix is symmetric and
-diagonally dominant, so no pivoting is needed and the arithmetic cannot depend on row order.
+Solved per connected component by Gaussian elimination — the matrix is symmetric positive
+definite (each coupling adds `k·vvᵀ`, `v = (g, −1)`), so no pivoting is needed and the arithmetic
+cannot depend on row order. It is **not** diagonally dominant across a gear below one.
+
+**A drive link may be geared and clutched.** Geared at `g`, its torque is `k·(g·ω_a − ω_b)`; `b`
+gains `τ·dt` and `a` loses `g·τ·dt`, so `Tick#drive` applies `ratio × transfer` to the driving end
+and the slip estimate is `transfer × (g·ω_a − ω_b)`. Clutched, `DriveLink#engaged` scales its
+conductance by the lever and a disengaged link is dropped before the solve.
+
+**`sources:`** — `{ node_id => torque }` from any node answering `drive_torque` — is a constant term
+on the right-hand side: gravity on a winding drum. It is solved **with** the drags and couplings so
+a brake can hold it, and its momentum rides beside the transfers as `node=source`. `book_drive`
+estimates its work at the settled speed and books it on the node that declared it —
+`joules_injected` while it puts energy in, `joules_extracted` while it takes it out — before the
+drags and slip divide the rest.
 
 `settle_drive` also passes **`drags:`** — `{ node_id => conductance }`, a coupling to a reservoir
 at potential zero. It adds to the diagonal and nothing to `b`, and its transfers come back keyed
@@ -408,6 +421,7 @@ sums those into the ledger after phase 5:
 | `joules_injected` | `joules_added` |
 | `joules_from_reactions` | `joules_from_reactions` (set by `run_reactions`) |
 | `joules_extracted` | `joules_to_work` |
+| `joules_roped` | `joules_to_work` — what a rope end braked off, the only work that crosses to another operation |
 | `joules_discarded` | `joules_advected_out` |
 | `mass_injected` | `mass_added` |
 | `mass_vented` | `mass_vented` |
@@ -429,9 +443,16 @@ sums those into the ledger after phase 5:
 > a command — because the energy comes from *another operation* rather than from a node's own
 > behaviour. A node cannot report it, since no node in this operation was party to it.
 >
-> The buffer it lands in (`Nodes::Import`'s `supply_joules`) is counted by
+> The buffer it lands in (a rope end's `supply_joules`) is counted by
 > `Operation#total_joules` alongside `joules` and parcel enthalpy. Leave it out and an exchange
 > reads as creation on one side and destruction on the other.
+>
+> **A rope carries both ways.** Each end (`Concerns::Roped`) reports its speed, its clutch and its
+> `joules_roped`, and receives the other's at the barrier. The braking end sends everything its
+> rope drag took; the driven end spends what its shaft measurably gained and its buffer overflows
+> the rest to `joules_to_friction` — the slip. `joules_roped` is booked apart from
+> `joules_extracted` by `Tick#book_drive` because every other `:work` drag on the same shaft — a
+> mine's fan and pump hang off its line shaft — is that operation's own and must not cross.
 
 > **Report gross crossings, never a before/after delta.** A delta is the NET of everything
 > that happened in the tick, and at a boundary the two directions cancel: `Atmosphere` used to

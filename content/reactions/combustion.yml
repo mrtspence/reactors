@@ -85,6 +85,29 @@ coal_combustion:
     # and that is the failure worth making a player see coming.
     spread_per_s: 0.30
     quench_per_s: 0.45
+    # Coal heating in a waste with air reaching it catches of itself around here. A firebox that hot
+    # is already alight, so the grate never notices.
+    autoignition_k: 700
+  # **Short of air, coal goes to carbon monoxide** instead of stopping for want of it: half the air,
+  # a quarter of the heat, and whitedamp — a smouldering gob, and a choked grate.
+  limited_by: air
+  alternatives:
+    - consumes: { coal: 1.0, air: 5.5 }
+      produces: { flue_gas: 4.07, whitedamp: 2.33, ash: 0.1 }
+      enthalpy_j_per_unit: -8400000
+
+# **Coal going sour in the waste: slow oxidation at whatever temperature it lies at.** No flame and
+# no ignition — oxygen taken up by broken coal, leaving blackdamp and heat. A tenth of a kilogram of
+# coal per kilogram of air, at about 400 kJ a mole of oxygen. Where the heat cannot get away, the
+# coal warms until `coal_combustion` lights of itself — a gob fire.
+coal_oxidation:
+  consumes: { coal: 0.1, air: 1.0 }
+  produces: { blackdamp: 1.1 }
+  enthalpy_j_per_unit: -2900000
+  # Per second, of the air in reach of the coal: slow, so a fast leak carries its air away
+  # before much of it is taken up.
+  rate_per_s: 0.0001
+  min_temperature_k: 273
 
 wood_combustion:
   consumes: { wood: 1.0, air: 6.0 }
@@ -96,6 +119,66 @@ wood_combustion:
     # Catches readily and dies readily. Kindling: the reason you light a coal fire with wood.
     spread_per_s: 0.80
     quench_per_s: 0.70
+    # Timber held at about 300 °C chars and lights with no flame near it — a hot bearing in a
+    # wooden headframe. Read against the hottest point the wood touches (`Vessel#hot_spot`).
+    autoignition_k: 573
+
+# **Coal lying as a layer on a hot surface**: spillage packed round a belt's drive head, with the
+# grease off its bearings. The same coal as `coal_combustion`, which is a heating in bulk; a layer
+# against hot steel lights far lower, and lower the thicker it lies. ASTM E2021 gives Pittsburgh
+# bituminous dust 300 °C at 6.4 mm and 210 °C at 25.4 mm; this is the 25 mm figure.
+coal_layer_combustion:
+  consumes: { coal: 1.0, air: 11.0 }
+  produces: { flue_gas: 11.9, ash: 0.1 }
+  enthalpy_j_per_unit: -30000000
+  rate_per_s: 1.5
+  min_temperature_k: 500
+  ignition:
+    spread_per_s: 0.30
+    quench_per_s: 0.45
+    autoignition_k: 483
+  limited_by: air
+  alternatives:
+    - consumes: { coal: 1.0, air: 5.5 }
+      produces: { flue_gas: 4.07, whitedamp: 2.33, ash: 0.1 }
+      enthalpy_j_per_unit: -8400000
+
+# **A conveyor belt.** It lights from what it lies on (`Vessel#hot_spot`): a burning deposit at the
+# drive head, or, hotter, the drum it has stalled on. A rubber belt fire creeps along the belt:
+# slower to take than timber, and slower to let go.
+belt_combustion:
+  consumes: { belting: 1.0, air: 10.0 }
+  produces: { flue_gas: 10.95, ash: 0.05 }
+  enthalpy_j_per_unit: -28000000
+  rate_per_s: 1.2
+  min_temperature_k: 450
+  ignition:
+    spread_per_s: 0.25
+    quench_per_s: 0.50
+    # About 400 °C (750 °F), the least the US Bureau of Mines found rubber belting lit at of itself
+    # in air. Raw rubber goes nearer 300 °C; the cotton carcass and the fillers hold a belt off longer.
+    autoignition_k: 672
+  # Short of air, a belt fire smoulders to carbon monoxide, which is what a belt fire on the intake
+  # sends inbye to the face.
+  limited_by: air
+  alternatives:
+    - consumes: { belting: 1.0, air: 7.0 }
+      produces: { flue_gas: 6.45, whitedamp: 1.5, ash: 0.05 }
+      enthalpy_j_per_unit: -13000000
+
+# **Fire-resistant belting**: PVC lights of itself only a little hotter than rubber belting, at about
+# 454 °C. What makes it fire-resistant is that alight it goes out by itself: its chlorine starves the
+# flame, so it cannot carry one along the belt.
+fire_resistant_belt_combustion:
+  consumes: { fire_resistant_belting: 1.0, air: 6.0 }
+  produces: { flue_gas: 6.9, ash: 0.1 }
+  enthalpy_j_per_unit: -18000000
+  rate_per_s: 0.8
+  min_temperature_k: 700
+  ignition:
+    spread_per_s: 0.10
+    quench_per_s: 1.50
+    autoignition_k: 727
 
 oil_combustion:
   consumes: { fuel_oil: 1.0, air: 14.0 }
@@ -141,11 +224,19 @@ firedamp_combustion:
     # **The explosive range, and the reason a pit is not permanently alight.** Methane carries
     # a flame between about 5% and 15% by volume and does nothing at all either side. Below the
     # lean figure a naked light burns calmly in gas a lamp can already read — which is what
-    # makes the flame cap worth looking at — and an ignition goes out when it has burnt the
-    # mixture back down through it, rather than settling in to burn every kilogram that seeps
-    # in afterwards.
+    # makes the flame cap worth looking at — and burns only what it lights, rather than
+    # settling in to burn every kilogram that seeps in afterwards.
     lean_fraction: 0.05
     rich_fraction: 0.15
+    # A hot enough surface lights it with no flame — a gob fire against the district's air. Nothing
+    # else in a pit gets there.
+    autoignition_k: 870
+  # **Inside the range, a flame that has taken hold crosses the district faster than a tick**, so
+  # it is resolved rather than run at `rate_per_s`: the front burns the whole mixture, and its
+  # products are set by the mixture's own air. `rate_per_s` and `spread_per_s` govern the flare
+  # before it — see `Resources::Deflagration`.
+  prompt:
+    kind: deflagration
   # **A gas explosion in a working with the air already used up does not go out — it goes
   # wrong.** Methane burnt with three-quarters of the oxygen it wants makes carbon monoxide
   # instead of carbon dioxide, which is why the survivors of a firedamp ignition in a badly
@@ -190,6 +281,10 @@ coal_dust_combustion:
     # No rich limit. There is no such thing as a coal dust cloud too thick to burn in any
     # roadway anybody would survive being in.
     lean_fraction: 0.0000625
+  # A cloud in its range is taken by a gas front passing through it in the same instant, which is
+  # how an ignition that starts in gas becomes a dust explosion.
+  prompt:
+    kind: deflagration
   # **And this is the one that made the rescue parties turn back.** A dust explosion consumes
   # the air of the whole length it runs, so most of it burns in air it has already spent —
   # carbon to CO rather than CO2, which is nine kilojoules a gram instead of thirty-three.

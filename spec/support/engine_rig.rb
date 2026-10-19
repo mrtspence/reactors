@@ -46,13 +46,15 @@ module EngineRig
   WORKING = { igniter: 0, blower: 0, damper_open: 85, stoking: 60, feed: 45,
               throttle_open: 60, load_demand: 80, cylinder_cocks: 0 }.freeze
 
-  # The fire, as it burns: a shallow bed, most of it alight, with its own ash and flue gas in
+  # The fire, as it burns: a shallow bed, a quarter of it alight, with its own ash and flue gas in
   # among it. `oxidiser_kg` is the fire's memory of the draught and is a rate, not a stock — see
-  # `Resources::Ignition`.
-  FIRE_K = 1_025.0
-  FIRE = { coal: 2.91, air: 0.97, ash: 11.7, flue_gas: 1.13 }.freeze
-  IGNITED_KG = 0.589
-  OXIDISER_KG = 1.395
+  # `Resources::Ignition`. **The bed is the one the engine settles to**, read off 3,000 ticks of
+  # working: a deeper one than this is short of air, and short of air coal goes to carbon monoxide,
+  # so an over-fed seed is a transient rather than a working fire.
+  FIRE_K = 1_010.0
+  FIRE = { coal: 0.461, air: 1.01, ash: 11.7, flue_gas: 1.113 }.freeze
+  IGNITED_KG = 0.115
+  OXIDISER_KG = 1.422
 
   # The drum at its working mark. 608 kPa is where the stock safety valve holds it, so this is an
   # engine sitting on its valve — which is the ordinary condition of a well-fired one.

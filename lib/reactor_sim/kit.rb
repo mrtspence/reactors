@@ -5,11 +5,10 @@ module ReactorSim
   # `Equipment` and `Training`, and this file is the data, the way `operations/steam_engine/
   # parts.rb` is data for `Parts`.
   #
-  # **Kept deliberately small at this stage.** There is one machine and one hazard model, so a
-  # catalogue of forty items would be forty guesses. What is here covers the three slots, the
-  # two stats anything reads today, and the tags the Danger Check and the future mine both
-  # need — enough to test the mechanism without pretending to a tech tree that has not been
-  # designed. See docs/design_sketches/minions.md §7.
+  # **Kept deliberately small at this stage**, so a catalogue of forty items is not forty guesses.
+  # What is here covers the three slots, the stats anything reads, and a resistance for the hazard
+  # tags each machine deals in — heat and steam at the engine, impact, rockfall, crush and falls in
+  # the pit. See docs/design_sketches/minions.md §7.
   #
   # **Every entry declares `mass_kg:`, and the field is required so that it has to.** What a thing
   # weighs is half of what it costs to carry it — `Burden` reads the total as `worn_kg` and charges
@@ -118,6 +117,15 @@ module ReactorSim
                        mass_kg: 2.0,
                        tags: { heat_resistance: 0.2, scald_resistance: 0.35 })
 
+    # **The first kit that answers the pit rather than the firebox.** A stone off the roof, a
+    # knock against the shaft side, the jolt of a cage stopped hard — and a little against being
+    # caught, since the head is what goes first. Gear, so it is the apron or the helmet: the hand
+    # at the boiler and the hand in the shaft want different things.
+    Equipment.register(:pit_helmet, slot: :gear, label: "Pit Helmet",
+                       description: "Hardened leather with a steel band. It turns a falling stone.",
+                       mass_kg: 0.6,
+                       tags: { impact_resistance: 0.4, rockfall_resistance: 0.3, crush_resistance: 0.1 })
+
     # --- utility -------------------------------------------------------------
     #
     # The niche thing, and the slot most likely to be left empty.
@@ -133,6 +141,15 @@ module ReactorSim
                        description: "Wax and wadding. Quieter, and harder to shout at.",
                        mass_kg: 0.3,
                        stats: { intelligence: 0.1, charisma: -0.15 })
+
+    # **A shaft-sinker's belt**, hooked on wherever he stands. It does nothing for a fall the whole
+    # depth of the shaft with the cage, but a missed step off the rods or the sollars is a jerk on
+    # a strap instead of a fall. Utility, so it competes with the lamp.
+    Equipment.register(:safety_belt, slot: :utility, label: "Safety Belt",
+                       description: "A leather belt and a hook. Clumsy, until the day it is not.",
+                       mass_kg: 2.0,
+                       stats: { dexterity: -0.05 },
+                       tags: { fall_resistance: 0.4 })
 
     Equipment.register(:hand_lamp, slot: :utility, label: "Hand Lamp",
                        description: "An oil lamp on a bail. Better light, same open flame.",
@@ -192,6 +209,15 @@ module ReactorSim
                       mass_kg: 0.0,
                       stats: { intelligence: 0.1 },
                       tags: { certificated: true, practised: true })
+
+    # **A ticket of its own, apart from the engineman's**: a shotfirer holds the face's lives in a
+    # fuse, and a hand without it at the shot holes is out of their depth — more blown-out shots,
+    # more misfires, more fired early.
+    Training.register(:shotfirers_ticket, label: "Shotfirer's Ticket",
+                      description: "Certificated to charge and fire shots underground.",
+                      mass_kg: 0.0,
+                      stats: { intelligence: 0.1 },
+                      tags: { shotfirer: true, practised: true })
 
     Training.register(:steady_hands, label: "Steady Hands",
                       description: "A year of not dropping things.",

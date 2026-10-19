@@ -29,10 +29,15 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > quarters and is sent somewhere.
 >
 > **Except where the operation says otherwise.** A spatial operation may start part of its shift
-> somewhere else — the mine's `ADVANCE_SHIFT` puts the last three seats in the district, posted
-> to nothing, so there is work to do before anybody has walked anywhere. It is a property of the
-> SEAT, decided by the chassis at build, so a draft roster never changes the answer; the crew
-> screen reads it back off the built minions' `default_place`.
+> somewhere else — the mine's **shift parts** (`Mine::SHIFTS`, in the `face_shift` and
+> `pit_bottom_shift` slots) put three seats in the district and three at the pit bottom to start
+> with, five of either upgraded, posted to nothing, so there is work to do before anybody has
+> walked anywhere. A part declares `stats: { advance_seats:, advance_place: }`;
+> `Assembly#advance_shifts` reads them in slot order and `Mine.crew_for` deals them from the end of
+> the roster, face first, so the first seats stay at bank. It is a property of the SEAT, decided
+> by the loadout at build, so a draft roster never changes the answer; the crew screen reads it
+> back off the built minions' `default_place`. The pit bottom has its own refuge
+> (`pit_bottom_rest`, room for one) beside the district's.
 
 > **A place is worth declaring even where nobody walks.** The steam engine is one room with no
 > passages at all — a mill engine's boiler, cylinder and flywheel stand together and the
@@ -64,8 +69,29 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > deliberately exceeds what the starting fan holds** — a spread the base machine always copes
 > with is a spread that changes nothing.
 >
-> **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, or the example measures
-> which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
+> **What lies ahead of the face is drawn too** (`Mine::Ahead`): none, one or two bodies of old
+> water and, separately, none, one or two pockets of gas, each at a random depth into the face, met
+> as the face advances by coal won at a heading's 4.7 t a metre. **A pocket's size is drawn too** —
+> log-normal on the coal it throws, median 20 t, gas following the coal and gassier ground holding
+> more — so knowing one is there is not knowing how bad it is. Nobody is told; the weeping coal, the
+> plans and the borer's holes are the only warning, and the plans and the holes are read only by
+> somebody boring. Not knowing whether there is any, or whether there is another, is the tension.
+> **So are the goaf's falls**: the roof behind the face hangs by the metres won less what has been
+> packed, and falls at spans drawn per match — the first weighting largest — flushing the goaf's
+> gas out and driving a windblast down the roads. **And so is the waste the last workings left**
+> (`Mine::Gob`): a quarter of pits inherit nothing heating, the rest a zone of drawn size already
+> part-way to firing, its start temperature solved so the fire is due when a wide log-normal says —
+> most between 45 and 90 minutes, the soonest a quarter of an hour. From there it is physics: the
+> fan's trickle through the waste feeds it, sealing starves it, and alight it makes carbon
+> monoxide, breaks out at the face and fires the district's gas.
+>
+> **The district and pit bottom have rock round them** (`Mine.rock`, `Nodes::Wall` of
+> `coal_measures`), so a room's gas cools against its walls and a room's own `heat_capacity` is its
+> gear's. A blast's harm is therefore its `:explosion` (`endangers:`/`damages:` keyed `explosion:`),
+> not the roadway wearing through on heat it no longer holds.
+>
+> **A spec that runs a mine must pin it**: `ground: Ground::ORDINARY`, which also draws no water
+> ahead, or the example measures which pit it was handed rather than the machine. Exactly `ReferenceCrew`'s argument one layer
 > down, and the failure looks identical — a physics regression that is really a bad draw.
 
 Three ways that goes wrong, all of them silent:
@@ -94,7 +120,7 @@ Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisori
 ```
 
 - **A part contributes a `Fragment`** — nodes, links, thermal/drive links, **passages**,
-  **places**, control points — because a part is almost never one node. A cage winder is the
+  **places**, control points — because a part is almost never one node. A cage is the
   worked example: it brings a node, a drive link, a lever *and* a way through the shaft, because
   fitting one is what makes the shaft ridable at all. Its gauges are named by id and come from
   the operation's panel catalogue.
@@ -148,6 +174,11 @@ to the builder.
 > full-suite run**, because nothing else loads that file, so every targeted re-run of the failing
 > specs passed. `Operations.known` is everything; `Operations.catalogued` is the machines.
 
+**`dev_engine.rb` is a harness a developer plays with**: one shaft held at working speed, at up to
+`setting × 10^range` watts (1 kW–1 GW), its power injected and ledgered like a heater's. It
+declares no assembler, so it has no slots, no crew and no outfitting screen, and being a harness
+it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENGINE=1`.
+
 ## Design decisions, in order
 
 1. **What are the nodes?** A join earns a node only when it is *interesting* — it carries a
@@ -160,7 +191,10 @@ to the builder.
    *transport*, not existence — steam condensing inside a gas-only pipe is correct and
    expected. Closed loops are fine and need no special handling.
 3. **Heat and torque.** Every `Thermal` node needs an `ambient_conductance` or the operation
-   becomes a perfect heat accumulator.
+   becomes a perfect heat accumulator. **A powered fitting is a load on the operation's own shaft,
+   never an engine of its own**: the man engine and the Cornish set's beam are drive-linked to the
+   line shaft, so whatever is putting work into that shaft powers them — the steam engine, the dev
+   engine, anything roped to it.
 4. **What can the player touch?** Nodes read `ctx.controls.fetch(:id)` — the lever's **actual**
    position. `stiffness:` makes a lever travel over several ticks, in percent of its range per
    second, scaled by whoever is posted there; an unattended lever still moves at its rated
@@ -187,6 +221,75 @@ to the builder.
    perfectly well and sets the cut-off wrong. Declare it on the one or two posts that genuinely
    take knowing how, with `requires:` naming the ticket — and make sure that ticket is
    something a player can buy, or the declaration is a punishment with no answer.
+
+   **A post can drive other levers.** `governor:` on a control point makes whoever is posted
+   there a controller: each tick in phase 0 it reads the post's lever and the machine's last-tick
+   state and writes the levers it works, which are `internal: true` — off the panel, refused by
+   `set_control`. The mine's winding engineman is the worked example (`Mine::Winding`): the player
+   names where the cage goes and he works the clutches and brake. With nobody posted, those
+   levers hold where they were left — the machine does not know it is unattended.
+
+   **The rope and the headframe are slots of their own.** The rope tier (hemp, iron wire, steel
+   wire) is the rope's strength, weight and wear; the cage's mass and catches stay with the hoist
+   tier, and the rope reads them off the drum, so the two slots never need to know each other. The
+   sheave reads its load off the rope. The headframe tier is timber or iron, and **both draw the
+   same share of the intake**, so buying the iron one never changes the pit's air.
+
+   **A ventilating furnace is a slot beside the fan** (`furnace`: fire basket, brick furnace,
+   double furnace). The return comes up by way of the upcast foot in either frame, and the fan's
+   conduit carries the shaft's depth of stack, so the furnace's flue warming the foot draws the
+   whole upcast with no power at all. A furnaceman stokes it. **Its air is the return's**, so
+   return gas in its range fires at the furnace, and the front runs back into the district.
+   **The dumb drift** (its own slot) feeds the fire from the intake through a regulator instead.
+   It does it by `informs: { furnace_fed_from: :intake }`, the one way a fitting shapes another
+   slot's wiring.
+
+   **What moves the coal to the shaft is the `haulage` slot**: hand putting, or a rope haulage — the
+   same roadway and roof, driven off the line shaft at four times the rate, its sets on
+   `Mine::HaulageRope`. The road rises from the pit bottom to the district (`ROAD_RISE_M`), so a set
+   the rope lets go — worn and snatched, or a set coupled without its backstay — runs back down to
+   the shaft: `RUNAWAY`, an `along:` hazard hurting each person by where on the road they are, then
+   the haulage stopped until the hauling hands splice it. **A runaway catch** (its own slot: catch
+   points or drags) informs the rope haulage where it stands on the road and how much it holds.
+   Below it a runaway reaches `1 − holds` of what it would have, and the door's wreck scales the
+   same way. **A belt conveyor** (`Mine::Conveyor`)
+   carries with nobody on the road, its feed a lever. Fed past what its drum grips — less with water
+   on the pit bottom — it stalls, and the drum (a `Bearing` loaded by the belt) turns on under it and
+   heats. **The drum lights the spillage, and the spillage the belt**, each through a `hot_spot:`:
+   the `drive_head` vessel holds coal spilt off the belt (`Mine::Spillage`, a share of its traffic),
+   which lights as a layer far below the belt's own point, and burning is the belt road's hot spot.
+   The belt attendant shovels it back. The belt road is an intake of its own beside the main road,
+   so the smoke goes inbye to the face; fire-resistant belting does not carry the fire.
+
+   **Shotfiring is a slot of its own** (`blasting`, empty to start: black powder or permitted
+   explosives). A ticketed shotfirer works `Mine::ShotHole`, a conduit from the magazine that
+   passes one charge when the hole is ready; the charge's fumes land in the district and the coal and
+   dust the shot brings down follow through `ShotYield` conduits, off its running total. **Its
+   accidents are perils of his post**: a blown-out shot is a flame in the room for a tick, and a
+   misfire is `judged:` — recognised and dug out all or nothing, or misjudged and left live in the
+   face for the hewer to strike.
+
+   **Cutter sprays are a slot of their own** (`cutter_sprays`, empty to start). `Mine::SprayLine`
+   pumps sump water to the face, and it drains back to the sump. While the face is fully wet the
+   cutter's picks offer no spark (`PickLine` records `quenched`) and `DustLine` lays most of the
+   dust. The quench is all or nothing on purpose: a deflagration triggers on any seed, so a smaller
+   spark is no safer than a large one. Both readers name `:spray_line` and read a pit with no
+   sprays as dry.
+
+   **Coal rides the hoist.** A deck in cage A is filled at the bottom by the onsetter and run off
+   at bank by the banksman, each only while the cage stands at their landing, and its coal is the
+   drum's load. With `coal_winding` on the engineman shuttles it himself — **men always first** — so
+   winding coal takes three posts: the engineman, the onsetter and the banksman.
+
+   **One person's report can drive another person's lever.** The engineman winds away from a
+   landing only on its marshal's bell — the banksman at bank, the onsetter below — and a marshal
+   out of their depth slips and rings a **false ready** while somebody is still getting in. A good
+   engineman paired with a bad onsetter is a crew problem nobody near the winding can see — **so
+   the panel's `winding_signals` board says it in words**: what the cage is doing and what it is
+   waiting on, the first that holds of a fault, why it is not moving, the bell, men getting in, a
+   deck being worked, men waiting across the shaft. `Winding#signal` sits beside `dispatch` and
+   `govern`, so the rules and the report of them cannot drift, and the tick writes it onto the drum
+   after the walk.
 5. **What can the player see?** The interesting design work. Give the two things that will
    kill the player the best instruments — and even those late.
 

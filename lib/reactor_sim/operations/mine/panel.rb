@@ -19,11 +19,11 @@ module ReactorSim
       PANEL_ORDER = %i[
         flame_cap lamp_flame canary
         shaft_speed shaft_supply
-        air_quantity district_air
-        sump_level water_make
+        air_quantity furnace_fire district_air
+        sump_level beam_condition water_make survey shot_holes bore_holes goaf_weight fire_stink
         district_light district_fire
-        roof_timber putting
-        cage_speed winding_gear
+        roof_timber putting rope_on_the_road drum_heat
+        winding_signals cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
         coal_raised seam_remaining
       ].freeze
 
@@ -240,6 +240,37 @@ module ReactorSim
           # the decision the gauge exists to inform.
           #
           # Prose and heavily lagged, because it is a walk and a judgement, not a measurement.
+          # **The hauling hands' word on their rope**: worn by the traffic, and below about a quarter
+          # of its strength a set started hard parts it. Through them, so with nobody on the road
+          # nobody is looking at it.
+          rope_on_the_road: Diagnostic.new(
+            id: :rope_on_the_road, label: "Haulage Rope", observer: :haulage,
+            source: Sources::Derived.new(:haulage_rope, :integrity),
+            filters: [ Filters::Lag.new(4), Filters::Bands.new([ 0.01, 0.3, 0.6 ]) ],
+            display: Displays::Prose.new([ "parted — splicing it", "broken wires, and stretched",
+                                           "wearing", "a good rope" ])
+          ),
+
+          # **The furnaceman's word on his fire**, which is the draught: a furnace draws as hard as it
+          # burns. Through him, so with nobody stoking nobody is watching it go down.
+          furnace_fire: Diagnostic.new(
+            id: :furnace_fire, label: "Furnace", observer: :furnace_stoking,
+            source: Sources::Derived.new(:furnace, :temperature_k),
+            filters: [ Filters::Lag.new(4), Filters::Bands.new([ 450.0, 700.0, 950.0 ]) ],
+            display: Displays::Prose.new([ "out", "burning low", "a good fire", "roaring" ])
+          ),
+
+          # **The belt attendant's word on the drive drum**: it warms only while the belt is stalled
+          # on it, and past the belt's ignition point the belt lights. Through him, so with nobody at
+          # the drive head nobody is feeling the drum.
+          drum_heat: Diagnostic.new(
+            id: :drum_heat, label: "Belt Drive", observer: :belt_attending,
+            source: Sources::Derived.new(:belt_drive, :temperature_k),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 330.0, 420.0, 540.0 ]) ],
+            display: Displays::Prose.new([ "cool", "warm — the belt is slipping on it", "too hot to touch",
+                                           "smoking" ])
+          ),
+
           roof_timber: Diagnostic.new(
             id: :roof_timber, label: "Roof", source: Sources::Derived.new(:tub_road, :integrity),
             filters: [ Filters::Lag.new(6), Filters::Noise.new(0.04, deadband: 0.05),
@@ -248,48 +279,160 @@ module ReactorSim
                                            "bars taking weight", "standing well", "newly set" ])
           ),
 
-          # What has gone up the shaft this tick, averaged — a winder's output is a cycle rather
-          # than a flow, so the instantaneous figure is not a reading anybody could use.
+          # What has come off the deck at bank, averaged — coal arrives a deck at a time, so the
+          # instantaneous figure is not a reading anybody could use.
           coal_raised: Diagnostic.new(
             id: :coal_raised, label: "Coal Raised",
-            source: Sources::Field.new(:winder, :carried_kg),
-            filters: [ Filters::Average.new(12), Filters::Lag.new(2) ],
+            source: Sources::Field.new(:deck_unloading, :carried_kg),
+            # A minute's average: a deck comes off in about a minute and a half at a time.
+            filters: [ Filters::Average.new(240), Filters::Lag.new(2) ],
             display: Displays::Needle.new(unit: "kg/s", precision: 2, min: 0.0, max: 8.0)
           ),
 
-          # **Is the man-riding gear actually turning**, which nothing on the panel said.
-          #
-          # A cage is a passage rather than a node, so calling it and having it *move* are two
-          # different facts: the lever is set at bank, the speed comes off the line shaft, and a
-          # shift told to ride a cage that is not turning simply takes the ladders instead and
-          # nobody at bank can tell. This is the gauge that closes that gap — at bank, on the
-          # gear itself, which is why it is an honest needle rather than a report.
-          #
-          # Ships with the man-riding fitting, because with nothing fitted there is no gear to
-          # watch and the ladders need no instrument.
-          cage_speed: Diagnostic.new(
-            id: :cage_speed, label: "Man Winding",
-            source: Sources::Derived.new(:cage_drive, :rpm),
+          # **What the cage is doing and what it is waiting on** — the bell, the men getting in, a
+          # deck being worked, a tub in the guides. A signal board rather than an instrument: it says
+          # what both landings can see, so it has no lag, no noise and nobody it is read through.
+          # The tick writes it onto the drum after the walk (`Winding#signal`).
+          winding_signals: Diagnostic.new(
+            id: :winding_signals, label: "Winding",
+            source: Sources::Field.new(:cage_drive, :signal),
+            display: Displays::Prose.new(Winding::SIGNALS.values)
+          ),
+
+          # **Where the cage is**, which is what an engineman winding to a mark actually watches:
+          # a pointer on a dial geared to the drum. Lagged a tick, so a late brake reads as a late
+          # brake. Past either end of the scale it pins, which is the overwind showing. Geared to
+          # the drum, it reads rope paid out — so a cage hung in the shaft goes on moving on it.
+          cage_depth: Diagnostic.new(
+            id: :cage_depth, label: "Cage Depth",
+            source: Sources::Derived.new(:cage_drive, :position_m),
+            filters: [ Filters::Lag.new(1) ],
+            display: Displays::Needle.new(unit: "m", precision: 0, min: 0.0, max: SHAFT_DEPTH_M)
+          ),
+
+          # **The one thing that says the depth indicator is lying**: rope paid out that the cage
+          # is not hanging on. Prose, because what it is for is noticing.
+          slack_rope: Diagnostic.new(
+            id: :slack_rope, label: "Slack Rope",
+            source: Sources::Derived.new(:cage_drive, :slack_m),
+            filters: [ Filters::Lag.new(1), Filters::Bands.new([ 0.3, 3.0 ]) ],
+            display: Displays::Prose.new([ "taut", "slack", "coiling on the cage" ])
+          ),
+
+          # **Is the man engine actually turning**, which nothing else on the panel says. The rods
+          # are a passage rather than a node a shift can see, so calling it and having it *move*
+          # are two different facts: the lever is set at bank, the speed comes off the line shaft,
+          # and a shift told to ride rods that are not turning takes the ladders instead and nobody
+          # at bank can tell. At bank, on the gear itself, so an honest needle rather than a report.
+          rod_speed: Diagnostic.new(
+            id: :rod_speed, label: "Man Engine",
+            source: Sources::Derived.new(:man_engine, :rpm),
             filters: [ Filters::Lag.new(1), Filters::Noise.new(1.0, deadband: 3.0) ],
             display: Displays::Needle.new(unit: "rpm", precision: 0, min: 0.0, max: 320.0)
           ),
 
-          # **What the winding gear has left in it**, and the reason it is on the panel now is
-          # the reason it will matter later: rope goes before anything else in a headframe, and
-          # it goes from wear rather than from an event.
-          #
-          # TODO: first caller of a *rope-specific* failure is the hot-rope mode — a rope that
-          # has been run hard fails differently from gear that has simply worn out, and wants
-          # its own `failure_modes` entry on the winder plus a duty term in `stress_per_second`.
-          # Today this reads the winder's ordinary durability, which is honest but blunt: it
-          # falls with use and says nothing about *why*.
-          winding_gear: Diagnostic.new(
-            id: :winding_gear, label: "Winding Gear",
-            source: Sources::Derived.new(:winder, :integrity),
+          # **The winding brake, as the engineman sees it**: how it is wearing, in words, and how
+          # hot it is running, by the smell. A rod about to part reads "worn" for a long time and
+          # then not at all — the lining's state is what can be watched minute to minute.
+          winding_brake: Diagnostic.new(
+            id: :winding_brake, label: "Winding Brake",
+            source: Sources::Derived.new(:cage_brake, :integrity),
             filters: [ Filters::Lag.new(4), Filters::Noise.new(0.03, deadband: 0.04),
                        Filters::Bands.new([ 0.2, 0.5, 0.8 ]) ],
-            display: Displays::Prose.new([ "the rope is going — stop winding",
+            display: Displays::Prose.new([ "the rod is going — do not trust it",
                                            "worn, and showing it", "serviceable", "sound" ])
+          ),
+
+          brake_heat: Diagnostic.new(
+            id: :brake_heat, label: "Brake Paths",
+            source: Sources::Derived.new(:cage_brake, :temperature_k),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 380.0, 450.0, 600.0 ]) ],
+            display: Displays::Prose.new([ "cold", "warm", "smoking — it will not hold as it did",
+                                           "glowing" ])
+          ),
+
+          # **The banksman's look at the rope** as it goes past him, so nobody at bank means no
+          # report. Corrosion is inside the strands, which is why the noise is wide.
+          rope_condition: Diagnostic.new(
+            id: :rope_condition, label: "Winding Rope", observer: :banking,
+            source: Sources::Derived.new(:winding_rope, :integrity),
+            filters: [ Filters::Lag.new(4), Filters::Noise.new(0.08, deadband: 0.04),
+                       Filters::Bands.new([ 0.25, 0.5, 0.8 ]) ],
+            display: Displays::Prose.new([ "broken wires all along her", "rusty, and some wires gone",
+                                           "she looks sound", "new" ])
+          ),
+
+          # **The Cornish beam, as the banksman sees it from the bank**: late, and in words.
+          beam_condition: Diagnostic.new(
+            id: :beam_condition, label: "Pump Beam", observer: :banking,
+            source: Sources::Derived.new(:pump_beam, :integrity),
+            filters: [ Filters::Lag.new(6), Filters::Noise.new(0.1, deadband: 0.05),
+                       Filters::Bands.new([ 0.25, 0.5, 0.8 ]) ],
+            display: Displays::Prose.new([ "cracked across the gudgeon", "she groans on the stroke",
+                                           "working sweetly", "new" ])
+          ),
+
+          sheave_heat: Diagnostic.new(
+            id: :sheave_heat, label: "Sheave",
+            source: Sources::Derived.new(:sheave, :temperature_k),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 320.0, 360.0, 400.0 ]) ],
+            display: Displays::Prose.new([ "cool", "warm", "hot to the hand", "smoking" ])
+          ),
+
+          # **What lies between the face and the old workings**, as somebody at the face judges it
+          # from the plans and the water coming off the coal: the barrier left, in metres, banded
+          # hard and noisy. Old plans were wrong, which is how Lofthouse was flooded — and where
+          # there is no water at all the plans say the same as where there is plenty of coal. Read by
+          # the borer, who is the one probing ahead of the face — nobody boring, nobody looking.
+          survey: Diagnostic.new(
+            id: :survey, label: "The Plans", observer: :boring,
+            source: Sources::Field.new(:seepage, :barrier_m),
+            filters: [ Filters::Lag.new(8), Filters::Noise.new(1.0, deadband: 0.5),
+                       Filters::Bands.new([ 1.0, 3.0, 8.0 ]) ],
+            display: Displays::Prose.new([ "water standing in the cut", "the coal is weeping",
+                                           "the plans show old workings near", "forty yards of solid coal" ])
+          ),
+
+          # **Fire stink**: the smell off the waste of coal heating in it, long before anything shows. A
+          # deputy's nose, so it is the timberman's, and it is banded on the waste's own heat.
+          fire_stink: Diagnostic.new(
+            id: :fire_stink, label: "The Waste", observer: :timbering,
+            source: Sources::Derived.new(:gob, :temperature_k),
+            filters: [ Filters::Lag.new(8), Filters::Noise.new(4.0, deadband: 2.0),
+                       Filters::Bands.new([ 320.0, 380.0, 600.0 ]) ],
+            display: Displays::Prose.new([ "sweet", "a musty smell off the waste", "fire stink",
+                                           "smoke coming off the waste" ])
+          ),
+
+          # **The goaf working**: the roof behind the face, heard rather than seen, as what hangs comes
+          # toward the span it will fall at. The timberman is the one listening to the roof.
+          goaf_weight: Diagnostic.new(
+            id: :goaf_weight, label: "The Goaf", observer: :timbering,
+            source: Sources::Field.new(:goaf, :weighting),
+            filters: [ Filters::Lag.new(4), Filters::Noise.new(0.08, deadband: 0.04),
+                       Filters::Bands.new([ 0.5, 0.8, 0.95 ]) ],
+            display: Displays::Prose.new([ "quiet", "creaking", "the goaf is talking", "bumping and cracking" ])
+          ),
+
+          # **What the auger is finding**: the gas in a pocket within its reach, by what comes out of
+          # the holes. Nothing within reach and a pocket nobody has got near read the same — dry holes.
+          # **The shotfirer's word on his holes**: drilling, fired, a misfire left in, digging it out.
+          # Through him, so with nobody at the shot holes nobody is saying.
+          shot_holes: Diagnostic.new(
+            id: :shot_holes, label: "Shot Holes", observer: :shotfiring,
+            source: Sources::Field.new(:shot_hole, :status),
+            display: Displays::Prose.new([ "no shot charged", "drilling and charging",
+                                           "shot fired — coal down", "a misfire in the hole",
+                                           "digging out a misfire" ])
+          ),
+
+          bore_holes: Diagnostic.new(
+            id: :bore_holes, label: "Bore Holes", observer: :boring,
+            source: Sources::Field.new(:bore_line, :found_kg),
+            filters: [ Filters::Lag.new(4), Filters::Noise.new(20.0, deadband: 10.0),
+                       Filters::Bands.new([ 5.0, 100.0, 600.0 ]) ],
+            display: Displays::Prose.new([ "dry holes", "gas singing in the holes", "gas blowing hard from the holes",
+                                           "the auger blown back out of the hole" ])
           ),
 
           # A surveyor's estimate of what is left in the district, and it is a guess.
@@ -308,10 +451,10 @@ module ReactorSim
     register(Mine::TYPE,
              chassis: Mine::CHASSIS.keys,
              assembler: lambda { |chassis, loadout|
-               Mine.assembly_for(chassis || :two_shaft, loadout || {})
+               Mine.assembly_for(chassis || Mine::CHASSIS.keys.first, loadout || {})
              }) do |id:, seed:, time_scale: Mine::DEFAULT_TIME_SCALE, state: nil,
                                                  rngs: nil, content: nil,
-                                                 chassis: :two_shaft, loadout: {},
+                                                 chassis: Mine::CHASSIS.keys.first, loadout: {},
                                                  crew: {}, ground: nil|
       Mine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
                  ground: ground,

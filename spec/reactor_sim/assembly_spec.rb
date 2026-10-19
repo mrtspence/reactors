@@ -244,6 +244,37 @@ RSpec.describe ReactorSim::Assembly do
     end
   end
 
+  # **One fitting shaping another's wiring**, through the spec, under keys its slot names.
+  describe "informs" do
+    def informing
+      reg = registry
+      # The tank labels itself by what it was told, so a test can read what reached its builder.
+      reg.register(:told_tank, kind: :tank, provides: %i[tank]) do |spec|
+        Fragment.new(nodes: [ Nodes::Vessel.new(id: :tank, volume_m3: 1.0, label: spec.fetch(:bore, :narrow).to_s) ])
+      end
+      reg.register(:wide_pipe, kind: :pipe, informs: { bore: :wide }) { |_spec| Fragment.empty }
+      reg.register(:stray_pipe, kind: :pipe, informs: { colour: :red }) { |_spec| Fragment.empty }
+      reg
+    end
+
+    def informed(pipe, informs: %i[bore])
+      slots = [ Slot.new(id: :tank, accepts: :tank, default: :told_tank),
+                Slot.new(id: :pipe, accepts: :pipe, default: pipe, informs: informs) ]
+      described_class.new(slots: slots, registry: informing)
+    end
+
+    def tank_label(assembly) = assembly.fragment.nodes.find { |n| n.id == :tank }.label
+
+    it "reaches the other builders, whichever slot is built first" do
+      expect(tank_label(informed(:wide_pipe))).to eq("wide")
+      expect(tank_label(informed(nil))).to eq("narrow")
+    end
+
+    it "refuses a key the fitting's slot does not allow" do
+      expect(informed(:stray_pipe).verdict.errors).to include(a_string_matching(/informs :colour/))
+    end
+  end
+
   # The mechanism pointed at the machine it was built for.
   describe "the real steam engine" do
     def spec = SteamEngine::CHASSIS.fetch(:high_pressure)

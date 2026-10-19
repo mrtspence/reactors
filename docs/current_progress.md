@@ -87,6 +87,17 @@ Tailwind standalone, importmap. Entirely Node-free.
 
 Verified end to end: same-key records land on one partition and are consumed in order.
 
+### Developer tools
+
+**The dev engine** (`Operations::DevEngine`): `REACTOR_DEV_ENGINE=1 bin/dev` ropes the pit to an
+untended shaft held at 22 rad/s, at up to `setting × 10^range` watts — 1 kW to 1 GW — off two
+levers on its own console. Development and test only, a harness rather than a blueprint. The
+steam engine stays in the match on its own mill. **The rope, not the engine, is the ceiling**: at
+the line shaft's conductance (5.4 kN·m ÷ 22 rad/s) and a far end held at 22 rad/s, at most
+`k·ω²/4` ≈ 30 kW crosses, with the line shaft dragged down to half speed — as it does from the
+steam engine at working speed. An idle pit draws about 16 kW at 19 rad/s. Past ~30 kW a higher setting changes
+nothing on this rope; the range is there for a stiffer coupling or another machine.
+
 ### Specs
 
 `ls spec/reactor_sim/` is the truth; at the time of writing: `assembly`, `conservation`,
@@ -325,6 +336,323 @@ of feedback is folded in. What remains is sequenced in
 Still owed on the mine itself: a separate man-riding shaft, buoyancy inside a volume so firedamp
 collects in the roof, and the advance shift as a fitting rather than a chassis constant.
 
+**Next operation: an open-pit iron ore mine.** Research only, awaiting review:
+[`design_sketches/open-pit-iron-research.md`](design_sketches/open-pit-iron-research.md). Its §6.3
+lists the decisions a design sketch needs first (mobile steam against the line-shaft rule,
+weather, ore grade, chassis geography, ore choice, rail scope, contract stripping).
+
+### Mine accidents — four units, designed one draft at a time
+
+Twenty accident modalities, all greenlit, in four units. **Only units 1 and 2 are designed**, in
+[`design_sketches/mine-accidents-winding.md`](design_sketches/mine-accidents-winding.md) (third
+revision; every review question decided, recorded in its §5). Units 3
+and 4 each get their own draft once the unit before has landed; §6 of that file lists what each
+needs. **No beam engine**: its hazards come from shaft-top gear (a *bob*) on the mine's side of the
+coupling, and a beam engine stays available as a later blueprint. **No steam-engine work in this
+pass** — see "After the mine pass" below.
+
+**Specs in all four units are thin slices** — zero ticks where the claim is a function, ≤ 20 from a
+constructed state where it is behaviour, and anything over 50 justified in the spec.
+
+**Unit 1 — prerequisites.** Built; two tuning items open.
+
+- [x] **P1 Two-way coupling.** Both ends of a coupling are rope ends (`Concerns::Roped`) that hear
+  each other's last-tick speed and clutch at the barrier: a driver below the far end, a brake above
+  it. **Any load can be sold** — a `Load` a coupling names brakes by the rope instead of its curve.
+  `ratio:` gears it; a rope past either end's `I/dt` is refused because it rings (measured). A shed
+  load reaches the engine, a surge reaches the mine, and an overrunning mine drives the engine.
+- [ ] **Rebalance the mine's power up, right after P1.** Measured: the mine draws ~16 kW at
+  working speed (~29 kW with the cage called) against ~495 kW from a working engine. Once a coupled
+  engine's sold load brakes by the rope rather than its mill curve, it feels only the mine, so at
+  today's settings it runs away within ~40 ticks — and a load rejection matters only if the mine is
+  a real share of the engine's load. Scale the line shaft and the fan, pump and winder duties until
+  the mine is most of a working engine's load; colliery winding and pumping engines were hundreds
+  of kW. Until then a coupled dev match needs its throttle nearly closed.
+- [x] **P2 The hoist.** `Nodes::Hoist` (a drum and two balanced cages) and `Nodes::Brake` (sticks
+  while it can hold, slips past it) on the cage, driven off the line shaft through **geared,
+  clutched drive links** — forward, and a reverser. **Gravity is a torque source inside the drive
+  solve**, booked as it is done; applied after the solve, no brake could have held a cage. The
+  player names a destination and the engineman (`Mine::Winding`, a `governor:`) works the clutches
+  and brake in phase 0; unattended, the levers hold where they were left. Riders board at a landing,
+  ride `via` the drum, and step off a dead cage. Measured: a ticketed engineman stops at 89.85 m
+  against a 90 m landing; a cage left driving runs on through it.
+  - **The man engine's stroke phase moved to W7**, its only caller.
+  - **Two figures for W1 to tune**: the engineman believes in a brake of 2 m/s² against a real
+    ~9.5 m/s², so even an unticketed hand stops short today; and the cage's cost is small — 280 kg
+    of hands moves the line shaft by 0.04% — until the mine is rebalanced and coal rides the hoist.
+- [x] **P3 Ignition as a property of the room.** `ignition(state, levers)` per place, like
+  `ambient_tags`; the candle migrated onto it as its first caller. Verified behaviour-neutral:
+  a gassy candle-lit pit run through ignition, explosion and rupture matches `HEAD` node for node
+  under the canonical digest, the district's `heater_engaged` event being the one intended loss.
+- [x] **P4 Mishaps, and the accident pick.** A peril may name a machine consequence, applied by
+  next tick's `stress` from the `:minion_mishap` event — general, for every operation. The cause
+  is now a pick weighted by this tick's spend, perils declare `rate:` apart from `severity:`, and
+  `draw_fates` throws a sixth, `peril:`. A pending mishap waits in `state[:mishaps]`, not in the
+  events, because events are not snapshotted.
+- [ ] **Retune the haulage road's perils with `rate:`** — a frequent, mild `struck_by_tub` and a
+  rare, deadly `caught_in_haulage`. A short sweep, not a guess.
+
+**Unit 2 — the shaft.** Built; tuning items open.
+
+- [x] S0 The single-shaft frame as the default — one `Shaft` node every way up and down runs
+  `through:`, a brattice slot whose tiers (canvas, creosoted canvas, timber, concrete) differ in
+  leakage only; `two_shaft` is the upgrade and brings the Upcast Ladders as a second way out.
+  Routing is shortest-distance and keyed by the closed set.
+- [x] W1 Overwind and underwind — depth indicator, detaching hook, overwind trip; the ends of the
+  shaft are `caught` / `overwound` / `crashed`; `riders:` on `endangers:`
+- [ ] **Tune the engineman's believed brake** (2 m/s²) against the real one (~9.5), and re-check
+  that an unticketed hand overwinds sometimes. Tuning pass.
+- [x] W2 Brake failure and runaway descent — fade, glazing, rod fatigue to a parted rod
+- [x] W3 Rope failure and the sheave — `Nodes::Rope` (bending, corrosion by the seepage's
+  `ground`, a hot sheave, kinks), the sheave as a `Bearing` with a greasing round, finite
+  recapping, re-roping from a `SpareRope` blueprint, catches on the hooked tiers. **No `frayed`
+  rung**: the rope report (the banksman's word) is the warning
+- [x] W4 Hang-ups, slack rope, things in the shaft — a tub the banksman lets in lodges at 25 m,
+  closes every way through, hangs a descending cage while the drum pays out slack, and drops it
+  its slack when it gives; the snatch is `T = mg + √((mg)² + 2smgh)`. A slack-rope gauge; shaft
+  gates as the bank's safety equipment
+- [x] W5 Overload — a rated cage; a marshal at the landing caps boarding, nobody there does not.
+  Stall and roll-back are P2's
+- [x] W6 Signalling — banksman and onsetter posts, boarding takes three seconds, the engineman
+  winds on the marshal's bell, a slipping marshal rings a false ready, winding on a boarding rider
+  crushes them; the signal bell sparks at the pit bottom, which can now burn firedamp
+- [x] W7 The man engine — `ManEngine` with a strap worn per stroke and per rider, `torn_out` on an
+  overspeed and `parted` worn through, a `misstep` peril scaling with strokes, catches by mode,
+  the rod wrecking the shaft and the brattice and leaving the line shaft
+- [x] W8 A rope parting on a laden wind runs the supplier up through the coupling
+- [x] The resistance pass over `kit.rb`: a pit helmet (impact, rockfall, a little crush) and a
+  safety belt (falls)
+- [ ] **Tune unit 2's first guesses** in the tuning pass: rope life (~4 h of continuous winding),
+  recap and re-rope rates, the sheave's dry equilibrium (~400 K, estimated, not re-measured), the
+  `tub_into_shaft` and `misstep` rates per shift, the strap's wear, the bell's spark
+- [ ] **Not built, deferred**: a tub that falls onto a cage is a hazard to its riders (TODO on
+  `Mine::Shaft#suffer` — needs a mishap that can raise a hazard); a snatch the rope survives jolts
+  nobody (only a parted rope hurts); a "ready to wind" panel instrument (the bell is internal);
+  the man engine's stroke is speed-squared, not a modelled reciprocating phase
+
+**Unit 3 — non-winding hazards on P1–P4.** Reviewed and split:
+[`design_sketches/mine-accidents-unit3.md`](design_sketches/mine-accidents-unit3.md), decisions in
+its §4.
+
+*Unit 3a — designed, ready to build:*
+
+- [x] **C0 Coal on the hoist** — a deck on the cage, loaded by the onsetter and emptied by the
+  banksman, each only while the cage stands at their landing; the `Winder` conduit and the
+  `winding` lever are gone and the engineman's `man_winding` is the one certificated post; with
+  `coal_winding` on he shuttles, men always first; the cage tiers moved to the `winder` slot, the
+  steam whim is a **kibble** men ride at a peril, and the man engine became its own `:man_engine`
+  with a `rods` lever. Measured on the spec rig: a cage raises 954 kg about every 275 s
+  (3.5 kg/s), climbing laden at 1.8 m/s; a kibble 291 kg every ~165 s (1.75 kg/s)
+  - **Winding coal now takes three posts** — engineman, onsetter, banksman. The old coal winder
+    ran unattended, as a valve
+  - **Two things the load forced**: the winding clutches are 3×10⁴ (at 4×10³ a full deck ran the
+    cage backwards into the sump) and the overwind trip cuts the drive (`DriveLink#cut_by`) as
+    well as braking, since a stiff clutch out-pulls the brake; the engineman winds by speed,
+    feathering the clutch, because at that stiffness a fixed clutch hunted round the landing
+  - **A stale dev loadout** naming `cage_winder`, or a cage in `manriding`, falls back to the
+    slot default rather than refusing to boot
+- [ ] **Tune C0** in the tuning pass: the landings (12 kg/s each end is most of a cycle), deck
+  sizes, the kibble peril's rate, and the cage's draw on the line shaft against the pending mine
+  power rebalance — a laden wind pulls the spec rig's line shaft from 18.8 to 13.6 rad/s
+- [x] 14 Doors and trappers — a `Door` (a `Leak`, like the brattice) the haulage pushes open, an
+  optional trapper station `diminutive` hands are better at, blown out by the district's rupture;
+  self-closing doors and an air lock as tiers. Open, it cuts district air by a third (1.48 against
+  2.21 kg/tick, worked single shaft). **The starting pit's door stands open unless somebody traps
+  it**, which every mine spec that runs the haulage now feels
+- [x] 15 Ignition beyond the candle — anybody carrying `open_flame` is an igniter in their room;
+  a gauze sconce passes flame past 2.3 m/s of draught (the Guibal makes 2.54–3.03, the waddle
+  1.84–2.02, door shut); the coal cutter sparks while cutting
+- [x] 9 Overspeed downstream — the fan `burst`s and the pump `main_burst`s past their ratio of
+  rated line-shaft speed, dynamo lamps blow over-run, a worn part sooner; an `overspeed_trip`
+  fitting throws the line shaft's clutch out at 1.25× and sheds the mine as a load rejection
+- [x] 10 The restart slug — specced as it emerges (9.5% by mass, lit at tick 122 on restart, not
+  with the fan stopped, not with the lights withdrawn). No new instrument: the flame cap is the
+  reading before a restart
+- [ ] **Not built in 3a, deferred**: a trapper who slips leaving the door open (a node cannot see a
+  slip); a self-closing door jamming; a hand-carried Davy lamp failing in a draught (only the wall
+  sconces read it); the air lock is indistinguishable from a self-closing door at hand-putting
+  traffic and wants a heavier haulage tier to matter
+- [ ] **Tune 3b so far** in the tuning pass: the Cornish beam's `STROKE_PER_S` (fatigue alone takes
+  ~28 h); the rope tiers' figures (hemp 110 kN / 1.1 kg/m, iron 400 / 5.5, steel 1000 / 5.8 —
+  checked against period tables); the headframe's 4 t of timber, 10% share of the intake and 30%
+  burnt-through; the groove's capstan figure. **A dry journal now seizes 27 s after wiping** with
+  metal-on-metal rubbing — real, and a short warning rung; decide whether it needs a better gauge
+  rather than slower physics. Outbursts: the pocket figures (median 20 t of coal, σ 1.0, 10 m³ of
+  firedamp a tonne), **the airborne dust share (1% of the coal thrown) is a guess**, the 60 kg/s
+  release, the auger's 4 m reach and 0.25 kg/s draw. Goaf: spans (first 6 m, then 3 m, σ 0.4), the
+  flush (×150 for 20 s) and packing at about half a hewer's advance. The gob: the 25% with nothing
+  heating, the zone's 3 t median, the 65-minute median time to firing (σ 0.4), the 50 kW design heat
+  and 18 kg of air it starts on (what the trickle settles to, measured; seven draws fire within 12%
+  of their drawn time), `REACTIVITY` 10, sealing at about two hours, breaking out at 1000 K. **Coal's
+  CO pathway also applies on the grate**: the engine is identical at steady working (1010 K, 608 kPa,
+  160 rpm, 455 kW, no CO) and makes CO only from an over-fed bed, so the engine rig's fire bed was
+  retaken from the running engine
+- [ ] **Tune 3a** in the tuning pass: the door's open and shut rates, the gauze's 2.3 m/s, the
+  burst ratios (fan 1.5, pump 1.4, lamps 1.4) and the trip's 1.25, the bell spark's size (the hand
+  flame and sconces are a flame cap's worth now, which is what they burn in lean gas)
+
+*Unit 3b — designed and reviewed in [`design_sketches/mine-accidents-unit3b.md`](design_sketches/mine-accidents-unit3b.md).
+In build order:*
+
+- [x] 18 Inundation that kills — `Breath` on the gas phase only, drowning as a depth mark on the
+  sump, a flooded pit bottom closing the ways through it, the survey reading; liquid peat deferred.
+  **Revised**: the water is drawn per match like the gas pockets (`Mine::Ahead`), at a real depth
+  into the face, and a body of it runs out
+- [x] 11 The Cornish beam — the Cornish set's driven element, a load on the line shaft that works
+  the pump and, broken, wrecks the shaft (Hartley)
+- [x] **Rope tiers** — hemp, iron wire and steel wire ropes as a slot; the rope's own weight in its
+  tension and on the drum; the sheave loaded by the rope
+- [x] 12 Fire on the intake — self-ignition (`autoignition_k`, `Vessel#hot_spot`); wiped bearings
+  rubbing metal on metal; **a seized sheave drags the rope instead of locking the drum** (reverses
+  W3); a timber/iron headframe slot in parallel with the downcast; a reversible fan tier. A
+  hand-carried Davy lamp failing in a draught stays deferred: it needs a draught per place, and only
+  the district's sconces measure one
+- [x] *Playtest checkpoint* (2026-10-15). Burns in the district within minutes, and two men who
+  never reached the cage. Replayed from the seed and the command log: **not the gob and not the
+  winder.** The heating waste started holding its cold gas charge at 670 K — 2.3 atmospheres — and
+  blew 200 kg of hot gas into the roads (it now starts at the roads' pressure); and a naked light in
+  1% gas burnt ~640 kW continuously, because a flame outside its range kept its lit mass across
+  ticks and the candle seeds were a thousand times a flame cap's (it now burns what it lights, at a
+  flame cap's rate). The men were walking: 200 m at a day-labourer's 0.64 m/s, stood down by the
+  burns 37 m short. Explosions also turned out to make products set by the tick grid, and nothing
+  cooled them — both answered by the next item
+- [x] **Shifts and the pit bottom refuge** — [`design_sketches/roadway-shift.md`](design_sketches/roadway-shift.md).
+  Who starts underground is fitted, not the frame's: three at the face and three at the pit
+  bottom by default, five of either with the back shift and the underground stable; and a refuge
+  at the pit bottom with room for one
+- [x] **Winding signals** — [`design_sketches/winding-signals.md`](design_sketches/winding-signals.md).
+  One plain-words gauge on the panel saying what the cage is doing and what it is waiting on: a
+  fault, why it is not moving, the bell, men getting in, a deck being worked, men waiting across
+  the shaft
+- [x] **Prompt reactions and walls** — [`design_sketches/prompt-reactions.md`](design_sketches/prompt-reactions.md).
+  - [x] A: `Concerns::PromptReaction`, `:deflagration` on firedamp and coal dust, `:explosion`.
+    Products by the mixture's own air whatever the spark; a gas front takes the dust with it
+  - [x] B: `Nodes::Wall` — rock (`coal_measures`, in the material catalogue, which now carries
+    conductivity throughout) with its own temperature on the district and pit bottom; hot strata
+    as a `hot_spot:`. The `:explosion` is now the blast: it hurts by its joules and wrecks the door
+    and half a sound roadway, because a walled district sheds its heat before it could wear
+    through. The held specs re-measured on the new physics
+- [ ] **Tune the walls and the blast**: set against fire gas in a rough mine drift — a 30 W/m²K
+  film (measured 25–50), a dust-laden blast's emissivity of 0.4, rough rock at twice a smooth
+  bore's face — a district blast's gas is at 559 K five seconds on and 338 K at twenty. Still
+  first figures: the 2 cm skin, the fixed emissivity (a seam), the blast's 3 GJ reference and its
+  half a roadway. **Gas is not cooled in transit**: the main road is a conduit with no rock and no
+  residence, so a blast's gas reaches the pit bottom near 1,300 K for a tick or two
+- [x] 16 Sudden outburst — 0–2 hidden pockets drawn with the ground, at random depths into the
+  face and of random, heavy-tailed size; the boring-ahead station, which also reads the plans
+- [x] 17 Goaf falls — falls at spans drawn at `initial_state` (log-normal, the first weighting
+  largest), the flush and the windblast; packing; the goaf's working as a gauge
+- [x] 13 Gob fire — an inherited, drawn waste already part-way to firing (`Mine::Gob`);
+  `coal_oxidation`; a trickle through the waste from the intake to the face; fire stink; sealing; a
+  lit gob makes CO, breaks out at the face and fires the district's gas (firedamp `autoignition_k`)
+
+**Follow-up after the accident buildout — staffing and throughput.** Raised 2026-10-14, design
+deferred until unit 3b lands. The accident depths (water and gas 2–12 m in, at 4.7 t a metre) are
+set against this pass, not against today's single hewer.
+
+- [ ] **Several hewers**: one hewing station today; 3–5 hewers depending on upgrades. Decide the
+  shape: numbered stations (Hewer 1, Hewer 2…), one each, or one station with a headcount
+  (`Hewers (3)`). `ControlPoint` already has `capacity:` — refused past it in `assign_minion` —
+  but only one station sets it; nil means *unlimited*, and how several people's effort combines at
+  one station has to be settled before relying on it
+- [ ] **Every station gated to a headcount** — a pass over all stations so none is unlimited by
+  omission
+- [ ] **Putters, onsetter and banksman scale** with the face: more hewers needs more putting and
+  more loading at the shaft
+- [ ] **Better tubs as blueprints**, scaling the putters' throughput
+- [ ] **Blasting** as a powerful, dangerous way to raise output — unit 4's shotfiring (item 20)
+
+**Unit 4 — new production tiers.** Drafted for review in
+[`design_sketches/mine-accidents-unit4.md`](design_sketches/mine-accidents-unit4.md).
+
+- [x] 19 Rope haulage, and runaway tubs — a `haulage` slot (hand putting, rope haulage at four
+  times the rate off the line shaft), the road rising 12 m to the district, `HaulageRope` worn by
+  traffic and parted by a set's snatch or a set breaking away, and the runaway as an `along:`
+  hazard: by where on the road somebody is, manholes for a near miss, the crush well down it; the
+  haulage stopped until spliced. **Two new dice per person** (`road:`, `caught:`), which moved
+  every person's stream — `peril_spec`'s pairing examples re-seeded. **Tune**: the set's 2.6 t, the
+  snatch's 8×, the rope's 60 kN and six hours, the splice's 600 s, the runaway's weight 3.0 and its
+  crush (0.5, ×2), the breakaway rate 0.08, the haulage engine's lift-equivalent of 10 m.
+  **Not built**: a runaway's coal spilled at the pit bottom (the set's coal is in a conduit, which
+  holds nothing). **The runaway catch**, added in the completeness pass: a `runaway_catch` slot
+  (catch points at 0.15 of the way down holding 0.8, drags at 0.05 holding 0.95) that informs
+  the rope haulage, so a runaway reaches `1 − holds` of its share below the catch and spares the
+  door. **Tune**: both catches' `at` and `holds`
+- [x] 20 Shotfiring — the `blasting` slot (black powder, permitted explosives), a magazine at bank,
+  a ticketed shotfirer at the shot holes; a tonne and a half a shot, its fumes and dust. Blown-out
+  shots flash in the room; a misfire is judged — dug out all or nothing, or left live in the face
+  for the hewer to strike. **Tune**: the shot's 900 s and the clearing's 1,200 s, the peril rates
+  (blow-out 0.6 / 0.05, misfire 0.4, premature 0.12, set off 0.6, struck 1.2), the misjudgement's
+  0.1 and 0.8, the blow-out flame (0.4 kg/s, 4 MW for a tick), a charge of 0.5 kg
+- [x] Furnace ventilation — a `furnace` slot beside the fan (fire basket, brick furnace, double
+  furnace) and a `dumb_drift` slot.
+  - The furnace's flue warms the upcast foot, now a fixture in both frames, and the upcast's
+    90 m of stack draws by buoyancy. Unpowered it draws 11× a cold pit, and with the fan it adds
+    about 22% to the air.
+  - The return feeds it, so return gas in its range fires there. The dumb drift feeds it intake
+    through a regulator, and tells it so by `informs:`, the new slot mechanism.
+  - **Flame fronts now travel**: a deflagration lights the in-range mixture of every holder
+    sharing a gas path with it next tick, so a furnace firing its return fires the district.
+  - **Tune**: the tiers' stoking rates (0.015 / 0.05 / 0.10 kg/s) and bores, the dumb drift's
+    regulator (a fifth of the bore), the furnace's heat capacities. **Not built**: a furnace
+    drift as a place of its own (the furnaceman works at the pit bottom).
+- [x] Water sprays on the cutter — a `cutter_sprays` slot. A small pump off the line shaft lifts
+  sump water to the face and it drains back. While the face is fully wet the cutter's picks offer
+  no spark at all, and 0.7 of the dust is laid; a sump pumped bare leaves only the seepage's
+  trickle, which is no protection. The spark seeds (cutter, bell) are now a spark's 1e-7 kg/s.
+  **Tune**: the spray's 0.4 kg/s at three bar, full wetting at half its rating, the dust laid
+  (0.7). **Not built**: the design's "much later" ignition under sprays — a seed of any size fires
+  band gas, so the quench is all or nothing
+- [x] Conveyors, and belt fires on the intake — two more `haulage` tiers (a belt conveyor, and a
+  fire-resistant one), the belt carrying with nobody on the road and its feed a lever. Fed past
+  what the drum grips — less with water on the pit bottom — it stalls, and the drum heats under it.
+  The drum lights the spillage packed round the drive head (a 25 mm layer's 483 K), and the
+  burning spillage lights the belt (672 K, the Bureau of Mines' figure). The belt road is a second
+  intake, so the smoke and CO go inbye. A belt attendant shovels the spillage back and reads the
+  drum. Fitting a belt raises the pit's air about 8%, as a new road would. **Tune**: the drum's
+  30 kg/s grip and the loading point's 40, the wet-grip loss of 0.6, the spillage's 0.2% of
+  traffic and the attendant's 0.3 kg/s, the belt road's half-a-main-road conductance, the belt's
+  4 t and 28 MJ/kg. The drum is real figures, not tuning: 11.5 kN of slip at 2 m/s (23 kW), a
+  55 kg shell (2.7×10⁴ J/K), 48 W/K, about 8 minutes from a stall to the spillage lighting in the
+  spec rig. **Not built**: a belt wetted by anything but the sump, a torn or jammed belt, and a
+  deposit whose ignition point falls as it thickens
+
+**Last — brattices and stoppings as hazards.** Design deferred to the end, because each tier's
+character is an interaction with something built earlier.
+
+- [ ] What each tier does when it comes down — canvas barely obstructs, concrete is devastating —
+  and when there is a fire — creosoted canvas is a fire load, timber burns, concrete does not.
+  Meets the shaft node's obstructions, roof and heading collapses, and fire on the intake; the
+  same tiers then apply to roadway stoppings
+
+**Found during the mine pass, outside it.**
+
+- [ ] **Parts are not scoped to an operation.** They are registered by kind only, so the outfitting
+  screen offers the mine's Lamp Cabin and Pit Head Baths in the steam engine's quarters slot (both
+  are `crew_quarters`), and fitting one refuses to build. Wants an owning operation on the part,
+  read by `Outfitting#available` and the hazard walk in `injury_spec`.
+- [ ] **Hot-spot bodies, when a caller needs them** (`design_sketches/hot-spots.md` §4): `heats:`
+  on a heat source, so a `Bearing` books its drag into a named node, and `behind:` on
+  `Nodes::Wall`, so a skin conducts into a body rather than to the earth. The first candidate is
+  the headframe, whose timber reads the sheave journal's own temperature where the bearers sit
+  under the cooler housing. That abstraction is good enough today, so this is deferred.
+- [ ] **Split `tick.rb`, much later.** It is past 1,800 lines and most of it is pure functions over
+  the frozen state — routing and riding, the marshal and boarding rules, mishaps, ignition sources,
+  the drive bookkeeping — that move out into modules with no behaviour change. Not part of the mine
+  pass.
+- [ ] **Malice, much later.** A minion who does the harm on purpose: a demon who is simply
+  capricious, a dwarf and an elf on one shift without the diversity training. Comedy and risk
+  management at once. Wants a list of hazards a person can cause deliberately, aimed at somebody
+  rather than spent by chance; the first is the marshal's **false ready** (W6), rung to catch a
+  particular rider boarding. Not part of the mine pass.
+
+**After the mine pass — the steam engine.**
+
+- [ ] A **governor**: P1 makes a shed load a way to burst the engine's wheel, and until this lands
+  the operator's hands are the only answer. Expect coupled playtests to burst more wheels than
+  they will afterwards; that is not a balance finding.
+- [ ] A **beam engine** as a later blueprint, if the engine leaping its own moorings is wanted back.
+
 ### The suite's shape changed: construct the state, do not wait for it
 
 **Specs do not wait for ticks any more.** State is a plain hash and the engine is deterministic, so
@@ -354,7 +682,7 @@ with the same claims and several that are now stronger:
 
 | Was | Now |
 |---|---|
-| `mine_tech_spec`'s inundation: 6 × 12,000 ticks | a part-worn fissure, 150 ticks |
+| `mine_tech_spec`'s inundation: 6 × 12,000 ticks | old workings seeded a hand's breadth ahead of the face, 150 ticks |
 | `blackdamp_spec`'s lamp warning: a 120-step degradation loop | a concentration sweep — the lamp warns at 4% while the air is still breathable at 0.9644 |
 | `dust_spec`'s stone dusting: 8,000-tick ignitions | the whole suppression curve — 1963 K bare, 733 K at 130 kg, **293 K and nothing fired** at 400 |
 | `roof_spec`'s gradient: 6,000 ticks to a fall | `integrity` after 200 — 1.000 / 0.911 / 0.821 |
@@ -371,23 +699,21 @@ and reframed: it demanded that 20–90% of the gas survive, which it does not at
   working concentration and see which side of `Breath::SAFE` each fan settles it on. On the
   gassiest ground the waddle lands at 0.92479 and the Guibal at 0.93081.
 - **A rupture or a roof fall is erosion, not a bang.** Seeding a part-worn part tests the failure;
-  the erosion rate belongs to the node that owns it (`Inrush#stress_per_second`, `Roadway`).
+  the erosion rate belongs to the node that owns it (`Roadway`). An inrush is positional — the face
+  reaching water — so its spec seeds the water rather than the wear.
 
 `slip_spec` is converted too, and it needed neither a constructed state nor a long sample — it
 needed **two things that were simply wrong**. Its 3,000-tick settle bought nothing (`:winding` is a
 bank post and the shift starts at bank; all it did was let fatigue drift, which is a different
 experiment) and its lever reversed on a **400-tick cycle**, so a sample shorter than that never
 moved the lever and `target` only ever took one value. At a 50-tick cycle, 400 ticks of sample:
-12 examples in 49 s, up from 10 examples in minutes. The extra two came free — a `boneheaded: 1.0`
-hand fumbles a plain valve 13 times in 200 ticks where the 0.5 kobold fumbles it not at all, so the
-gate demonstrably reads the tag's **level** and not its presence.
+12 examples in 49 s, up from 10 examples in minutes. The extra two came free, and one of them is
+that the gate reads the tag's **level** and not its presence — now through `Minion#daftness`, the
+tag cubed, so a 1.0 hand slips every five seconds and a 0.3 one every three minutes.
 
-**Still on the old pattern: `peril_spec` only.** Seeding a thin `margin` reaches the first accident
-in 200 ticks (a poor hand at `margin: 0.05` takes three), so the lever exists — but its
-rate-comparison examples ("saves more often the better it is", "never saves everybody") are
-*statistical*, and a sample short enough to be fast produced no accidents at all for the ogre and
-safety-gear fixtures. **Size the sample before converting it**; a half-converted version would
-leave those claims weaker than they are now.
+**`peril_spec` is converted too.** Its rate comparisons are asserted on `accident_avoided?` and
+`Blunder.pick` as functions at zero ticks, and its shifts are 200 ticks with the posted hands
+seeded at `margin: 0.05`, which reaches the crossing on tick 131.
 
 > **Nothing in the game resists `crush`, `impact`, `rockfall` or `fall`.** The convention is
 > there — a hazard tag `:x` is resisted by a minion tag `:x_resistance` — and no kit declares
@@ -590,11 +916,14 @@ no kit **0 kg**, crude pick and hand lamp 167 kg, proper pick and Davy lamp 298 
 items back it: `miners_tools` and the `davy_lamp`, which is the one that carries **no
 `open_flame`** — the entire point of it.
 
-**Inundation** is `Mine::Inrush`, a fissure that gives way on how hard the face is being driven,
-so a district nobody is working never breaks into anything. Sized for the inrush and throttled
-down while sound, because a `derates: { throughput: }` above 1.0 cannot beat the narrowest port
-on the path. At 18 kg/s it overwhelms a sinking set's 14 and is held by a Cornish set's 26.
-Measured: breaks through at t+7473 driving flat out, sump takes 12.5 tonnes.
+**Inundation** is `Mine::Inrush`, a fissure that gives way when the face reaches water — old
+workings drawn per match (`Mine::Ahead`: none, one or two, 2–12 m in, 20–80 t each), so a
+district nobody is working never breaks into anything, and many never have anything to break into.
+The coal weeps within 3 m. Sized for the inrush and throttled down while sound, because a
+`derates: { throughput: }` above 1.0 cannot beat the narrowest port on the path. At 18 kg/s it
+overwhelms a sinking set's 14 and is held by a Cornish set's 26, until the body's tonnes are
+through. **At 4.7 t a metre a hand-hewn face advances about half a metre an hour** (0.6 kg/s), so
+with hand picks the nearest water is hours away; a coal cutter is what brings it within a session.
 
 **Cutting is a slot** — `hand_picks` at 1.4 kg/s against `coal_cutter` at 5.6, and the cutter's
 real value is that it does not tire (`exertion` 1.2e-3 → 3.0e-4), so the seat it frees is worth
@@ -2128,6 +2457,18 @@ documented where they matter and collected here because the collection is worth 
   produces silently vanish. Build clients lazily, memoised per process id.
 - **Never close an rdkafka handle inside a signal trap.** FFI plus a background polling thread
   means it deadlocks. A handler may only set a flag.
+- **A smaller spark is no safer in band gas.** A deflagration triggers on any lit seed above
+  1e-12 kg, so scaling an igniter down by ten fires a mixture in range on the same tick. A
+  protection against ignition has to remove the igniter, as the cutter sprays' quench does, never
+  shrink it.
+- **A small vessel with a fire in it reaches flame temperature unless it carries its structure.**
+  A belt's drive head with 1×10³ J/K ran a burning deposit to 2,150 K, coal's adiabatic flame
+  temperature, and would have lit anything near it. Give a room that can burn the heat capacity of
+  what it is built of (a drive frame's half-tonne of steel), or its rock as a `Nodes::Wall`.
+- **A room that cannot pass a front on fires itself over and over.** Before fronts travelled, a
+  furnace fed by a return in its range went off every nine seconds, refilling from the district,
+  while the district (full of the same mixture) never lit. If an explosion repeats on a short
+  period, look for the neighbour it should have reached.
 
 ---
 

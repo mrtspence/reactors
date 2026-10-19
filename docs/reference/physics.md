@@ -84,6 +84,18 @@ That approximation buys a lot: advection becomes exactly correct, because a parc
 carries precisely the energy its temperature implies. Things needing genuinely distinct
 temperatures are **distinct nodes**.
 
+**A room's walls are the commonest case.** The gas in a roadway and the rock round it are
+different temperatures — a blast leaves the one at 2,400 K and the other barely warm — so the rock
+is a `Nodes::Wall`: a skin of its material, linked to the gas by a convective film and the hot
+gas's radiation, and backed by conduction into the strata, which are the ambient reservoir. One
+skin has both limits a semi-infinite solid has, absorbing a blast at the face and passing heat on
+with a time constant of `ρ c skin² / k`. Lumped with the gas instead, the rock would be at the
+gas's temperature — 2,400 K walls, and a district that stayed hot for minutes. The mine's figures
+are fire gas against rough rock: a 30 W/m²K film (measured runs 25–50), a dust-laden blast's
+emissivity of 0.4, and twice a smooth bore's face. Measured on a district explosion: 2,700 K at the
+flash, 559 K five seconds on, 338 K at twenty — so whoever the blast spares is left to the
+afterdamp rather than roasted.
+
 `rebalance(state, content)` restores the single-temperature invariant after anything changes
 the mix. `add_joules` calls it for you. The engine calls it after advection, reactions and
 phase change — you rarely need to.
@@ -211,6 +223,75 @@ the diagonal, because a reservoir at potential zero adds conductance and no righ
 > genuinely means "this has stopped turning" declares a large multiple of it instead, which is how
 > `Nodes::Bearing` expresses seizure.
 
+### Gears, clutches, sources and a brake that sticks
+
+A `DriveLink` may be geared and clutched — what lets a drum be driven both ways off a line shaft
+that turns one way. Across a gear `g`, `b` gains `τ·dt` and `a` loses `g·τ·dt`: momentum is not
+conserved across a gear and is not meant to be; energy is, and the slip `τ·(g·ω_a − ω_b)` is never
+negative. **A clutch carries torque only as stiffness × slip**, so its stiffness has to be sized for
+the load: the mine's winding clutches are 3×10⁴ N·m·s/rad because a tonne of coal on the deck is
+14 kN·m at the drum, and at 4×10³ the slip that needed was more than the drum's rated speed — the
+laden cage ran backwards into the sump. `cut_by:` names a node that can throw a clutch out whatever
+its lever says, which is how an overwind trip cuts the drive as well as braking.
+
+**A constant torque on a body is a source inside the solve** (`drive_torque`, passed as
+`sources:`), never an impulse applied after it. Applied afterwards, a brake's drag — solved
+first, against a body at rest — can never hold the load: the next tick's drag removes the impulse
+and gravity re-adds it, so a "held" cage creeps at one impulse per tick.
+
+**A constant-torque brake sticks, then slips** (`Nodes::Brake`). Linearised as `τ/ω` it has no
+torque at rest, so while the shaft is all but stopped and its capacity exceeds the torque it is
+holding against it declares a lock conductance of `I/dt × LOCK_MULTIPLE`; past that it slips at
+its capacity. The torque it holds against is read from the shaft it `supports:`, as of last tick.
+
+### A winding rope's tension, and the snatch
+
+A winding rope (`Nodes::Rope`) is not in the drive solve: the hoist's gravity source carries the
+load, and the rope only **reads** what it is carrying, off the drum as of last tick. Riding, that is
+`(cage + cargo)·(g + |a|)`. A cage **hung** on something in the shaft is off the rope, so it carries
+nothing while the drum pays out slack; when the hang gives, the cage falls its slack `h` onto a
+rope of stiffness `s`, and the peak is
+
+```
+T = mg + √((mg)² + 2·s·mg·h)
+```
+
+— exactly twice the static load at no slack and rising with its root. At 8×10⁵ N/m and a 1,650 kg
+cage that is 32 kN with no slack, 90 kN at 0.2 m and 178 kN at a metre: a slack metre parts a new
+140 kN rope. The rope parts when this passes `breaking_kn × integrity`; the energy of the fall is
+not booked, since the drum never stored the cage's potential energy to begin with.
+
+### A haulage rope's tension, on an incline
+
+A rope haulage's rope (`Mine::HaulageRope`) carries a set down the road's gradient. Its standing
+tension is the set's weight along the incline plus its rolling resistance:
+
+```
+T = m·g·(sin θ + μ_r)        sin θ ≈ rise ÷ length
+```
+
+A 2.6 t set on a 12 m rise over 200 m at rolling 0.02 is about 2.0 kN. **A sound rope never parts
+under that.** What parts a worn one is the **snatch** of a set started hard, eight times the
+standing tension, against `breaking_kn × integrity`. A 60 kN rope survives it until it is worn
+below about a quarter. Nothing is in the drive solve: the haulage engine pays its shaft for the
+traffic as a lift (`lift_m:` on the road's conduit), and the rope only reads what the road
+carried last tick.
+
+### A rope between operations
+
+Two operations cannot share a drive solve, so a shaft in one is joined to a shaft in another by a
+**rope** (`Concerns::Roped`, `Match::Coupling`): a viscous coupling of conductance `k`, each end
+treating the other's speed **as of last tick** as a reservoir. Below it an end is a driver,
+`k·(ω_far − ω)`, paid from what the far end sent; above it, a brake booked to `:rope` and sent.
+`ratio:` gears it — speeds cross divided by it, and `k` is reflected by `ratio²` — and energy is
+invariant under it.
+
+**The lag makes the cross term explicit**, so a stiff rope rings. For equal inertias the gap
+between the ends scales by `(I/dt − k)/(I/dt + k)` per tick, which changes sign past `k = I/dt`.
+Measured on an engine roped to a pit: no reversal of the slip at the line shaft's `I/dt`, a
+reversal every other tick at twice it. `Match` refuses a rope past either end's own `I/dt`, which
+is conservative for an end drive-linked to a heavier wheel.
+
 ---
 
 ## Phase change
@@ -286,6 +367,23 @@ Five rules, each of which was got wrong first:
   so in a hot room with air to spare the quench term is **zero whatever figure is written**.
   A fire that will not go out is almost never a quench that is too low.
 
+  **Outside its range a flame burns what it lights and no more.** `Tick#burn_down_ignition`
+  shrinks a fire in proportion to the fuel burnt — a front consuming a lump moves on to the next
+  — but a mixture that will not carry a flame has no front, so there what burns comes off the
+  lit mass one for one. In proportion, the lit mass would outlive every tick's burn and a naked
+  light in 1% gas would burn twenty times its own seed. That is why a candle's seed is a flame cap's worth
+  (`Minion::HAND_FLAME`, `Mine::OPEN_FLAME`): in lean gas the seed *is* the burn.
+- **A premixed fuel burns with the air mixed into it.** For a reaction with a flammable range,
+  the pathway split gives the lit fuel only its share of the node's air
+  (`Reaction.premixed_share`), so a rich mixture burns rich from the first gram and its products
+  do not depend on how much of it caught in a tick. A fuel bed takes all the air there is.
+- **A fuel hot enough lights itself.** `autoignition_k`, opt-in in the `ignition:` block, seeds
+  the fire at `Ignition::AUTO_SEED_KG_PER_S` while the fuel is past it — read against the hotter
+  of the node's bulk temperature and its `hot_spot:` node's, as of last tick, because a lumped body
+  has no local hot spot and a timber frame is lit where it touches the bearing. Wood declares it
+  (573 K), coal (700 K) and firedamp (870 K) — the last so a gob fire can fire the district's gas
+  through the district's `hot_spot:`, the one surface in a pit that gets there.
+
 Spread is **closed-form logistic**, so it is exact at any `dt` and cannot overshoot. Logistic
 because a fire spreads from its *edges* — and because from exactly zero it stays at zero, which
 is what makes an igniter a match rather than a switch.
@@ -297,6 +395,51 @@ that burns away takes its share of the fire with it.
 **This does not replace modelling genuinely distinct temperatures as distinct nodes.** A
 reactor's fuel pin really is hundreds of kelvin above its coolant, and no ignited fraction can
 express that. The two answer different questions and are meant to coexist.
+
+### Prompt reactions: what happens faster than a tick is resolved
+
+`Resources::Prompt`, run by `Concerns::PromptReaction`. A reaction declaring
+`prompt: { kind: }` is not integrated once it triggers — it is **resolved** from what the node
+holds, the same call phase change makes. Integrated at its rate, an explosion splits its burn
+between pathways against the air left each tick, so its products depend on where the burn falls
+on the tick grid — **22.5 or 66.9 kg of CO from the same fuel**, measured, changed only by the size
+of the spark. Sub-stepping converges slowly and to the wrong answer: a well-mixed node burns clean
+until the air is gone, where a premixed flame burns rich throughout.
+
+- **Phase 5 asks first.** A node hosting a prompt reaction resolves whatever triggers, then the
+  rest of its reactions run at their rates as before; a resolved reaction does not run again.
+  A node hosting none takes the old path exactly.
+- **In sequence**: after each resolution every prompt reaction not yet resolved this tick is asked
+  again against the node as it now is, in declaration order, each at most once a tick.
+- **`:deflagration`** (`Resources::Deflagration`) — the only kind. Anything alight in a mixture
+  inside its range is a front, so on the next tick (the lit mass is as of last tick) the front
+  passes through the whole mixture and every kilogram of fuel burns, through
+  `Reaction.complete`: the pathway split against **all** the node's air, which is the mass-balance
+  answer. A front lights every other fuel in its range, so a gas explosion takes a dust cloud with
+  it on the air the gas left. **There is no build-up at room scale**: a lit fraction left to grow
+  at its rate first burns the mixture it is in and dilutes it — far enough, measured, to take a 9%
+  district out of its range before it goes off.
+- **A front travels, a room a tick.** A node whose front burnt anything records `front: true`.
+  Next tick that front arrives in every holder sharing a gas path with it, in either direction
+  (`Operation#gas_neighbours`, derived once from the paths), and goes off there if that holder's
+  own mixture is in range. It is read from N−1, so it is order-independent.
+  - It travels both ways because a front leaves a room through every road out of it and runs back
+    up the stream that fed it.
+  - It stops where nothing is in range, and a burnt-out room it comes back to has nothing left to
+    burn.
+  - The arriving front is the explosion's cause (`:front_from_neighbour`, `detail: { from: }`).
+  - **Without this a furnace fired its own 30 m³ chamber every nine seconds**, refilling from a
+    return in its range, while the district beside it, full of the same mixture, never lit.
+- **The node's `reaction_throttle` is the share a front can carry through** — stone dust that is
+  two-thirds of the airborne dust carries none. In the rate path it scales `dt`; with no rate, it
+  scales the mixture.
+- Each resolution emits one `:explosion` (`mode: :explosion`) with the reactions, the fuel burnt
+  and the joules. The node's `endangers: { explosion: }` hurts whoever is in it at that instant,
+  scaled by the joules, and its `damages: { explosion: }` wrecks what the blast reaches — a walled
+  room sheds its heat long before it could wear through, so the blast has to be the harm.
+- **The kind table is a seam.** Its next callers are a fuel–coolant interaction (molten metal into
+  water, which flashes steam, splits it and burns the hydrogen — three steps of the same loop) and
+  prompt criticality. See `docs/design_sketches/prompt-reactions.md`.
 
 ### Two rules that keep the books straight
 

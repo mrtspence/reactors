@@ -24,7 +24,7 @@ module ReactorSim
     # Which severities reach the player's incident feed. See `#incidents`.
     REPORTED_SEVERITIES = %i[warning critical].freeze
 
-    attr_reader :id, :type, :nodes, :links, :paths, :thermal_links, :drive_links, :layout,
+    attr_reader :id, :type, :nodes, :links, :paths, :gas_neighbours, :thermal_links, :drive_links, :layout,
                 :control_points, :diagnostics, :minions, :state, :content, :time_scale,
                 :options, :rngs, :routing
 
@@ -58,6 +58,7 @@ module ReactorSim
       # Routes are derived from the graph, which is configuration rather than state, so this
       # is computed once here and never per tick.
       @paths = Path.resolve(nodes: @nodes, links: @links)
+      @gas_neighbours = Path.gas_neighbours(@paths, @nodes)
       @rngs = rngs || build_rngs(seed)
       @state = state ? restore(state) : build_initial_state
     end
@@ -69,7 +70,7 @@ module ReactorSim
     # inside the tick (docs/simulation_architecture.md §7).
     def set_control(control_point_id, value)
       cp = @control_points[control_point_id.to_sym]
-      return false unless cp
+      return false if cp.nil? || cp.internal?
 
       controls = @state.fetch(:controls)
       @state = @state.merge(
@@ -97,6 +98,7 @@ module ReactorSim
       return false unless minion
 
       station = station_id&.to_sym
+      return false if station && @control_points[station]&.internal?
       return false unless station.nil? || @control_points.key?(station) || fetchable?(minion, station)
 
       minions = @state.fetch(:minions)
@@ -216,16 +218,29 @@ module ReactorSim
     # barrier, outside any tick, exactly as a command is — so neither can observe the other
     # mid-tick and phase order is untouched.
 
-    # What a `Load` delivered on the tick just finished, ready to be handed to whoever is
-    # coupled to it. Already booked to this operation's `joules_to_work`, so reading it moves
-    # nothing and double-counts nothing — the exchange is only deciding where it lands next.
-    def exported_joules(node_id)
-      @state.fetch(:nodes).dig(node_id.to_sym, :joules_extracted).to_f
+    # One end of a rope, as the far end will hear it: this end's speed, its clutch, and the work
+    # it took off its shaft on the tick just finished. That work is already booked to this
+    # operation's `joules_to_work`, so reading it moves nothing and double-counts nothing.
+    def rope_report(node_id)
+      id = node_id.to_sym
+      levers = @state.fetch(:controls).to_h { |cp, s| [ cp, @control_points.fetch(cp).value(s) ] }
+
+      @nodes.fetch(id).rope_report(@state.fetch(:nodes).fetch(id), levers)
     end
 
-    # Work arriving from another operation, into the buffer an `Import` shaft spends from.
-    # Ledgered on entry, because from this operation's point of view it is energy appearing
-    # from outside — the mirror of the `joules_to_work` the other side already paid out.
+    # What the far end said, and the work it sent.
+    def rope_receive(node_id, omega:, grip:, conductance:, joules:)
+      id = node_id.to_sym
+      nodes = @state.fetch(:nodes)
+      heard = @nodes.fetch(id).hear(nodes.fetch(id), omega: omega, grip: grip, conductance: conductance)
+      @state = @state.merge(nodes: nodes.merge(id => heard.freeze).freeze).freeze
+
+      receive_supply(id, joules)
+    end
+
+    # Work arriving from outside, into the buffer a rope end spends from. Ledgered on entry,
+    # because from this operation's point of view it is energy appearing from outside — the
+    # mirror of the `joules_to_work` the other side already paid out.
     def receive_supply(node_id, joules)
       node = @nodes[node_id.to_sym]
       return false unless node.respond_to?(:receive)
@@ -339,10 +354,10 @@ module ReactorSim
       # `stations` makes the one place crew start unreachable from the crew screen.
       { operation_id: @id,
         instruments: @diagnostics.values.map(&:chrome),
-        controls: @control_points.values.select(&:lever?).map { |c|
+        controls: @control_points.values.select(&:commandable?).map { |c|
           { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit }
         },
-        stations: @control_points.values.map { |c| { id: c.id, label: c.label } },
+        stations: @control_points.values.reject(&:internal?).map { |c| { id: c.id, label: c.label } },
         # **Empty for an operation with no geometry**, which is what makes the panel's "where
         # are they" line nil-accepting rather than a mine-only feature: the steam engine ships
         # no places and the client renders nothing.
@@ -453,6 +468,20 @@ module ReactorSim
         raise Error, "diagnostic #{diagnostic.id}: no control point #{station} to observe it"
       end
 
+      # A mishap is suffered by the part it names, and only a part that understands that kind of
+      # mishap can. Aimed anywhere else it would be a peril that silently breaks nothing.
+      @nodes.each_value do |node|
+        node.perils.each do |peril|
+          next unless peril.mishap?
+
+          target = @nodes[peril.mishap.fetch(:node)]
+          next if target.respond_to?(:suffers?) && target.suffers?(peril.mishap.fetch(:kind))
+
+          raise Error, "peril #{peril.id}: #{peril.mishap.fetch(:node)} cannot suffer " \
+                       "#{peril.mishap.fetch(:kind)}"
+        end
+      end
+
       @links.each do |link|
         source = @nodes[link.from_node] or raise Error, "link #{link.id}: no node #{link.from_node}"
         sink   = @nodes[link.to_node]   or raise Error, "link #{link.id}: no node #{link.to_node}"
@@ -542,6 +571,8 @@ module ReactorSim
         [ id, minion_state.merge(station: minion_state[:station]&.to_sym,
                                  posting: minion_state[:posting]&.to_sym,
                                  place: minion_state[:place]&.to_sym,
+                                 via: minion_state[:via]&.to_sym,
+                                 riding: minion_state[:riding]&.to_sym,
                                  injury: minion_state[:injury]&.to_sym,
                                  carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze)
               .freeze ]
@@ -556,8 +587,15 @@ module ReactorSim
                              slip_at: cp_state[:slip_at]&.to_sym).compact.freeze ]
       end
 
+      # **A mishap waiting for the next tick names a part and a kind**, both symbols living as
+      # values. A String node misses every lookup and the part is never touched.
+      mishaps = state.fetch(:mishaps, []).map do |mishap|
+        mishap.merge(node: mishap.fetch(:node).to_sym, kind: mishap.fetch(:kind).to_sym).freeze
+      end
+
       state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze, controls: controls.freeze,
-                  minions: minions.freeze, events: state.fetch(:events, [])).freeze
+                  minions: minions.freeze, mishaps: mishaps.freeze,
+                  events: state.fetch(:events, [])).freeze
     end
 
     def build_initial_state
@@ -566,6 +604,7 @@ module ReactorSim
         diagnostics: @diagnostics.to_h { |id, d| [ id, d.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         minions: @minions.to_h { |id, m| [ id, m.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         ledger: Ledger.initial.freeze,
+        mishaps: [].freeze,
         events: [] }.freeze
     end
   end

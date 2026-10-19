@@ -341,43 +341,92 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
   # both, so a machine moved from one key to the other has two ways to lose a hazard without
   # anything failing — a typo'd place, or a declaration left in the namespace nobody looks up.
   describe "what every catalogued machine declares" do
-    it "endangers only stations and places the machine actually has, for modes it can enter" do
-      ReactorSim::Operations.catalogued.each do |type|
-        ReactorSim::Operations.chassis_for(type).each do |frame|
-          op = ReactorSim::Match
-               .create(id: "x", seed: 1,
-                       operations: [ { id: :m, type: type, chassis: frame } ])
-               .operation(:m)
+    # Every frame, and every part fitted on its own in its slot — a hazard that arrives only with a
+    # fitting nobody fits by default is a hazard this walk would otherwise never see.
+    def every_build
+      bare = [ {} ]
+      ReactorSim::Operations.catalogued.flat_map do |type|
+        ReactorSim::Operations.chassis_for(type).flat_map do |frame|
+          slots = ReactorSim::Operations.assembly_for(type, chassis: frame).slots
+          fittings = slots.flat_map do |slot|
+            ReactorSim::Parts.of_kind(slot.accepts).map { |part| { slot.id => part.id } }
+          end
+          (bare + fittings).map { |loadout| [ type, frame, loadout ] }
+        end
+      end
+    end
 
-          op.nodes.each_value do |node|
-            next unless node.respond_to?(:failure_hazards)
+    # TODO: parts are registered by kind with no record of which operation they belong to, so a
+    # mine's lamp cabin is offered to the steam engine's quarters slot and refuses to build there.
+    # Until parts are scoped, a single fitting that will not build on a machine declares nothing on
+    # it and is skipped; a machine's own default build failing still fails here.
+    def build(type, frame, loadout)
+      ReactorSim::Match
+        .create(id: "x", seed: 1, operations: [ { id: :m, type: type, chassis: frame, loadout: loadout } ])
+        .operation(:m)
+    rescue ReactorSim::Error
+      raise if loadout.empty?
+    end
 
-            node.failure_hazards.each do |mode, declared|
-              expect(node.failure_modes).to have_key(mode),
-                                            "#{node.id} endangers on #{mode}, which it cannot enter"
-              (declared[:stations] || {}).each_key do |station|
-                expect(op.control_points).to have_key(station),
-                                             "#{node.id} endangers #{station}, which does not exist"
-              end
+    it "endangers only stations, places and riders the machine actually has, for modes it can enter" do
+      every_build.each do |type, frame, loadout|
+        op = build(type, frame, loadout) or next
 
-              (declared[:places] || {}).each_key do |place|
-                expect(op.layout.declared?(place)).to be(true),
-                                                      "#{node.id} endangers #{place}, " \
-                                                      "which is not a declared place"
-              end
+        op.nodes.each_value do |node|
+          next unless node.respond_to?(:failure_hazards)
 
-              expect(declared.values_at(:stations, :places).compact).not_to be_empty,
-                                                                           "#{node.id} endangers " \
-                                                                           "nobody on #{mode}"
-
-              # A part that declares a scale and then never reports the figure falls back to
-              # flat — which is safe, and silent. This is the check that stops it being silent.
-              next unless declared[:scales_with]
-
-              expect(node.failure_detail(op.state.fetch(:nodes).fetch(node.id), ctx_for(op)))
-                .to have_key(declared[:scales_with]),
-                    "#{node.id} scales on #{declared[:scales_with]}, which it never reports"
+          # A failure's modes, and the `:explosion` a node hosting a prompt reaction can have.
+          prompt = node.respond_to?(:prompt_modes) ? node.prompt_modes(op.content) : {}
+          node.failure_hazards.each do |mode, declared|
+            expect(node.failure_modes.merge(prompt)).to have_key(mode),
+                                                        "#{node.id} endangers on #{mode}, which it cannot enter"
+            (declared[:stations] || {}).each_key do |station|
+              expect(op.control_points).to have_key(station),
+                                           "#{node.id} endangers #{station}, which does not exist"
             end
+
+            (declared[:places] || {}).each_key do |place|
+              expect(op.layout.declared?(place)).to be(true),
+                                                    "#{node.id} endangers #{place}, " \
+                                                    "which is not a declared place"
+            end
+
+            # Ridden in a cage (`via` the hoist) or on the rods of a powered way (`riding` what
+            # drives it).
+            carriers = op.layout.passages.flat_map { |p| [ p.hoist, (p.driven_by if p.powered?) ] }
+            (declared[:riders] || {}).each_key do |carrier|
+              expect(carriers).to include(carrier),
+                                  "#{node.id} endangers riders of #{carrier}, which nobody rides"
+            end
+
+            # A hazard that runs down a passage reaches people by where on it they are, so its ends
+            # must be places and the stations it places or roams must exist.
+            if (run = declared[:along])
+              run.slice(:from, :to).each do |end_of_run, place|
+                expect(op.layout.declared?(place)).to be(true),
+                                                      "#{node.id} runs #{end_of_run} #{place}, which is not a place"
+              end
+              (run.fetch(:positions, {}).keys + Array(run[:roaming])).each do |station|
+                expect(op.control_points).to have_key(station),
+                                             "#{node.id} runs past #{station}, which does not exist"
+              end
+            end
+
+            expect(declared.values_at(:stations, :places, :riders, :along).compact).not_to be_empty,
+                                                                                  "#{node.id} endangers " \
+                                                                                  "nobody on #{mode}"
+
+            # A part that declares a scale and then never reports the figure falls back to
+            # flat — which is safe, and silent. This is the check that stops it being silent.
+            next unless declared[:scales_with]
+
+            reported = if prompt.key?(mode)
+              ReactorSim::Concerns::PromptReaction::EXPLOSION_DETAIL
+            else
+              node.failure_detail(op.state.fetch(:nodes).fetch(node.id), ctx_for(op)).keys
+            end
+            expect(reported).to include(declared[:scales_with]),
+                                "#{node.id} scales on #{declared[:scales_with]}, which it never reports"
           end
         end
       end

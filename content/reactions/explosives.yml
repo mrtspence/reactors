@@ -1,0 +1,22 @@
+# **A fired charge**, reacting the tick it reaches the face's air. No `ignition:` block and no
+# `min_temperature_k`, so it goes the moment it is there: a shot is detonated by its fuse, not lit by
+# the room. Fast enough to be complete within a tick at any rate a mine runs.
+#
+# What these leave is the fumes, which are the shot's own accident — every shot makes them, and a
+# shot fired in still air poisons the face it brought down. The heat is small beside the coal it
+# moves; a shot's danger is its flame, which is the shot hole's ignition, not this enthalpy.
+
+# About 0.44 of it to gas — carbon dioxide and nitrogen, with monoxide enough to be dangerous —
+# and the rest to potassium salts left as a fine residue.
+black_powder_firing:
+  consumes: { black_powder: 1.0 }
+  produces: { flue_gas: 0.36, whitedamp: 0.08, ash: 0.56 }
+  enthalpy_j_per_unit: -2800000
+  rate_per_s: 200.0
+
+# Mostly to gas and steam, with little monoxide and little residue.
+permitted_firing:
+  consumes: { permitted_explosive: 1.0 }
+  produces: { flue_gas: 0.62, steam: 0.28, whitedamp: 0.02, ash: 0.08 }
+  enthalpy_j_per_unit: -3900000
+  rate_per_s: 200.0

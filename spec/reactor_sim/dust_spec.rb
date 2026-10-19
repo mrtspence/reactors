@@ -38,7 +38,7 @@ RSpec.describe "coal dust" do
   # which wins depends on the randomised file order.
   def shift_of_dust_kg = 108.0
 
-  def pit = build_pit(id: "d", seed: 3, loadout: { manriding: :cage_gear })
+  def pit = build_pit(id: "d", seed: 3, loadout: { winder: :cage_gear })
 
   # How much coal has come out of the seam. Measured against a fresh pit rather than against the
   # figure in the fixture, so the seam can be resized without silently inverting a test.
@@ -62,7 +62,7 @@ RSpec.describe "coal dust" do
   end
 
   def work!(op, ticks, hewing: 100, ventilation: 100, **levers)
-    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: ventilation, **levers)
 
     run!(op, ticks)
@@ -71,7 +71,7 @@ RSpec.describe "coal dust" do
   # Hold a flame to it and report the hottest it got. The peak rather than the end state, because
   # the fan carries the heat away in seconds and an end reading would miss the explosion entirely.
   def peak_on_ignition(op, ticks: 60)
-    levers!(op, hewing: 0, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: 0, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: 0, naked_flame: 100)
 
     peak = 0.0

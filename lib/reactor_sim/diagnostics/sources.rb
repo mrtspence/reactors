@@ -65,7 +65,10 @@ module ReactorSim
         rim_speed: :state_only,
         kinetic_joules: :state_only,
         stress_fraction: :with_content,
-        integrity: :state_only
+        integrity: :state_only,
+        # Rope a hoist has paid out, and how much of it the cage is not hanging on.
+        position_m: :state_only,
+        slack_m: :state_only
       }.freeze
 
       def initialize(node, quantity)

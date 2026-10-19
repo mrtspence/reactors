@@ -39,8 +39,15 @@ module ReactorSim
 
       def initial_state = { kg: 0.0, oxidiser_kg: 0.0 }
 
-      # Returns the next ignition state: `{ kg:, oxidiser_kg: }`.
-      def advance(spec, ignition, parcels, temperature_k:, dt:, content:, seed_kg: 0.0)
+      # **A fuel hot enough lights itself.** Past `autoignition_k` the node's own heat seeds the
+      # fire at this rate, exactly as a match would — so timber against a seized sheave, or coal
+      # heating in the goaf, catches with nothing alight beside it. Opt-in per reaction.
+      AUTO_SEED_KG_PER_S = 0.01
+
+      # Returns the next ignition state: `{ kg:, oxidiser_kg: }`. `hottest_k` is the hottest point
+      # the fuel touches, where that is not the node's own bulk temperature.
+      def advance(spec, ignition, parcels, temperature_k:, dt:, content:, seed_kg: 0.0,
+                  hottest_k: nil)
         oxidiser = remember_oxidiser(ignition, spec, parcels, content, dt)
         fuel_kg = fuel_mass(spec, parcels, content)
 
@@ -48,6 +55,7 @@ module ReactorSim
         # it does not bring the fire back — which is exactly what a stoker has to prevent.
         return { kg: 0.0, oxidiser_kg: oxidiser } if fuel_kg <= Parcel::EPSILON
 
+        seed_kg += self_seed_kg(spec, [ temperature_k, hottest_k.to_f ].max, dt)
         ignited = [ ignition.fetch(:kg, 0.0) + seed_kg, fuel_kg ].min
         return { kg: 0.0, oxidiser_kg: oxidiser } if ignited <= Parcel::EPSILON
 
@@ -62,6 +70,11 @@ module ReactorSim
         end
 
         { kg: kg.clamp(0.0, fuel_kg), oxidiser_kg: oxidiser }
+      end
+
+      def self_seed_kg(spec, temperature_k, dt)
+        auto = spec.dig(:ignition, :autoignition_k)
+        auto && temperature_k >= auto.to_f ? AUTO_SEED_KG_PER_S * dt : 0.0
       end
 
       # Whether the fire is gaining ground or losing it, per second. Positive spreads,

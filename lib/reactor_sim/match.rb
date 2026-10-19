@@ -11,15 +11,23 @@ module ReactorSim
   class Match
     attr_reader :id, :seed, :tick, :operations, :couplings
 
-    # One operation's shaft work feeding another's. Both ends name an operation and a node, so
-    # the connection is declared rather than inferred from an aggregate — an operation may have
-    # several loads and only one of them is sold.
+    # A rope between two operations' shafts. Both ends name an operation and a node, so the
+    # connection is declared rather than inferred — an operation may have several loads and only
+    # one of them is sold.
     #
-    #   Coupling.new(from: [ :engine, :load ], to: [ :mine, :line_shaft ])
-    Coupling = Struct.new(:from, :to, keyword_init: true) do
+    #   Coupling.new(from: [ :engine, :load ], to: [ :mine, :line_shaft ], ratio: 0.78)
+    #
+    # `ratio` is the `from` end's speed per unit of the `to` end's: the gearing. `stiffness` is the
+    # rope's conductance in the `to` end's frame, and defaults to what that end declares.
+    Coupling = Struct.new(:from, :to, :ratio, :stiffness, keyword_init: true) do
+      def initialize(from:, to:, ratio: 1.0, stiffness: nil)
+        super(from: from, to: to, ratio: ratio.to_f, stiffness: stiffness&.to_f)
+      end
+
       def self.parse(raw)
         raw = raw.to_h { |k, v| [ k.to_sym, v ] }
-        new(from: pair(raw.fetch(:from)), to: pair(raw.fetch(:to)))
+        new(from: pair(raw.fetch(:from)), to: pair(raw.fetch(:to)),
+            ratio: raw.fetch(:ratio, 1.0), stiffness: raw[:stiffness])
       end
 
       # Symbols as values do not survive JSON, and these are four of them.
@@ -30,7 +38,7 @@ module ReactorSim
       def to_operation   = to.first
       def to_node        = to.last
 
-      def to_h = { from: from, to: to }
+      def to_h = { from: from, to: to, ratio: ratio, stiffness: stiffness }.compact
     end
 
     def self.create(id:, seed:, operations:, couplings: [], time_scale: 1.0)
@@ -100,14 +108,12 @@ module ReactorSim
       end
     end
 
-    # Work crossing between operations, at the tick barrier.
+    # Both ends of every rope, at the tick barrier: each end hears the other's speed and clutch,
+    # in its own frame, and receives the work the other end took off its shaft.
     #
-    # **Every read happens before any operation steps**, so what each coupling carries is taken
-    # from the settled previous tick and cannot depend on the order operations are visited in —
-    # the same rule a node obeys reading N−1 (`invariants.md` §3). Reading inside the loop would
-    # make the first operation stepped supply a different amount from the second.
-    #
-    # One tick of latency is deliberate and matches every other hop in the engine.
+    # **Every read happens before any write**, so what crosses is taken from the settled previous
+    # tick and cannot depend on the order operations are visited in — the same rule a node obeys
+    # reading N−1 (`invariants.md` §3). One tick of latency, as at every other hop.
     def exchange!
       return if @couplings.empty?
 
@@ -116,11 +122,19 @@ module ReactorSim
         sink = operation(coupling.to_operation)
         next unless source && sink
 
-        [ coupling, source.exported_joules(coupling.from_node) ]
+        [ coupling, source.rope_report(coupling.from_node), sink.rope_report(coupling.to_node),
+          coupling.stiffness || sink.nodes.fetch(coupling.to_node).rope_conductance ]
       end
 
-      moving.each do |coupling, joules|
-        operation(coupling.to_operation).receive_supply(coupling.to_node, joules)
+      moving.each do |coupling, from, to, conductance|
+        ratio = coupling.ratio
+        operation(coupling.to_operation)
+          .rope_receive(coupling.to_node, omega: from.fetch(:omega) / ratio, grip: from.fetch(:grip),
+                                          conductance: conductance, joules: from.fetch(:joules))
+        operation(coupling.from_operation)
+          .rope_receive(coupling.from_node, omega: to.fetch(:omega) * ratio, grip: to.fetch(:grip),
+                                            conductance: conductance / (ratio**2),
+                                            joules: to.fetch(:joules))
       end
     end
 
@@ -192,12 +206,47 @@ module ReactorSim
         source = operation(coupling.from_operation)
         sink = operation(coupling.to_operation)
         next unless source && sink
+
+        validate_rope_ends!(coupling, source, sink)
         next if (source.time_scale - sink.time_scale).abs <= 1e-9
 
         raise Error, "coupling #{coupling.from_operation} -> #{coupling.to_operation}: " \
                      "time_scale #{source.time_scale} and #{sink.time_scale} differ; " \
                      "coupled operations must share a clock"
       end
+    end
+
+    # Both ends must be able to hold a rope, and the rope must have a conductance from somewhere.
+    def validate_rope_ends!(coupling, source, sink)
+      [ [ source, coupling.from_node ], [ sink, coupling.to_node ] ].each do |op, node_id|
+        node = op.nodes[node_id]
+        next if node.respond_to?(:hear)
+
+        raise Error, "coupling: #{op.id}.#{node_id} is not something a rope can be tied to"
+      end
+      raise Error, "coupling: ratio must be positive" unless coupling.ratio.positive?
+
+      sink_end = sink.nodes.fetch(coupling.to_node)
+      rope = coupling.stiffness || (sink_end.rope_conductance if sink_end.respond_to?(:rope_conductance))
+      raise Error, "coupling: no stiffness, and #{sink.id}.#{coupling.to_node} declares none" if rope.nil?
+
+      validate_rope_stiffness!(coupling, rope, source, sink)
+    end
+
+    # **A rope stiffer than an end's `I/dt` rings.** Each end sees the other's speed a tick late,
+    # so the gap between them scales by `(I/dt − k)/(I/dt + k)` per tick and changes sign past
+    # `k = I/dt`. Measured on an engine roped to a pit: no reversal at the line shaft's `I/dt`, a
+    # reversal every other tick at twice it. Checked against each end's own inertia, which is
+    # conservative for an end drive-linked to a heavier wheel.
+    def validate_rope_stiffness!(coupling, rope, source, sink)
+      [ [ sink, coupling.to_node, rope ], [ source, coupling.from_node, rope / (coupling.ratio**2) ] ]
+        .each do |op, node_id, conductance|
+          limit = op.nodes.fetch(node_id).moment_of_inertia / (ReactorSim::DT * op.time_scale)
+          next if conductance <= limit
+
+          raise Error, "coupling: rope at #{op.id}.#{node_id} is #{conductance.round(1)} N·m·s/rad, " \
+                       "past that end's I/dt of #{limit.round(1)} — it would ring"
+        end
     end
 
     # An unknown type falls through to false and is counted as rejected, which is the same

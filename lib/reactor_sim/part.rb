@@ -77,14 +77,17 @@ module ReactorSim
   # sitting; the part only says which ones arrive with it. A part naming a gauge that does not
   # exist fails at build rather than reading nil forever.
   class Part
-    attr_reader :id, :kind, :label, :description, :stats, :provides, :instruments, :wip
+    attr_reader :id, :kind, :label, :description, :stats, :provides, :instruments, :wip, :informs
 
     # `wip:` is a part that is deliberately half-built — its shape is right and its cost is not
     # yet modelled. It exists as a flag rather than as a comment because the outfitting screen
     # has to be able to say so: a player choosing between two parts on their stats deserves to
     # know that one of them is currently free in a way it will not stay.
+    #
+    # `informs:` is the spec values this part sets for the others, under the keys its slot's
+    # `informs:` allows — configuration, unlike `stats:`, which nothing may read.
     def initialize(id:, kind:, label: nil, description: nil, stats: {},
-                   provides: [], instruments: [], wip: false, &builder)
+                   provides: [], instruments: [], wip: false, informs: {}, &builder)
       raise Error, "part #{id.inspect} needs a builder block" unless builder
 
       @id = id.to_sym
@@ -98,6 +101,7 @@ module ReactorSim
       @provides = Array(provides).map(&:to_sym).freeze
       @instruments = Array(instruments).map(&:to_sym).freeze
       @wip = wip
+      @informs = informs.to_h { |key, value| [ key.to_sym, value ] }.freeze
       @builder = builder
       freeze
     end

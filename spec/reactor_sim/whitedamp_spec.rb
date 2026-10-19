@@ -29,11 +29,12 @@ RSpec.describe "whitedamp" do
   # monoxide.
   #
   # **Stated by mass**, because that is what `district_mix` and `gas_pct` speak and mixing the two
-  # bases moves every figure by nearly a factor of two. These correspond to about 11% and 15% by
-  # volume. Measured whitedamp made across the band: 4% and 5% by mass make **none at all**, 6%
-  # makes 0.97 kg, 7% makes 10.6, 8% makes 16.0 — and 10% does not light, being past the rich
-  # limit, which is `district_fire_spec`'s claim rather than this file's.
-  def clean_pct = 6.0
+  # bases moves every figure by nearly a factor of two. 5% by mass is 19 kg of air to the kilogram
+  # of gas, leaner than the 17.2 a clean burn takes; 8% is 11.5, too little even for the monoxide
+  # pathway's 12.9. Measured whitedamp made across the band: 4% and 5% make **none at all**, 6%
+  # makes 65 kg, 7% makes 192, 8% makes 214 — and 10% does not light, being past the rich limit,
+  # which is `district_fire_spec`'s claim rather than this file's.
+  def clean_pct = 5.0
 
   def starved_pct = 8.0
 
@@ -41,7 +42,7 @@ RSpec.describe "whitedamp" do
   # 0.0015 of the volume, so the line sits between 1 and 3 kg in a 1,400 m³ district.
   def poisonous_kg = 3.0
 
-  def pit = build_pit(id: "w", seed: 3, loadout: { manriding: :cage_gear })
+  def pit = build_pit(id: "w", seed: 3, loadout: { winder: :cage_gear })
 
   def poisoned?(op, node) = ReactorSim::Breath.poisoned?(parcels(op, node), op.content)
 
@@ -53,7 +54,7 @@ RSpec.describe "whitedamp" do
   def pit_with(**mix) = at_the_face(seed(pit, nodes: { district: district_mix(pit, **mix) }))
 
   def work!(op, ticks, ventilation: 0, naked_flame: 0, hewing: 0, from: 0, **levers)
-    levers!(op, hewing: hewing, haulage: 100, timbering: 100, winding: 100, pumping: 100,
+    levers!(op, hewing: hewing, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100,
                 ventilation: ventilation, naked_flame: naked_flame, **levers)
 
     run!(op, ticks, from: from)
@@ -74,20 +75,12 @@ RSpec.describe "whitedamp" do
       expect(held(op, :district, :whitedamp)).to eq(0.0)
     end
 
-    # **The causation, and the reason this needed pathways rather than a seep.** The same ignition
-    # in the same district makes a twentieth as much when the air is there to burn cleanly.
-    #
-    # A ratio, never a figure: any ignition makes a little monoxide, because the burn runs far
-    # faster than the air reaches it and goes momentarily short even with plenty to spare. What
-    # the causation claims is the **gap**, which measures at about sixteen times.
+    # **The causation, and the reason this needed pathways rather than a seep.** An explosion's
+    # products are set by the mixture's own air, so the same ignition makes plenty in a rich
+    # district and exactly none in a lean one.
     it "is made by fire that could not get air, and not by fire that could" do
-      starved = ignited(starved_pct)
-      clean = ignited(clean_pct)
-
-      expect(held(starved, :district, :whitedamp)).to be > 0.0
-      expect(held(clean, :district, :whitedamp)).to be > 0.0
-      expect(held(clean, :district, :whitedamp))
-        .to be < held(starved, :district, :whitedamp) * 0.3
+      expect(held(ignited(starved_pct), :district, :whitedamp)).to be > 0.0
+      expect(held(ignited(clean_pct), :district, :whitedamp)).to eq(0.0)
     end
   end
 
@@ -104,10 +97,14 @@ RSpec.describe "whitedamp" do
         .to be > ReactorSim::Breath::SAFE
     end
 
-    it "weighs almost nothing next to the afterdamp beside it" do
+    # A seventh at the very most — the monoxide pathway's own 1.75 kg against 12.15 of flue gas,
+    # where even the richest burn takes it.
+    it "weighs little next to the afterdamp beside it" do
       op = ignited(starved_pct)
+      produces = op.content.reaction(:firedamp_combustion).dig(:alternatives, 0, :produces)
 
-      expect(held(op, :district, :whitedamp)).to be < held(op, :district, :flue_gas) * 0.1
+      expect(held(op, :district, :whitedamp))
+        .to be <= held(op, :district, :flue_gas) * produces.fetch(:whitedamp) / produces.fetch(:flue_gas)
     end
 
     # Poisoned air reads as no air at all, which is how `Breath` is told about a hazard that has

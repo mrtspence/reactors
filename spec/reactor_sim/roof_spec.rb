@@ -34,10 +34,10 @@ RSpec.describe "the roof" do
   # A working district with the shift in place. Returns the operation and every event, so an
   # example never has to see the walk.
   def working(hewing:, timbering:, worn: nil, ticks: 200)
-    op = at_the_face(seed(build_pit(id: "r", seed: 3, loadout: { manriding: :cage_gear }),
+    op = at_the_face(seed(build_pit(id: "r", seed: 3, loadout: { winder: :cage_gear }),
                           nodes: worn ? { tub_road: { durability: worn } } : {}))
     levers!(op, hewing: hewing, haulage: 100, timbering: timbering,
-                winding: 100, pumping: 100, ventilation: 100)
+                coal_winding: 100, pumping: 100, ventilation: 100)
 
     [ op, run!(op, ticks) ]
   end

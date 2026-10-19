@@ -41,8 +41,9 @@ and also sweeps the source statically.
 >
 > The rule above always permitted it and nothing used it, so for most of this engine's life
 > only `initial_state` and phase 7 actually drew. **`Tick#draw_fates` now throws for every
-> minion on every tick** — a margin of safety, and three values deciding whether somebody at
-> a tricky lever does the wrong thing with it.
+> minion on every tick** — a margin of safety, three values deciding whether somebody at a
+> tricky lever does the wrong thing with it, whether safety equipment caught an accident, and
+> which accident it was. No two outcomes share a draw, so they stay uncorrelated.
 >
 > That makes one discipline load-bearing that was previously theoretical:
 >

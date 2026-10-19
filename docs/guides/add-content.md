@@ -46,15 +46,15 @@ than the contract. Derive the current one:
 grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n' | tr -d ' ' | sort -u
 ```
 
-In use at the time of writing: `bearing`, `breathable`, `coolant`, `damp`, `dust`, `exhaust`,
-`fuel`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`, `oxidiser`, `solid`,
-`structural`, `waste`, `working_fluid`.
+In use at the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`,
+`exhaust`, `explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`,
+`moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 **A tag does one of three jobs and the word does not say which**, so say it when you add one:
 
 | Job | Examples | Read by |
 |---|---|---|
-| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust` | `Port#accepts?` |
+| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust`, `explosive` | `Port#accepts?` |
 | Reaction — what a substance can do in one | `fuel`, `oxidiser`, `inert` | reactions, ignition, a node's `reaction_throttle` |
 | Physiology — what it does to a person | `breathable` | `Breath` |
 
@@ -97,11 +97,16 @@ cast_iron:
   density_kg_per_m3: 7200
   specific_heat_j_per_kg_k: 460
   tensile_strength_pa: 150.0e6
+  thermal_conductivity_w_per_m_k: 50
   max_temperature_k: 800
 ```
 
 `tensile_strength_pa` is only required on things actually used as structural materials;
 asking for one that is missing raises rather than returning nil into a stress calculation.
+`thermal_conductivity_w_per_m_k` is the same: required of whatever a `Nodes::Wall` is built of,
+and every material in the catalogue declares one. **Rock is a material too** — `coal_measures`,
+with no strength or rating, because nothing is built of it; it is what a pit's walls are, and its
+density, specific heat and conductivity are the whole of why a blast's heat lasts seconds.
 
 What a spinning part cares about is the **ratio** of tensile strength to density. Cast iron
 does badly on it — excellent in compression, poor in tension, which is exactly the wrong way
@@ -219,10 +224,26 @@ plateau is 1.5–2.0 and both edges are outright failures. Measurements are in
     quench_per_s: 0.45   # how fast it dies when cold or starved of air
     lean_fraction: 0.05  # below this share of the volume it will not carry a flame
     rich_fraction: 0.15  # above it there is not enough air in the mixture to burn
+    autoignition_k: 573  # past this the fuel lights itself, with no flame near it
 ```
 
 **Opt-in.** A reaction without this block keeps the old bulk-temperature gate and behaves
 exactly as before, so adding it to one reaction cannot disturb another.
+
+**`autoignition_k` is a real ignition temperature, not a tuning knob** — timber's ~300 °C, not a
+figure chosen so something in a machine reaches it. A node reads it against the hotter of its own
+temperature and its `hot_spot:`, the node its fuel touches. If a machine cannot get its timber
+there when a real one did, the machine's heating is what is wrong.
+
+**The same fuel in a different configuration is a different reaction**, named for it.
+`coal_layer_combustion` is coal's chemistry with a 25 mm layer's hot-surface ignition point
+(483 K) for spillage packed against a drum, beside `coal_combustion`'s 700 K for a heating in bulk.
+The figure belongs to the geometry, so the geometry is in the name.
+
+**A fire-resistant grade is two figures, not a flag**: an `autoignition_k` past what the hot
+part can reach, and a `quench_per_s` well above `spread_per_s`, so that even lit by something
+else it cannot carry a flame along itself. `fire_resistant_belting` beside `belting` is the
+worked pair.
 
 ### The flammability range is for mixtures, not for fuel beds
 
@@ -247,6 +268,28 @@ fuel is inferred from the `:fuel` tag, so nothing has to be declared twice. See
 
 **Set `quench_per_s` above `spread_per_s`**, or a cold box can never put a fire out — at
 equilibrium the two balance, and a fire settles where its draught can support it.
+
+A flame in a mixture outside its range burns only what it lights, one for one. **An igniter's seed
+rate is therefore what a flame burns in lean gas**, so size it to the flame — a candle's flame
+cap is about a microgram a second, not the grams a firelighter on a grate wants.
+
+### `prompt:` is for whatever happens faster than a tick
+
+```yaml
+  prompt:
+    kind: deflagration
+```
+
+A reaction that declares it is **resolved, not integrated**, once it triggers (see
+[`../reference/physics.md`](../reference/physics.md#prompt-reactions-what-happens-faster-than-a-tick-is-resolved)).
+`deflagration` is the one kind: a premixed fuel in its flammable range, alight, burns the whole
+mixture on the next tick, its products set by the mixture's own air through its `alternatives:`.
+It needs an `ignition:` block with a flammable range, and `Content` refuses to load one without
+it or with a kind nobody resolves. Firedamp and coal dust declare it; a fuel bed never should —
+its air really does arrive tick by tick.
+
+`rate_per_s` still governs a prompt reaction outside its range, where a naked light burns a
+trickle of lean gas.
 
 ### `min_temperature_k` is not the ignition point
 
@@ -346,7 +389,12 @@ Rules worth knowing before you add one:
 - **`clumsy` and `boneheaded` are the same family at opposite ends.** Clumsy makes the *bite*
   worse once something has gone wrong; boneheaded makes the *mistake* likelier in the first
   place. Pulling the wrong lever is not the same failing as dropping it, and only one of them
-  feeds the Danger Check.
+  feeds the Danger Check. **`boneheaded` climbs steeply**: it is read cubed (`Minion#daftness`),
+  so 0.3 is daft on occasion, 0.5 often, and 1.0 — something that cannot count past its fingers —
+  slips every few seconds. Pick the value with that curve in mind.
+- **`open_flame` is an igniter wherever its wearer stands**, so a piece of kit that carries it is
+  a naked light in a gassy district. **`diminutive`** (a value, like `hulking`) aids stations that
+  want somebody small — the trapper at a haulage door — and nothing that wants force.
 - **Minion tags are a MAP, not a list.** Resource tags are flat — a thing is `:liquid` or is not —
   but "how well can you see in the dark" has a number for an answer. Write `true` for a trait that
   is simply present.

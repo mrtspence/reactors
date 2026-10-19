@@ -43,15 +43,24 @@ module PitRig
 
   SEATS = (1..4)
 
+  # **A collier with a winding ticket**, so a spec that rides the cage has somebody at the post who
+  # does not slip — an unticketed hand fumbles the certificated lever every half-minute or so.
+  ENGINEMAN_TAGS = { certificated: true }.freeze
+
   MINIONS = SEATS.to_h { |i|
     [ :"hand_#{i}", { name: "Hand #{i}", archetype: :collier, hireable: false } ]
-  }.freeze
+  }.merge(engineman: { name: "Engineman", archetype: :engineman, hireable: false }).freeze
 
   # Seats, not people: `crew_1` is a place on the payroll that `hand_1` is filling.
   CREW = SEATS.to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{i}" } ] }.freeze
 
+  # The same shift with an engineman in the fifth seat, for anything that rides the cage.
+  WOUND_CREW = CREW.merge(crew_5: { minion: :engineman }).freeze
+
   def self.content(archetype)
-    ReactorSim::Content.default.merging(archetypes: { collier: archetype }, minions: MINIONS)
+    engineman = archetype.merge(label: "Engineman", tags: archetype.fetch(:tags).merge(ENGINEMAN_TAGS))
+    ReactorSim::Content.default.merging(archetypes: { collier: archetype, engineman: engineman },
+                                        minions: MINIONS)
   end
 
   CONTENT = content(COLLIER)
@@ -67,9 +76,18 @@ module PitRig
 
   # `loadout:` is omitted rather than defaulted, so an unfitted slot takes the chassis default
   # exactly as it would without the rig.
-  def build_match(id:, seed:, crew: CREW, ground: ORDINARY, loadout: nil, **opts)
-    operation = { id: "pit", type: :mine, ground: ground, crew: crew, **opts }
-    operation[:loadout] = loadout if loadout
+  #
+  # **The two-shaft frame unless an example asks otherwise**, pinned for the reason `ground:` is:
+  # a mine spec measures the machine, and the starting frame's brattice leaks some of every
+  # ventilation figure away.
+  #
+  # **No pit bottom shift unless an example asks for one.** Where the crew starts is the rig's to
+  # lay out, the way `at_the_face` constructs their arrivals: its hands and engineman fill the
+  # first seats at bank, and the pit bottom shift would deal seats five to seven underground and
+  # take the winder's man with them. `shifts_spec` fits it.
+  def build_match(id:, seed:, crew: CREW, ground: ORDINARY, loadout: nil, chassis: :two_shaft, **opts)
+    operation = { id: "pit", type: :mine, ground: ground, crew: crew, chassis: chassis, **opts }
+    operation[:loadout] = { pit_bottom_shift: nil }.merge(loadout || {})
 
     ReactorSim::Match.create(id: id, seed: seed, operations: [ operation ])
   end
@@ -81,14 +99,44 @@ module PitRig
   # One tick of a mine that is being paid for, for as many ticks as asked. **Returns the
   # events**, never the operation: the caller already holds that, and an example that wants to
   # assert on what the pit reported should not have to build its own loop to collect it.
-  def run!(op, ticks, from: 0, supply: SUPPLY_J)
+  # `wind: true` puts a banksman on the cage — see `wind!`.
+  def run!(op, ticks, from: 0, supply: SUPPLY_J, wind: false)
     events = []
     ticks.times do |i|
+      wind!(op) if wind
       op.receive_supply(:line_shaft, supply)
       events.concat(op.step!(tick: from + i + 1))
     end
     events
   end
+
+  # **A banksman for specs**: calls the cage to whoever is waiting at a landing to cross the shaft,
+  # and sends it to the far landing once somebody is aboard and has finished getting in. The cage is
+  # incidental to most claims that ride it, and a winding schedule written into every one would bury
+  # the claim. Needs somebody at `:man_winding` — `WOUND_CREW`'s engineman — or nothing winds.
+  def wind!(op)
+    shaft = op.layout.passages.find(&:ridden?) or return
+    hands = op.state.fetch(:minions).values
+    aboard = hands.find { |s| s[:via] == shaft.hoist }
+    getting_in = hands.find { |s| s[:via] == shaft.hoist && s.fetch(:boarding_s, 0.0).positive? }
+    waiting = hands.find { |s| s[:via].nil? && shaft.touches?(s[:place]) && crossing?(op, shaft, s) }
+
+    landing =
+      if getting_in then getting_in[:place]
+      elsif aboard then shaft.other(aboard[:place])
+      else waiting&.fetch(:place)
+      end
+    op.set_control(shaft.staffed_by, landing == shaft.a ? 0.0 : 100.0) if landing
+  end
+
+  def crossing?(op, shaft, state)
+    posting = state[:posting] or return false
+    going = op.layout.place_of(posting) || op.state.dig(:minions, posting, :place)
+    !going.nil? && going != state[:place] && !op.layout.next_hop(state[:place], going, []).nil? &&
+      shaft.touches?(op.layout.next_hop(state[:place], going, []))
+  end
+
+  def engineman!(op, seat: :crew_5) = op.assign_minion(seat, :man_winding)
 
   # --- constructed state -----------------------------------------------------
   #
@@ -191,8 +239,10 @@ module PitRig
     held(op, node, gas) / total * 100.0
   end
 
+  # The gas phase only, as the tick reads it.
   def air(op, place)
-    ReactorSim::Breath.breathable_fraction(parcels(op, op.layout.breathes(place)), op.content)
+    gas = ReactorSim::Parcel.matching(parcels(op, op.layout.breathes(place)), [ :gas ], op.content)
+    ReactorSim::Breath.breathable_fraction(gas, op.content)
   end
 
   def crew(op, seat) = op.state.fetch(:minions).fetch(seat)
