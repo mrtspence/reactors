@@ -142,21 +142,25 @@ RSpec.describe "the mine" do
     # where the opening five minutes of a match are a walk, so the last seats are an advance shift
     # standing in the district when the whistle goes.
     describe "the advance shift" do
+      def below(op) = op.state.fetch(:minions).select { |_, s| s[:place] == :district }
+
       it "is already in the district, posted to nothing" do
         op = mine
-        below = op.state.fetch(:minions).select { |_, s| s[:place] == :district }
+        last = op.state.fetch(:minions).keys.last(below(op).size)
 
-        expect(below.keys).to eq(%i[crew_8 crew_9 crew_10])
-        expect(below.values.map { |s| s[:posting] }).to all(be_nil)
+        expect(below(op)).not_to be_empty
+        expect(below(op).keys).to eq(last)
+        expect(below(op).values.map { |s| s[:posting] }).to all(be_nil)
       end
 
       # The point of them: coal on the first tick they are told to cut, with no walk first.
       it "takes up a face post on the spot, where a hand at bank cannot" do
         op = mine
-        op.assign_minion(:crew_8, :hewing)
+        hand = below(op).keys.first
+        op.assign_minion(hand, :hewing)
         op.step!(tick: 1)
 
-        expect(crew(op, :crew_8)[:station]).to be(:hewing)
+        expect(crew(op, hand)[:station]).to be(:hewing)
         expect(crew(op, :crew_1)[:place]).to be(:bank)
       end
     end

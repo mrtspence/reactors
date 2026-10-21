@@ -33,10 +33,14 @@ module ReactorSim
       # at when it is bought from an engine at 1.0. See `Match#validate_couplings!`.
       DEFAULT_TIME_SCALE = 1.0
 
-      # **The shifts already down when the whistle goes** are fitted, not given: three at the face
-      # and three at the pit bottom to start with, five of either for the back shift and the
-      # underground stable (`Mine::SHIFTS`). Bank to the face is minutes, and a player who has to
-      # spend all of them before anything can happen is a player watching a loading bar.
+      # The yard round the shaft collar that drains into it, m². A storm's rain on it reaches the
+      # sump at a few kilograms a second — a load on the pump, not a flood.
+      YARD_M2 = 2_000.0
+
+      # **The shifts already down when the whistle goes** are fitted, not given: a face shift and a
+      # pit bottom shift to start with, bigger ones as upgrades (`Mine::SHIFTS`). Bank to the face is
+      # minutes, and a player who has to spend all of them before anything can happen is a player
+      # watching a loading bar.
       STARTING_PARTS = {
         cutting: :hand_picks,
         haulage: :hand_putting,
@@ -73,17 +77,19 @@ module ReactorSim
       # `options:`**, and it does not need to be: it changes `initial_state` and nothing about
       # the graph, and a restored snapshot installs its own state over the top — so the ground
       # a match was given survives a round trip whatever this was called with.
+      # `conditions:` is the match's sky — `{ season:, climate:, start_hour:, severity: }` from setup
+      # — and nil is the standard sky a spec measures the pit under.
       def build(id:, seed:, chassis: CHASSIS.keys.first, loadout: {}, crew: {}, ground: nil,
-                time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
+                conditions: nil, time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         chassis = chassis.to_sym
-        assembly = assembly_for(chassis, loadout, ground: ground)
+        assembly = assembly_for(chassis, loadout, ground: ground, conditions: conditions)
         fragment = assembly.build!
         roster = Crew.normalise(crew, capacity: assembly.crew_capacity)
 
         Operation.new(
           id: id, type: TYPE, seed: seed, time_scale: time_scale,
           state: state, rngs: rngs, content: content,
-          options: { chassis: chassis, loadout: assembly.loadout, crew: roster },
+          options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions }.compact,
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           # From the fragment, so a fitted cage contributes its own way through the shaft — the
@@ -98,9 +104,10 @@ module ReactorSim
         )
       end
 
-      def assembly_for(chassis, loadout = {}, ground: nil)
+      def assembly_for(chassis, loadout = {}, ground: nil, conditions: nil)
         spec = CHASSIS.fetch(chassis.to_sym) { raise Error, "unknown mine chassis #{chassis.inspect}" }
         spec = spec.merge(ground: ground) if ground
+        spec = spec.merge(conditions: conditions) if conditions
 
         Assembly.new(
           slots: slots(spec), loadout: loadout, spec: spec,
@@ -367,9 +374,11 @@ module ReactorSim
       end
 
       # The furnaceman's shovel, an effort station like the engine's stoker.
-      def furnace_stoke(max_kg_per_s:)
+      # `max_kg_per_s` is one furnaceman's.
+      def furnace_stoke(max_kg_per_s:, crew:)
         Nodes::Conduit.new(id: :furnace_stoke, label: "Stoking the Furnace", accepts: [ :fuel ],
-                           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e3, control_id: :furnace_stoking)
+                           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e3, control_id: :furnace_stoking,
+                           worked: true, crew: crew)
       end
 
       # Through the furnace's grate and arch, which is what a bigger furnace widens.
@@ -442,7 +451,7 @@ module ReactorSim
         def apply(state, ctx, _grant)
           road = ctx.nodes[@traffic]
           tubs = road&.activity(ctx.node_state(@traffic), :tubs, ctx.dt).to_f
-          trapping = @trapper ? (ctx.controls.fetch(@trapper, 0.0) / 100.0).clamp(0.0, 1.5) : 0.0
+          trapping = @trapper ? [ ctx.controls.fetch(@trapper, 0.0) / 100.0, 0.0 ].max : 0.0
           shutting = (SHUT_PER_S * trapping) + @self_closing_per_s
           open = state.fetch(:open, 0.0) + (((OPENED_PER_S * tubs) - shutting) * ctx.dt)
 
@@ -871,11 +880,12 @@ module ReactorSim
         def throughput_kg(state, ctx) = super * (1.0 - (LAID_WET * SprayLine.wetting(ctx, @sprayed_by)))
       end
 
+      # `max_kg_per_s` is what each hewer raises.
       def dust_line(max_kg_per_s:)
         DustLine.new(
           id: :dust_line, label: "Dust", accepts: [ :dust ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 1.0e3,
-          control_id: :hewing
+          control_id: :hewing, worked: true
         )
       end
 
@@ -1066,7 +1076,7 @@ module ReactorSim
 
         private
 
-        def packing(ctx) = @packing ? (ctx.controls.fetch(@packing, 0.0) / 100.0).clamp(0.0, 1.0) : 0.0
+        def packing(ctx) = @packing ? [ ctx.controls.fetch(@packing, 0.0) / 100.0, 0.0 ].max : 0.0
 
         def fall(state, advance)
           state.merge(fallen_at_m: advance, packed_m: 0.0, hanging_m: 0.0, flushing_s: FLUSH_S,
@@ -1219,7 +1229,7 @@ module ReactorSim
 
         def apply(state, ctx, grant)
           state, events = super
-          worked = @sealing ? (ctx.controls.fetch(@sealing, 0.0) / 100.0).clamp(0.0, 1.0) : 0.0
+          worked = @sealing ? [ ctx.controls.fetch(@sealing, 0.0) / 100.0, 0.0 ].max : 0.0
           [ state.merge(sealed: [ sealed(state) + (SEAL_PER_S * worked * ctx.dt), 1.0 ].min), events ]
         end
       end
@@ -1429,7 +1439,6 @@ module ReactorSim
         def initialize(sparks: nil, sprayed_by: :spray_line, **opts)
           @sparks = sparks&.freeze
           @sprayed_by = sprayed_by.to_sym
-          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
           super(**opts)
         end
 
@@ -1443,9 +1452,9 @@ module ReactorSim
             cause: :cutter_sparks }
         end
 
-        # How hard it was cutting this tick, against its rating, and whether the sprays had it wet.
+        # How hard it was cutting this tick, against a full face, and whether the sprays had it wet.
         def apply(state, ctx, grant)
-          cut = state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * ctx.dt)
+          cut = state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * ctx.dt)
           super.merge(cutting: cut.clamp(0.0, 1.0), quenched: SprayLine.wetting(ctx, @sprayed_by) >= 1.0)
         end
       end
@@ -1453,11 +1462,11 @@ module ReactorSim
       # A frictional spark: a spark's seed, enough to fire a mixture in the band, almost no heat.
       CUTTER_SPARKS = { kg_per_s: 1.0e-7, watts: 30.0 }.freeze
 
-      def pick_line(max_kg_per_s:, sparks: nil)
+      def pick_line(max_kg_per_s:, crew:, sparks: nil)
         PickLine.new(
           id: :pick_line, label: "Hewing", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 2.0e3,
-          control_id: :hewing, sparks: sparks
+          control_id: :hewing, sparks: sparks, worked: true, crew: crew
         )
       end
 
@@ -1586,9 +1595,12 @@ module ReactorSim
           end
         end
 
+        # `hewing` is the face's busy-ness against a full crew, which is what a live charge in it
+        # scales with: every hewer on it is somebody who might strike it.
         def apply(state, ctx, grant)
-          work = (ctx.controls.fetch(:shotfiring, 0.0) / 100.0).clamp(0.0, 2.0)
-          hewing = (ctx.controls.fetch(:hewing, 0.0) / 100.0).clamp(0.0, 2.0)
+          work = [ ctx.controls.fetch(:shotfiring, 0.0) / 100.0, 0.0 ].max
+          face_crew = ctx.nodes[:pick_line]&.crew || 1
+          hewing = [ ctx.controls.fetch(:hewing, 0.0) / 100.0 / face_crew, 0.0 ].max
           shot = fired(super, ctx).merge(work: work, hewing: hewing)
           shot = shot.fetch(:misfires).positive? ? dig_out(shot, work, ctx) : charge(shot, work, ctx)
           shot.merge(status: STATUSES.index(status(shot)))
@@ -1711,38 +1723,34 @@ module ReactorSim
       # more than every explosion put together — and they are undramatic in exactly this way:
       # nothing goes wrong suddenly, somebody simply did not set enough timber.
       class Roadway < Nodes::Conduit
-        # Durability per second at a fully advanced, wholly unsupported face.
+        # Durability per second for each kg/s of coal cut beyond what the timbering keeps up with.
         #
-        # **Against `Wearing::DEFAULT_DURABILITY_RANGE`, which is 850–1150, not 0–1.** Written as
-        # `9.0e-3` — a plausible-looking figure for a fraction-per-second — it took 2% off a
-        # roadway in 1500 s and the roof could not have come in inside a day's play. A rate is
+        # **Against `Wearing::DEFAULT_DURABILITY_RANGE`, which is 850–1150, not 0–1.** A rate is
         # meaningless without the scale it is against; check the pool before picking the rate.
         #
-        # At 7.3 a wholly unsupported face brings the road in at about 450 simulated seconds,
-        # which is minutes rather than seconds on purpose: the player has to be able to see it
-        # coming and send somebody.
-        #
-        # **It was 2.2 before hewing became gated rather than aided.** The controls this reads
-        # carry the *worked* value, so a change to how capability is computed moves this figure
-        # even though nothing here was touched: a decent kit went from ×1.6 aided to ×0.48
-        # gated, a factor of 3.3, and the rate had to follow it.
-        UNSUPPORTED_RATE = 7.3
+        # A full hand face of five hewers with a decent kit cuts about 0.3 kg/s, and wholly
+        # unsupported brings the road in at about ten minutes: long enough to see it coming and
+        # send somebody, short enough to happen inside a match.
+        UNSUPPORTED_RATE = 5.2
+
+        # How much cutting one competent timberer keeps propped: three hand hewers' worth. A
+        # tuning figure until a source turns up; a cutter's face wants more timbermen, because it
+        # opens ground faster.
+        TIMBERED_KG_PER_S = 0.36
 
         # `endangers:` lives here rather than on `Conduit`, because a pipe that hurts the people
         # beside it is a general idea nothing else has needed yet and a roadway coming in is
         # not. `Tick#hazards_from` only asks whether a node responds to `failure_hazards`, so a
         # subclass answering is enough.
         # `rope:` names the haulage rope a road's sets are drawn on, if it has one: parted, the road
-        # carries nothing until it is spliced.
+        # carries nothing until it is spliced. `advanced_by:` is the node that cuts the face, and
+        # what it cut last tick is the ground opened; `supported_by:` is the timbering post.
         def initialize(advanced_by:, supported_by:, endangers: {}, perils: [], rope: nil, **opts)
           @rope = rope&.to_sym
           @advanced_by = advanced_by.to_sym
           @supported_by = supported_by.to_sym
           @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
           @perils = perils.freeze
-          # Kept because `activity` divides by it: the road's own rating is the scale its
-          # traffic means anything against.
-          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
           super(**opts)
         end
 
@@ -1758,11 +1766,17 @@ module ReactorSim
         # working still consume timber to stand still, and a district standing idle does not
         # fall in — it is cutting that opens ground.
         def stress_per_second(state, ctx)
-          exposed = ctx.controls.fetch(@advanced_by, 0.0) / 100.0
-          supported = ctx.controls.fetch(@supported_by, 0.0) / 100.0
-          unsupported = [ exposed - supported, 0.0 ].max
+          (unsupported_kg_per_s(ctx) * UNSUPPORTED_RATE) + super
+        end
 
-          (unsupported * UNSUPPORTED_RATE) + super
+        # Coal cut beyond what the timbering keeps up with, kg/s. Cutting is what opens ground, so
+        # this reads what the face actually cut rather than how hard it was asked to.
+        def unsupported_kg_per_s(ctx)
+          return 0.0 unless ctx.dt.positive?
+
+          cut = ctx.node_state(@advanced_by)&.fetch(:carried_kg, 0.0).to_f / ctx.dt
+          propped = ctx.controls.fetch(@supported_by, 0.0) / 100.0 * TIMBERED_KG_PER_S
+          [ cut - propped, 0.0 ].max
         end
 
         # A fall does not seal a roadway, it chokes it — a few tubs a shift get past over the
@@ -1774,7 +1788,7 @@ module ReactorSim
         def activity(state, quantity, dt)
           return nil unless quantity == self.class::TRAFFIC
 
-          (state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * dt)).clamp(0.0, 1.0)
+          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
         end
 
         # What its perils scale with: the tubs going past.
@@ -1785,8 +1799,7 @@ module ReactorSim
         def failure_mode(_state, _ctx, _cause) = :roof_fall
 
         def failure_detail(state, ctx)
-          { unsupported: (ctx.controls.fetch(@advanced_by, 0.0) -
-                          ctx.controls.fetch(@supported_by, 0.0)).clamp(0.0, 100.0).round(1),
+          { unsupported: unsupported_kg_per_s(ctx).round(3),
             carried_kg: state.fetch(:carried_kg, 0.0).round(3) }
         end
       end
@@ -1890,7 +1903,7 @@ module ReactorSim
         # How busy the road is, as of last tick, and — parted — the splice coming on.
         def apply(state, ctx, _grant)
           road = ctx.node_state(@road) || {}
-          rated = ctx.nodes&.[](@road)&.port(:outlet)&.capacity_kg(ctx.dt).to_f
+          rated = ctx.nodes&.[](@road)&.full_crew_kg_per_s.to_f * ctx.dt
           traffic = rated.positive? ? (road.fetch(:carried_kg, 0.0) / rated).clamp(0.0, 1.0) : 0.0
           state = state.merge(traffic: traffic)
           return state unless broken?(state)
@@ -1901,7 +1914,7 @@ module ReactorSim
         private
 
         def splice(state, ctx)
-          work = (ctx.controls.fetch(@splice_control, 0.0) / 100.0).clamp(0.0, 2.0)
+          work = [ ctx.controls.fetch(@splice_control, 0.0) / 100.0, 0.0 ].max
           progress = state.fetch(:splicing) + (work * ctx.dt / SPLICE_S)
           return state.merge(splicing: progress) if progress < 1.0
 
@@ -1943,26 +1956,26 @@ module ReactorSim
       # `driven:` makes it a rope haulage: a haulage engine off the line shaft drawing sets on
       # `rope:`, moving coal only while the shaft turns and paying the shaft for the empties it
       # draws back up. Without it the road is put by hand.
-      def tub_road(max_kg_per_s:, driven: false, rope: nil)
+      # `max_kg_per_s` is one putter's, or one hauling hand's, and `crew:` how many the road takes.
+      def tub_road(max_kg_per_s:, crew:, driven: false, rope: nil)
         Roadway.new(
           rope: rope,
           **(driven ? { driven_by: :line_shaft, displacement: true, rated_omega: WORKING_OMEGA,
                         lift_m: HAULED_LIFT_M, efficiency: 0.6 } : {}),
-          advanced_by: :hewing, supported_by: :timbering,
+          advanced_by: :pick_line, supported_by: :timbering,
           id: :tub_road, label: "Haulage Road", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 4.0e3,
-          control_id: :haulage,
+          control_id: :haulage, worked: true, crew: crew,
           # Who is under it when it comes in. **The road runs between two rooms and the fall
           # reaches both** — the putter's end worst, because he is on it, and the face less.
           # Keyed by place rather than by post, so the timberman standing at the face is caught
           # too, which he plainly should be and was not while a hazard reached people through
           # the job they were doing.
           endangers: {
-            # `reference:` is in the same **worked** units `unsupported` is reported in, so it
-            # moved when hewing became gated: a fully unsupported face reads about 48 with a
-            # decent kit, not 100, and a reference of 60 put every fall in one severity band.
+            # `reference:` is in kg/s of unsupported cutting, the unit `unsupported` is reported
+            # in: a full hand face wholly unsupported reads about 0.3 with a decent kit.
             roof_fall: { tags: %i[rockfall crush], scales_with: :unsupported,
-                         reference: 30.0,
+                         reference: 0.2,
                          places: { pit_bottom: 2.6, district: 1.6 } }
           },
           # **What the road does to people with nothing broken at all**, which is the majority
@@ -2019,7 +2032,7 @@ module ReactorSim
           share = displacement_fraction(ctx)
           return false unless share.positive?
 
-          pushed = port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx) * share
+          pushed = full_crew_kg_per_s * ctx.dt * open_fraction(ctx) * share
           [ pushed, waiting_kg(ctx) ].min > grip_kg_per_s_now(ctx) * share * ctx.dt
         end
 
@@ -2054,7 +2067,7 @@ module ReactorSim
           grip_kg_per_s: grip_kg_per_s, fed_from: :district, wetted_by: :pit_bottom,
           driven_by: :line_shaft, displacement: true, rated_omega: WORKING_OMEGA,
           lift_m: BELT_LIFT_M, efficiency: 0.7,
-          advanced_by: :hewing, supported_by: :timbering,
+          advanced_by: :pick_line, supported_by: :timbering,
           id: :tub_road, label: "Belt Road", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 4.0e3, control_id: :haulage,
           endangers: { roof_fall: { tags: %i[rockfall crush], scales_with: :unsupported, reference: 30.0,
@@ -2125,7 +2138,8 @@ module ReactorSim
       # The attendant's shovel: the spillage back onto the pit bottom's coal, as hard as he works.
       def belt_clearing
         Nodes::Conduit.new(id: :belt_clearing, label: "Clearing the Drive Head", accepts: [ :solid ],
-                           max_kg_per_s: 0.3, heat_capacity: 1.0e3, control_id: :belt_attending)
+                           max_kg_per_s: 0.3, heat_capacity: 1.0e3, control_id: :belt_attending,
+                           worked: true, crew: 2)
       end
 
       # 400 m of belt, both runs, at ten kilograms a metre.
@@ -2192,7 +2206,6 @@ module ReactorSim
           @hoist = hoist.to_sym
           @landing_m = landing_m.to_f
           @perils = perils.freeze
-          @rated_kg_per_s = opts.fetch(:max_kg_per_s).to_f
           super(**opts)
         end
 
@@ -2209,28 +2222,40 @@ module ReactorSim
         def activity(state, quantity, dt)
           return nil unless quantity == :tubs
 
-          (state.fetch(:carried_kg, 0.0) / (@rated_kg_per_s * dt)).clamp(0.0, 1.0)
+          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
         end
       end
 
-      # The onsetter running full tubs onto the deck at the pit bottom.
-      def deck_loading(max_kg_per_s:)
+      # The onsetter running full tubs onto the deck at the pit bottom. `max_kg_per_s` is one
+      # onsetter's.
+      def deck_loading(max_kg_per_s:, crew: LANDING_CREW)
         Landing.new(id: :deck_loading, label: "Onsetting", accepts: [ :solid ],
                     hoist: :cage_drive, landing_m: SHAFT_DEPTH_M, max_kg_per_s: max_kg_per_s,
-                    heat_capacity: 2.0e3, control_id: :onsetting)
+                    heat_capacity: 2.0e3, control_id: :onsetting, worked: true, crew: crew)
       end
 
+      # Two to a landing: one running the tubs on or off and one at the gate.
+      LANDING_CREW = 2
+
+      # What the weather on the deck at bank does to running tubs off it: twice as bad wet, nine
+      # times on ice.
+      BANK_FOOTING = { wet: 1.0, icy: 8.0 }.freeze
+
       # The banksman running them off at bank.
-      def deck_unloading(max_kg_per_s:)
+      def deck_unloading(max_kg_per_s:, crew: LANDING_CREW)
         Landing.new(
           id: :deck_unloading, label: "Banking", accepts: [ :solid ],
           hoist: :cage_drive, landing_m: 0.0, max_kg_per_s: max_kg_per_s,
-          heat_capacity: 2.0e3, control_id: :banking,
+          heat_capacity: 2.0e3, control_id: :banking, worked: true, crew: crew,
           # Rare beside the haulage road's, because it is one tub in many hundreds — and it hurts
-          # nobody at bank; it is the shaft that suffers it.
+          # nobody at bank; it is the shaft that suffers it. **Both are the deck's footing**: a wet
+          # one is worse, an icy one far worse, and an icy deck is how a banksman ends up in the
+          # shaft after his tub.
           perils: [ Peril.new(id: :tub_into_shaft, rate: 0.3, scales_with: :tubs,
                               mishap: { node: :shaft, kind: :obstruction, share: 1.0 },
-                              stations: %i[banking]) ]
+                              stations: %i[banking], underfoot: BANK_FOOTING),
+                    Peril.new(id: :slipped_on_the_deck, tags: %i[fall impact], severity: 1.2, rate: 0.1,
+                              scales_with: :tubs, stations: %i[banking], underfoot: BANK_FOOTING) ]
         )
       end
 
@@ -2496,7 +2521,7 @@ module ReactorSim
 
       def bore_line
         BoreLine.new(id: :bore_line, label: "Bore Holes", accepts: [], pocket: :gas_pocket,
-                     max_kg_per_s: 0.25, heat_capacity: 1.0e3, control_id: :boring)
+                     max_kg_per_s: 0.25, heat_capacity: 1.0e3, control_id: :boring, worked: true)
       end
 
       # **The fissure between the face and whatever water lies ahead of it.**

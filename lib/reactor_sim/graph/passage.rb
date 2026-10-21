@@ -102,6 +102,10 @@ module ReactorSim
       @declared = merge_places(Array(places)).freeze
       @places = derive_places.freeze
       @node_places = derive_node_places.freeze
+      @node_exposure = @node_places.filter_map { |node_id, place_id|
+        share = exposure(place_id)
+        [ node_id, share ] if share.positive?
+      }.to_h.freeze
       validate!(nodes.to_h)
       @breathes = derive_breathes(nodes.to_h).freeze
       @adjacency = derive_adjacency.freeze
@@ -126,6 +130,15 @@ module ReactorSim
 
     # Which node holds the air in this place — the volume somebody standing here is breathing.
     def breathes(place_id) = @breathes[place_id&.to_sym]
+
+    # How much of the weather reaches a place, and the places it reaches at all.
+    def exposure(place_id) = @declared[place_id&.to_sym]&.exposed || 0.0
+
+    def exposed_places = @declared.values.select { |place| place.exposed.positive? }.map(&:id)
+
+    # **Every node the weather reaches, and how much**: those in exposed places. Configuration,
+    # so the tick reads it rather than walking the places.
+    attr_reader :node_exposure
 
     # **Every** way between two places, not the first one. Two places can be joined more than
     # once — a shaft has a ladderway *and* a cage — and which of them somebody takes depends on
@@ -231,7 +244,8 @@ module ReactorSim
         known = acc[place.id]
         acc[place.id] = known.nil? ? place : Place.new(id: place.id, label: known.label,
                                                        nodes: known.nodes + place.nodes,
-                                                       air: known.air || place.air)
+                                                       air: known.air || place.air,
+                                                       exposure: known.exposure || place.exposure)
       end
     end
 

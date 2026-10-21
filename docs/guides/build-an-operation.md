@@ -32,6 +32,23 @@ Operation.new(
 rebuilt identically every time from the registered builder. That is what lets a snapshot be
 a bag of floats rather than an object graph.
 
+### The sky over it
+
+**Every operation with anything outdoors carries the sky as a fixture.** Three things, all
+shared, so a new operation writes none of the weather itself:
+
+1. A `Nodes::Outdoors` node (id `:outdoors`) built from `conditions:`. The builder and its
+   `Operations.register` block take `conditions:` and put it in `options:`, so a restore rebuilds
+   the same sky. Nil is the standard sky, which is what every spec gets.
+2. `WeatherGauges.guesses(observer:)` among the fixture's diagnostics, observed by whoever works
+   outdoors; `WeatherGauges.instruments` merged into the catalogue; `WeatherGauges::ORDER` at the
+   end of `PANEL_ORDER`; `WeatherGauges.slot` in the slot list.
+3. **`exposure:` on each place the weather reaches** — 1 for open ground, a fraction for a
+   building, nothing underground. It shifts the ambient of every node in the place, offers the
+   sky's light and its `wet`/`icy` footing to the people there, and lets the wind at them.
+
+Rain reaches a holder through a `Nodes::Catchment` of the ground that drains to it.
+
 ---
 
 ## The five decisions, in order
@@ -84,8 +101,10 @@ ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle, default
 
 Nodes read `ctx.controls.fetch(:throttle_open)` — the lever's **actual** position. A control
 point with `stiffness:` travels toward its target over several ticks; the default is
-instantaneous. An **effort** station (`effort:`) reads as its position scaled by whoever is posted
-there, and nothing at all with nobody there. A **governor** post (`governor:`) drives other,
+instantaneous. An **effort** station (`effort:`) reads as its position scaled by the crew posted
+there, summed — **worker-equivalents**, 100 for one competent hand flat out — and nothing at all
+with nobody there. Rate its node **per worker**, and declare a conduit it works `worked: true`
+with `crew:` set to the post's capacity, or the build refuses it. A **governor** post (`governor:`) drives other,
 `internal:` levers from its own — the mine's winding engineman works the clutches and brake to
 send the cage where the player names. See [`operations/CLAUDE.md`](../../lib/reactor_sim/operations/CLAUDE.md).
 
@@ -124,7 +143,7 @@ end
 station they all start at. Where they *are* lives in `state[:minions]`, because assignment is a
 command (`assign_minion`, absolute and idempotent like `set_control`).
 
-Five things to know:
+Things to know:
 
 - **Nobody starts at a working station, and it has to stay that way.** A machine that lets an
   effort station be a starting post hands the player a shift already at the face for free — which
@@ -136,11 +155,16 @@ Five things to know:
   way — a fitted part declaring `stats: { advance_seats:, advance_place: }`, read by
   `assembly.advance_shifts` in slot order and dealt onto `place:` on the `Minion` at build, never
   by the roster. Being a part is what lets a player buy a bigger head start.
-- **A station may have room for only so many.** `capacity:` on a `ControlPoint` is how many
-  people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
-  posting nobody can walk to. Every lever but one declares none and takes a crowd; the mine's
-  refuge hole takes one man, and a bigger cut-out is something a pit buys. Counted over
-  `posting`, so the refusal lands when the order is given rather than on arrival.
+- **A station has room for so many, and their work sums.** `capacity:` on a `ControlPoint` is how
+  many people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
+  posting nobody can walk to. **A lever defaults to one**; a part with room for a gang says so —
+  as a `crew:` stat, passed by its fragment to both the post and the node — and an upgrade raises
+  it. A post with no `node:` (quarters, a rest post) defaults to no limit. **A governor post holds
+  one**, refused at build. Counted over `posting`, so the refusal lands when the order is given
+  rather than on arrival.
+- **Size what is downstream of a gang, or don't.** A worked conduit caps nothing but its crew; if
+  the next fitting cannot take what a strong gang moves, the work backs up there, which is the
+  player's allocation problem and not a cap to add.
 - **A crew quarters builds no node.** It is a *place*, and a place is a `ControlPoint` with no
   `node:` — `ControlPoint#lever?` is what keeps it off the lever strip while leaving it on the
   crew screen. Do **not** write `provides: %i[quarters]`: `provides:` names NODE ids, and node,

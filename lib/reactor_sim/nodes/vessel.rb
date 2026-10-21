@@ -277,7 +277,9 @@ module ReactorSim
       def heater_fraction(ctx)
         return 0.0 if @heater_control_id.nil?
 
-        (ctx.controls.fetch(@heater_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
+        # Unclamped above, because a heater worked by people — a furnaceman's shovel — arrives in
+        # worker-equivalents; a heater on a valve never reads past 100%.
+        [ ctx.controls.fetch(@heater_control_id, 0.0) / 100.0, 0.0 ].max
       end
 
       # A vessel hosting no ignited reaction — most of them — answers 0.0 and therefore never

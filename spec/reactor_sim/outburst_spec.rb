@@ -50,8 +50,12 @@ RSpec.describe "sudden outbursts" do
     end
   end
 
+  # A gram of coal ahead of the face, so any cutting at all reaches it on the first tick and the
+  # claim does not depend on how fast a face cuts.
+  AT_THE_FACE_M = 0.001 / ReactorSim::Operations::Mine::Ahead::FACE_KG_PER_M
+
   def driven(naked_flame:)
-    op = with_pocket(at_m: 0.0001)
+    op = with_pocket(at_m: AT_THE_FACE_M)
     levers!(op, hewing: 100, haulage: 100, timbering: 100, naked_flame: naked_flame)
     peak = 0.0
     events = (1..20).flat_map do |t|
@@ -60,8 +64,7 @@ RSpec.describe "sudden outbursts" do
     [ op, events, peak ]
   end
 
-  # A tenth of a millimetre ahead — half a kilogram of coal — so the first few ticks of hewing reach
-  # it and the pocket, at 15 kg a tick, is through before the twentieth.
+  # The pocket, at 15 kg a tick, is through before the twentieth.
   # **In the dark**, so what is measured is the gas arriving rather than what a candle makes of it.
   it "throws a pocket into the district when the face reaches it" do
     op, events, peak = driven(naked_flame: 0)

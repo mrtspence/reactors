@@ -355,9 +355,13 @@ module ReactorSim
       { operation_id: @id,
         instruments: @diagnostics.values.map(&:chrome),
         controls: @control_points.values.select(&:commandable?).map { |c|
-          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit }
+          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit, capacity: c.capacity }
         },
-        stations: @control_points.values.reject(&:internal?).map { |c| { id: c.id, label: c.label } },
+        # `capacity` is how many the post takes (nil: no limit), so the crew screen can show a
+        # gang filling up from the postings it already has.
+        stations: @control_points.values.reject(&:internal?).map { |c|
+          { id: c.id, label: c.label, capacity: c.capacity }
+        },
         # **Empty for an operation with no geometry**, which is what makes the panel's "where
         # are they" line nil-accepting rather than a mine-only feature: the steam engine ships
         # no places and the client renders nothing.
@@ -437,6 +441,23 @@ module ReactorSim
 
     # --- construction --------------------------------------------------------
 
+    # **A conduit an effort post works is `worked:`, and only those are.** Its lever arrives in
+    # worker-equivalents, and a conduit that does not know it clamps the crew to one worker's rate
+    # at the valve and at its own ports — silently, so a five-man face would cut one man's coal.
+    # The other way round, a valve read as a crew would let its position run past 100%.
+    def validate_worked!
+      @nodes.each_value do |node|
+        next unless node.is_a?(Nodes::Conduit)
+
+        levers = [ node.control_id, node.head_control_id ].compact
+        effort = levers.any? { |id| @control_points[id]&.effort? }
+        next if effort == node.worked? || levers.empty?
+
+        raise Error, "conduit #{node.id}: worked by #{levers.join(', ')} " \
+                     "but #{node.worked? ? '' : 'not '}declared worked:"
+      end
+    end
+
     def validate_graph!
       # Nodes, levers, instruments and crew share one flat id namespace, because they share
       # one rng table — `build_rngs` keys every stream by component id. A collision hands two
@@ -467,6 +488,8 @@ module ReactorSim
 
         raise Error, "diagnostic #{diagnostic.id}: no control point #{station} to observe it"
       end
+
+      validate_worked!
 
       # A mishap is suffered by the part it names, and only a part that understands that kind of
       # mishap can. Aimed anywhere else it would be a peril that silently breaks nothing.
@@ -515,9 +538,13 @@ module ReactorSim
     # existing operation perturbs no stream that was already there — and therefore changes no
     # physics. That property is what made it safe to give the steam engine a crew without
     # re-tuning it.
+    # Scoped by operation, except for a node that names a **match-wide** stream — the sky — so
+    # that every operation in a match draws the same one.
     def build_rngs(seed)
-      (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys)
-        .to_h { |id| [ id, Rng.stream(seed, "#{@id}/#{id}") ] }
+      (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys).to_h do |id|
+        shared = @nodes[id].respond_to?(:shared_stream) ? @nodes[id].shared_stream : nil
+        [ id, Rng.stream(seed, shared || "#{@id}/#{id}") ]
+      end
     end
 
     # A snapshot round-trips through JSON, which stringifies symbol keys — and only keys.

@@ -88,8 +88,10 @@ module ReactorSim
     # **`burden:` is a fourth term, for the same reason `suffocation:` is a third** — it is about
     # what is on your back rather than about a station. It applies to gear as much as to a
     # casualty, so a minion in an asbestos suit is paying for it while standing still.
-    def advance(minion, state, control:, dt:, demand: 0.0, suffocation: 0.0, burden: 0.0)
-      rate = accrual(minion, state, control, demand) - recovery(control, state) +
+    # **`strain:` multiplies the work alone**: heat makes shovelling cost more, not standing still,
+    # so it scales `accrual` and nothing else. 1.0 in comfort, which is nearly always.
+    def advance(minion, state, control:, dt:, demand: 0.0, suffocation: 0.0, burden: 0.0, strain: 1.0)
+      rate = (accrual(minion, state, control, demand) * strain) - recovery(control, state) +
              suffocation + hauling(minion, burden)
       next_fatigue = (state.fetch(:fatigue, 0.0) + (rate * dt)).clamp(RANGE.begin, RANGE.end)
 

@@ -192,7 +192,8 @@ module ReactorSim
       # Only with the cage stopped at the top landing: you cannot cut a rope that is carrying it.
       def at_bank?(ctx) = ctx.nodes.fetch(@hoist).cage_stopped_at?(ctx.states.fetch(@hoist), 0.0)
 
-      def worked(ctx, control) = control ? (ctx.controls.fetch(control, 0.0) / 100.0).clamp(0.0, 1.0) : 0.0
+      # In worker-equivalents: a gang at the rope gets through it faster than one man.
+      def worked(ctx, control) = control ? [ ctx.controls.fetch(control, 0.0) / 100.0, 0.0 ].max : 0.0
 
       def recap(state, ctx)
         effort = worked(ctx, @recap_control)

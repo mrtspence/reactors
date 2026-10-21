@@ -61,11 +61,12 @@ module ReactorSim
     # `place:` is **where this lever stands** — a place id in the operation's `Layout` — and is
     # what makes manning it cost a walk. Nil means it can be worked from anywhere, which is every
     # control in an operation that declares no passages at all.
-    # `capacity:` is **how many people this station has room for**, and nil — every lever in the
-    # game but one — means it does not care. A hole cut in a roadway side takes one man, and a
-    # bigger one is something a mine buys, so the number is a part's stat rather than a rule.
-    # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can
-    # walk to.
+    # `capacity:` is **how many people this station has room for**. A lever defaults to one; a
+    # part that has room for a gang says so, and its workers' efforts sum (`Tick#crews`). A post
+    # with nothing to work — the crew quarters — defaults to no limit, since the quarters' own
+    # `crew_capacity` already bounds it. The number is a part's stat rather than a rule, and
+    # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can walk
+    # to. **A governor post holds one**: two people do not drive one winding engine.
     # `complexity:` is **how tricky this lever is to work correctly**, and is the exact parallel
     # to `effort:` — deliberately orthogonal to it. `effort:` says how *fast* a job happens and
     # therefore depends on who does it; `complexity:` says whether it happens *correctly*. A
@@ -102,7 +103,7 @@ module ReactorSim
       @gated_by = gated_by&.map(&:to_sym)&.freeze
       @exertion = exertion.to_f
       @recovery = (recovery || (effort ? 0.0 : Fatigue::BASE_RECOVERY)).to_f
-      @capacity = capacity&.to_i
+      @capacity = capacity&.to_i || (@node ? 1 : nil)
       @complexity = complexity.to_f
       @requires = requires&.to_sym
       validate_effort!
@@ -118,7 +119,7 @@ module ReactorSim
     def effort? = !@effort.nil?
 
     # **Something a player can move, as opposed to somewhere a person can stand.** Every station
-    # is a control point — that is what `station_index`, `endangers:` and fatigue all resolve
+    # is a control point — that is what `Tick#crews`, `endangers:` and fatigue all resolve
     # through — but the crew quarters controls nothing, so it has no `node:` and belongs on the
     # crew screen rather than the lever strip. Derived rather than declared, because a lever with
     # nothing on the other end of it is not a lever by construction.
@@ -239,9 +240,12 @@ module ReactorSim
     # Zero would be a station nobody may ever be posted to, which is indistinguishable from one
     # that does not exist and is never what anybody meant to declare.
     def validate_capacity!
-      return if @capacity.nil? || @capacity.positive?
+      unless @capacity.nil? || @capacity.positive?
+        raise Error, "control #{@id}: capacity #{@capacity} must be positive or absent"
+      end
+      return if @governor.nil? || @capacity == 1
 
-      raise Error, "control #{@id}: capacity #{@capacity} must be positive or absent"
+      raise Error, "control #{@id}: a governor post holds one person, not #{@capacity.inspect}"
     end
   end
 end

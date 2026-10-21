@@ -47,6 +47,9 @@ Rails.application.routes.draw do
     post "commands", to: "commands#create", as: :operation_commands
   end
   resource :match_reset, only: %i[create], path: "matches/:match_id/reset"
+  # What the match is played under — the season — chosen before it starts. Match-level, because
+  # one sky covers every machine in it.
+  resource :match_setup, only: %i[edit update], path: "matches/:match_id/setup"
 
   root to: redirect("/matches/#{DevMatch::ID}/operations/#{DevMatch::PRIMARY}")
 end

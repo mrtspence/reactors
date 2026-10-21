@@ -321,13 +321,21 @@ RSpec.describe "passages and minion travel" do
       expect(crew(op, :crew_8)[:posting]).to be(:rest)
     end
 
-    # Every other lever declares none, and must go on taking a crowd — `station_index` being
-    # last-writer-wins is a separate expedient and this must not quietly become its fix.
-    it "lets a station that declares no capacity take anybody" do
+    # A post with nothing to work and no room declared — a crew quarters — takes anybody.
+    it "lets a post with no lever and no declared room take anybody" do
       op = rig
 
       expect(op.assign_minion(:crew_1, :banking)).to be(true)
       expect(op.assign_minion(:crew_2, :banking)).to be(true)
+    end
+
+    # A lever is a job, and with no room declared it is a job for one.
+    it "gives a lever room for one unless its part says otherwise" do
+      lever = ReactorSim::ControlPoint.new(id: :valve, node: :pipe)
+      gang = ReactorSim::ControlPoint.new(id: :face, node: :seam, capacity: 3)
+
+      expect([ lever.room_for?(0), lever.room_for?(1) ]).to eq([ true, false ])
+      expect([ gang.room_for?(2), gang.room_for?(3) ]).to eq([ true, false ])
     end
   end
 

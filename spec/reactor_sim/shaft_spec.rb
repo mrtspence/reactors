@@ -152,11 +152,23 @@ RSpec.describe "the shaft" do
       [ op, run!(op, 3) ]
     end
 
-    it "is lodged by a banksman who lets a tub into the shaft" do
-      op, events = banksman_on_the_edge
+    # **Which accident a banksman has is the dice's**, now that the deck has more than one, so the
+    # two halves are asserted apart: his deck carries the tub, and a tub let in lodges the shaft.
+    it "puts a tub-into-the-shaft among the perils of the banksman's deck" do
+      op, = banksman_on_the_edge
+      deck = op.nodes.fetch(:deck_unloading).perils
 
-      expect(events.map { |e| e[:type] }).to include(:minion_mishap)
-      expect(op.state.dig(:nodes, :shaft, :jam_m)).to eq(ReactorSim::Operations::Mine::Shaft::LODGE_M)
+      expect(deck.filter_map(&:mishap)).to include(include(node: :shaft, kind: :obstruction))
+    end
+
+    it "is lodged by a tub let into the shaft" do
+      op, = banksman_on_the_edge
+      snapshot = ReactorSim.deep_symbolize(op.to_h)
+      snapshot[:state][:mishaps] = [ { node: :shaft, kind: :obstruction, share: 1.0 } ]
+      lodged = ReactorSim::Operation.from_h(snapshot)
+      run!(lodged, 1, from: 3)
+
+      expect(lodged.state.dig(:nodes, :shaft, :jam_m)).to eq(ReactorSim::Operations::Mine::Shaft::LODGE_M)
     end
 
     # Bought down rather than removed: whether a gate saves it is the bank's safety equipment,

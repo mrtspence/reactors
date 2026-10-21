@@ -46,9 +46,9 @@ module MineTech
     }
   )
 
-  # Old workings a hand's breadth ahead of the face — ten kilograms of coal — so driving it breaks
-  # through inside a few ticks instead of hours. Where the water lies is the ground's business.
-  WATER_AHEAD_M = 0.002
+  # Old workings a gram of coal ahead of the face, so any cutting at all breaks through at once and
+  # the claim does not depend on how fast a face cuts. Where the water lies is the ground's business.
+  WATER_AHEAD_M = 0.001 / ReactorSim::Operations::Mine::Ahead::FACE_KG_PER_M
 end
 
 RSpec.describe "the mine's tech tree" do

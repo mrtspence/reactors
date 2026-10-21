@@ -48,6 +48,9 @@ module ReactorSim
       heater_engaged
       steam_raised
       blew_off
+      weather_turned
+      nightfall
+      daybreak
     ].freeze
 
     # Ascending. The client colours on these, so a new one is a delivery-tier change too.

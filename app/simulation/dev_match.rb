@@ -194,7 +194,22 @@ module DevMatch
   # flat `chassis`/`loadout`/`crew` was only ever right while there was one machine.
   def reset_command
     { "type" => "reset_match",
-      "operations" => operation_ids.to_h { |id| [ id.to_s, reset_spec(id) ] } }
+      "operations" => operation_ids.to_h { |id| [ id.to_s, reset_spec(id) ] },
+      # **One sky for the whole match**, carried once rather than per machine, so every machine is
+      # rebuilt under the same season.
+      "conditions" => stored_conditions.transform_keys(&:to_s).transform_values(&:to_s) }
+  end
+
+  # The season the match is set up for, as the simulation takes it.
+  def stored_conditions = MatchSetup.for(ID).to_sim
+
+  # **Ask the runner to rebuild the match**, which is what a reset and a change of setup both are.
+  # The command is built BEFORE the recovery clock advances, so somebody whose last match this was
+  # is still unavailable for the machine being built now.
+  def request_reset!
+    command = reset_command
+    start!
+    CommandProducer.instance.produce(match_id: ID, command: command)
   end
 
   def reset_spec(operation_id)
@@ -229,17 +244,21 @@ module DevMatch
   # have hired anybody.
   # `specs:` is what a reset hands over, keyed by operation id; left unset, every machine falls
   # back to what is stored, which is what a cold boot wants.
-  def build(specs: {})
+  # `conditions:` is what a reset hands over; left unset, the stored setup.
+  def build(specs: {}, conditions: nil)
+    sky = conditions ? conditions.to_h { |k, v| [ k.to_sym, v.to_sym ] } : stored_conditions
     ReactorSim::Match.create(
       id: ID, seed: SEED, time_scale: time_scale, couplings: couplings,
-      operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}) }
+      operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}, sky) }
     )
   end
 
-  def operation_spec(operation_id, given)
+  # Every machine with slots is built under the match's sky. One without — the dev engine — has
+  # nothing outdoors.
+  def operation_spec(operation_id, given, sky = stored_conditions)
     return { id: operation_id, type: kind_of(operation_id) } unless fittable?(operation_id)
 
-    { id: operation_id, type: kind_of(operation_id),
+    { id: operation_id, type: kind_of(operation_id), conditions: sky,
       chassis: given["chassis"]&.to_sym || chassis(operation_id: operation_id),
       loadout: given["loadout"]&.to_h { |slot, part| [ slot.to_sym, part&.to_sym ] } ||
                stored_parts(operation_id: operation_id),

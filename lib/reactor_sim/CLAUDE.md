@@ -35,14 +35,18 @@ operations/   specific machines, assembled from everything above
 
 Top-level files: `tick.rb` (the eight phases, in order), `operation.rb` (config, commands,
 projection, serialisation), `match.rb` (many operations in lockstep), `content.rb`,
-`control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`.
+`control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`,
+and `conditions.rb` — the sky a match is played under: kinds of condition (the weather, the light)
+that draw once from the outdoors node's **match-wide** stream at `initial_state` and are read as a
+pure function of the clock, through a fixed set of channels a later kind reuses. No die is thrown
+after the start. See [`design_sketches/conditions.md`](../../docs/design_sketches/conditions.md).
 
-What a person is subject to lives in six pure modules over a state hash they do not own,
+What a person is subject to lives in seven pure modules over a state hash they do not own,
 none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
-air), `scorch.rb` (the heat), `peril.rb` (the place, and the hidden margin it spends) and
-`burden.rb` (what they are carrying).
-**A harm that works continuously owes a dwell counter past collapse** — `asphyxia` and
-`burns` — because `Severity.escalate` will not announce the same tier twice and a steady
+air), `scorch.rb` (the heat), `chill.rb` (the cold, and the strain of working in heat),
+`peril.rb` (the place, and the hidden margin it spends) and `burden.rb` (what they are carrying).
+**A harm that works continuously owes a dwell counter past collapse** — `asphyxia`, `burns` and
+`chilled` — because `Severity.escalate` will not announce the same tier twice and a steady
 grind therefore never reaches `:mortal` on its own.
 
 > **A burden is gear and people, and the arithmetic cannot tell them apart.** `mass_kg` is the
@@ -107,6 +111,10 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > the opening move of a match. Jobs are derived, never declared: they are exactly the control
 > points with `effort:`. When there are more of those than seats, something is always
 > unattended, which is the point.
+>
+> **A post takes as many as its `capacity` and their work sums** (`Tick#crews`). A lever defaults
+> to one; a gang's part raises it. An effort post reaches its node in **worker-equivalents** —
+> 100 is one competent hand flat out — so nodes are rated per worker and cap nothing but the crew.
 
 > **`aided_by:` adds and `gated_by:` multiplies, and the difference is a design decision rather
 > than an arithmetic one.** A shovel makes shovelling better and its absence makes it merely

@@ -18,6 +18,9 @@ module ApplicationHelper
     engine: { label: "The engine itself",
               blurb: "What turns, what it drives, and what vents when it goes wrong.",
               accent: "text-violet-300", rule: "border-violet-900/60" },
+    weather: { label: "Weather",
+               blurb: "What the sky is doing, by instrument rather than by somebody's knee.",
+               accent: "text-emerald-300", rule: "border-emerald-900/60" },
     other: { label: "Other", blurb: "", accent: "text-slate-300", rule: "border-slate-800" }
   }.freeze
 

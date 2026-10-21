@@ -58,11 +58,15 @@ module ReactorSim
 
       def initial_temperature_k = @ambient_k
 
-      def holds_initial_state(_rng, content) = { parcels: baseline(content) }
+      def holds_initial_state(_rng, content)
+        { parcels: baseline(content, @ambient_k), ambient_k_now: @ambient_k, pressure_pa_now: @pressure_pa_setting }
+      end
 
-      # Fixed by definition. The outside world does not pressurise because you vented into
-      # it, and anything working against ambient needs this to be a dependable constant.
-      def pressure_pa(_state, _content) = @pressure_pa_setting
+      # **The weather's, not the operation's.** The outside world does not pressurise because you
+      # vented into it, so this is a dependable reference within a tick — but it is the glass
+      # outside, so it rises and falls with the sky (`apply`), shifted from the declared setting
+      # by the sky's departure from standard.
+      def pressure_pa(state, _content) = state.fetch(:pressure_pa_now, @pressure_pa_setting)
 
       # Unlimited, by volume and by pressure alike. Whatever an operation pushes at the
       # sky, the sky takes.
@@ -74,8 +78,8 @@ module ReactorSim
       # infinite: `Relaxation` divides by it, and a finite figure this large already puts the
       # equilibrium of any coupling within float noise of ambient — which is what "the outside
       # world does not pressurise because you vented into it" means numerically.
-      def mole_capacity_per_pa(_state, _content)
-        @volume_m3 / (Units::GAS_CONSTANT * @ambient_k)
+      def mole_capacity_per_pa(state, _content)
+        @volume_m3 / (Units::GAS_CONSTANT * state.fetch(:ambient_k_now, @ambient_k))
       end
 
       def plan(_state, _ctx) = Intent.none
@@ -98,10 +102,23 @@ module ReactorSim
       # anything hot vented into it warmed it by about a millionth of a degree — which, at
       # 10¹² J/K, is nearly two megajoules a tick sitting in `joules` that nothing ledgered
       # and nothing could see. Resetting the parcels alone left it there to accumulate.
+      #
+      # **And the baseline is the sky's**: air drawn in arrives at today's temperature, which is what
+      # makes a downcast cold in winter and every stack's draught answer to the season.
+      #
+      # **What the weather does to the sky's own energy is booked as added**, because it comes from
+      # outside the operation: warmed a kelvin, 10¹² J/K is a terajoule nobody put in. Exactly zero
+      # under a steady sky.
       def apply(state, ctx, grant)
+        sky = ctx.respond_to?(:sky) ? ctx.sky : Conditions::STANDARD
+        outdoor_k = @ambient_k + (sky.fetch(:outdoor_k) - Conditions::STANDARD_K)
+        was_k = state.fetch(:ambient_k_now, @ambient_k)
+        weather_j = outdoor_k == was_k ? 0.0 : at_rest_joules(ctx.content, outdoor_k) - at_rest_joules(ctx.content, was_k)
         state.merge(
-          parcels: baseline(ctx.content),
-          joules: heat_capacity * @ambient_k,
+          parcels: baseline(ctx.content, outdoor_k),
+          ambient_k_now: outdoor_k,
+          pressure_pa_now: @pressure_pa_setting + (sky.fetch(:pressure_pa) - Conditions::STANDARD_PA),
+          joules: heat_capacity * outdoor_k,
           mass_injected: grant.total_sent,
           # Per PORT rather than per node, for the same reason `transport_affinity` is: a
           # node's ends have to be allowed to disagree about what they mean. Energy is not
@@ -119,16 +136,21 @@ module ReactorSim
           # crossings are the rule: air that came back out of the workings did leave them.
           mass_vented: grant.received_kg(:exhaust) + grant.received_kg(:intake),
           mass_spilled: grant.received_kg(:spill),
-          joules_injected: grant.total_sent_joules,
+          joules_injected: grant.total_sent_joules + weather_j,
           joules_discarded: grant.total_received_joules
         )
       end
 
       private
 
-      def baseline(content)
+      # The sky's energy when nothing has crossed it: its structure and its baseline contents.
+      def at_rest_joules(content, temperature_k)
+        (heat_capacity * temperature_k) + Parcel.total_joules(baseline(content, temperature_k))
+      end
+
+      def baseline(content, temperature_k)
         Parcel.normalise(@composition.map { |resource, kg|
-          Parcel.build(resource: resource, kg: kg, temperature_k: @ambient_k, content: content)
+          Parcel.build(resource: resource, kg: kg, temperature_k: temperature_k, content: content)
         })
       end
     end

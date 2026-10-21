@@ -140,6 +140,20 @@ fitting screens 404 through `require_fittable!`, and their switcher leaves it ou
 > the panel coming *from* the runner — published to a compacted topic, or sent over the channel
 > on subscribe — which is where this goes when matches are created on demand.
 
+## Match setup
+
+```
+GET   …/matches/:match_id/setup/edit    the season
+PATCH …/matches/:match_id/setup         set it, and rebuild the match
+```
+
+**Match-level, because one sky covers every machine in it.** `MatchSetup` holds the season (the
+climate's seasons come from the sim's content, not a list here); `DevMatch.build` passes it to
+every fittable operation as `conditions:`, and the reset command carries it once, as
+`"conditions"`, beside the per-operation specs. Saving it rebuilds the match through
+`DevMatch.request_reset!`, the one path a reset takes, so the season is chosen before the crew
+and the rig are outfitted for it. The weather inside the season is the seed's.
+
 ## The outfitting screen
 
 ```

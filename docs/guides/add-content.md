@@ -409,8 +409,32 @@ Rules worth knowing before you add one:
   spends it. **A set with no air is no protection at all** — `respirator` alone is inert — so
   the two are written together or the kit does nothing.
 
-The gauge-reading path (a diagnostic's `observer:`) is reserved and read by nothing — see
-`docs/simulation_architecture.md` §7.
+`intelligence` and `dexterity` feed a diagnostic's `observer:` through `Minion#wits`: whoever is
+posted at that gauge's station is how good its reading is. See `docs/reference/diagnostics.md`.
+
+**`cold_resistance`** is what warm kit buys against `Chill` (a greatcoat is 0.5), the cold's
+counterpart to `heat_resistance`. `unfeeling`, like `unburning`, is a race the cold does not
+reach, and nothing declares it yet.
+
+---
+
+## A climate
+
+`content/conditions/*.yml` holds the skies a match can be played under, by season. A season
+declares `day_of_year`, `mean_k`, `daily_range_k`, `pressure_pa`, a `severity` range and its
+`spells`; a spell declares `weight`, `minutes`, `offset_k`, `precipitation` (kg/m²/s at its
+height — 1 mm/h is 2.8e-4), `wind_m_s` and `pressure_trend` (Pa per hour). `Registry` refuses a
+season or a spell missing any of them at boot. A climate also declares `latitude_deg`, which
+with the season's day decides how long its day is.
+
+**A spell's figures are offsets on the season, stretched by the drawn `severity`**, so one table
+gives both a mild winter and a hard one. What falls takes its form from the temperature — snow,
+sleet or rain — rather than being declared. Spells are referred to by **sorted index** in state,
+so renaming one is harmless and adding one renumbers the others (no snapshot holds them across a
+content change).
+
+The rooms a weather reaches offer `wet` and `icy` to the people in them, and a peril reads them
+through `underfoot:`. Neither is a resource tag: they are room tags, like `darkvision`.
 
 ---
 

@@ -49,11 +49,12 @@ module ReactorSim
       # The chassis decides the frame — where the exhaust goes, which slots exist — and the
       # loadout decides what is fitted in them. An empty `loadout:` is the stock engine.
       # See `parts.rb` and `docs/design_sketches/modular_components.md`.
-      def build(id:, seed:, chassis: :high_pressure, loadout: {}, crew: {},
+      # `conditions:` is the match's sky from setup; nil is the standard sky.
+      def build(id:, seed:, chassis: :high_pressure, loadout: {}, crew: {}, conditions: nil,
                 time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         # A restored snapshot brings these back from JSON as strings.
         chassis = chassis.to_sym
-        assembly = assembly_for(chassis, loadout)
+        assembly = assembly_for(chassis, loadout, conditions: conditions)
         fragment = assembly.build!
         roster = Crew.normalise(crew, capacity: assembly.crew_capacity)
 
@@ -63,7 +64,7 @@ module ReactorSim
           # The RESOLVED loadout, naming every slot including the empty ones: a partial loadout
           # is re-defaulted on restore, so a deliberately-empty slot would grow its part back.
           # The roster is here for the same reason — a crew is a loadout by another name.
-          options: { chassis: chassis, loadout: assembly.loadout, crew: roster },
+          options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions }.compact,
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           places: [ engine_house(fragment) ],
@@ -77,8 +78,9 @@ module ReactorSim
       # The one way to ask what a loadout would build, and all an outfitting screen needs: slots,
       # alternatives and verdict, without building an operation. `build` goes through here too,
       # so the machine a player is shown and the machine they get cannot differ.
-      def assembly_for(chassis, loadout = {})
+      def assembly_for(chassis, loadout = {}, conditions: nil)
         spec = CHASSIS.fetch(chassis.to_sym) { raise Error, "unknown engine chassis #{chassis.inspect}" }
+        spec = spec.merge(conditions: conditions) if conditions
 
         Assembly.new(
           slots: slots(spec), loadout: loadout, spec: spec,
@@ -238,7 +240,7 @@ module ReactorSim
         Nodes::Conduit.new(
           id: :stoker, label: "Stoking Line", accepts: [ :fuel ],
           max_kg_per_s: 0.25, heat_capacity: 2.0e3,
-          control_id: :stoking
+          control_id: :stoking, worked: true
         )
       end
 
@@ -254,11 +256,12 @@ module ReactorSim
       # charge, so an attentive player got a permanently under-oiled engine. Pouring oil is
       # quick; what costs the player is being *away from the shovel*, and that is already the
       # whole price.
-      def oil_line(id:, max_kg_per_s: 0.06)
+      # Worked by hand on the oil round, a valve once a sight-feed lubricator is fitted.
+      def oil_line(id:, max_kg_per_s: 0.06, worked: false)
         Nodes::Conduit.new(
           id: id, label: "Oil Line", accepts: [ :lubricant ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 40.0, ambient_conductance: 0.0,
-          control_id: :oiling
+          control_id: :oiling, worked: worked
         )
       end
 
@@ -306,7 +309,7 @@ module ReactorSim
           heat_capacity: 2.0e3, ambient_conductance: 0.0,
           head_pa: head_pa, head_control_id: (:blower unless driven_by),
           driven_by: driven_by, rated_omega: (DONKEY_OMEGA if driven_by),
-          efficiency: 0.55
+          efficiency: 0.55, worked: driven_by.nil?
         )
       end
 
@@ -813,7 +816,7 @@ module ReactorSim
         Nodes::Conduit.new(
           id: :ash_pan, label: "Ashpan", accepts: [ :waste ],
           max_kg_per_s: 0.5, heat_capacity: 1.0e3, ambient_conductance: 40.0,
-          control_id: :ash_raking
+          control_id: :ash_raking, worked: true
         )
       end
 

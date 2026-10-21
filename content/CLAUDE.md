@@ -247,6 +247,17 @@ something the simulation may know about. `Registry#sheet(id)` returns the first 
 - **Health, fatigue, station and injury are state, not content** — they change during a match and
   live in `state[:minions]`. Getting that backwards would make a hurt minion recover on restore.
 
+## Climates
+
+`content/conditions/` holds the skies a match is played under, by season — what a season is like
+and the mix of spells it draws from. **A spell's figures are offsets stretched by a drawn
+severity**, so one season gives both a mild match and a hard one; what falls takes its form from
+the temperature. Every key is required and checked at boot. Guide:
+[`docs/guides/add-content.md`](../docs/guides/add-content.md#a-climate).
+
+- **`cold_resistance`** on kit is what stands against `Chill`, as `heat_resistance` does against
+  `Scorch`.
+
 ## Validation and testing
 
 `Content::Registry` validates eagerly at boot and raises `ReactorSim::Error` naming the

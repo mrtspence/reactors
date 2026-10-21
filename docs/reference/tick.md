@@ -26,7 +26,7 @@ engine uses 1.0; an operation running alone may use much more.
 | # | Phase | What it does | May draw entropy? |
 |---|---|---|---|
 | 0 | `draw_fates` → `actuate` | **Every die thrown for a person this tick**, then levers travelling toward their targets at the rate their minion can manage — and not always to the lever they were aimed at, because somebody out of their depth at a tricky post freezes, pulls it backwards, or grabs a different one in the same room. Then a post with a **governor** — the winding engineman — drives the internal levers it works from its own lever's value and the machine's **frozen N−1 state**, writing their target with their actual; with nobody posted it does nothing and they hold where they were left. Where he winds to is the player's lever, or — with `coal_winding` on — his own **shuttle** (`Winding#dispatch`): men first (`Tick#calls_for`: the far landing of anybody aboard, then the landing of anybody waiting to cross), else a laden deck up and an empty one down for more. He winds by speed, feathering the clutch from where he left it, and **at the mark holds the cage with the brake**, whichever way the ropes' imbalance is pulling it. He winds away from a landing only on its **bell** (`Tick#signalled?`): with a marshal posted there he holds until nobody is still getting in — unless the marshal is slipping, which rings a false ready; with nobody posted there is no bell and he winds on the order alone | **yes** |
-| 1 | read | Freeze tick N−1, build the `Context` every node sees. `ctx.controls` is not the lever positions: an **effort** station's value is its position scaled by what the person posted there can manage, gates included — and a gate may be met by the **room** as well as by the person, which is `Tick#ambient_tags` (light on the roadway against a lamp on a belt; the better of the two, never the sum). The room also supplies its **ignition**: `Tick#ignition_sources` sums what every node in a place offers through `ignition(state, levers)`, and then the naked light of anybody standing there carrying `open_flame` (`Minion::HAND_FLAME`, from N−1 minion state), and hands it to that place's air as `ctx.room_ignition(id)` — nodes then minions, each walked by sorted id. And each hoist's or man engine's **cargo** — everybody committed `via` a drum or `riding` the rods, from N−1 minion state — as `ctx.cargo_kg(id)` | no |
+| 1 | read | Freeze tick N−1, build the `Context` every node sees. `ctx.controls` is not the lever positions: an **effort** station's value is its position scaled by what the crew posted there can manage between them, in worker-equivalents, gates included. The context also carries **the sky as of last tick** (`ctx.sky`, from the outdoors node, or the standard sky where there is none) and each node's `exposure`, which `ctx.ambient_k_of(node)` uses. A place open to the sky is offered its light as `darkvision`, and `wet` and `icy` underfoot, by its exposure (`Tick#under_the_sky`), merged better-of with what its nodes offer — and a gate may be met by the **room** as well as by the person, which is `Tick#ambient_tags` (light on the roadway against a lamp on a belt; the better of the two, never the sum). The room also supplies its **ignition**: `Tick#ignition_sources` sums what every node in a place offers through `ignition(state, levers)`, and then the naked light of anybody standing there carrying `open_flame` (`Minion::HAND_FLAME`, from N−1 minion state), and hands it to that place's air as `ctx.room_ignition(id)` — nodes then minions, each walked by sorted id. And each hoist's or man engine's **cargo** — everybody committed `via` a drum or `riding` the rods, from N−1 minion state — as `ctx.cargo_kg(id)` | no |
 | 2 | `plan` | Every node declares intent, independently, against N−1 | no |
 | 3 | settle | One pure function over every claim — mass, heat, momentum | no |
 | 4a | `advect` | Granted parcels cross a whole **path**, carrying their energy. Returns what was *delivered* per inlet, which is what the walls left of it | no |
@@ -39,7 +39,8 @@ engine uses 1.0; an operation running alone may use much more.
 | 6 | `stress` | First, what somebody did to a part **last** tick: every mishap in `state[:mishaps]` is suffered by the part it names (`Wearing#suffer`). Then durability, overload, failure events. A failure's `damages:` are spent on its neighbours — **and so are this tick's explosions'**, keyed `explosion:` | no |
 | 6b | `endanger` | What a failure **or an explosion** does to the **people** near it: a Danger Check per minion, against the **place** they are standing in, the station they are posted to, and what is carrying them through a shaft (`riders:`, by `via` or `riding`). An `:explosion` from phase 5 is looked up by its node and `mode: :explosion` exactly as a failure is by its mode, and may scale with its `joules`. **A hazard declaring `along:` runs down a passage** — a runaway set — and reaches each person by their share of the way down (`Tick#along`): everybody at the foot, little at the top, stations placed by `positions:`, walkers by their real progress, and the road's own hands (`roaming:`) at their `road:` die; anybody on the road may reach the place's refuge (a near miss, on their `dodge:` die) or be crushed (`caught:`, rising as the share squared); a `catch:` on the run cuts the share of anybody below it to `1 − holds`. Severity adds where more than one reaches them | no |
 | 6b′ | `scorch` | What the **heat** of the room does to the people in it: resilience ground away at a rate set by the gas's volumetric heat capacity and how far it is past what that person tolerates. The gas phase only — you stand beside water, not in it — and a threshold rather than a multiplier, so below somebody's rating it costs exactly nothing | no |
-| 6c | `tire` | What the **work** does to the people doing it, and what the **air** does to them: fatigue accrues on `intent ÷ capability`, recovery and suffocation net against it. The air is the gas phase of each place's air node (`Tick#breathable_air`), and none at all where that node is `submerged?` — drowning is suffocation. Pinned at the ceiling in bad air is the collapse, and the clock from there to a mortal injury runs here | no |
+| 6b″ | `chill` | What the **cold** of the room does to the people in it: below a tolerance (`Chill::TOLERATED_K`, raised by `cold_resistance` and toughness), resilience is ground at a rate set by how far the air *as felt* is past it — the place's gas, with the wind chill taken as far as the place is open to the sky (`Tick#place_felt`). A dwell counter, `chilled`, carries it past collapse to mortal. Nothing at all above the tolerance | no |
+| 6c | `tire` | What the **work** does to the people doing it, and what the **air** does to them: fatigue accrues on `intent ÷ capability` — times `Chill.strain` in a hot place, since heat makes the same work cost more — and recovery and suffocation net against it. The air is the gas phase of each place's air node (`Tick#breathable_air`), and none at all where that node is `submerged?` — drowning is suffocation. Pinned at the ceiling in bad air is the collapse, and the clock from there to a mortal injury runs here | no |
 | 6d | `blunder` | **What the people do to themselves**, which is the route into harm that needs nothing to break first. A hidden `margin` of safety, spent by the **perils of the place** in proportion to how hard it is being worked, and mended only where no peril reaches at all — a lull between tubs is not recovery. Crossing zero is an accident, and **which peril it was is picked in proportion to what each took this tick** (the `peril:` fate, walked by sorted id) — so every peril that reaches somebody can happen to them, at the rate it spends rather than the severity it hurts with. A `judged:` pair splits one event by `Minion#misjudges`, read in the room's light, so who is posted decides which of the two it is. `safety_equipment` fitted in that place may turn it into a `:minion_near_miss` instead. A peril that names a `mishap:` emits `:minion_mishap` and writes it to `state[:mishaps]`, and the part it names suffers it at the start of the **next** tick's phase 6 — a state key rather than the event, because events are not snapshotted | no |
 | 6e | `travel` | Where the people have got to, in **two passes**. One: everybody who can walk moves toward the place their `posting` is worked, at their own `pace` less whatever they are carrying, by the **quickest passage that is actually running**. Two: anybody being carried is *stowed* — their place written from their carrier's, their station and posting cleared. Also keeps `remaining` and `journey`, which are how far there is left to go and how far there was to go at the farthest point of this walk — a panel divides them for a progress bar. A posting may name **a person** rather than a lever, which is a fetch order and becomes a pickup on arrival. A **ridden** passage (a cage) is boarded, not walked: somebody waits at the landing until the cage is there and stopped, is then `via` the drum and wherever the cage is, and gets off at the far landing — or back where they got on, if that is where they are going or the cage has stopped running. Getting in takes `Hoist::BOARDING_S`; a cage wound away meanwhile catches them (`boarding_hazard`) and leaves them at the landing. Where a landing's **marshal** is posted, a pass after the walk lets on this tick's boarders in id order while the cage's `rated_kg` has room, as of last tick, and sends the rest back to wait. A ridden way is offered only while its post is manned, its drum sound and its shaft turning. Somebody part-way along a powered way is `riding` its drive. A no-op in an operation that declares no passages | no |
 | 6f | `signal_winding` | **The signal board**: for each winder, what its cage is doing and waiting on — a fault, then why it is not moving, then the bell, men getting in, a deck being worked, men waiting across the shaft (`Winding#signal`) — written onto the drum as `signal:` for the panel. Over the tick just settled, because no node can see the people: the same reason `advect` hands a conduit its `carried_kg` | no |
@@ -85,7 +86,7 @@ twice in a fixed order. Running after `endanger` matters too: somebody already c
 exploding boiler this tick has no station before their own margin is weighed.
 
 **Phase 6e runs last of the five and reads no controls at all.** Who is standing where is built in
-phase 0 from the *previous* tick (`station_index`, `control_values`), so a minion who arrives in 6e
+phase 0 from the *previous* tick (`crews`, `control_values`), so a minion who arrives in 6e
 takes up their post on the **next** tick — the same one-hop delay everything else in the engine
 has, and what keeps arrival from depending on phase order. It runs after `tire` so a minion carried
 out in 6b has already had their posting cancelled and does not get up and resume the walk.
@@ -142,8 +143,11 @@ Ledgering before that would miss it entirely — this was a real bug worth ~1.8 
 
 ## The crew is consulted twice, and the second one is the one that matters
 
-`Tick#station_index` maps station → minion from **state**, not configuration, because a minion
-who has been reassigned is at the post their state names. It is read in two different places.
+`Tick#crews` maps each post to **everybody working it**, by sorted id, from **state** rather than
+configuration, because a minion who has been reassigned is at the post their state names. It
+counts `station`, not `posting`, so somebody still walking there is not working yet. A post holds
+as many as its `capacity` (one for a lever unless its part says otherwise; `Operation#room_at?`
+refuses the next), and the crew's efforts **sum**. It is read in two different places.
 
 > **Every seat starts in the crew quarters, so a machine nobody deploys does nothing at all.**
 > Measured on the steam engine: 322.8 K and 0 kW undeployed against 1022.0 K and 495.5 kW with
@@ -152,9 +156,19 @@ who has been reassigned is at the post their state names. It is read in two diff
 
 **Phase 0 — how fast a lever travels.** `actuate` takes `rate_multiplier: crew_multiplier(id)`,
 so a lever with a finite `stiffness` moves at `stiffness × rate_multiplier × dt`, where
-`stiffness` is percent of the lever's range per second. The mine's valves ship finite figures —
-the fan is forty seconds hard over — and everything else keeps the default `Float::INFINITY`,
-which snaps `actual` to `target` and discards the multiplier before it is read.
+`stiffness` is percent of the lever's range per second and the multiplier is the **sum** over
+the hands on it — two people on a stiff valve wheel turn it faster than one. The mine's valves
+ship finite figures — the fan is forty seconds hard over — and everything else keeps the default
+`Float::INFINITY`, which snaps `actual` to `target` and discards the multiplier before it is read.
+
+**Phase 0 — slips.** Everybody at a post can get it wrong, each on their own die from
+`draw_fates`, so a crew slips more often than one of its members and no draw is added. The first
+of them by id who slipped picks the kind and the victim.
+
+**The governor** reads the post's one occupant: a governor post's capacity is held to one at
+build. Presence checks — a marshal at a landing, a passage's `staffed_by` — ask whether anybody
+is at the post. A gauge with an `observer:` reads as well as the **sharpest** member of the crew
+at that post.
 
 **An unattended lever travels at its rated speed**, deliberately: surface plant is the overseer's
 own, and a colliery's fan and pump are at bank where nobody is normally posted. Posting
@@ -171,7 +185,9 @@ control.effort? ? worked(control, s) : control.value(s)
 ```
 
 A control declares itself an **effort station** with a weighted stat blend, and what the node
-reads is then `lever × capability`, where capability is the blend × kit × condition:
+reads is then `lever × Σ capability` over the crew, where capability is the blend × kit ×
+condition. **That is worker-equivalents**: 100 is one competent, unaided human flat out and five
+of them read 500, so a node multiplies a per-worker rate by it and caps nothing but the crew:
 
 ```ruby
 ControlPoint.new(id: :stoking, effort: { swing: 0.75, dexterity: 0.25 }, aided_by: :shovelling)
@@ -191,15 +207,15 @@ every weight set still sums to 1.0 against the same baseline.
 Weights must sum to 1.0, enforced, because that is what keeps *a fit unaided human scores 1.0*
 true at every station — and therefore what lets a node's declared throughput mean "what a
 competent person achieves". There is deliberately **no clamp**: the stoker's `0.25 kg/s` is a
-person rather than a firehole, so somebody exceptional exceeds it.
+person rather than a firehole, so somebody exceptional exceeds it. A conduit worked this way is
+declared `worked: true`, which lifts its valve's 100% clamp and unbounds its ports;
+`Operation#validate_worked!` refuses an effort post on a conduit that is not, and a worked
+conduit on a valve. If the work then backs up further down the line, that is the player's
+allocation to fix rather than a cap to add.
 
 **An unmanned effort station delivers nothing** — an unmanned shovel moves no coal. It applies
 only to the controls that are somebody's work; a valve needs nobody. A minion carried out has
 `station: nil` and therefore mans nothing, which falls out rather than needing a case.
-
-Remaining shortcuts, marked `TODO` at the code:
-
-- Two minions at one station is **last writer wins**.
 
 ### The state hash must name it
 

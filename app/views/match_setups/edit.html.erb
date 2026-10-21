@@ -1,0 +1,39 @@
+<% content_for :title, "Reactor — Match Setup" %>
+
+<div class="min-h-screen w-full bg-slate-900 text-slate-100">
+
+  <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
+    <h1 class="text-sm uppercase tracking-widest text-slate-300">Match Setup</h1>
+
+    <div class="grow"></div>
+
+    <%= link_to "Back to the console",
+                console_path(match_id: params[:match_id], operation_id: DevMatch::PRIMARY),
+                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                       "ring-1 ring-slate-700" %>
+  </header>
+
+  <main class="p-4 max-w-xl">
+    <%# The season is the one choice here, and it is the player's: what the weather does inside it —
+        which spells, how hard — is drawn when the match starts. Outfit for it before you play. %>
+    <%= form_with model: @setup, url: match_setup_path(match_id: params[:match_id]), method: :patch,
+                  class: "flex flex-col gap-3" do |form| %>
+      <% if @setup.errors.any? %>
+        <p class="text-sm text-rose-300"><%= @setup.errors.full_messages.to_sentence %></p>
+      <% end %>
+
+      <%= form.label :season, "Season", class: "text-[11px] uppercase tracking-wide text-slate-400" %>
+      <%= form.select :season, MatchSetup.seasons.map { |s| [ s.titleize, s ] }, {},
+                      class: "bg-slate-800 text-slate-100 rounded px-2 py-1 ring-1 ring-slate-700" %>
+
+      <p class="text-xs text-slate-500">
+        One season for the whole match and every machine in it. Winter brings cold, snow and ice on
+        the bank; summer brings heat that tires a labourer; any season can bring a storm.
+      </p>
+
+      <%= form.submit "Set and rebuild the match",
+                      class: "self-start text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 " \
+                             "ring-1 ring-slate-500" %>
+    <% end %>
+  </main>
+</div>

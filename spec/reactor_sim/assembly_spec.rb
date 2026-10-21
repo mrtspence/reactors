@@ -410,9 +410,10 @@ RSpec.describe ReactorSim::Assembly do
     # The gauge list must not move when the slot list is reordered for some unrelated reason:
     # a player learns a panel by where things are. `PANEL_ORDER` decides, not the slots and not
     # the parts — including for a gauge an instrument part *supplied* rather than named.
+    # The weather instruments arrive only with a part this build does not fit.
     it "orders instruments by the panel's order, not by slot order" do
-      expect(real.diagnostics.map(&:id))
-        .to eq(SteamEngine::PANEL_ORDER - [ :condenser_vacuum ])
+      fitted_only = [ :condenser_vacuum ] + ReactorSim::Operations::WeatherGauges.instruments.keys
+      expect(real.diagnostics.map(&:id)).to eq(SteamEngine::PANEL_ORDER - fitted_only)
     end
 
     # **The pressure gauge arrives from a part and still lands first.** It is the most important
@@ -454,7 +455,9 @@ RSpec.describe ReactorSim::Assembly do
       expect(real.fragment.nodes.map(&:id)).to include(:boiler, :cylinder, :flywheel, :relief)
     end
 
-    # **Eight parts can be left out, and none of them may break the build.** This is the whole
+    # **These parts can be taken out of the stock engine, and none of them may break the build.**
+    # A slot that starts empty — the weather instruments — is an upgrade rather than something to
+    # take out, and is not on this list. This is the whole
     # of stage 2 asserted in one place: what is optional, that removing any one of them still
     # assembles and still passes every route check, and that each one says something before the
     # player finds out the hard way.
@@ -477,7 +480,7 @@ RSpec.describe ReactorSim::Assembly do
                    safety_valve: :omit, fusible_plug: :omit, cylinder_relief: :omit }.freeze
 
       it "is exactly these nine, with these behaviours" do
-        declared = SteamEngine.slots(spec).reject(&:required?)
+        declared = SteamEngine.slots(spec).reject(&:required?).select(&:default)
                               .to_h { |s| [ s.id, s.when_empty ] }
 
         expect(declared).to eq(OPTIONAL)

@@ -40,14 +40,22 @@ module ReactorSim
                      heat_capacity: 1.0e4, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, control_id: nil,
                      rangeability: 1.0, material: nil,
-                     max_temperature_k: Float::INFINITY, stress_rate: 0.0)
+                     max_temperature_k: Float::INFINITY, stress_rate: 0.0,
+                     worked: false, crew: 1)
+        # **Worked by people: `max_kg_per_s` is ONE worker's rate**, and the lever arrives in
+        # worker-equivalents (`Tick#worked`), so the crew is the ceiling and the ports cap nothing.
+        # `crew` is how many the post has room for, which is what a full road's `activity` means.
+        @worked = worked
+        @rated_kg_per_s = max_kg_per_s.to_f
+        @crew = Integer(crew)
+        port_kg_per_s = worked ? Float::INFINITY : max_kg_per_s
         super(
           id: id, label: label,
           ports: [
             Port.new(id: :inlet,  direction: :inlet,  accepts: accepts,
-                     max_kg_per_s: max_kg_per_s),
+                     max_kg_per_s: port_kg_per_s),
             Port.new(id: :outlet, direction: :outlet, accepts: accepts,
-                     max_kg_per_s: max_kg_per_s)
+                     max_kg_per_s: port_kg_per_s)
           ]
         )
         @conductance = conductance&.to_f
@@ -102,6 +110,14 @@ module ReactorSim
       # Material passes through rather than stopping here, so the arbiter resolves past it.
       def transport? = true
 
+      def worked? = @worked
+
+      attr_reader :crew
+
+      # What the whole crew passes flat out, which is what busy-ness is measured against: one
+      # putter on a three-man road is a third of a busy road.
+      def full_crew_kg_per_s = @rated_kg_per_s * @crew
+
       # A check valve. Pipes are bidirectional by default, because reverse flow is real physics
       # rather than an error: a chimney backdraughts when the fire dies, a line siphons, an open
       # valve blows back when the vessel it feeds is the higher of the two.
@@ -133,7 +149,7 @@ module ReactorSim
       # Consequence: **a ruptured conduit with no breach wired next to it does nothing**, which
       # is deliberate — it puts the spill somewhere it can be sized and pointed.
       def throughput_kg(state, ctx)
-        port(:outlet).capacity_kg(ctx.dt) * open_fraction(ctx) * derating(state, :throughput) *
+        @rated_kg_per_s * ctx.dt * open_fraction(ctx) * derating(state, :throughput) *
           displacement_fraction(ctx)
       end
 
@@ -155,7 +171,8 @@ module ReactorSim
         fan = if @head_pa.zero?
           0.0
         elsif @head_control_id
-          @head_pa * (ctx.controls.fetch(@head_control_id, 0.0) / 100.0).clamp(0.0, 1.0)
+          lever = ctx.controls.fetch(@head_control_id, 0.0) / 100.0
+          @head_pa * (@worked ? [ lever, 0.0 ].max : lever.clamp(0.0, 1.0))
         else
           @head_pa
         end
@@ -233,10 +250,16 @@ module ReactorSim
       # 30–50 across**: pick it from a sweep.
       #
       # **1.0 means linear**, so a conduit that does not declare this is unaffected.
+      #
+      # **A worked conduit is not a valve**: its lever is a crew in worker-equivalents, unclamped
+      # above, so five putters move five putters' worth.
       def open_fraction(ctx)
         return 1.0 unless @control_id
 
-        lever = (ctx.controls.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
+        lever = ctx.controls.fetch(@control_id, 0.0) / 100.0
+        return [ lever, 0.0 ].max if @worked
+
+        lever = lever.clamp(0.0, 1.0)
         return lever if @rangeability <= 1.0
 
         ((@rangeability**lever) - 1.0) / (@rangeability - 1.0)

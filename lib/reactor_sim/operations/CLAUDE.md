@@ -105,7 +105,16 @@ Three ways that goes wrong, all of them silent:
   look the same to the builder.
 - **The registered builder whitelists its keywords.** An option it does not name is an
   `ArgumentError` at restore. Loud, which is right — but `options:` and that signature have to
-  move together.
+  move together. `conditions:` (the match's sky) is one of them on every operation with an
+  `Outdoors` fixture.
+
+## The sky over it
+
+**An operation with anything outdoors carries `Nodes::Outdoors` as a fixture, its places declare
+`exposure:`, and its panel and slots take `WeatherGauges`** — the guesses on a post that works
+outdoors, the instruments as a fitted slot, at the end of `PANEL_ORDER`. Nothing about the weather
+is written per operation. Rain reaches a holder through a `Nodes::Catchment`. Full checklist:
+[`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-sky-over-it).
 
 ## Assembled from parts
 
@@ -200,6 +209,15 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    second, scaled by whoever is posted there; an unattended lever still moves at its rated
    speed. Leave it infinite on an **effort** station, where `capability` already supplies the
    rate and a finite travel would charge the same minion twice.
+
+   **A post is a job for one unless its part says otherwise, and a crew's work sums.** An effort
+   post arrives at its node in **worker-equivalents** (lever × Σ capability; 100 is one competent
+   hand flat out), so rate the node **per worker** and cap nothing but the crew. Give a gang's
+   part a `crew:` stat and pass it to both the post's `capacity:` and the node's `crew:` — the node
+   needs it because its `activity` is measured against a full crew. A conduit an effort post works
+   is `worked: true`, which `Operation#validate_worked!` enforces in both directions; without it the
+   valve and its ports would clamp the gang to one worker's rate, silently. A governor post holds
+   one.
 
    **An `effort:` blend must say which kind of strong it means, and the engine cannot catch a
    wrong answer.** `strength` is a strength-to-weight *ratio*, so three keys are available and a

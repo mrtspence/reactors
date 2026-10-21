@@ -21,15 +21,26 @@ module ReactorSim
   # engine house holds five — the room, the firebox, the drum, the injector, the steam chest —
   # and only one of them is a lungful. `Layout` infers it when it is unambiguous and refuses to
   # guess when it is not, because picking the first declared would be silent and wrong.
-  Place = Struct.new(:id, :label, :nodes, :air, keyword_init: true) do
-    def initialize(id:, label: nil, nodes: [], air: nil)
+  #
+  # `exposure:` is **how much of the weather reaches it**, 0 to 1: a pit bank is open to the sky,
+  # an engine house keeps most of it out, and underground — the default — none at all. A node's
+  # ambient follows the outdoor temperature by its place's exposure, and the sky's light and what
+  # lies underfoot are offered to people there in proportion. Nil means it was not said, which a
+  # merge treats as nothing so the room's own declaration wins.
+  Place = Struct.new(:id, :label, :nodes, :air, :exposure, keyword_init: true) do
+    def initialize(id:, label: nil, nodes: [], air: nil, exposure: nil)
       super(id: id.to_sym, label: label || id.to_s.tr("_", " ").capitalize,
-            nodes: Array(nodes).map(&:to_sym).uniq.freeze, air: air&.to_sym)
+            nodes: Array(nodes).map(&:to_sym).uniq.freeze, air: air&.to_sym,
+            exposure: exposure&.to_f)
       raise Error, "place #{id}: air #{air.inspect} is not one of its nodes" if
         air && !nodes.map(&:to_sym).include?(air.to_sym)
+      raise Error, "place #{id}: exposure #{exposure} is not between 0 and 1" if
+        exposure && !(0.0..1.0).cover?(exposure.to_f)
 
       freeze
     end
+
+    def exposed = exposure || 0.0
 
     def holds?(node_id) = nodes.include?(node_id&.to_sym)
   end

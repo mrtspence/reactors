@@ -62,12 +62,11 @@ module PerilCrew
   # run once reported a *sound* crew suffering more than a poor one.
   POSTED = %i[crew_1 crew_2 crew_3].freeze
 
-  # **What to seed a posted hand's margin at to put them on the edge of an accident.** The road
-  # closes the last of it inside a couple of hundred ticks; at 0.10 it mends faster than it spends
-  # and nothing happens. In the module rather than in the `describe` because a constant assigned
-  # inside an example group lands on `Object`, where it collides with every other spec file's idea
-  # of what that name means.
-  ON_THE_EDGE = 0.05
+  # **What to seed a posted hand's margin at to put them on the edge of an accident**: next to
+  # nothing, so the first of it the road spends tips them over, however busy the road is. In the
+  # module rather than in the `describe` because a constant assigned inside an example group lands
+  # on `Object`, where it collides with every other spec file's idea of what that name means.
+  ON_THE_EDGE = 1.0e-6
 
   # **A pit whose crossing the manholes have something to show for**: whether a given accident is
   # saved is the dodge die's, so the pairing examples need a seed where at least one is — and the
@@ -288,8 +287,7 @@ RSpec.describe "perils" do
   end
 
   # **`edge: true` throughout this group**, because every claim in it is about what happens once
-  # the margin is gone rather than about how long the road takes to take it. The crossing lands on
-  # tick 131 and catches all three posted hands.
+  # the margin is gone rather than about how long the road takes to take it.
   describe "when it runs out" do
     it "hurts somebody, and says which peril did it" do
       accidents, = shift(:poor, edge: true)

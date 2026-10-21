@@ -52,8 +52,25 @@ module ReactorSim
     DRIVEN_IN_SERVICE = 0.1
 
     Context = Struct.new(:controls, :dt, :tick, :content, :nodes, :states, :ignition, :cargo,
-                         keyword_init: true) do
+                         :outdoors, :exposure, keyword_init: true) do
       def node_omega(id) = ask(id, :omega)
+
+      # **The sky, as of last tick** — every channel in `Conditions::STANDARD` plus the ground's.
+      # The standard sky where an operation has no outdoors node.
+      def sky = outdoors || Conditions::STANDARD
+
+      # How far the outdoor temperature is from the standard day a node's ambient was declared
+      # against, K.
+      def outdoor_shift_k = sky.fetch(:outdoor_k) - Conditions::STANDARD_K
+
+      # **A node's ambient now**: its declared figure, shifted by the weather as far as its place
+      # is exposed. Exact under the standard sky, which is what leaves every machine a spec
+      # measures where it was.
+      def ambient_k_of(node)
+        share = exposure&.fetch(node.id, nil) or return node.ambient_k
+
+        node.ambient_k + (share * outdoor_shift_k)
+      end
 
       # The weight of everybody committed to riding this hoist, as of last tick.
       def cargo_kg(id) = cargo&.fetch(id, 0.0) || 0.0
@@ -142,7 +159,8 @@ module ReactorSim
       read = state.fetch(:nodes)                                # phase 1
       # `control_values` builds `@ignition` from the same lever positions, so it comes first.
       ctx = Context.new(controls: control_values(controls), ignition: @ignition, cargo: cargo,
-                        dt:, tick:, content: content, nodes: nodes, states: read)
+                        dt:, tick:, content: content, nodes: nodes, states: read,
+                        outdoors: sky_before, exposure: layout.node_exposure)
 
       intents = nodes.to_h { |id, node| [ id, node.plan(read.fetch(id), ctx) ] }  # phase 2
 
@@ -162,7 +180,9 @@ module ReactorSim
       next_nodes, ledger, wear_events = stress(next_nodes, ledger, ctx, prompt_events)  # phase 6
       next_minions, hurt_events = endanger(wear_events + prompt_events, ctx)  # phase 6b
       next_minions, burn_events = scorch(next_minions, next_nodes, ctx)  # phase 6b′
-      next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx)  # phase 6c
+      felt = place_felt(next_nodes)
+      next_minions, cold_events = chill(next_minions, felt, ctx)         # phase 6b″
+      next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx, felt)  # phase 6c
       next_minions, blunder_events = blunder(next_minions, next_nodes, fates, ctx) # phase 6d
       next_minions, carry_events = travel(next_minions, ctx)     # phase 6e
       next_nodes = signal_winding(next_nodes, next_minions, controls)
@@ -177,8 +197,8 @@ module ReactorSim
         minions: next_minions.freeze,
         ledger: ledger.freeze,
         mishaps: pending_mishaps(blunder_events),
-        events: (events + prompt_events + wear_events + hurt_events + burn_events + spent_events +
-                 blunder_events + carry_events).freeze }.freeze
+        events: (events + prompt_events + wear_events + hurt_events + burn_events + cold_events +
+                 spent_events + blunder_events + carry_events).freeze }.freeze
     end
 
     # **What somebody did to a part this tick, for the next tick's `stress` to apply.** Its own
@@ -224,7 +244,7 @@ module ReactorSim
     # travel to.
     def governed(levers)
       control_points.each_value.select(&:governor).reduce(levers) do |acc, post|
-        minion_id = station_index[post.id] or next acc
+        minion_id = occupant(post.id) or next acc
         minion = minions[minion_id] or next acc
 
         governor = post.governor
@@ -316,7 +336,7 @@ module ReactorSim
       drum_state = state.fetch(:nodes).fetch(hoist)
       landing = passage.ends.find { |place| drum.cage_stopped_at?(drum_state, passage.landing_m(place)) }
       marshal = landing && passage.marshals[landing]
-      return true if marshal.nil? || station_index[marshal].nil?
+      return true if marshal.nil? || crews[marshal].nil?
       return true if levers.fetch(marshal)[:slip]
 
       state.fetch(:minions).none? do |_, s|
@@ -342,20 +362,27 @@ module ReactorSim
       end
     end
 
+    # **Everybody at the post can get it wrong, each on their own die**, so a crew slips more often
+    # than one of its members. The first of them by id who did picks the kind and the victim.
     def begin_slip(control, fates, dt)
-      minion_id = station_index[control.id] or return NO_SLIP
-      minion = minions[minion_id] or return NO_SLIP
-
-      minion_state = state.fetch(:minions).fetch(minion_id)
-      fate = fates[minion_id] or return NO_SLIP
-      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
-      return NO_SLIP if fate.fetch(:slip) >= control.slip_chance(minion, wits, dt)
+      crew = crews[control.id] or return NO_SLIP
+      fate = crew.lazy.filter_map { |id| slipped(control, id, fates, dt) }.first or return NO_SLIP
 
       kind = SLIPS[(fate.fetch(:kind) * SLIPS.length).floor.clamp(0, SLIPS.length - 1)]
       victim = kind == :wrong_lever ? within_reach(control, fate.fetch(:victim)) : nil
       return NO_SLIP if kind == :wrong_lever && victim.nil?
 
       { slip: kind, slip_at: victim, slip_for: SLIP_TICKS }
+    end
+
+    # This minion's fate if it says they slipped at this lever, or nil.
+    def slipped(control, minion_id, fates, dt)
+      fate = fates[minion_id] or return nil
+      minion_state = state.fetch(:minions).fetch(minion_id)
+      minion = minions.fetch(minion_id)
+      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
+
+      fate.fetch(:slip) < control.slip_chance(minion, wits, dt) ? fate : nil
     end
 
     # **Which other lever they could have grabbed instead** — the ones in the same room, which
@@ -409,32 +436,39 @@ module ReactorSim
       moved
     end
 
-    # Who is stood at this lever, and how fast they can work it.
+    # Who is stood at this lever, and how fast they can work it: **the hands on it, summed**, as
+    # two people on a stiff valve wheel turn it faster than one.
     #
     # Read from STATE rather than configuration, because a station is assignable: a minion who
     # has been moved is at the post their state names, not the one they were built with.
     def crew_multiplier(control_point_id)
-      minion_id = station_index[control_point_id]
+      crew = crews[control_point_id]
       # **An unattended lever travels at its rated speed, because the overseer is working it.**
       # Surface plant is the player's own: a colliery's fan, pump and winder are at bank where
       # no minion is normally posted, so a lever that froze without a body would mean a pit
       # whose fan could never be started. Posting somebody makes it *faster or slower* than
       # rated rather than making it possible at all.
-      return 1.0 unless minion_id
+      return 1.0 unless crew
 
-      minions.fetch(minion_id)
-             .rate_multiplier(state.fetch(:minions).fetch(minion_id), content)
+      crew.sum { |id| minions.fetch(id).rate_multiplier(state.fetch(:minions).fetch(id), content) }
     end
 
-    # TODO: expedient — last writer wins if two minions share a station. A proper
-    # implementation either refuses the assignment or sums their effort; both need a rule for
-    # what a crowd at one lever means, which nothing yet depends on.
-    def station_index
-      @station_index ||= state.fetch(:minions).each_with_object({}) { |(id, minion_state), acc|
-        station = minion_state[:station]
-        acc[station] = id if station
-      }.freeze
+    # **Everybody actually working each post**, by sorted id — `station`, not `posting`, because
+    # somebody still walking there is not working yet. Sorted, so every sum over a crew and every
+    # "first of them" is independent of the order the roster was declared in. A post nobody is at
+    # has no entry. `Operation#room_at?` keeps a crew within the post's `capacity`.
+    def crews
+      @crews ||= state.fetch(:minions).keys.sort.each_with_object({}) { |id, acc|
+        next unless minions.key?(id)
+
+        station = state.fetch(:minions).fetch(id)[:station] or next
+        (acc[station] ||= []) << id
+      }.transform_values(&:freeze).freeze
     end
+
+    # The one person at a post that holds one — a governor, which `ControlPoint` refuses to give
+    # room for more.
+    def occupant(post_id) = crews[post_id]&.first
 
     # What a node actually reads off a lever. For a **valve** that is its position: a regulator
     # goes where you put it. For an **effort** station it is the position scaled by what the
@@ -468,13 +502,33 @@ module ReactorSim
     def ambient_tags(levers)
       return {} if layout.places.empty?
 
-      nodes.each_with_object({}) do |(id, node), acc|
+      lit = nodes.each_with_object({}) do |(id, node), acc|
         next unless node.respond_to?(:ambient_tags)
 
         place = layout.place_of_node(id) or next
         offered = node.ambient_tags(state.fetch(:nodes).fetch(id), levers)
         acc[place] = (acc[place] || {}).merge(offered) { |_, a, b| [ a, b ].max }
       end
+      under_the_sky(lit)
+    end
+
+    # **What the sky offers a place open to it**, as far as it is open: its light, and whether the
+    # ground underfoot is wet or icy. Merged by the same better-of rule as a lamp, so daylight at
+    # bank and a lamp at bank do not add up to more than either.
+    def under_the_sky(lit)
+      sky = sky_before
+      layout.exposed_places.each_with_object(lit) do |place, acc|
+        share = layout.exposure(place)
+        offered = { darkvision: sky.fetch(:daylight) * share,
+                    wet: sky.fetch(:wet, 0) * share, icy: sky.fetch(:icy, 0) * share }.reject { |_, v| v.zero? }
+        acc[place] = (acc[place] || {}).merge(offered) { |_, a, b| [ a, b ].max }
+      end
+    end
+
+    # The sky as it was at the end of last tick, which is what everything this tick reads.
+    def sky_before
+      @sky_before ||= state.dig(:nodes, Nodes::Outdoors::ID)&.slice(*Nodes::Outdoors::SKY) ||
+                      Conditions::STANDARD
     end
 
     # **An ignition source belongs to the room it is in**, and offers itself to the air of that
@@ -540,19 +594,22 @@ module ReactorSim
         cause: offered.fetch(:kg_per_s, 0.0) > was.fetch(:kg_per_s, 0.0) ? offered[:cause] : was[:cause] }.freeze
     end
 
+    # **In worker-equivalents**: the lever times the crew's capabilities, summed. 100 is one
+    # competent, unaided human flat out and five of them read 500, so a node multiplies a
+    # per-worker rate by this and caps nothing — the crew is the ceiling.
+    #
     # Read from the PREVIOUS tick's minion state, so who is standing where cannot depend on
     # phase order. A minion carried out has `station: nil` and therefore mans nothing.
     def worked(control, control_state, ambient)
-      minion_id = station_index[control.id]
-      return 0.0 if minion_id.nil?
+      crew = crews[control.id] or return 0.0
 
-      minion = minions[minion_id] or return 0.0
-      minion_state = state.fetch(:minions).fetch(minion_id)
-      control.value(control_state) *
-        minion.capability(minion_state,
-                          effort: control.effort, aided_by: control.aided_by,
-                          gated_by: control.gated_by,
-                          ambient: ambient[minion_state[:place]])
+      control.value(control_state) * crew.sum do |id|
+        minion_state = state.fetch(:minions).fetch(id)
+        minions.fetch(id).capability(minion_state,
+                                     effort: control.effort, aided_by: control.aided_by,
+                                     gated_by: control.gated_by,
+                                     ambient: ambient[minion_state[:place]])
+      end
     end
 
     # Phase 4a. Granted parcels move, carrying their energy with them. Ungranted mass stays
@@ -1317,7 +1374,9 @@ module ReactorSim
     # lever costs them more from the moment they are hurt.
     #
     # **No entropy**, exactly as the Danger Check draws none, so a tired minion replays exactly.
-    def tire(minions_state, states, controls, ctx)
+    #
+    # **A hot place makes the same work cost more** (`Chill.strain`), from the air as it is felt.
+    def tire(minions_state, states, controls, ctx, felt = {})
       events = []
       air = breathable_air(states)
 
@@ -1333,7 +1392,8 @@ module ReactorSim
         tired = Fatigue.advance(minion, Breath.draw(minion_state, here, minion),
                                 control: control, demand: demand, dt: ctx.dt,
                                 suffocation: choking,
-                                burden: Burden.ratio(minion, minion_state, minions))
+                                burden: Burden.ratio(minion, minion_state, minions),
+                                strain: Chill.strain(felt[minion_state[:place]]))
         tired, spent = Fatigue.check_spent(tired)
         events << spent_event(minion, control, ctx) if spent
 
@@ -1529,6 +1589,43 @@ module ReactorSim
       end
     end
 
+    # Phase 6b″. **What the cold does to the people in it**, from the air of their place as it
+    # feels — the wind on it as far as the place is open to the sky. After `scorch`, reading the
+    # same rooms, so a minion is never both scorched and chilled by one tick's arithmetic in an
+    # order that matters: no room is both past 318 K and below 265.
+    def chill(minions_state, felt, ctx)
+      events = []
+      return [ minions_state, events ] if felt.empty?
+
+      next_states = minions_state.to_h do |id, minion_state|
+        minion = minions[id]
+        next [ id, minion_state ] if minion.nil?
+
+        cold, mode = Chill.advance(minion, minion_state, felt[minion_state[:place]], ctx.dt)
+        events << chilled_event(minion, cold, mode, ctx) if mode
+        [ id, cold.freeze ]
+      end
+
+      [ next_states, events ]
+    end
+
+    # The air of each room as a person would feel it, once per tick.
+    def place_felt(states)
+      return {} if layout.places.empty?
+
+      wind = sky_before.fetch(:wind_m_s)
+      place_gas(states).to_h do |place, (temperature_k, _rho_c)|
+        [ place, Chill.felt_k(temperature_k, layout.exposure(place), wind) ]
+      end
+    end
+
+    def chilled_event(minion, state, mode, ctx)
+      Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
+                  severity: :critical, tick: ctx.tick, mode: mode, cause: :cold,
+                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
+                            place: state[:place], chilled: state.fetch(:chilled, 0.0).round(3) })
+    end
+
     def burned_event(minion, state, mode, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: :critical, tick: ctx.tick, mode: mode, cause: :burns,
@@ -1594,7 +1691,7 @@ module ReactorSim
     # Phase 6e. Where everybody has got to.
     #
     # **Runs after `tire`, and reads no controls**, so who is standing where still comes from the
-    # previous tick everywhere it matters — `station_index` and `control_values` are built in
+    # previous tick everywhere it matters — `crews` and `control_values` are built in
     # phase 0 from N−1, so a minion who arrives here takes up their post on the NEXT tick. That is
     # the same one-hop delay every other thing in the engine has, and it is what keeps arrival
     # from depending on phase order.
@@ -1651,7 +1748,7 @@ module ReactorSim
     # Kilograms a marshalled landing will still let on, or nil where nobody is marshalling it.
     def room_aboard(passage, landing, aboard)
       station = passage&.marshals&.fetch(landing, nil)
-      return nil if station.nil? || passage.rated_kg.nil? || station_index[station].nil?
+      return nil if station.nil? || passage.rated_kg.nil? || crews[station].nil?
 
       passage.rated_kg - aboard.fetch(passage.hoist, 0.0)
     end
@@ -1835,7 +1932,7 @@ module ReactorSim
     # it is turning — a cage with no power behind it is not a way down at all.
     def in_service?(passage, ctx)
       return true unless passage.ridden?
-      return false if station_index[passage.staffed_by].nil?
+      return false if crews[passage.staffed_by].nil?
       return false if wrecked?(passage)
       return true unless passage.driven_by && passage.rated_omega&.positive?
 
@@ -2067,14 +2164,16 @@ module ReactorSim
     # `observer:` names a **station**, never a minion, the same rule `endangers:` follows and
     # for the same reason: a station is fixed by the machine and a roster is the player's. An
     # instrument that names none is a dial on a wall and reads 1.0 — which is every gauge in
-    # the game but the few where the reading is somebody's word.
+    # the game but the few where the reading is somebody's word. **A crew reads a dial as well as
+    # its sharpest member.**
     def reading_competence(diagnostic)
       station = diagnostic.observer or return 1.0
-      minion_id = station_index[station] or return nil
-      minion = minions[minion_id] or return nil
+      crew = crews[station] or return nil
 
-      minion_state = state.fetch(:minions).fetch(minion_id)
-      minion.wits(minion_state, ambient: @ambient&.fetch(minion_state[:place], nil))
+      crew.map { |id|
+        minion_state = state.fetch(:minions).fetch(id)
+        minions.fetch(id).wits(minion_state, ambient: @ambient&.fetch(minion_state[:place], nil))
+      }.max
     end
   end
 end

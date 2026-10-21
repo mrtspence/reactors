@@ -129,6 +129,9 @@ equipment:
     materials: {}
   oilskin_coat:
     materials: {}
+  # Wool, so nothing the catalogue can price in metal; free until cloth is a resource.
+  greatcoat:
+    materials: {}
   asbestos_suit:
     materials: {}
   ear_defenders:
@@ -422,6 +425,14 @@ part:
     materials:
       steel: 120
       bronze: 15
+  # The weather's instruments: a glass on the wall, and the pair the Act asks for at the pit top.
+  thermometer:
+    materials:
+      bronze: 1
+  barometer:
+    materials:
+      bronze: 4
+      steel: 1
   # Runaway catches: a sprung set of points, or a backstay for every set.
   catch_points:
     materials:

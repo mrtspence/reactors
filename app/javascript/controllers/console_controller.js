@@ -288,6 +288,47 @@ export default class extends Controller {
     for (const [id, el] of this.crew) {
       this.paintMinion(el, this.state.crew[id])
     }
+    this.paintPostings()
+  }
+
+  // **How full each post is**, counted from the postings the projection already carries. Sent
+  // counts against capacity, because that is what the engine refuses on; working is who has
+  // arrived, and the gap between them is the gang still walking in.
+  //
+  // A full post is disabled in everybody's dropdown but its own members', and the engine still
+  // refuses it regardless — this is a courtesy, not the gate.
+  paintPostings() {
+    const sent = new Map()
+    const working = new Map()
+    for (const crew of Object.values(this.state.crew)) {
+      if (crew.posting) sent.set(crew.posting, (sent.get(crew.posting) || 0) + 1)
+      if (crew.station) working.set(crew.station, (working.get(crew.station) || 0) + 1)
+    }
+
+    for (const [id, el] of this.crew) {
+      const select = el.querySelector("[data-minion-station]")
+      if (!select || document.activeElement === select) continue
+
+      const own = this.state.crew[id]?.posting
+      for (const option of select.querySelectorAll("option[data-station-capacity]")) {
+        const capacity = parseInt(option.dataset.stationCapacity, 10)
+        const taken = sent.get(option.value) || 0
+        option.textContent = `${option.dataset.stationLabel} ${taken}/${capacity}`
+        option.disabled = taken >= capacity && own !== option.value
+      }
+    }
+
+    for (const [id, el] of this.levers) {
+      const badge = el.querySelector("[data-lever-crew]")
+      if (!badge) continue
+
+      const capacity = parseInt(badge.dataset.capacity, 10)
+      const ordered = sent.get(id) || 0
+      const at = working.get(id) || 0
+      const walking = ordered - at
+      badge.textContent = walking > 0 ? `${at}/${capacity}, ${walking} walking` : `${at}/${capacity}`
+      badge.classList.toggle("hidden", !(capacity > 1 || ordered > 0))
+    }
   }
 
   // Where somebody is standing, and what has happened to them.

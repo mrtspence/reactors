@@ -31,11 +31,17 @@ RSpec.describe "the roof" do
   # A road with almost nothing left, so an unsupported face brings it in inside 150 ticks.
   def worn_road = 20.0
 
+  # **A full hand face**: five hewers, and the two timbermen it takes to keep up with them, since
+  # one props three hewers' advance. A single hewer opens too little ground to wear the road.
+  HEWERS = %i[crew_1 crew_4 crew_5 crew_6 crew_7].freeze
+  TIMBERMEN = %i[crew_3 crew_8].freeze
+
   # A working district with the shift in place. Returns the operation and every event, so an
   # example never has to see the walk.
   def working(hewing:, timbering:, worn: nil, ticks: 200)
-    op = at_the_face(seed(build_pit(id: "r", seed: 3, loadout: { winder: :cage_gear }),
-                          nodes: worn ? { tub_road: { durability: worn } } : {}))
+    pit = build_pit(id: "r", seed: 3, crew: PitRig.gang_crew(8), loadout: { winder: :cage_gear })
+    op = at_the_face(seed(pit, nodes: worn ? { tub_road: { durability: worn } } : {}),
+                     hewing: HEWERS, timbering: TIMBERMEN)
     levers!(op, hewing: hewing, haulage: 100, timbering: timbering,
                 coal_winding: 100, pumping: 100, ventilation: 100)
 
@@ -54,8 +60,7 @@ RSpec.describe "the roof" do
     # that produces far more and then destroys the machine, and a band between them.
     #
     # **Read off `integrity` rather than off a fall**, because the gradient is the erosion rate and
-    # a fall is where it ends up. Measured over 200 ticks: 1.00000 fully timbered, 0.91063 at half,
-    # 0.82126 with nobody supporting at all.
+    # a fall is where it ends up.
     it "never loses a thread of the road on a fully timbered face" do
       op, events = working(hewing: 100, timbering: 100)
 
@@ -76,18 +81,23 @@ RSpec.describe "the roof" do
       expect(wear.each_cons(2).all? { |worse, better| better > worse }).to be(true), wear.inspect
     end
 
-    # **The difference, not the ratio.** Cutting at 40 with nobody timbering is the same exposure
-    # as cutting at 100 with the face 60% supported, and it has to behave the same — a ratio would
-    # make an idle face consume timber to stand still.
-    #
-    # Equal to eight significant figures: 0.92850262 against 0.92850263. Not bit-identical, and
-    # it should not be — the two reach the same exposure by different lever arithmetic, so the
-    # last place differs by float accumulation rather than by anything about the roof.
+    # **The difference, not the ratio.** A slow face nobody is timbering and a fast one partly
+    # propped leave the same ground unpropped, and have to behave the same: a ratio would make an
+    # idle face consume timber to stand still. The timbering that makes the two match is worked
+    # out from the face and the props rather than written down, so a retune moves nothing here.
     it "cares about how far the face has run ahead, not how hard it is worked" do
-      slow, = working(hewing: 40, timbering: 0)
-      fast, = working(hewing: 100, timbering: 60)
+      slow = 40.0
+      probe, = working(hewing: 100, timbering: 0, ticks: 1)
+      cut = probe.state.dig(:nodes, :pick_line, :carried_kg) / ReactorSim::DT
+      prop = ReactorSim::Operations::Mine::Roadway::TIMBERED_KG_PER_S *
+             probe.minions.fetch(TIMBERMEN.first).capability(probe.state.dig(:minions, TIMBERMEN.first),
+                                                             effort: probe.control_points.fetch(:timbering).effort,
+                                                             gated_by: probe.control_points.fetch(:timbering).gated_by) *
+             TIMBERMEN.size
+      timbering = 100.0 * cut * (1.0 - (slow / 100.0)) / prop
 
-      expect(integrity(slow)).to be_within(1e-6).of(integrity(fast))
+      expect(integrity(working(hewing: slow, timbering: 0).first))
+        .to be_within(1e-6).of(integrity(working(hewing: 100, timbering: timbering).first))
     end
   end
 

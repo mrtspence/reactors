@@ -2,6 +2,10 @@
   <div class="flex items-baseline justify-between">
     <label for="lever-<%= id %>" class="text-[11px] uppercase tracking-wide text-slate-300">
       <%= label %>
+      <%# Who is working it against how many it takes, filled from the projection. Shown for a
+          gang's post, or for any post somebody has been sent to. %>
+      <span class="ml-1 normal-case text-slate-500 hidden" data-lever-crew
+            data-capacity="<%= capacity %>"></span>
     </label>
     <span class="text-sm tabular-nums text-slate-100">
       <span data-lever-readout>—</span><%= unit %>

@@ -119,13 +119,11 @@ RSpec.describe "events" do
     # **A pit whose posted crew are one tick from an accident.** Every mine example in this group
     # wants a casualty or a fire, and both used to be reached by running thousands of ticks —
     # which measures `peril_spec`'s and `district_fire_spec`'s claims rather than this file's.
-    # **0.005 and not 0.05**, which is worth recording: `PitRig`'s collier is a plain 1.0 hand
-    # where `peril_spec`'s is clumsy and green, so the road closes the last of their margin far
-    # more slowly — at 0.05 it mends faster than it spends and nobody is ever hurt. A margin seed
-    # belongs to the hand it is seeded on.
+    # The margin is next to nothing, so the first the road spends tips them over however busy it
+    # is.
     def pit_on_the_brink
       pit = build_pit(id: "h", seed: 5, loadout: { winder: :cage_gear })
-      brink = %i[crew_1 crew_2 crew_3].to_h { |seat| [ seat, { margin: 0.005 } ] }
+      brink = %i[crew_1 crew_2 crew_3].to_h { |seat| [ seat, { margin: 1.0e-6 } ] }
       at_the_face(seed(pit, minions: brink)).tap do |op|
         levers!(op, hewing: 100, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100)
       end
@@ -153,7 +151,7 @@ RSpec.describe "events" do
     # **The casualty is built rather than waited for.** A hidden margin takes thousands of ticks
     # to spend down on a haulage road, and how long that takes is `peril_spec`'s claim — what is
     # wanted here is simply somebody hurt, with a `cause:` on the record. Seeding the posted
-    # crew's margin on the brink reaches the crossing on tick 131.
+    # crew's margin on the brink reaches the crossing within a few ticks.
     it "says what hurt somebody, not merely that something did" do
       op = pit_on_the_brink
       to_a_person = %i[minion_hurt minion_spent]

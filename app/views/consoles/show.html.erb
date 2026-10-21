@@ -67,6 +67,11 @@
                          "ring-1 ring-slate-700" %>
     <% end %>
 
+    <%# The season, which is the match's rather than this machine's. %>
+    <%= link_to "Match setup", edit_match_setup_path(match_id: @match_id),
+                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
+                       "ring-1 ring-slate-700" %>
+
     <button type="button" data-action="console#reset"
             class="text-xs px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 ring-1 ring-rose-700">
       Reset engine

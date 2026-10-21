@@ -117,6 +117,15 @@ module ReactorSim
                        mass_kg: 2.0,
                        tags: { heat_resistance: 0.2, scald_resistance: 0.35 })
 
+    # **The winter kit, and it is gear**, so in the cold it is the coat or the helmet. Heavy wool
+    # buys a man at bank about fifteen degrees against the wind, and costs a little stamina at
+    # any work hard enough to sweat in it.
+    Equipment.register(:greatcoat, slot: :gear, label: "Greatcoat and Mittens",
+                       description: "Thick wool to the knee, and mittens on a string.",
+                       mass_kg: 3.5,
+                       stats: { dexterity: -0.1, endurance: -0.05 },
+                       tags: { cold_resistance: 0.5 })
+
     # **The first kit that answers the pit rather than the firebox.** A stone off the roof, a
     # knock against the shaft side, the jolt of a cage stopped hard — and a little against being
     # caught, since the head is what goes first. Gear, so it is the apron or the helmet: the hand

@@ -28,16 +28,18 @@ module ReactorSim
           resources: read_all(File.join(dir, "resources")),
           reactions: read_all(File.join(dir, "reactions")),
           archetypes: read_all(File.join(dir, "archetypes")),
-          minions: read_all(File.join(dir, "minions"))
+          minions: read_all(File.join(dir, "minions")),
+          climates: read_all(File.join(dir, "conditions"))
         ).freeze
       end
 
       # Test seam: build a registry from literals with no filesystem involved. Every keyword
       # defaults, so a spec asks for the one table it cares about and gets empty ones for the
       # rest — which is what keeps an unrelated substance from boiling mid-test.
-      def build(resources: {}, reactions: {}, archetypes: {}, minions: {})
+      def build(resources: {}, reactions: {}, archetypes: {}, minions: {}, climates: {})
         Registry.new(resources: deep_sym(resources), reactions: deep_sym(reactions),
-                     archetypes: deep_sym(archetypes), minions: deep_sym(minions)).freeze
+                     archetypes: deep_sym(archetypes), minions: deep_sym(minions),
+                     climates: deep_sym(climates)).freeze
       end
 
       # Public because `Registry#merging` needs it — a caller handing in literals should get the
@@ -81,13 +83,18 @@ module ReactorSim
       # itself lives in `Sheet`, with the folding rules it belongs to.
       REQUIRED_ARCHETYPE_KEYS = ([ :label ] + Sheet::STATS).freeze
 
-      attr_reader :resources, :reactions, :archetypes, :minions
+      # A climate's season declares all of these; its spells each declare `SPELL_KEYS`.
+      REQUIRED_SEASON_KEYS = %i[day_of_year mean_k daily_range_k pressure_pa severity spells].freeze
+      REQUIRED_SPELL_KEYS = %i[weight minutes offset_k precipitation wind_m_s pressure_trend].freeze
 
-      def initialize(resources:, reactions:, archetypes: {}, minions: {})
+      attr_reader :resources, :reactions, :archetypes, :minions, :climates
+
+      def initialize(resources:, reactions:, archetypes: {}, minions: {}, climates: {})
         @resources = resources.freeze
         @reactions = reactions.freeze
         @archetypes = archetypes.freeze
         @minions = minions.freeze
+        @climates = climates.freeze
         @phase_pairs = index_phase_pairs.freeze
         @tags = @resources.to_h { |id, spec| [ id, spec.fetch(:tags, []).map(&:to_sym).freeze ] }.freeze
         validate!
@@ -111,6 +118,16 @@ module ReactorSim
 
       def minion(id)
         @minions.fetch(id.to_sym) { raise Error, "unknown minion: #{id.inspect}" }
+      end
+
+      def climate(id)
+        @climates.fetch(id.to_sym) { raise Error, "unknown climate: #{id.inspect}" }
+      end
+
+      def season(climate_id, season_id)
+        climate(climate_id).fetch(:seasons).fetch(season_id.to_sym) do
+          raise Error, "climate #{climate_id}: no season #{season_id.inspect}"
+        end
       end
 
       # Everybody a player could come to own. The last-resort standin exists and is excluded,
@@ -142,7 +159,8 @@ module ReactorSim
       def merging(archetypes: {}, minions: {})
         self.class.new(resources: @resources, reactions: @reactions,
                        archetypes: @archetypes.merge(Content.deep_symbolize(archetypes)),
-                       minions: @minions.merge(Content.deep_symbolize(minions))).freeze
+                       minions: @minions.merge(Content.deep_symbolize(minions)),
+                       climates: @climates).freeze
       end
 
       # Precomputed. This is called once per parcel per port per link per tick, and the
@@ -267,6 +285,26 @@ module ReactorSim
           next if @archetypes.key?(archetype)
 
           raise Error, "minion #{id}: unknown archetype #{archetype.inspect}"
+        end
+
+        validate_climates!
+      end
+
+      # A season missing a figure would surface as a nil inside the weather's arithmetic, a minute
+      # into a match played in it.
+      def validate_climates!
+        @climates.each do |id, climate|
+          raise Error, "climate #{id}: missing latitude_deg" unless climate.key?(:latitude_deg)
+
+          climate.fetch(:seasons, {}).each do |season, spec|
+            missing = REQUIRED_SEASON_KEYS.reject { |k| spec.key?(k) }
+            raise Error, "climate #{id} #{season}: missing #{missing.join(', ')}" if missing.any?
+
+            spec.fetch(:spells).each do |spell, figures|
+              missing = REQUIRED_SPELL_KEYS.reject { |k| figures.key?(k) }
+              raise Error, "climate #{id} #{season} #{spell}: missing #{missing.join(', ')}" if missing.any?
+            end
+          end
         end
       end
 

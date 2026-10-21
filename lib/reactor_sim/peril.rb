@@ -28,11 +28,16 @@ module ReactorSim
   # `Minion#misjudges` — so the pair happens as often as one peril would, and who is posted decides
   # which it is. A misfire is the case: recognised, it is dug out; taken for a spent shot, it is
   # left live in the face.
+  #
+  # **`underfoot:` is what the ground does to it**: `{ wet: 1.0, icy: 8.0 }` makes a slip twice as
+  # likely on a wet deck and nine times on an icy one, read from what the room offers
+  # (`Tick#under_the_sky`), so it bites as far as the place is open to the weather.
   Peril = Struct.new(:id, :tags, :severity, :rate, :mishap, :scales_with, :when_tagged,
-                     :unless_tagged, :places, :stations, :riders, :judged, keyword_init: true) do
+                     :unless_tagged, :places, :stations, :riders, :judged, :underfoot,
+                     keyword_init: true) do
     def initialize(id:, severity: 0.0, rate: nil, mishap: nil, tags: [], scales_with: nil,
                    when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil,
-                   judged: nil)
+                   judged: nil, underfoot: {})
       super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
             mishap: Peril.mishap(mishap),
             tags: Array(tags).map(&:to_sym).freeze,
@@ -41,7 +46,8 @@ module ReactorSim
             places: Array(places).map(&:to_sym).freeze,
             stations: Array(stations).map(&:to_sym).freeze,
             riders: Array(riders).map(&:to_sym).freeze,
-            judged: judged&.to_sym)
+            judged: judged&.to_sym,
+            underfoot: underfoot.to_h { |tag, k| [ tag.to_sym, k.to_f ] }.freeze)
       if judged && !Peril::JUDGEMENTS.include?(self.judged)
         raise Error, "peril #{id}: judged #{judged.inspect} is neither of #{Peril::JUDGEMENTS.inspect}"
       end
@@ -61,6 +67,13 @@ module ReactorSim
     def hurts? = severity.positive?
 
     def mishap? = !mishap.nil?
+
+    # What the ground under the room makes of this peril: 1.0 on dry footing, more on wet or ice.
+    def footing(ambient)
+      return 1.0 if underfoot.empty? || ambient.nil?
+
+      1.0 + underfoot.sum { |tag, k| k * Injury.numeric(ambient.fetch(tag, 0.0)) }
+    end
 
     # **A tag can select a kind of accident rather than only making one likelier.** A hulking
     # minion gets wedged in a narrow roadway where nobody else could; a small one is missed by
@@ -177,7 +190,7 @@ module ReactorSim
       exposed = susceptibility(minion, state)
       bites = reaching.filter_map do |peril, activity|
         bite = peril.rate * peril.weight_for(minion, state, ambient: ambient) * activity * exposed *
-               SPEND_PER_S * dt
+               peril.footing(ambient) * SPEND_PER_S * dt
         [ peril, bite ] if bite.positive?
       end
 

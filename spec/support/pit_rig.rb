@@ -43,16 +43,22 @@ module PitRig
 
   SEATS = (1..4)
 
+  # Enough colliers for a full face and its timbermen, for a spec that needs a gang (`gang_crew`).
+  HANDS = (1..10)
+
   # **A collier with a winding ticket**, so a spec that rides the cage has somebody at the post who
   # does not slip — an unticketed hand fumbles the certificated lever every half-minute or so.
   ENGINEMAN_TAGS = { certificated: true }.freeze
 
-  MINIONS = SEATS.to_h { |i|
+  MINIONS = HANDS.to_h { |i|
     [ :"hand_#{i}", { name: "Hand #{i}", archetype: :collier, hireable: false } ]
   }.merge(engineman: { name: "Engineman", archetype: :engineman, hireable: false }).freeze
 
   # Seats, not people: `crew_1` is a place on the payroll that `hand_1` is filling.
   CREW = SEATS.to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{i}" } ] }.freeze
+
+  # A bigger shift, `seats` colliers, for a spec that puts a gang on a post.
+  def self.gang_crew(seats) = (1..seats).to_h { |i| [ :"crew_#{i}", { minion: :"hand_#{i}" } ] }.freeze
 
   # The same shift with an engineman in the fifth seat, for anything that rides the cage.
   WOUND_CREW = CREW.merge(crew_5: { minion: :engineman }).freeze
@@ -170,9 +176,12 @@ module PitRig
   # **The patches alone**, for a caller that has to seed through something other than a bare
   # operation — `Constructed#seed_match`, when a digest or replay example needs the match's own
   # copy to carry the arrival too.
+  #
+  # A post takes one seat or a list of them, for a gang.
   def at_the_face_minions(op, hewing: :crew_1, haulage: :crew_2, timbering: :crew_3)
-    posted = { hewing => :hewing, haulage => :haulage, timbering => :timbering }
-             .reject { |seat, _| seat.nil? }
+    posted = { hewing: hewing, haulage: haulage, timbering: timbering }
+             .flat_map { |station, seats| Array(seats).map { |seat| [ seat, station ] } }
+             .to_h.reject { |seat, _| seat.nil? }
 
     posted.to_h do |seat, station|
       [ seat, { posting: station, station: station, place: post_place(op, station),

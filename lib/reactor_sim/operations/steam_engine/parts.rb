@@ -336,8 +336,8 @@ module ReactorSim
                      provides: %i[oil_feed_journals oil_feed_rings],
                      stats: { max_kg_per_s: 0.06 }) do |_spec|
         Fragment.new(
-          nodes: [ SteamEngine.oil_line(id: :oil_feed_journals),
-                   SteamEngine.oil_line(id: :oil_feed_rings) ],
+          nodes: [ SteamEngine.oil_line(id: :oil_feed_journals, worked: true),
+                   SteamEngine.oil_line(id: :oil_feed_rings, worked: true) ],
           links: [
             Link.new(from: [ :oil_store, :out ],            to: [ :oil_feed_journals, :inlet ]),
             Link.new(from: [ :oil_feed_journals, :outlet ], to: [ :main_bearings, :oil_in ]),
@@ -1147,7 +1147,8 @@ module ReactorSim
           # many hands the operation can field and where they begin the shift — so an engine
           # without one has no crew at all, rather than a crew that starts nowhere.
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Crew Quarters", group: :crew,
-                   required: true, default: :mess_room)
+                   required: true, default: :mess_room),
+          WeatherGauges.slot
         ]
 
         return base unless spec.fetch(:condenser)
@@ -1178,7 +1179,10 @@ module ReactorSim
             Link.new(from: [ :cylinder, :exhaust ], to: [ :flue, :inlet ])
           end
 
-        Fragment.new(nodes: [ Nodes::Atmosphere.new ], links: [ exhaust ])
+        Fragment.new(nodes: [ Nodes::Atmosphere.new, Nodes::Outdoors.new(setup: spec[:conditions]) ],
+                     links: [ exhaust ],
+                     # What whoever is at the fire makes of the weather through the door.
+                     diagnostics: WeatherGauges.guesses(observer: :stoking).values)
       end
 
       # **One room, because that is what a stationary plant was.** Separating the boiler into
@@ -1200,7 +1204,9 @@ module ReactorSim
       # place that names a node the operation does not have — an engine with no boiler tubes
       # stopped building at all.
       def engine_house(fragment)
-        Place.new(id: :engine_house, label: "Engine House", air: :atmosphere,
+        # Walled and roofed: it keeps most of the weather off the machinery, and the light through
+        # its windows is a third of the day's.
+        Place.new(id: :engine_house, label: "Engine House", air: :atmosphere, exposure: 0.3,
                   nodes: fragment.nodes.map(&:id) - OUTSIDE)
       end
 

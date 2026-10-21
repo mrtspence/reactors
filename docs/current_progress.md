@@ -336,10 +336,60 @@ of feedback is folded in. What remains is sequenced in
 Still owed on the mine itself: a separate man-riding shaft, buoyancy inside a volume so firedamp
 collects in the roof, and the advance shift as a fitting rather than a chassis constant.
 
-**Next operation: an open-pit iron ore mine.** Research only, awaiting review:
-[`design_sketches/open-pit-iron-research.md`](design_sketches/open-pit-iron-research.md). Its §6.3
-lists the decisions a design sketch needs first (mobile steam against the line-shaft rule,
-weather, ore grade, chassis geography, ore choice, rail scope, contract stripping).
+**Next operation: an open-pit limonite mine**, researched in
+[`design_sketches/open-pit-iron-research.md`](design_sketches/open-pit-iron-research.md). It is
+built in five units, designed one at a time:
+
+1. **Crewed posts** (several workers at one post, retrofitted to both operations). **Built**:
+   [`design_sketches/crewed-posts.md`](design_sketches/crewed-posts.md) §7.
+   - Mechanism:
+     - A lever takes one by default and a gang's part raises it.
+     - Work arrives in worker-equivalents and the crew is the only cap.
+     - Activity is measured against a full crew.
+     - Hand picks, putting and the cutter are rated per worker from history.
+     - Seats: 13 in the lamp cabin, 5 at the face and 4 at the pit bottom.
+   - **Tuning owed, all first guesses:**
+     - The belt's overfeed stall can't be reached from a hand face (a full face cuts about
+       0.3 kg/s against 30 kg/s of grip), so belt fires want a new route into a stall.
+     - Dust per hewer (0.06 kg/s) is carried over so that a full face raises today's dust. It is
+       a fiat, half the hewer's coal.
+     - `Roadway::TIMBERED_KG_PER_S` (0.36, three hewers to a timberman) and the roof-fall
+       severity reference (0.2 kg/s) are unsourced.
+     - The cutter (0.8 kg/s a man) and putter (0.3) rates are general knowledge.
+     - These per-worker rates are unchanged, so a crew of two doubles them: landings, rope
+       hauling, belt clearing.
+     - The back shift (7), underground stable (6) and baths (18) were scaled by eye.
+   - **UI:** a refused posting is only signalled by the option being disabled. The command is
+     asynchronous and nothing reports the refusal back.
+2. A general conditions system, with weather and day and night as its first instance.
+   **Built**: [`design_sketches/conditions.md`](design_sketches/conditions.md) §6.
+   - What it does:
+     - One sky per match, drawn from a season chosen at **match setup** (a new screen).
+     - The sky moves every exposed node's ambient, the atmosphere and every stack's draught.
+     - The light at bank and in the engine house follows the hour.
+     - Rain and snowmelt drain off the pit yard into the sump.
+     - Cold grinds people (`Chill`), and a greatcoat helps. Heat makes work tire them faster.
+     - Wet and icy decks make the banksman's perils worse.
+     - Readings are the banksman's or fireman's guesses until a thermometer or barometer is
+       bought.
+   - **Freezing proper is deferred to its own unit** (§6.6 of that sketch): an ice phase,
+     frozen conduits, thickened oil, iced friction surfaces.
+   - **Tuning owed, all first guesses:**
+     - The climate's figures: means, ranges, spell mixes, severities.
+     - `Chill`'s tolerance and rate, and its strain per kelvin.
+     - The pit yard's 2,000 m².
+     - The deck's footing multipliers (wet ×2, icy ×9) and the new `slipped_on_the_deck`
+       peril's rate.
+     - The engine house's 0.3 exposure.
+   - **Barometric gas was left emergent**, as decided. Not yet measured whether a falling glass
+     draws anything off the goaf; the gob and goaf paths are where to look.
+   - **The engine house breathes the atmosphere node**, so its people feel the full outdoor
+     temperature beside a firebox. An existing simplification the cold now exposes.
+   - Not built: cold stiffening dexterity, which the sketch mentioned.
+3. Animosity and distraction. Drafted for review in
+   [`design_sketches/animosity-and-distraction.md`](design_sketches/animosity-and-distraction.md).
+4. Mobile engines: steam shovels and locomotives as their own crewed engines.
+5. The open pit itself.
 
 ### Mine accidents — four units, designed one draft at a time
 

@@ -17,7 +17,8 @@ module ReactorSim
       # slot list nor a fitted instrument may disturb: fitting a better pressure gauge must not
       # move the water glass. `Assembly` sorts by this and refuses a gauge it does not name, so
       # the list cannot drift by omission.
-      PANEL_ORDER = %i[
+      # The weather last: the sky is worth a glance, the boiler is worth watching.
+      PANEL_ORDER = (%i[
         boiler_pressure boiler_water safety_valve valve_setting_pa
         crown_sheet plug_blown
         firebox_temp fire_state
@@ -26,7 +27,7 @@ module ReactorSim
         bearing_temp bearing_condition
         coal_remaining water_remaining oil_remaining air_supply
         condenser_vacuum
-      ].freeze
+      ] + WeatherGauges::ORDER).freeze
 
       # **Every gauge this engine knows how to show, indexed by id — not the ones it is showing.**
       # Parts name the instruments that arrive with them and `Assembly` selects from this hash, so
@@ -49,7 +50,7 @@ module ReactorSim
           bearing_temp, bearing_condition,
           coal_remaining, water_remaining, oil_remaining, air_supply,
           condenser_vacuum
-        ].to_h { |d| [ d.id, d ] }.freeze
+        ].to_h { |d| [ d.id, d ] }.merge(WeatherGauges.instruments).freeze
       end
 
       # **The gauge that matters most, and a fitting in its own right.** The definition stays here
@@ -457,8 +458,9 @@ module ReactorSim
              }) do |id:, seed:, time_scale: 1.0, state: nil,
                                                      rngs: nil, content: nil,
                                                      chassis: :high_pressure, loadout: {},
-                                                     crew: {}|
+                                                     crew: {}, conditions: nil|
       SteamEngine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
+                        conditions: conditions,
                         time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

@@ -78,6 +78,8 @@ require_relative "reactor_sim/content"
 # A leaf, required this early only because `Concerns::Wearing` emits one and concerns load
 # before nodes. Conceptually it belongs with the outputs, beside `diagnostics/player_view`.
 require_relative "reactor_sim/event"
+# The sky's schedule and readings, which the outdoors node holds.
+require_relative "reactor_sim/conditions"
 require_relative "reactor_sim/physics/parcel"
 require_relative "reactor_sim/physics/resources"
 require_relative "reactor_sim/physics/resources/saturation"
@@ -127,6 +129,8 @@ require_relative "reactor_sim/nodes/motor"
 # A shaft turned from outside this operation — the receiving end of another operation's work.
 require_relative "reactor_sim/nodes/import"
 require_relative "reactor_sim/nodes/atmosphere"
+require_relative "reactor_sim/nodes/outdoors"
+require_relative "reactor_sim/nodes/catchment"
 # Where an operation's output goes, and the only writer of `mass_delivered`.
 require_relative "reactor_sim/nodes/delivery"
 require_relative "reactor_sim/nodes/cylinder"
@@ -154,6 +158,7 @@ require_relative "reactor_sim/breath"
 # What the heat where somebody is standing does to them. After `injury`, whose resilience it
 # grinds directly rather than draining a pool of its own; `tick` is the only caller.
 require_relative "reactor_sim/scorch"
+require_relative "reactor_sim/chill"
 # A way a place can hurt somebody with nothing broken, and the hidden margin it spends. After
 # `injury`, whose Danger Check it hands a hazard to; `tick` is the only caller.
 require_relative "reactor_sim/peril"
@@ -177,6 +182,8 @@ require_relative "reactor_sim/part"
 require_relative "reactor_sim/parts"
 require_relative "reactor_sim/slot"
 require_relative "reactor_sim/assembly"
+# The weather's gauges and instrument parts, shared by every operation with a sky over it.
+require_relative "reactor_sim/operations/weather_gauges"
 
 require_relative "reactor_sim/tick"
 require_relative "reactor_sim/operation"

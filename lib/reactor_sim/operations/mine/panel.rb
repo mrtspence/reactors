@@ -16,7 +16,8 @@ module ReactorSim
       # it is at bank where you can see it.
       module_function
 
-      PANEL_ORDER = %i[
+      # The weather last: the sky is worth a glance, the flame cap is worth watching.
+      PANEL_ORDER = (%i[
         flame_cap lamp_flame canary
         shaft_speed shaft_supply
         air_quantity furnace_fire district_air
@@ -25,7 +26,7 @@ module ReactorSim
         roof_timber putting rope_on_the_road drum_heat
         winding_signals cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
         coal_raised seam_remaining
-      ].freeze
+      ] + WeatherGauges::ORDER).freeze
 
       def catalogue
         {
@@ -442,7 +443,7 @@ module ReactorSim
             filters: [ Filters::Lag.new(6), Filters::Quantize.new(5_000.0) ],
             display: Displays::Digital.new(unit: "t", precision: 0, convert: :kilo)
           )
-        }
+        }.merge(WeatherGauges.instruments)
       end
     end
 
@@ -455,9 +456,9 @@ module ReactorSim
              }) do |id:, seed:, time_scale: Mine::DEFAULT_TIME_SCALE, state: nil,
                                                  rngs: nil, content: nil,
                                                  chassis: Mine::CHASSIS.keys.first, loadout: {},
-                                                 crew: {}, ground: nil|
+                                                 crew: {}, ground: nil, conditions: nil|
       Mine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
-                 ground: ground,
+                 ground: ground, conditions: conditions,
                  time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

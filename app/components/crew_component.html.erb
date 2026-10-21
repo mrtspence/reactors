@@ -65,8 +65,11 @@
         <select class="bg-slate-900 text-slate-200 text-xs rounded px-1 py-0.5 ring-1 ring-slate-700"
                 data-minion-station data-action="change->console#assign">
           <option value="">— stood down —</option>
+          <%# A post's capacity rides on its option so the console can count the gang filling it
+              from postings it already has. A post with no limit carries none and is never full. %>
           <% stations.each do |station| %>
-            <option value="<%= station.fetch(:id) %>"><%= station.fetch(:label) %></option>
+            <%= tag.option station.fetch(:label), value: station.fetch(:id),
+                           data: { station_label: station.fetch(:label), station_capacity: station[:capacity] } %>
           <% end %>
           <%# A fetch order, in the same control as every other posting: go to this person and
               pick them up. Only rendered where there is geometry — without places nobody is ever

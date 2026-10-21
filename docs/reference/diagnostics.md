@@ -279,6 +279,22 @@ to diff flags itself.
    palette pieces get specced too — an upgrade slot nobody has exercised is one that will not
    work when it is first reached for.
 
+## The weather: somebody's guess, until you buy a glass
+
+`Operations::WeatherGauges` is shared by every operation with a sky over it, because the sky is
+the same whatever is under it.
+
+- **What anybody can say goes on every panel, as prose, and is somebody's word.** "Feels cold",
+  "getting dark", "pouring", "wind's howling", "my knee aches". Each is an observer gauge on the
+  post that is outdoors — the colliery's banksman, the engine's fireman — so nobody there means
+  nothing said, and a daft or benighted reader says it wrong. They read `Field`s off
+  `Nodes::Outdoors` (`feels_k`, `daylight`, `falling`, `wind_m_s`, `pressure_trend`).
+- **The numbers are fitted** (slot `weather_instruments`): a thermometer, and a barometer whose
+  companion `the_glass` reads the pressure's trend through `Average` then `Rate` into prose —
+  falling fast, falling, steady, rising — because the trend is what a pit top read a glass for.
+- They sit **last** on each panel. The sky is worth a glance; the flame cap and the boiler
+  pressure are worth watching.
+
 ## When the gauge is itself a part
 
 Most instruments belong to a machine part: the wheel stress gauge arrives with the flywheel, the

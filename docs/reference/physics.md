@@ -104,6 +104,27 @@ Heat transfer between nodes is an implicit solve over the whole thermal network;
 ambient stays closed form, because a fixed-potential reservoir cannot be overshot. See
 [`settlement.md`](settlement.md#heat-and-rotation-settle_heat-settle_drive).
 
+### The weather moves the ambient
+
+**What the sky is doing is a reading, drawn once and recomputed from the clock**
+(`Conditions`, held by `Nodes::Outdoors`). It reaches the physics in three places, each a
+**shift from the standard day** a figure was declared against, so a standard sky changes nothing:
+
+| Where | How far |
+|---|---|
+| A node's ambient (`Context#ambient_k_of`) | Its place's `exposure`: a pit bank 1, an engine house 0.3, underground 0 |
+| `Atmosphere`'s temperature and pressure | In full — it is the outside air |
+| A stack's cold column (`Arbiter.path_head`) | In full, so a winter's day draws a chimney and a downcast harder, and natural draught weakens as the day warms |
+
+A falling barometer moves the pressure reference of everything vented to the sky. **Whether it
+draws gas out of a goaf is left to the gas paths that already exist**, rather than added.
+
+**People feel the air with the wind on it**: the Canadian wind-chill index
+(`Outdoors.feels_k`), taken as far as their place is open to the sky. Below a tolerance the cold
+grinds resilience (`Chill`, shaped like `Scorch`); above a comfort band the heat makes work cost
+more (`Chill.strain`, a multiplier on fatigue accrual), because outdoor heat is strain rather than
+a burn.
+
 ### Radiation is a conductance, because `T⁴ − T_amb⁴` factors
 
 ```

@@ -45,7 +45,7 @@ module ReactorSim
       Settlement.new(
         flows: settle_mass(nodes:, states:, paths:, intents:, content:, dt:, ctx:),
         heat: settle_heat(nodes:, states:, thermal_links:, content:, dt:),
-        ambient: settle_ambient(nodes:, states:, content:, dt:),
+        ambient: settle_ambient(nodes:, states:, content:, dt:, ctx:),
         drive: settle_drive(nodes:, states:, drive_links:, dt:, ctx:)
       ).freeze
     end
@@ -253,6 +253,10 @@ module ReactorSim
     #
     # Densities come from the ideal gas law at ambient pressure using the SOURCE's own mean
     # molar mass, so flue gas and air are compared on the same footing.
+    #
+    # **The cold column is the outside air**, so it moves with the weather in full: a chimney
+    # stands in it, and a mine's downcast is filled from it. So a winter's day draws a stack
+    # harder than a summer's, and a natural draught weakens as the day warms.
     def path_head(path, nodes, states, content, ctx)
       fixed = path.conduits.sum { |id| nodes.fetch(id).head_pa(ctx) }
       height = path.conduits.sum { |id| nodes.fetch(id).stack_height_m }
@@ -267,6 +271,7 @@ module ReactorSim
       molar = Parcel.total_kg(gases) / moles
       hot = source.temperature_k(state, content)
       ambient = source.respond_to?(:ambient_k) ? source.ambient_k : Units::STANDARD_TEMPERATURE_K
+      ambient += ctx.outdoor_shift_k if ctx.respond_to?(:outdoor_shift_k)
       return fixed if hot <= 0.0 || ambient <= 0.0
 
       density = ->(t) { Units::STANDARD_PRESSURE_PA * molar / (Units::GAS_CONSTANT * t) }
@@ -693,18 +698,22 @@ module ReactorSim
     # **The guard is on the total, not on conduction.** Skipping a node whose
     # `ambient_conductance` is zero would skip everything that radiates and barely conducts,
     # which is most hot things in a machine.
-    def settle_ambient(nodes:, states:, content:, dt:)
+    #
+    # **The environment is where the node stands**: its declared ambient, shifted by the weather as
+    # far as its place is open to it (`Context#ambient_k_of`). Without a context it is the
+    # declared figure.
+    def settle_ambient(nodes:, states:, content:, dt:, ctx: nil)
       nodes.each_value.filter_map do |node|
         next unless node.respond_to?(:ambient_conductance)
 
         state = states.fetch(node.id)
         temperature = node.temperature_k(state, content)
-        conductance = node.ambient_conductance +
-                      node.radiative_conductance(temperature, node.ambient_k)
+        ambient = ctx.respond_to?(:ambient_k_of) ? ctx.ambient_k_of(node) : node.ambient_k
+        conductance = node.ambient_conductance + node.radiative_conductance(temperature, ambient)
         next if conductance <= 0.0
 
         q = Relaxation.to_reservoir(node.total_heat_capacity(state, content),
-                                    temperature, node.ambient_k, conductance, dt)
+                                    temperature, ambient, conductance, dt)
         next if q.abs <= Parcel::EPSILON
 
         [ node.id, q ] # positive = node sheds to the environment
