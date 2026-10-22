@@ -41,10 +41,11 @@ that draw once from the outdoors node's **match-wide** stream at `initial_state`
 pure function of the clock, through a fixed set of channels a later kind reuses. No die is thrown
 after the start. See [`design_sketches/conditions.md`](../../docs/design_sketches/conditions.md).
 
-What a person is subject to lives in seven pure modules over a state hash they do not own,
+What a person is subject to lives in eight pure modules over a state hash they do not own,
 none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
 air), `scorch.rb` (the heat), `chill.rb` (the cold, and the strain of working in heat),
-`peril.rb` (the place, and the hidden margin it spends) and `burden.rb` (what they are carrying).
+`peril.rb` (the place, and the hidden margin it spends), `burden.rb` (what they are carrying) and
+`animosity.rb` (each other).
 **A harm that works continuously owes a dwell counter past collapse** — `asphyxia`, `burns` and
 `chilled` — because `Severity.escalate` will not announce the same tier twice and a steady
 grind therefore never reaches `:mortal` on its own.
@@ -62,11 +63,33 @@ grind therefore never reaches `:mortal` on its own.
 > kobold out reads as a rest. Measured — a kobold on a half-tired human over a minute is +0.064
 > fatigue with the gate and **−0.068 without it**. Armour you can rest off; a body you cannot.
 
-> **Every die thrown for a person is thrown in `Tick#draw_fates`, in phase 0, unconditionally
-> for everybody.** A conditional draw makes the RNG stream depend on the condition and the
-> divergence surfaces as a snapshot replaying differently, days later, somewhere unrelated.
-> Keeping the count fixed and in one method is what makes it checkable — see
+> **Every die thrown for a person is thrown in phase 0, unconditionally for everybody** — in
+> `Tick#draw_fates` from their own stream, and in `Tick#draw_tempers` from a second stream of
+> their own (`Animosity.stream`), so a temper's dice never move a fate's. A conditional draw makes
+> the RNG stream depend on the condition and the divergence surfaces as a snapshot replaying
+> differently, days later, somewhere unrelated. Keeping the count fixed and in one method per
+> stream is what makes it checkable — see
 > [`invariants.md`](../../docs/reference/invariants.md#2-determinism).
+
+> **What people do to each other is `animosity.rb`, and its phase is `provoke.rb` (6d′).** A
+> grudge runs holder → target and comes from the race, the individual (`grudges:`, and
+> `resented_by:` written from the target's side), earlier matches (`options[:grudges]`, from the
+> delivery tier) and this one (the holder's state), added and clamped — `Operation#grudges` is the
+> built table. A hidden `patience`, `Blunder`'s margin with a target, runs out into a row, a brawl,
+> a shove into a peril declared `opportunity: true`, or sabotage through a post's `openings:`
+> (`Animosity::Opening`: a mishap through `state[:mishaps]`, or a slip of their own through
+> `state[:spite]`). A post with `oversees:` is a boss's. **Shoves and sabotage are all or
+> nothing; blows are graded** by how far `strike` beat `defend`, and hit by `attack` — the
+> contest itself (a bell-curved roll, landing, damage, a critical that `pierces:` the armour and
+> part of the toughness) is `combat.rb`, pure arithmetic any future fight reuses. A fighter mans nothing
+> (`Tick#crews` leaves them out) and does not walk. See
+> [`design_sketches/animosity-and-distraction.md`](../../docs/design_sketches/animosity-and-distraction.md).
+>
+> **`Minion#avoid` is every hazard's getting-out-of-the-way** — `√(wits × agility)`, the agility
+> slowed by what is carried — and safety saves, refuges, being caught by a runaway, the accident
+> margin and `defend` all read it. Wits alone stays where the question is judgement: slips,
+> lateness, misjudging, gauges. **Distraction** is `ambient_for`'s `distracting` — the allure of
+> everybody else in the room — and divides wits.
 
 ## Events are the other output, and they have one rule
 

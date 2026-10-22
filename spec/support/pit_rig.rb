@@ -38,7 +38,7 @@ module PitRig
   # mine specs a figure about the mine.
   COLLIER = { label: "Collier", mass_kg: 70.0,
               strength: 1.0, toughness: 1.0, endurance: TIRELESS,
-              intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
+              intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
               tags: { mining_effectiveness: 0.6, shovelling: 0.5, darkvision: 0.8 } }.freeze
 
   SEATS = (1..4)

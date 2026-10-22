@@ -78,7 +78,7 @@ module ReactorSim
       # An individual is a name and a race. Everything else is an offset and may be omitted.
       REQUIRED_MINION_KEYS    = %i[name archetype].freeze
 
-      # An archetype declares all five, because it is the baseline every other layer offsets and
+      # An archetype declares every stat, because it is the baseline every other layer offsets and
       # a missing one would surface mid-match as a nil inside an arithmetic expression. The list
       # itself lives in `Sheet`, with the folding rules it belongs to.
       REQUIRED_ARCHETYPE_KEYS = ([ :label ] + Sheet::STATS).freeze
@@ -273,11 +273,16 @@ module ReactorSim
         @archetypes.each do |id, spec|
           missing = REQUIRED_ARCHETYPE_KEYS.reject { |k| spec.key?(k) }
           raise Error, "archetype #{id}: missing #{missing.join(', ')}" if missing.any?
+          raise Error, "archetype #{id}: resented_by belongs to a person" if spec.key?(:resented_by)
+
+          validate_grudges!("archetype #{id}", spec)
         end
 
         @minions.each do |id, spec|
           missing = REQUIRED_MINION_KEYS.reject { |k| spec.key?(k) }
           raise Error, "minion #{id}: missing #{missing.join(', ')}" if missing.any?
+
+          validate_grudges!("minion #{id}", spec)
 
           # An individual naming a race that does not exist is a person with no stats at all.
           # Caught here rather than at the moment somebody tries to work a lever with them.
@@ -407,7 +412,20 @@ module ReactorSim
           archetype: spec.fetch(:archetype).to_sym,
           mass_kg: mass + spec.fetch(:mass_kg, 0.0).to_f,
           stats: Sheet.add_stats(baseline, spec.fetch(:stats, {})).freeze,
-          tags: Sheet.add_tags(base.fetch(:tags, {}), spec.fetch(:tags, {})).freeze }.freeze
+          tags: Sheet.add_tags(base.fetch(:tags, {}), spec.fetch(:tags, {})).freeze,
+          # Keyed by race or by person. The race's and the individual's add, as tags do.
+          grudges: Sheet.add_tags(grudges_of(base), grudges_of(spec)).freeze,
+          resented_by: grudges_of(spec, :resented_by).freeze }.freeze
+      end
+
+      def grudges_of(spec, key = :grudges) = spec.fetch(key, {}).to_h { |k, v| [ k.to_sym, v.to_f ] }
+
+      # A grudge against a race or a person nobody has heard of is a feud that never starts.
+      def validate_grudges!(owner, spec)
+        %i[grudges resented_by].each do |key|
+          unknown = spec.fetch(key, {}).keys.map(&:to_sym) - @archetypes.keys - @minions.keys
+          raise Error, "#{owner}: #{key} names unknown #{unknown.join(', ')}" if unknown.any?
+        end
       end
 
       def missing_mass(spec)

@@ -61,9 +61,15 @@ module ReactorSim
         # layers would make their order matter. Only the frame has a floor — a minion wearing
         # nothing genuinely carries nothing.
         mass_kg: [ mass, Sheet::MIN_MASS_KG ].max, worn_kg: [ worn, 0.0 ].max,
+        weapons: weapons(posting),
+        grudges: sheet.fetch(:grudges, {}), resented_by: sheet.fetch(:resented_by, {}),
         training: training_ids(posting).freeze,
         equipment: equipment_ids(posting).freeze }.freeze
     end
+
+    # **Everything fitted that can be swung, each on its own** — a pick and a knife do not add up,
+    # because a hand swings one; `Minion#wielding` picks the one that suits it, in slot order.
+    def weapons(posting) = equipment_ids(posting).filter_map { |slot, id| fitted(slot, id).weapon }.freeze
 
     # Every id symbolised and every slot named, including the empty ones — the same discipline
     # `Assembly#resolve_loadout` follows, and for the same reason. **A posting that arrives back

@@ -137,6 +137,7 @@ module ReactorSim
 
     def initialize(operation, state)
       @state = state
+      @grudges = operation.grudges
       @nodes = operation.nodes
       @links = operation.links
       @paths = operation.paths
@@ -155,6 +156,7 @@ module ReactorSim
     # Returns the next state. The operation installs it; nothing is mutated here.
     def call(tick:, dt:)
       fates = @fates = draw_fates                               # phase 0
+      @tempers = draw_tempers                                   # phase 0
       controls = actuate(dt, fates)                             # phase 0
       read = state.fetch(:nodes)                                # phase 1
       # `control_values` builds `@ignition` from the same lever positions, so it comes first.
@@ -184,6 +186,8 @@ module ReactorSim
       next_minions, cold_events = chill(next_minions, felt, ctx)         # phase 6b″
       next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx, felt)  # phase 6c
       next_minions, blunder_events = blunder(next_minions, next_nodes, fates, ctx) # phase 6d
+      tempers = provoke(next_minions, next_nodes, ctx)           # phase 6d′
+      next_minions = tempers.minions
       next_minions, carry_events = travel(next_minions, ctx)     # phase 6e
       next_nodes = signal_winding(next_nodes, next_minions, controls)
       next_diagnostics = observe(next_nodes, ctx)                # phase 7
@@ -196,9 +200,10 @@ module ReactorSim
         diagnostics: next_diagnostics.freeze,
         minions: next_minions.freeze,
         ledger: ledger.freeze,
-        mishaps: pending_mishaps(blunder_events),
+        mishaps: (pending_mishaps(blunder_events) + tempers.mishaps).freeze,
+        spite: tempers.spite,
         events: (events + prompt_events + wear_events + hurt_events + burn_events + cold_events +
-                 spent_events + blunder_events + carry_events).freeze }.freeze
+                 spent_events + blunder_events + tempers.events + carry_events).freeze }.freeze
     end
 
     # **What somebody did to a part this tick, for the next tick's `stress` to apply.** Its own
@@ -348,13 +353,18 @@ module ReactorSim
     # a hand who knows the job. The same `difficulty − wits` that decides how often they slip.
     def lateness(post, minion)
       minion_state = state.fetch(:minions).fetch(minion.id)
-      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
+      wits = minion.wits(minion_state, ambient: ambient_for(minion, minion_state))
 
       1.0 + [ post.difficulty(minion) - wits, 0.0 ].max
     end
 
+    # **A slip somebody meant** (`state[:spite]`, left by phase 6d′) begins in place of the dice.
     def slips_for(states, fates, dt)
+      meant = state.fetch(:spite, []).to_h { |deed| [ deed.fetch(:control), deed.fetch(:slip) ] }
+
       states.to_h do |id, cp_state|
+        next [ id, { slip: meant.fetch(id), slip_at: nil, slip_for: SLIP_TICKS } ] if meant.key?(id)
+
         left = cp_state[:slip_for].to_i
         next [ id, cp_state.slice(:slip, :slip_at).merge(slip_for: left - 1) ] if left.positive?
 
@@ -380,7 +390,7 @@ module ReactorSim
       fate = fates[minion_id] or return nil
       minion_state = state.fetch(:minions).fetch(minion_id)
       minion = minions.fetch(minion_id)
-      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
+      wits = minion.wits(minion_state, ambient: ambient_for(minion, minion_state))
 
       fate.fetch(:slip) < control.slip_chance(minion, wits, dt) ? fate : nil
     end
@@ -461,7 +471,11 @@ module ReactorSim
       @crews ||= state.fetch(:minions).keys.sort.each_with_object({}) { |id, acc|
         next unless minions.key?(id)
 
-        station = state.fetch(:minions).fetch(id)[:station] or next
+        minion_state = state.fetch(:minions).fetch(id)
+        # Somebody in a fight is at their post and working nothing.
+        next if Animosity.fighting?(minion_state)
+
+        station = minion_state[:station] or next
         (acc[station] ||= []) << id
       }.transform_values(&:freeze).freeze
     end
@@ -1285,7 +1299,7 @@ module ReactorSim
           next acc
         end
 
-        hit = run_hit(run, declared, scale * share, on_road && caught?(run, minion, share), source)
+        hit = run_hit(run, declared, scale * share, on_road && caught?(run, minion, minion_state, share), source)
         acc ? acc.merge(hit) { |key, x, y| key == :severity ? x + y : merged(x, y) } : hit
       end
     end
@@ -1335,13 +1349,43 @@ module ReactorSim
     def refuge_reached(minion, minion_state)
       fitted = safety_equipment[minion_state[:place]] or return nil
       effectiveness, source = fitted
-      wits = minion.wits(minion_state, ambient: ambient_before[minion_state[:place]])
-      Blunder.accident_avoided?(effectiveness, wits, fate_of(minion, :dodge)) ? source : nil
+      Blunder.accident_avoided?(effectiveness, avoid_for(minion, minion_state), fate_of(minion, :dodge)) ? source : nil
     end
 
-    def caught?(run, minion, share)
+    # Somebody quick and watchful is caught less often; nobody is ever safe from it.
+    def caught?(run, minion, minion_state, share)
       crushed = run[:crushed] or return false
-      fate_of(minion, :caught) < crushed.fetch(:chance) * (share**2)
+      clear = [ avoid_for(minion, minion_state), Blunder::MIN_AVOID ].max
+      fate_of(minion, :caught) < crushed.fetch(:chance) * (share**2) / clear
+    end
+
+    # **Getting out of the way, where they stand**: their wits in the room's light and its
+    # distractions, and their agility under what they carry.
+    def avoid_for(minion, minion_state)
+      minion.avoid(minion_state, ambient: ambient_for(minion, minion_state),
+                                 burden: Burden.ratio(minion, minion_state, minions))
+    end
+
+    # **What the room offers this person**: its own tags, with the allure of everybody else
+    # standing in it added to whatever `distracting` the room offers. From last tick's places, so
+    # it cannot depend on visit order; nobody is distracted by themselves. An operation with no
+    # geometry is one room.
+    def ambient_for(minion, minion_state, rooms = ambient_before)
+      place = minion_state[:place]
+      room = rooms[place]
+      others = allure_before.fetch(place, []).sum { |id, allure| id == minion.id ? 0.0 : allure }
+      return room unless others.positive?
+
+      (room || {}).merge(distracting: Injury.numeric(room&.fetch(:distracting, nil)) + others)
+    end
+
+    # `{ place => [[id, allure]] }` of everybody with any, by sorted id.
+    def allure_before
+      @allure_before ||= minions.keys.sort.each_with_object({}) { |id, acc|
+        minion_state = state.fetch(:minions).fetch(id)
+        allure = minions.fetch(id).allure(minion_state)
+        (acc[minion_state[:place]] ||= []) << [ id, allure ] if allure.positive?
+      }.freeze
     end
 
     def run_hit(run, declared, weight, crushed, source)
@@ -1384,7 +1428,8 @@ module ReactorSim
         minion = minions[id]
         next [ id, minion_state ] if minion.nil?
 
-        control = control_points[minion_state[:station]]
+        fighting = Animosity.exertion(minion, minion_state)
+        control = Animosity.fighting?(minion_state) ? nil : control_points[minion_state[:station]]
         demand = control ? control.demand(controls.fetch(control.id)) : 0.0
         here = air.fetch(minion_state[:place], 1.0)
         choking = Breath.rate(here, minion, minion_state)
@@ -1393,7 +1438,7 @@ module ReactorSim
                                 control: control, demand: demand, dt: ctx.dt,
                                 suffocation: choking,
                                 burden: Burden.ratio(minion, minion_state, minions),
-                                strain: Chill.strain(felt[minion_state[:place]]))
+                                strain: Chill.strain(felt[minion_state[:place]]), fighting: fighting)
         tired, spent = Fatigue.check_spent(tired)
         events << spent_event(minion, control, ctx) if spent
 
@@ -1427,6 +1472,31 @@ module ReactorSim
       end
     end
 
+    # Phase 0, and the same rule: **every die a temper throws, unconditionally**, from each
+    # person's own temper stream, so none of the draws above moves.
+    def draw_tempers
+      minions.keys.to_h { |id| [ id, Animosity.draw(rngs.fetch(Animosity.stream(id))) ] }
+    end
+
+    # Phase 6d′. **What people do to each other** — after their own blunders, before anybody
+    # walks, so a brawler is held where the fight is. See `Animosity::Provoke`.
+    def provoke(minions_state, states, ctx)
+      Animosity::Provoke.new(
+        minions: minions, table: @grudges, control_points: control_points,
+        opportunities: opportunities(states, ctx.dt), dice: @tempers, carried: being_carried(minions_state),
+        ctx: ctx,
+        defence: ->(minion, s) { minion.defend(s, ambient: ambient_for(minion, s), burden: Burden.ratio(minion, s, minions)) },
+        ambient: ->(minion, s) { ambient_for(minion, s) }
+      ).call(minions_state)
+    end
+
+    # **Every peril somebody could be pushed into right now**, by id — in front of a tub only
+    # while tubs are running.
+    def opportunities(states, dt)
+      perils_in_reach(states, dt).filter_map { |peril, activity| peril if peril.opportunity && activity.positive? }
+                                 .sort_by(&:id)
+    end
+
     # Phase 6d. **What the people do to themselves**, which is the route into harm that needs
     # nothing to break first.
     #
@@ -1457,7 +1527,8 @@ module ReactorSim
       after, peril = Blunder.advance(mine, minion, minion_state, ctx.dt,
                                      fates.dig(minion.id, :margin) || 1.0,
                                      fates.dig(minion.id, :peril) || 0.0,
-                                     ambient: ambient_before[minion_state[:place]])
+                                     ambient: ambient_for(minion, minion_state),
+                                     avoid: avoid_for(minion, minion_state))
       return after if peril.nil?
 
       guarded = guarding(minion, minion_state, fates)
@@ -1492,9 +1563,7 @@ module ReactorSim
       effectiveness, source = fitted
 
       return nil unless Blunder.accident_avoided?(
-        effectiveness,
-        minion.wits(minion_state, ambient: ambient_before[minion_state[:place]]),
-        fates.dig(minion.id, :dodge) || 1.0
+        effectiveness, avoid_for(minion, minion_state), fates.dig(minion.id, :dodge) || 1.0
       )
 
       source
@@ -1712,7 +1781,9 @@ module ReactorSim
       events = []
       walked = minions_state.to_h do |id, minion_state|
         minion = minions[id]
-        next [ id, minion_state ] if minion.nil? || carried.key?(id)
+        # **A brawler's orders wait for the fight to end**, or a quick hand on the crew screen
+        # would part every fight before its first blow.
+        next [ id, minion_state ] if minion.nil? || carried.key?(id) || Animosity.fighting?(minion_state)
 
         after = walk(minion, minion_state, ctx, events)
         lifted(minion_state, after).each { |got| events << carried_event(minion, got, ctx) }
@@ -2172,7 +2243,8 @@ module ReactorSim
 
       crew.map { |id|
         minion_state = state.fetch(:minions).fetch(id)
-        minions.fetch(id).wits(minion_state, ambient: @ambient&.fetch(minion_state[:place], nil))
+        minion = minions.fetch(id)
+        minion.wits(minion_state, ambient: ambient_for(minion, minion_state, @ambient || {}))
       }.max
     end
   end

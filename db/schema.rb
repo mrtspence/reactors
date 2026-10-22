@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_20_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_21_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -33,6 +33,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_20_120000) do
     t.bigint "tick"
     t.datetime "updated_at", null: false
     t.index ["owner_id", "achievement_id"], name: "index_awards_on_owner_id_and_achievement_id", unique: true
+  end
+
+  create_table "grudges", force: :cascade do |t|
+    t.float "amount", default: 0.0, null: false
+    t.jsonb "applied_ticks", default: [], null: false
+    t.datetime "created_at", null: false
+    t.string "holder_id", null: false
+    t.string "owner_id", null: false
+    t.string "run_id"
+    t.string "target_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["owner_id", "holder_id", "target_id"], name: "index_grudges_on_owner_id_and_holder_id_and_target_id", unique: true
   end
 
   create_table "incidents", force: :cascade do |t|

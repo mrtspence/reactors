@@ -85,6 +85,12 @@ minion:
     materials: {}
   throg:
     materials: {}
+  urist:
+    materials: {}
+  dalthu:
+    materials: {}
+  arunessa:
+    materials: {}
 
 # **Priced by the ITEM, not by the (minion, item) pair.** Ownership is per minion — Jim's apron
 # and Elowynne's apron are two separate unlocks with ids `jim/leather_apron` and
@@ -143,6 +149,11 @@ equipment:
   lucky_amulet:
     materials: { bronze: 1 }
     requires: burst_a_flywheel
+  clasp_knife:
+    materials: { steel: 1 }
+  # Leather, so free until it is a resource.
+  blinkers:
+    materials: {}
 
 # Training is bought with time rather than metal, so every one of these is free of materials and
 # gated on having actually done the thing instead. That is the shape a course *should* have: you
@@ -645,3 +656,6 @@ part:
     materials:
       wood: 420
       stone_dust: 60
+  # A man and a wage, not a thing built — free until wages are a cost.
+  overman:
+    materials: {}

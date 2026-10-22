@@ -11,7 +11,7 @@ module ReactorSim
   #
   # See `docs/design_sketches/minions.md` §4.
   module Sheet
-    # The six every archetype declares. Fixed rather than open because the simulation's own
+    # The stats every archetype declares. Fixed rather than open because the simulation's own
     # machinery reads them and needs a number with a meaning rather than an absence.
     #
     #   strength      strength-to-WEIGHT ratio         — pace, and the root of `force`
@@ -19,7 +19,12 @@ module ReactorSim
     #   endurance     how slowly they tire             — Fatigue.accrual
     #   intelligence  what they notice                 — the `observer:` gauge path
     #   dexterity     how finely they can work         — precision work
-    #   charisma      how others take them             — reserved
+    #   charisma      how others take them             — authority, allure
+    #   agility       getting the body out of the way  — pace, `avoid`
+    #   combat_prowess  scraps survived                — `attack` and `defend`
+    #
+    # **Both multiply straight in**, so an absent one would zero every attack or defence — which
+    # is why they are required like the rest. A human is 1.0 at each; a trained fighter 2 or 3.
     #
     # **`strength` is a RATIO, not an absolute, and 1.0 is a human's.** Below 1.0 means worse
     # pound-for-pound than a person, which is where most large things sit — strength grows with
@@ -38,25 +43,27 @@ module ReactorSim
     # done and what it costs them are separate claims — an ogre who shifts coal twice as fast and
     # tires twice as fast is only expressible with both — and toughness is about a blow landing,
     # which is a different event from a long shift.
-    STATS = %i[strength toughness endurance intelligence dexterity charisma].freeze
+    STATS = %i[strength toughness endurance intelligence dexterity charisma agility combat_prowess].freeze
 
     # The body a `strength` of 1.0 is the ratio for. Changing this rescales every derived figure
     # in the game at once, which is why it lives here rather than beside any one consumer.
     REFERENCE_MASS_KG = 70.0
 
-    # **What an `effort:` blend may name beyond the six, because mass pays off differently per
-    # job.** Both are 1.0 for a reference human, so a station's declared throughput stays true and
-    # weights still sum to 1.0 meaningfully.
+    # **What an `effort:` blend — or a weapon's `handling:` — may name beyond the stats.** All are
+    # 1.0 for a reference human, so a station's declared throughput stays true and weights still sum
+    # to 1.0 meaningfully.
     #
-    #   force   strength × mass ÷ reference. Pushing a tub, heaving rock, a heavy lever — work
-    #           where friction and leverage decide, and where bulk pays linearly.
-    #   swing   √force. A tool at the end of an arm: a pick can only be swung so fast and bites
-    #           only so deep, so bulk stops paying in proportion. An ogre lands about twice a
-    #           human's work with the same pick, and a *bigger* pick is then the upgrade.
+    #   force      strength × mass ÷ reference. Pushing a tub, heaving rock, a heavy lever — work
+    #              where friction and leverage decide, and where bulk pays linearly.
+    #   swing      √force. A tool at the end of an arm: a pick can only be swung so fast and bites
+    #              only so deep, so bulk stops paying in proportion. An ogre lands about twice a
+    #              human's work with the same pick, and a *bigger* pick is then the upgrade.
+    #   precision  putting a hand, a blade or a blow exactly where it was meant to go: mostly quick,
+    #              partly deft (`Minion::PRECISION`). Cutting a fuse or a strand, socketing a rope.
     #
-    # **A station may still name `strength` directly**, and some should — a more specific caller
-    # wins over a general rule. These are additions to what `effort:` accepts, not a replacement.
-    DERIVED = %i[force swing].freeze
+    # **A station may still name `strength` or `dexterity` directly**, and some should — slow, fine
+    # work is deftness without the quickness. These are additions to what `effort:` accepts.
+    DERIVED = %i[force swing precision].freeze
 
     # A stat can be driven to zero and no further. Negative strength would drive a lever *away*
     # from its target, which is not "very weak" — it is a different machine.

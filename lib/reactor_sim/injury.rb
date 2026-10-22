@@ -27,12 +27,12 @@ module ReactorSim
     # `failure_modes` uses.
     MODES = {
       # Walking wounded. Still at their post, and worse at it.
-      minor: { derates: { strength: 0.6, dexterity: 0.7, intelligence: 0.85 } },
+      minor: { derates: { strength: 0.6, dexterity: 0.7, intelligence: 0.85, agility: 0.6 } },
       # Carried out. Their station is cleared, so whatever they were doing stops being done.
-      severe: { derates: { strength: 0.0, dexterity: 0.0, intelligence: 0.0 },
+      severe: { derates: { strength: 0.0, dexterity: 0.0, intelligence: 0.0, agility: 0.0 },
                 stood_down: true },
       # The injury list. The only tier that outlives the match.
-      mortal: { derates: { strength: 0.0, dexterity: 0.0, intelligence: 0.0 },
+      mortal: { derates: { strength: 0.0, dexterity: 0.0, intelligence: 0.0, agility: 0.0 },
                 stood_down: true, lasting: true }
     }.freeze
 
@@ -84,8 +84,16 @@ module ReactorSim
     # Returns `[next_state, mode_or_nil]`. A mode comes back only on a TRANSITION — the discipline
     # `break_part` follows, and for the same reason: re-deciding every tick would announce the
     # same injury at the tick rate forever.
+    #
+    # **A hazard that `pierces:` finds the gap** — a critical blow to a soft spot, round the armour —
+    # and meets no `_resistance` kit, and only that share of the body's own toughness.
     def check(minion, state, hazard)
-      grind(state, hazard.fetch(:severity).to_f - resistance(minion, hazard))
+      grind(state, hazard.fetch(:severity).to_f - resisted(minion, hazard))
+    end
+
+    def resisted(minion, hazard)
+      kept = hazard[:pierces]
+      kept ? minion.toughness * numeric(kept) : resistance(minion, hazard)
     end
 
     # **The accumulation half, with the bite already worked out.** Separate because not every

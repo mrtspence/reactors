@@ -31,7 +31,9 @@ module ReactorSim
                        stats: { strength: 0.2 },
                        # The sketch's worked example: a shovel should be a large bonus to
                        # moving coal specifically, rather than a small bonus to everything.
-                       tags: { shovelling: 0.5 })
+                       tags: { shovelling: 0.5 },
+                       # A heavy blade on a long handle: swung, and not a good weapon.
+                       weapon: { handling: { swing: 0.75, precision: 0.15 }, edge: 0.1, wounds: %i[impact] })
 
     # The shovel's opposite number, and the reason `aided_by:` is per station rather than per
     # job: the same person is better at one of the two depending on what is in their hand.
@@ -46,7 +48,8 @@ module ReactorSim
                        description: "A fitter's spanner, sized for boiler mountings.",
                        mass_kg: 0.8,
                        stats: { dexterity: 0.15 },
-                       tags: { fitting: 0.3 })
+                       tags: { fitting: 0.3 },
+                       weapon: { handling: { swing: 0.6, precision: 0.3 }, edge: 0.05, wounds: %i[impact] })
 
     # The sketch's other worked example, and the one that shows a tag cutting both ways: the
     # candle is what lets you see down a drift, and it is what ignites the gas in one.
@@ -57,7 +60,8 @@ module ReactorSim
                        # to want it.
                        mass_kg: 4.0,
                        stats: { strength: 0.05 },
-                       tags: { mining_effectiveness: 0.25, darkvision: 0.1, open_flame: true })
+                       tags: { mining_effectiveness: 0.25, darkvision: 0.1, open_flame: true },
+                       weapon: { handling: { swing: 0.7, precision: 0.2 }, edge: 0.2, wounds: %i[puncture impact] })
 
     # **The gate is multiplied, so a crude kit is 0.25 × 0.1 and genuinely hopeless.** That is
     # the design — a hewer with a stone pick and a candle is not a slightly worse hewer — but it
@@ -67,7 +71,9 @@ module ReactorSim
                        description: "A steel pick, wedges, and a lamp worth the name.",
                        mass_kg: 3.0,
                        stats: { strength: 0.1 },
-                       tags: { mining_effectiveness: 0.8, darkvision: 0.5, open_flame: true })
+                       tags: { mining_effectiveness: 0.8, darkvision: 0.5, open_flame: true },
+                       # A heavy point you swing hard: all arm, very little aim.
+                       weapon: { handling: { swing: 0.8, precision: 0.2 }, edge: 0.3, wounds: %i[puncture impact] })
 
     # **What makes a casualty somebody else's problem rather than nobody's.** `Burden` reads
     # `stretcher` as an aid to the lift limit, so this is what lets a hand carry somebody their own
@@ -187,6 +193,23 @@ module ReactorSim
                        mass_kg: 14.0,
                        stats: { strength: -0.1, dexterity: -0.15 },
                        tags: { respirator: 0.85, respirator_air: 9_600 })
+
+    # Cuts a fuse, a strand, a lashing — and, drawn in a fight somebody means to finish, a man.
+    # Utility, so it competes with the lamp.
+    Equipment.register(:clasp_knife, slot: :utility, label: "Clasp Knife",
+                       description: "A folding blade with a marlinspike. Every rope man carries one.",
+                       mass_kg: 0.2,
+                       tags: { cutting: 0.3 },
+                       # A blade is placed, not swung: nearly all of it is the hand's precision.
+                       weapon: { handling: { swing: 0.2, precision: 0.8 }, edge: 0.3, wounds: %i[puncture] })
+
+    # **What a crew wears against a succubus**, or anything else worth looking at instead of the
+    # work: `focused` resists distraction. Narrows what they take in of everything else too.
+    Equipment.register(:blinkers, slot: :utility, label: "Blinkers",
+                       description: "Leather side-flaps on a cap band. Eyes front.",
+                       mass_kg: 0.2,
+                       stats: { intelligence: -0.05 },
+                       tags: { focused: 0.5 })
 
     # --- training ------------------------------------------------------------
     #

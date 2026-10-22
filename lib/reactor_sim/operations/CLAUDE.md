@@ -116,6 +116,16 @@ outdoors, the instruments as a fitted slot, at the end of `PANEL_ORDER`. Nothing
 is written per operation. Rain reaches a holder through a `Nodes::Catchment`. Full checklist:
 [`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-sky-over-it).
 
+## The people in it, and each other
+
+**A crewed operation's builder and register block take `grudges:`** and keep it in `options:`
+(`Animosity.carried_over`). What a feud can do there is declared, never coded: `openings:` on a post
+(a mishap or a slip somebody there could do on purpose, and whom it reaches), `opportunity: true` on
+a peril (somewhere a person can be pushed), `oversees:` on a boss's post. The colliery's are the
+banksman's and the onsetter's false all-clear, the banksman's tub down the shaft, the hauling hands'
+loosed set and the shotfirer's charge left live, with the overman in a `supervision` slot. Checklist:
+[`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-people-in-it-and-each-other).
+
 ## Assembled from parts
 
 An operation is built from a **chassis** (the frame: fixed topology, which slots exist) and a
@@ -229,9 +239,11 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    | `force` | `strength × mass ÷ 70` | pushing a tub, heaving rock, a heavy lever — friction and leverage, where bulk pays linearly |
    | `swing` | `√force` | a tool at the end of an arm, where technique and the tool cap what bulk buys |
    | `strength` | the ratio itself | where power-to-weight really is the question — moving your own body |
+   | `precision` | agility 0.6 + dexterity 0.4 | a quick, deft hand: cutting a fuse or a strand, socketing a rope. Slow, fine work names `dexterity` instead |
 
    Ask *"would half a tonne of ogre be four times better at this, or twice?"* Four is `force`;
-   twice is `swing`. See
+   twice is `swing`; and if it would be no better at all but an elf would, `precision`. A weapon's
+   `handling:` names the same keys. See
    [`design_sketches/strength-to-weight.md`](../../docs/design_sketches/strength-to-weight.md).
 
    `complexity:` is the **other** axis and orthogonal to `effort:`: effort says how *fast* a

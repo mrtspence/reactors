@@ -49,6 +49,24 @@ shared, so a new operation writes none of the weather itself:
 
 Rain reaches a holder through a `Nodes::Catchment` of the ground that drains to it.
 
+### The people in it, and each other
+
+**A crewed operation's builder and register block take `grudges:`** — who already hates whom from
+earlier matches, by person — and put it in `options:` through `Animosity.carried_over`, beside
+`crew:`. Then three declarations decide what a feud can do there:
+
+1. **`openings:` on a post** (`Animosity::Opening`): what somebody stood there could do to
+   somebody they hate — a mishap the part named can suffer, or a slip of their own lever — with
+   who it `reaches:` and the `harm:` they believe it does. The colliery's banksman can send a tub
+   down onto the cage or ring the cage away from a boarder; the hauling hands can loose a set; the
+   shotfirer can leave a charge live for the hewers.
+2. **`opportunity: true` on a peril**: somewhere a person can be pushed — in front of a tub, into a
+   belt, off the deck — while it is live.
+3. **`oversees:` on a post** makes it a boss's: whoever stands there may step into a quarrel in
+   those places. The colliery sells one in a `supervision` slot that is empty by default.
+
+A post with none of these still sees rows and brawls between whoever works it.
+
 ---
 
 ## The five decisions, in order

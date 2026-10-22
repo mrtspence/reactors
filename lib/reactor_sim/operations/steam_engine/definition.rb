@@ -49,8 +49,9 @@ module ReactorSim
       # The chassis decides the frame — where the exhaust goes, which slots exist — and the
       # loadout decides what is fitted in them. An empty `loadout:` is the stock engine.
       # See `parts.rb` and `docs/design_sketches/modular_components.md`.
-      # `conditions:` is the match's sky from setup; nil is the standard sky.
-      def build(id:, seed:, chassis: :high_pressure, loadout: {}, crew: {}, conditions: nil,
+      # `conditions:` is the match's sky from setup; nil is the standard sky. `grudges:` is who
+      # among the crew already hates whom from earlier matches, by person.
+      def build(id:, seed:, chassis: :high_pressure, loadout: {}, crew: {}, conditions: nil, grudges: nil,
                 time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         # A restored snapshot brings these back from JSON as strings.
         chassis = chassis.to_sym
@@ -64,7 +65,8 @@ module ReactorSim
           # The RESOLVED loadout, naming every slot including the empty ones: a partial loadout
           # is re-defaulted on restore, so a deliberately-empty slot would grow its part back.
           # The roster is here for the same reason — a crew is a loadout by another name.
-          options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions }.compact,
+          options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions,
+                     grudges: Animosity.carried_over(grudges) }.compact,
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           places: [ engine_house(fragment) ],
@@ -1075,7 +1077,9 @@ module ReactorSim
           Minion.new(id: seat, station: station, place: place, name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
                      stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
-                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg))
+                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg),
+                     weapons: sheet.fetch(:weapons), grudges: sheet.fetch(:grudges),
+                     resented_by: sheet.fetch(:resented_by))
         end
       end
     end

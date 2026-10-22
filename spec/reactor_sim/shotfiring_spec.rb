@@ -90,7 +90,8 @@ RSpec.describe "shotfiring" do
     def hand(boneheaded: 0.0)
       ReactorSim::Minion.new(id: :m, name: "Hand", tags: { boneheaded: boneheaded }, mass_kg: 70.0,
                              stats: { strength: 1.0, toughness: 1.0, endurance: 1.0,
-                                      intelligence: 1.0, dexterity: 1.0, charisma: 1.0 })
+                                      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0,
+                                      combat_prowess: 1.0 })
     end
 
     def fresh = { health: 1.0, fatigue: 0.0 }

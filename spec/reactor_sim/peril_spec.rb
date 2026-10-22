@@ -44,7 +44,7 @@ module PerilCrew
 
   def self.archetype(spec)
     { label: "Hand", mass_kg: 70.0, strength: 1.2, toughness: spec[:toughness], endurance: 1.0e6,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
       tags: spec[:tags].merge(darkvision: 0.9, mining_effectiveness: 0.6, shovelling: 0.6) }
   end
 

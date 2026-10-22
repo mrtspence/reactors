@@ -11,7 +11,7 @@ RSpec.describe ReactorSim::Content do
   # `Sheet::MIN_MASS_KG`.
   def human
     { label: "Human", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: 1.0,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0 }
   end
 
   describe "validation" do

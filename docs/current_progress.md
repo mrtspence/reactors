@@ -386,8 +386,46 @@ built in five units, designed one at a time:
    - **The engine house breathes the atmosphere node**, so its people feel the full outdoor
      temperature beside a firebox. An existing simplification the cold now exposes.
    - Not built: cold stiffening dexterity, which the sketch mentioned.
-3. Animosity and distraction. Drafted for review in
-   [`design_sketches/animosity-and-distraction.md`](design_sketches/animosity-and-distraction.md).
+3. **Animosity and distraction — built**
+   ([`design_sketches/animosity-and-distraction.md`](design_sketches/animosity-and-distraction.md)).
+   - Two new stats on every race, `agility` and `combat_prowess`, a human 1.0 at each. Agility is
+     half of walking.
+   - `Minion#avoid` (wits × agility) is every hazard's getting-out-of-the-way: safety saves,
+     refuges, runaways, the accident margin.
+   - `attack`/`defend` are the reusable combat contest. Weapons on the tools, a clasp knife,
+     blinkers.
+   - Grudges come from race, person, account and play, and persist and fade across matches
+     (`Grudge`). Patience runs out into a row, a brawl, a shove or sabotage. The colliery has four
+     openings and an overman.
+   - A succubus distracts everybody but herself. The shaft's falling tub now hurts the riders.
+   - New races: dwarf, orc, succubus, each with one individual.
+   - **Tuning owed, all first guesses:**
+     - `Animosity`'s spend, irritation, ceiling, tolerance, blow, release and fade figures.
+       The contest is `Combat`: a bell-curved landing roll (`CONTEST_SPREAD`) of `strike` (half
+       swing, half `precision`) against `defend`; damage by the weapon in hand, its `handling:`
+       blend read off the body plus its `edge` (bare hands a poor weapon of their own); and a
+       critical that passes the armour and meets `CRITICAL_TOUGHNESS` of the toughness. A fight
+       tires by the weapon's weight against `force`. The weapon profiles, `WIELD_EXERTION` and the
+       crit figures are first guesses. **Measure every further pass with
+       `ruby script/tuning/brawls.rb`** (any directory; `--set NAME=VALUE` tries a figure without
+       editing code, `--tag [ID.]TAG=VALUE` tries a temperament, `--armed` starts every brawl with
+       weapons out, `--tool` gives everybody one item): every character against every other, 100 brawls a pairing, written to
+       [`tuning/brawls.md`](tuning/brawls.md) and deterministic, so a pass is a diff.
+       Measured once with an orc among elves and a dwarf at bank: his first brawl came at about
+       3½ minutes and one every few minutes after, and a clean blow from him puts an elf straight
+       into severe.
+     - The opening harms; the overman's reach and blend.
+     - The weapon attacks; blinkers' `focused`; the knife's `cutting`.
+   - **Moved by the new stats, not yet measured:** walking pace for every non-human race, and
+     `avoid` in the accident margin and runaway catch for kobolds, ogres and elves.
+   - **Seams left, by name:** `distracted` (no morning coffee) and a room's `distracting` (enchanted
+     weather) are read with nothing offering them; `defence` waits for combat gear; lever-shaped
+     openings wait for the shovel.
+   - **Later — a brawl report in the match.** A brawl is opaque once it starts: the feed has its
+     `quarrel` and any `minion_hurt`, but nothing says it is over or how it ended. Wanted: an event
+     when a brawl ends, saying how (sated, carried out, parted by the boss, exhausted), carrying the
+     blow-by-blow in its detail (each exchange's strike, guard, share, critical, armed, bite) so a
+     later UI pass can open it as an expanded report. Not built.
 4. Mobile engines: steam shovels and locomotives as their own crewed engines.
 5. The open pit itself.
 

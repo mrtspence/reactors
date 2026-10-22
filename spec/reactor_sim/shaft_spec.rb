@@ -89,16 +89,28 @@ RSpec.describe "the shaft" do
       expect([ 0.2, 1.0, 3.0 ].map(&snatch)).to eq([ 0.2, 1.0, 3.0 ].map(&snatch).sort)
     end
 
-    def suffered(cage_at)
+    def suffering(cage_at)
       op = seed(cage_pit, nodes: { cage_drive: { position_m: cage_at } })
       ctx = ReactorSim::Tick::Context.new(controls: {}, dt: 0.25, nodes: op.nodes, states: op.state[:nodes])
       tub = { node: :shaft, kind: :obstruction, share: 1.0 }
-      op.nodes.fetch(:shaft).suffer(op.state.dig(:nodes, :shaft), tub, ctx).first
+      op.nodes.fetch(:shaft).suffer(op.state.dig(:nodes, :shaft), tub, ctx)
     end
+
+    def suffered(cage_at) = suffering(cage_at).first
 
     it "lodges a tub let in at bank, unless the cage is below where it would lodge" do
       expect(suffered(0.0)[:jam_m]).to eq(ReactorSim::Operations::Mine::Shaft::LODGE_M)
       expect(suffered(40.0)[:jam_m]).to be_nil
+    end
+
+    # Below the lodging point the tub lands on the cage, and on whoever is in it.
+    it "drops a tub onto a cage below, as a hazard to its riders" do
+      _, events = suffering(40.0)
+      shaft = cage_pit.nodes.fetch(:shaft)
+
+      expect(events.map { |e| e[:type] }).to eq([ :tub_fell ])
+      expect(shaft.failure_hazards.fetch(events.first[:mode])).to include(riders: include(:cage_drive))
+      expect(suffering(0.0).last).to be_empty
     end
 
     it "closes the ladderway while it is lodged" do

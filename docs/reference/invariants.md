@@ -31,8 +31,11 @@ and also sweeps the source statically.
 
 `seed + command log` reproduces a match exactly, bit for bit.
 
-- Every node, control point and diagnostic gets its **own** RNG stream, named
-  `"#{operation_id}/#{component_id}"`, so draws never depend on evaluation order.
+- Every node, control point, diagnostic and minion gets its **own** RNG stream, named
+  `"#{operation_id}/#{component_id}"`, so draws never depend on evaluation order. A minion has a
+  **second**, `"#{operation_id}/#{id}/temper"` (`Animosity.stream`), for the dice their temper
+  throws, so adding animosity moved none of their other draws. The sky's node draws from one
+  stream shared by the whole match (`shared_stream`), so linked operations see one sky.
 - RNG state lives in match state, so it snapshots and restores.
 - **Entropy may only be drawn in three places:** `initial_state`, phase 0 (`actuate`), and
   phase 7 (`observe`/`Diagnostic#record`). Nowhere else — see rule 4 for why.
@@ -52,7 +55,7 @@ and also sweeps the source statically.
 > condition — and the divergence does not show up where you made it. It shows up days later
 > as a snapshot that replays differently, in a part of the match nothing connects to the
 > change. `draw_fates` exists as one method returning one fixed-size hash so the count is
-> checkable by reading it.
+> checkable by reading it — and `draw_tempers` the same, on the temper stream.
 >
 > **Adding or removing a draw there is a replay-breaking change to every existing snapshot.**
 > That is acceptable while nothing durable is stored and must be deliberate afterwards.

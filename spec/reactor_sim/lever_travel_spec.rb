@@ -18,7 +18,7 @@ require "support/pit_rig"
 module LeverCrew
   def self.archetype(strength)
     { label: "Hand", mass_kg: 70.0, strength: strength, toughness: 1.0, endurance: 1.0e6,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} }
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0, tags: {} }
   end
 
   HANDS = { weak: 0.4, strong: 2.5 }.freeze

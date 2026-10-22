@@ -456,9 +456,9 @@ module ReactorSim
              }) do |id:, seed:, time_scale: Mine::DEFAULT_TIME_SCALE, state: nil,
                                                  rngs: nil, content: nil,
                                                  chassis: Mine::CHASSIS.keys.first, loadout: {},
-                                                 crew: {}, ground: nil, conditions: nil|
+                                                 crew: {}, ground: nil, conditions: nil, grudges: nil|
       Mine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
-                 ground: ground, conditions: conditions,
+                 ground: ground, conditions: conditions, grudges: grudges,
                  time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

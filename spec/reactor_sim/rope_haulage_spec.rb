@@ -200,9 +200,23 @@ RSpec.describe "rope haulage" do
       tick = ReactorSim::Tick.new(op, op.state)
       tick.instance_variable_set(:@fates, { crew_1: { caught: 0.2 } })
       hand = op.minions.fetch(:crew_1)
+      state = op.state.dig(:minions, :crew_1)
 
-      expect(tick.send(:caught?, run, hand, 0.9)).to be(true)
-      expect(tick.send(:caught?, run, hand, 0.3)).to be(false)
+      expect(tick.send(:caught?, run, hand, state, 0.9)).to be(true)
+      expect(tick.send(:caught?, run, hand, state, 0.3)).to be(false)
+    end
+
+    # Seeing it coming and getting clear: the same hand, slowed, is caught where they were not.
+    it "catches somebody who cannot get out of the way oftener than somebody who can" do
+      op = pit
+      tick = ReactorSim::Tick.new(op, op.state)
+      tick.instance_variable_set(:@fates, { crew_1: { caught: 0.2 } })
+      hand = op.minions.fetch(:crew_1)
+      state = op.state.dig(:minions, :crew_1)
+      share = (1..9).map { |n| n / 10.0 }.reject { |s| tick.send(:caught?, run, hand, state, s) }.max or
+        raise "the hand is caught everywhere on the road"
+
+      expect(tick.send(:caught?, run, hand, state.merge(fatigue: 0.9), share)).to be(true)
     end
   end
 end

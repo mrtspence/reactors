@@ -36,7 +36,8 @@ module MineTech
 
   def self.archetype(tags)
     { label: "Hand", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: 1.0e6,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: tags.merge(shovelling: 0.5) }
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
+      tags: tags.merge(shovelling: 0.5) }
   end
 
   CONTENT = ReactorSim::Content.default.merging(

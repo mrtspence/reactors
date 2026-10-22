@@ -20,6 +20,23 @@ RSpec.describe DevMatch do
     end
   end
 
+  # The runner rebuilds from the reset command alone, so the grudges have to be in it.
+  describe "grudges from earlier matches" do
+    before { Grudge.deepen!(owner_id: DevPlayer::ID, holder_id: "urist", target_id: "galathas", amount: 0.3, run_id: "r", tick: 1) }
+
+    it "ride in the reset command" do
+      expect(described_class.reset_command.fetch("grudges")).to include("urist" => include("galathas" => 0.3))
+    end
+
+    it "reach every crewed machine's options" do
+      match = described_class.build
+      crewed = match.operations.select { |op| op.options.key?(:crew) }
+
+      expect(crewed).not_to be_empty
+      expect(crewed.map { |op| op.options.dig(:grudges, :urist, :galathas) }.uniq).to eq([ 0.3 ])
+    end
+  end
+
   describe "the dev engine" do
     def flag(value)
       allow(ENV).to receive(:[]).and_call_original

@@ -24,11 +24,12 @@ module ReactorSim
   # Jim is who turned up.
   class Minion
     attr_reader :id, :name, :minion, :archetype, :stats, :tags, :default_station, :default_place,
-                :mass_kg, :worn_kg
+                :mass_kg, :worn_kg, :weapons, :grudges, :resented_by
 
     # What a journey draws on. Blended for the same reason every `effort:` is, and it runs
     # through `capability`, so fatigue and injury slow a walk exactly as they slow a shovel — a
-    # spent minion stops where they stand until they have rested.
+    # spent minion stops where they stand until they have rested. `agility` is half of moving your
+    # own body, so an elf crosses a district quicker than an ogre.
     #
     # > **Deliberately NOT `endurance`, however obviously walking is an endurance job.**
     # > `endurance` is a *divisor* in `Fatigue.accrual` and enters no capability blend, which is
@@ -37,7 +38,7 @@ module ReactorSim
     # > walks at seven hundred thousand times human pace, and every spec built on it is wrong in
     # > a way that looks like a physics bug. Weights still sum to 1.0, so a competent unaided
     # > human paces exactly 1.0.
-    PACE = { strength: 0.6, toughness: 0.4 }.freeze
+    PACE = { strength: 0.4, agility: 0.4, toughness: 0.2 }.freeze
 
     # Reading an instrument, or working a lever that takes knowing how: mostly wit and a
     # little steadiness of hand.
@@ -56,8 +57,11 @@ module ReactorSim
     # worth refusing. `worn_kg` is *summed* by `Crew#fold` from whatever is fitted, so zero is the
     # honest answer for somebody carrying nothing rather than a hidden default standing in for a
     # number nobody wrote down.
+    # `weapons:` are the weapon profiles of what they carry (`Equipment.weapon_profile`), listed by
+    # `Crew`; `grudges:` who they dislike and `resented_by:` who dislikes them, by race or by person,
+    # which `Animosity.table` resolves.
     def initialize(id:, mass_kg:, name: nil, minion: nil, archetype: nil, stats: {}, tags: {},
-                   station: nil, place: nil, worn_kg: 0.0)
+                   station: nil, place: nil, worn_kg: 0.0, weapons: [], grudges: {}, resented_by: {})
       @mass_kg = [ mass_kg.to_f, Sheet::MIN_MASS_KG ].max
       @worn_kg = [ worn_kg.to_f, 0.0 ].max
       @default_place = place&.to_sym
@@ -68,6 +72,9 @@ module ReactorSim
       @stats = Sheet::STATS.to_h { |stat| [ stat, stats.fetch(stat, 0.0).to_f ] }.freeze
       @tags = tags.to_h { |k, v| [ k.to_sym, v ] }.freeze
       @default_station = station&.to_sym
+      @weapons = Array(weapons).freeze
+      @grudges = grudges.to_h { |k, v| [ k.to_sym, v.to_f ] }.freeze
+      @resented_by = resented_by.to_h { |k, v| [ k.to_sym, v.to_f ] }.freeze
       freeze
     end
 
@@ -156,12 +163,77 @@ module ReactorSim
     # `green` halves it rather than subtracting, so somebody who has never done the job before
     # is unreliable without being incapable — and no combination of tags can take a reader
     # below zero, which a subtraction could.
+    #
+    # **Distraction divides it the same way**, so it reaches everything wits does.
     def wits(state, ambient: nil)
       able = capability(state, effort: WITS, aided_by: %i[keen_eyed practised],
                         gated_by: %i[darkvision], ambient: ambient)
 
-      able / (1.0 + Injury.numeric(tag(:green)))
+      able / (1.0 + Injury.numeric(tag(:green)) + distraction(ambient))
     end
+
+    # **How much is pulling their eyes off the work**: what the room offers as `distracting` —
+    # which `Tick#ambient_for` makes the allure of everybody else standing in it — plus their own
+    # `distracted`, less what `focused` shuts out.
+    # TODO: `distracted` has no source yet; first caller is match modifiers (no morning coffee).
+    def distraction(ambient)
+      taken = Injury.numeric(ambient&.fetch(:distracting, nil)) + Injury.numeric(tag(:distracted))
+
+      [ taken * (1.0 - Injury.numeric(tag(:focused))), 0.0 ].max
+    end
+
+    # **How distracting somebody is to the people beside them**, like `swing` a figure derived
+    # rather than a stat: the tag on a steep curve, by their charisma. Kit raises or lowers either.
+    def allure(state) = (Injury.numeric(tag(:distracting))**2) * effective(:charisma, state)
+
+    # How fast they can get their body out of the way: `agility`, worn down as any work is, and
+    # slowed by what they are carrying exactly as their walk is.
+    def nimbleness(state, burden: 0.0) = effective(:agility, state) * condition(state) * Burden.pace_factor(burden)
+
+    # **Seeing it coming and getting clear, both** — the one figure every kind of hazard avoidance
+    # reads. A geometric mean, so a competent human is 1.0, either at zero is zero, and the
+    # condition both halves carry counts once.
+    def avoid(state, ambient: nil, burden: 0.0)
+      Math.sqrt(wits(state, ambient: ambient) * nimbleness(state, burden: burden))
+    end
+
+    # **What they fight with**: bare hands, or — `armed:`, a choice made in a fight somebody means to
+    # finish — whichever of their weapons hits hardest in these hands. You swing one at a time.
+    def wielding(state, armed: false)
+      return Equipment::UNARMED unless armed && @weapons.any?
+
+      @weapons.max_by { |profile| hits(state, profile) + profile.fetch(:edge) }
+    end
+
+    # **How hard a blow of theirs hits when it lands**: the weapon's handling, read off this body —
+    # a pick off the swing, a knife off the precision — by the scraps survived. The weapon's own
+    # `edge` is added in the contest (`Combat.blow_severity`), whoever holds it.
+    def attack(state, armed: false) = hits(state, wielding(state, armed: armed))
+
+    def hits(state, profile)
+      handled = profile.fetch(:handling).sum { |stat, weight| effective(stat, state) * weight }
+
+      effective(:combat_prowess, state) * handled * condition(state)
+    end
+
+    # **Whether a blow, a shove or a deed lands at all**: half the swing behind it, half the
+    # precision, by prowess. So bulk still tells, but a clumsy giant is no marksman — an ogre hits
+    # about as often as an elf and far harder when he does.
+    def strike(state)
+      effective(:combat_prowess, state) * ((swing(state) + precision(state)) / 2.0) * condition(state)
+    end
+
+    # What they bring against one. Defensive gear is the summed `defence` tag.
+    # TODO: no kit declares `defence` yet; first caller is combat gear (a shield, a ring).
+    def defend(state, ambient: nil, burden: 0.0)
+      avoid(state, ambient: ambient, burden: burden) * effective(:combat_prowess, state) *
+        (1.0 + Injury.numeric(tag(:defence)))
+    end
+
+    # The hazard tags a blow of theirs carries.
+    def wounds(state, armed: false) = wielding(state, armed: armed).fetch(:wounds)
+
+    def condition(state) = state.fetch(:health) * (1.0 - state.fetch(:fatigue))
 
     # Which gated passages this minion may use. Read once at build to pick their routing table,
     # so nothing searches tags during a tick.
@@ -175,11 +247,7 @@ module ReactorSim
     # negative rate would drive the lever away from its target.
     # **`force` rather than `strength`, because a stiff lever wants a big body** and not a good
     # power-to-weight ratio. An ogre shifts it faster than a man; a whippet of an elf does not.
-    def rate_multiplier(state, _content = nil)
-      condition = state.fetch(:health) * (1.0 - state.fetch(:fatigue))
-
-      [ effective(:force, state) * condition, 0.0 ].max
-    end
+    def rate_multiplier(state, _content = nil) = [ effective(:force, state) * condition(state), 0.0 ].max
 
     # **Absolute output, as a multiple of a reference human's.** `strength` is a ratio, so what a
     # body actually delivers is that ratio times the body — which is why half a tonne of ogre is
@@ -196,15 +264,24 @@ module ReactorSim
     # the upgrade that unlocks the rest.
     def swing(state = nil) = Math.sqrt(force(state))
 
+    # Putting a hand, a blade or a blow exactly where it was meant to go: mostly being quick, partly
+    # being deft. A human is 1.0.
+    PRECISION = { agility: 0.6, dexterity: 0.4 }.freeze
+
+    def precision(state = nil)
+      PRECISION.sum { |stat, weight| (state ? effective(stat, state) : @stats.fetch(stat)) * weight }
+    end
+
     # What this minion is actually worth at a stat right now, injury included. Named so a caller
     # cannot forget the derating by reading `minion.strength` and getting the fresh figure.
     #
-    # **Derived keys resolve here**, so `effort:` can name `force` or `swing` and nothing else has
-    # to know they are not stats. Their derating comes through `strength`, which is the stat an
-    # injury actually takes away.
+    # **Derived keys resolve here**, so `effort:` can name `force`, `swing` or `precision` and
+    # nothing else has to know they are not stats. Their derating comes through the stats they are
+    # made of, which are what an injury actually takes away.
     def effective(stat, state)
       return force(state) if stat == :force
       return swing(state) if stat == :swing
+      return precision(state) if stat == :precision
 
       @stats.fetch(stat, 0.0) * Injury.derating(state, stat)
     end
@@ -236,13 +313,12 @@ module ReactorSim
     # `ambient:` is what the ROOM supplies toward the same gates — light on the roadway against
     # a lamp on your belt. See `Tick#ambient_tags`.
     def capability(state, effort:, aided_by: nil, gated_by: nil, ambient: nil)
-      condition = state.fetch(:health) * (1.0 - state.fetch(:fatigue))
       blended = effort.sum { |stat, weight| effective(stat, state) * weight }
       # One tag or several, summed. A station names one thing that helps at it; reading an
       # instrument is helped by a sharp eye *and* by having done it before.
       aid = Array(aided_by).sum { |key| Injury.numeric(tag(key)) }
 
-      [ blended * (1.0 + aid) * gate(gated_by, ambient) * condition, 0.0 ].max
+      [ blended * (1.0 + aid) * gate(gated_by, ambient) * condition(state), 0.0 ].max
     end
 
     # One for a job that needs nothing, so a station declaring no gates is unchanged.

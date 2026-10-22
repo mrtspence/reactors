@@ -11,9 +11,10 @@ class ProgressionConsumer < ApplicationConsumer
       record = decode(message) or next
 
       MatchRun.observe!(run_id: record.fetch("run_id"), match_id: record.fetch("match_id"))
-      # Two questions about the same stream, kept apart: what this player has achieved, and who
-      # they can field next time.
+      # Three questions about the same stream, kept apart: what this player has achieved, who
+      # they can field next time, and who among them will be at each other's throats.
       injuries.call(record)
+      grudges.call(record)
       awarded = digest.call(record)
       next if awarded.empty?
 
@@ -25,6 +26,8 @@ class ProgressionConsumer < ApplicationConsumer
   private
 
   def injuries = @injuries ||= InjuryList.new(owner_id: DevPlayer::ID)
+
+  def grudges = @grudges ||= GrudgeList.new(owner_id: DevPlayer::ID)
 
   # One per batch rather than one per message: it holds no per-record state, and the owner is
   # fixed until there is auth.

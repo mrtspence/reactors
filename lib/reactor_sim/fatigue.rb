@@ -90,9 +90,12 @@ module ReactorSim
     # casualty, so a minion in an asbestos suit is paying for it while standing still.
     # **`strain:` multiplies the work alone**: heat makes shovelling cost more, not standing still,
     # so it scales `accrual` and nothing else. 1.0 in comfort, which is nearly always.
-    def advance(minion, state, control:, dt:, demand: 0.0, suffocation: 0.0, burden: 0.0, strain: 1.0)
-      rate = (accrual(minion, state, control, demand) * strain) - recovery(control, state) +
-             suffocation + hauling(minion, burden)
+    # **`fighting:` is hard work and no rest** — a brawl, at what `Animosity.exertion` says it costs
+    # this body with this weapon; zero for somebody not in one.
+    def advance(minion, state, control:, dt:, demand: 0.0, suffocation: 0.0, burden: 0.0, strain: 1.0,
+                fighting: 0.0)
+      rate = (accrual(minion, state, control, demand) * strain) + suffocation + hauling(minion, burden)
+      rate += fighting.positive? ? fighting * strain / endurance(minion) : -recovery(control, state)
       next_fatigue = (state.fetch(:fatigue, 0.0) + (rate * dt)).clamp(RANGE.begin, RANGE.end)
 
       state.merge(fatigue: next_fatigue)

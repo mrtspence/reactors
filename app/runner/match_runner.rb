@@ -198,7 +198,8 @@ class MatchRunner
     specs = command["operations"] || {}
 
     @logger.info("runner: resetting #{match.id} (#{specs.keys.join(', ')})")
-    @matches[match.id] = DevMatch.build(specs: specs, conditions: command["conditions"])
+    @matches[match.id] = DevMatch.build(specs: specs, conditions: command["conditions"],
+                                        grudges: command["grudges"])
     # A new build is a new run, and the durable log has to say so. Ticks restart at zero, so
     # reusing the id would make the next run's events collide with this one's — and it also
     # tells a consumer to abandon any interval it had open, rather than closing it against a

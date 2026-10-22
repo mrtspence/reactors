@@ -32,12 +32,15 @@ module ReactorSim
   # **`underfoot:` is what the ground does to it**: `{ wet: 1.0, icy: 8.0 }` makes a slip twice as
   # likely on a wet deck and nine times on an icy one, read from what the room offers
   # (`Tick#under_the_sky`), so it bites as far as the place is open to the weather.
+  #
+  # **`opportunity: true` is somewhere a person can be pushed** — off the deck, in front of a tub —
+  # by somebody who hates them enough (`Animosity`).
   Peril = Struct.new(:id, :tags, :severity, :rate, :mishap, :scales_with, :when_tagged,
-                     :unless_tagged, :places, :stations, :riders, :judged, :underfoot,
+                     :unless_tagged, :places, :stations, :riders, :judged, :underfoot, :opportunity,
                      keyword_init: true) do
     def initialize(id:, severity: 0.0, rate: nil, mishap: nil, tags: [], scales_with: nil,
                    when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil,
-                   judged: nil, underfoot: {})
+                   judged: nil, underfoot: {}, opportunity: false)
       super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
             mishap: Peril.mishap(mishap),
             tags: Array(tags).map(&:to_sym).freeze,
@@ -46,7 +49,7 @@ module ReactorSim
             places: Array(places).map(&:to_sym).freeze,
             stations: Array(stations).map(&:to_sym).freeze,
             riders: Array(riders).map(&:to_sym).freeze,
-            judged: judged&.to_sym,
+            judged: judged&.to_sym, opportunity: opportunity == true,
             underfoot: underfoot.to_h { |tag, k| [ tag.to_sym, k.to_f ] }.freeze)
       if judged && !Peril::JUDGEMENTS.include?(self.judged)
         raise Error, "peril #{id}: judged #{judged.inspect} is neither of #{Peril::JUDGEMENTS.inspect}"
@@ -186,8 +189,8 @@ module ReactorSim
     # What this tick's exposure costs, and what each peril took of it: `[total, bites]`.
     #
     # **Spent by `rate`, never by `severity`** — how often a thing happens is not how bad it is.
-    def spend(reaching, minion, state, dt, ambient: nil)
-      exposed = susceptibility(minion, state)
+    def spend(reaching, minion, state, dt, ambient: nil, avoid: 1.0)
+      exposed = susceptibility(minion, state, ambient: ambient, avoid: avoid)
       bites = reaching.filter_map do |peril, activity|
         bite = peril.rate * peril.weight_for(minion, state, ambient: ambient) * activity * exposed *
                peril.footing(ambient) * SPEND_PER_S * dt
@@ -221,12 +224,21 @@ module ReactorSim
       ordered.last.first
     end
 
+    # Below this, `avoid` stops making things worse: somebody who can neither see nor move is
+    # already as exposed as the arithmetic should make them.
+    MIN_AVOID = 0.1
+
     # How much of a peril actually reaches this person. Everything here already existed and was
     # pointed at severity; `hazard_sense` in particular belongs mostly here — pit sense is about
     # not being there, not about absorbing it better.
-    def susceptibility(minion, state)
-      careless = 1.0 + tag(minion, :clumsy) + tag(minion, :green) + (DAFT_SPEND * minion.daftness)
-      wary = 1.0 + tag(minion, :hazard_sense) + tag(minion, :practised)
+    #
+    # **`avoid` divides it**, being able to see a thing coming and get clear of it, and
+    # distraction adds to the carelessness as well as dulling the wits behind `avoid`. A
+    # competent human is 1.0 on both, so the margins are calibrated where they always were.
+    def susceptibility(minion, state, ambient: nil, avoid: 1.0)
+      careless = 1.0 + tag(minion, :clumsy) + tag(minion, :green) + (DAFT_SPEND * minion.daftness) +
+                 minion.distraction(ambient)
+      wary = (1.0 + tag(minion, :hazard_sense) + tag(minion, :practised)) * [ avoid, MIN_AVOID ].max
       tired = 1.0 + (SPENT_WEIGHT * (state.fetch(:fatigue, 0.0)**EXPONENT))
 
       careless / wary * tired
@@ -249,8 +261,8 @@ module ReactorSim
     #
     # `which` is this tick's `peril:` fate, used only if the margin crosses here.
     # `ambient:` is the light of the room they are in, which their judgement reads.
-    def advance(reaching, minion, state, dt, rolled, which = 0.0, ambient: nil)
-      spent, bites = spend(reaching, minion, state, dt, ambient: ambient)
+    def advance(reaching, minion, state, dt, rolled, which = 0.0, ambient: nil, avoid: 1.0)
+      spent, bites = spend(reaching, minion, state, dt, ambient: ambient, avoid: avoid)
       full = state.fetch(:margin_full, 1.0)
       was = state.fetch(:margin, 1.0)
       margin = was - spent
@@ -276,9 +288,10 @@ module ReactorSim
     # rather than one that has been closed.
     MOST_EQUIPMENT_SAVES = 0.85
 
-    # Whether the equipment did its job this time. `attention` is `Minion#wits`, which is
-    # already gated on being able to see what is coming and already carries health and
-    # fatigue — so a man at the end of his shift is slower to use what he was given.
+    # Whether the equipment did its job this time. `attention` is `Minion#avoid`, which is
+    # already gated on being able to see what is coming and on being able to move, and already
+    # carries health and fatigue — so a man at the end of his shift is slower to use what he was
+    # given.
     def accident_avoided?(effectiveness, attention, roll)
       return false unless effectiveness.positive?
 

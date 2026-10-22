@@ -18,7 +18,7 @@ RSpec.describe ReactorSim::Scorch do
     ReactorSim::Minion.new(
       id: :m, name: "Probe", tags: tags, mass_kg: ReferenceCrew::HUMAN_KG,
       stats: { strength: 1.0, toughness: toughness, endurance: 1.0,
-               intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }
+               intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0 }
     )
   end
 

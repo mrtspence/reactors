@@ -10,7 +10,7 @@ app/kafka/        CommandProducer, EventProducer — web and runner side
 app/controllers/  Consoles, Commands, Loadouts, LoadoutDrafts, MatchResets, Crews, CrewDrafts
 app/channels/     OperationChannel — read-only, telemetry out, backfills a joining client
 app/components/   PanelComponent -> InstrumentComponent -> Instruments::{Needle,Digital,Prose,Lamp}
-app/services/     Outfitting, ProgressionDigest, InjuryList — resolved arguments, never params
+app/services/     Outfitting, ProgressionDigest, InjuryList, GrudgeList — resolved arguments, never params
 app/javascript/   controllers/console_controller.js, channels/consumer.js
 ```
 
@@ -153,6 +153,17 @@ every fittable operation as `conditions:`, and the reset command carries it once
 `"conditions"`, beside the per-operation specs. Saving it rebuilds the match through
 `DevMatch.request_reset!`, the one path a reset takes, so the season is chosen before the crew
 and the rig are outfitted for it. The weather inside the season is the seed's.
+
+## Grudges across matches
+
+**Formed in play, written down, handed back, worn away.** `GrudgeList` (beside `InjuryList` in
+`ProgressionConsumer`) writes each `grudge_formed` to a `Grudge` row per owner, holder and target —
+person ids, never standins — idempotent per run and tick, because the stream is at-least-once.
+`DevMatch` hands the account's grudges to every crewed machine as `grudges:`, and the reset command
+carries them once, as `"grudges"`, for the same reason it carries the season. Each match start
+fades them (`Grudge.fade!`, by the holder's spite through `Animosity.faded`) beside the injury
+list's clock. Race and authored grudges are content and never written here. **Nothing shows them
+yet** — a report and a recruitment screen are where they belong.
 
 ## The outfitting screen
 

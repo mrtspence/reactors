@@ -311,14 +311,19 @@ kinds of person. The same person can do either, which is what made it the wrong 
 elf:
   label: Elf
   mass_kg: 60.0        # REQUIRED, and not a stat — see below
-  strength: 0.85       # a strength-to-WEIGHT ratio, 1.0 = human. All six stats are required
+  strength: 0.85       # a strength-to-WEIGHT ratio, 1.0 = human. Every stat is required
   toughness: 0.7
   endurance: 0.85
   intelligence: 1.25
   dexterity: 1.2
   charisma: 1.1
+  agility: 1.3
+  combat_prowess: 1.3
   tags:
     darkvision: 0.3
+    conscientious: 0.2 # temperament, read against its opposite
+  grudges:             # who this race dislikes, by race or by person, 0..1
+    orc: 0.4
 
 # content/minions/crew.yml — layer two, who they are, written as OFFSETS
 galathas:
@@ -330,11 +335,14 @@ galathas:
     dexterity: -0.25    # …and heavy-handed with it
   tags:
     clumsy: 0.2
+  grudges:
+    throg: 0.6          # a person, this time
+  # resented_by: { dwarf: 0.5 }   # who dislikes HIM — a notorious past, written from his side
 ```
 
 Omit a stat to take the race's figure unchanged; omit `stats:` entirely for somebody unremarkable.
 
-**`mass_kg` is a seventh required field on an archetype, and it is deliberately not a stat.** Stats
+**`mass_kg` is required on an archetype too, and it is deliberately not a stat.** Stats
 pass through `Minion#effective`, which derates them by injury — so a broken arm would make somebody
 *lighter*. It is not a tag either, because `Sheet::TAG_RANGE` is 0..1 and an ogre cannot be said at
 all. **A race that omits it raises at boot**: it is read by the lift limit and the burden ratio, and
@@ -371,10 +379,13 @@ two already folded.
 
 Rules worth knowing before you add one:
 
-- **The six stats are fixed and every archetype declares all of them.** The engine reads them and
-  needs a number rather than an absence. `strength` drives actuation, `toughness` drives the
-  Danger Check, `endurance` divides fatigue accrual; the other three are declared and read by
-  nothing yet.
+- **The stats are fixed and every archetype declares all of them.** The engine reads them and
+  needs a number rather than an absence. `strength` drives actuation, `toughness` the Danger
+  Check, `endurance` divides fatigue accrual, `intelligence` and `dexterity` are wits and fine
+  work, `charisma` a boss's authority and a person's allure, `agility` getting out of the way and
+  half of walking, `combat_prowess` the scraps survived — a human is 1.0, a trained fighter 2 or 3.
+  `agility` and `combat_prowess` **multiply** into `avoid`, `attack` and `defend`, which is why a
+  missing one is refused rather than defaulted.
 - **`endurance` is resistance to tiring, 1.0 for a human by definition**, and it is separate from
   `strength` on purpose: what a worker gets done and what it costs them are different claims.
   Equipment may carry a negative offset, which is how bulky kit says *"this tires me"*.
@@ -415,6 +426,38 @@ posted at that gauge's station is how good its reading is. See `docs/reference/d
 **`cold_resistance`** is what warm kit buys against `Chill` (a greatcoat is 0.5), the cold's
 counterpart to `heat_resistance`. `unfeeling`, like `unburning`, is a race the cold does not
 reach, and nothing declares it yet.
+
+### Grudges, temperament, and what is worth fighting with
+
+**`grudges:`** is who a race or a person dislikes, keyed by race or by person, 0..1; **`resented_by:`**
+(a person only) is who dislikes *them*. Race, individual, earlier matches and this one add, then
+clamp. A key that names no race and no person is refused at boot.
+
+**Temperament is tags in opposed pairs, read net** (`a − b`) through a steep curve:
+`short_tempered`/`even_tempered` (how fast resentment wears through), `callous`/`kindly` (how much
+harm to the target), `reckless`/`conscientious` (how much to anybody caught with them),
+`spiteful`/`forgiving` (how deep a wrong is remembered, and how slowly it fades between matches) and
+`violent_nature`/`gentle` (feeding temper, and acting as a grudge against everybody, so a violent
+race brawls and draws on people it does not hate) and `annoying`/`calming` (how much
+their mere presence wears on everybody else's patience, grudge or none). A grudge also counts in part as
+callousness towards the one it is held against, so a deep one makes a kind race dangerous to that
+race alone. `boneheaded`
+sometimes takes a harmful act for a harmless one.
+
+**`distracting`** makes somebody hard to work beside — squared, times their charisma
+(`Minion#allure`) — and **`focused`** shuts it out. **`defence`** is defensive gear, summed through
+the fold. An equipment item may declare **`weapon: { handling:, edge:, wounds: }`**:
+- `handling:` is what it asks of the hand, a blend in the vocabulary of a station's `effort:`. A
+  pick is `{ swing: 0.8, precision: 0.2 }` and a knife the other way round. The weights may sum past
+  one for a good weapon or short of it for a poor one; bare hands are `{ swing: 0.42, precision:
+  0.18 }`.
+- `edge:` is severity it adds to a landed blow whoever holds it.
+- `wounds:` are the hazard tags it leaves.
+
+Its weight to swing is the item's own `mass_kg`, which is what a fight tires somebody by against
+their `force`. A fighter swings one weapon at a time, whichever suits them best. `puncture` is a
+blade's or a pick's, resisted by `puncture_resistance` like any hazard tag, and nothing resists it
+yet. **`cutting`** is the knife's aid at the rope and fuse posts.
 
 ---
 

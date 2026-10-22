@@ -176,6 +176,11 @@ module ReactorSim
       # A wire haulage rope, broken at about this: a worn one parts under a set started hard.
       HAULAGE_ROPE_KN = 60.0
 
+      # **A set knocked off the rope on purpose** runs back down the incline into whoever is at
+      # the pit bottom — hauling hands included.
+      SET_LOOSED = Animosity::Opening.new(id: :set_loosed, places: %i[pit_bottom], harm: 2.5,
+                                          mishap: { node: :haulage_rope, kind: :breakaway })
+
       # Rated per hauling hand, two to the road: the engine draws what they can couple on.
       Parts.register(:rope_haulage, kind: :haulage, label: "Rope Haulage",
                      description: "An engine and a rope drawing sets of tubs. Far more coal than putters.",
@@ -189,8 +194,8 @@ module ReactorSim
             # and with the rope parted, its splicers. Knack and attention rather than force: the
             # engine does the pulling.
             ControlPoint.new(id: :haulage, label: "Hauling", node: :tub_road, default: 0.0,
-                             place: :pit_bottom, capacity: 2, effort: { dexterity: 0.6, intelligence: 0.4 },
-                             exertion: 5.0e-4)
+                             place: :pit_bottom, capacity: 2, effort: { precision: 0.6, intelligence: 0.4 },
+                             aided_by: :cutting, exertion: 5.0e-4, openings: [ SET_LOOSED ])
           ]
         )
       end
@@ -330,6 +335,11 @@ module ReactorSim
       # How often a charge misfires, split between the two ways it can be read.
       MISFIRE_RATE = 0.4
 
+      # **A charge left live in the face on purpose**, for the man he hates to strike with his pick
+      # — and every other hewer at the face with him.
+      LEFT_LIVE = Animosity::Opening.new(id: :left_live, stations: %i[hewing], harm: 3.6,
+                                         mishap: { node: :shot_hole, kind: :misjudged })
+
       def self.shotfiring_fragment(resource:, blow_out:)
         Fragment.new(
           nodes: [ Mine.magazine(resource: resource, kg: MAGAZINE_KG),
@@ -349,9 +359,9 @@ module ReactorSim
             # **The post that takes a ticket of its own**, and the shot is worked as hard as he can
             # manage: posted is working.
             ControlPoint.new(id: :shotfiring, label: "Shotfiring", node: :shot_hole, default: 100.0,
-                             place: :district, effort: { dexterity: 0.6, intelligence: 0.4 },
-                             gated_by: %i[darkvision], exertion: 6.0e-4,
-                             complexity: 1.0, requires: :shotfirer)
+                             place: :district, effort: { precision: 0.6, intelligence: 0.4 },
+                             gated_by: %i[darkvision], aided_by: :cutting, exertion: 6.0e-4,
+                             complexity: 1.0, requires: :shotfirer, openings: [ LEFT_LIVE ])
           ]
         )
       end
@@ -479,12 +489,12 @@ module ReactorSim
           control_points: [
             # Only with the cage stopped at bank — cutting and re-socketing the capel.
             ControlPoint.new(id: :recapping, label: "Recapping", node: :winding_rope, default: 100.0,
-                             place: :bank, capacity: 2, effort: { dexterity: 0.7, force: 0.3 },
-                             exertion: 6.0e-4),
+                             place: :bank, capacity: 2, effort: { precision: 0.7, force: 0.3 },
+                             aided_by: :cutting, exertion: 6.0e-4),
             # A long, heavy job, and only with a spare rope in store.
             ControlPoint.new(id: :reroping, label: "Re-roping", node: :winding_rope, default: 100.0,
                              place: :bank, capacity: 3, effort: { force: 0.6, dexterity: 0.4 },
-                             exertion: 9.0e-4)
+                             aided_by: :cutting, exertion: 9.0e-4)
           ]
         )
       end
@@ -500,6 +510,16 @@ module ReactorSim
       # **The marshals' posts take some knowing**: a hand out of their depth slips, and a marshal
       # slipping rings a false ready.
       MARSHAL_COMPLEXITY = 0.7
+
+      # **What a marshal who hates somebody can do with the bell**: ring the cage away while they
+      # are still getting in. A slip held on purpose, so the bell is the false ready a slip rings.
+      FALSE_ALL_CLEAR = Animosity::Opening.new(id: :false_all_clear, slip: :freeze, boarding: :cage_drive,
+                                               harm: CAUGHT_BOARDING.fetch(:severity))
+
+      # And what a banksman can do with a tub: send it down onto the cage under them.
+      TUB_DOWN_THE_SHAFT = Animosity::Opening.new(id: :tub_down_the_shaft, riders: %i[cage_drive],
+                                                  harm: Mine::Shaft::TUB_ON_THE_CAGE,
+                                                  mishap: { node: :shaft, kind: :obstruction, share: 1.0 })
 
       # Without catches a parted rope takes the cage down the shaft, and the shaft's guides with it.
       def self.winding_rope(tier:)
@@ -633,7 +653,8 @@ module ReactorSim
             # cage being loaded past its rating there. A clumsy one lets a tub into the shaft.
             ControlPoint.new(id: :banking, label: "Banksman", node: :deck_unloading, default: 100.0,
                              place: :bank, capacity: Mine::LANDING_CREW, effort: { force: 0.5, dexterity: 0.5 },
-                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY),
+                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY,
+                             openings: [ FALSE_ALL_CLEAR, TUB_DOWN_THE_SHAFT ]),
             ControlPoint.new(id: :cage_forward, label: "Lowering Clutch", node: :cage_drive,
                              place: :bank, internal: true),
             ControlPoint.new(id: :cage_reverse, label: "Raising Clutch", node: :cage_drive,
@@ -650,7 +671,7 @@ module ReactorSim
             # tubs on, and stops the cage being loaded past its rating there.
             ControlPoint.new(id: :onsetting, label: "Onsetter", node: :deck_loading, default: 100.0,
                              place: :pit_bottom, capacity: Mine::LANDING_CREW, effort: { force: 0.5, dexterity: 0.5 },
-                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY)
+                             exertion: 4.0e-4, complexity: MARSHAL_COMPLEXITY, openings: [ FALSE_ALL_CLEAR ])
           ]
         )
       end
@@ -1150,6 +1171,24 @@ module ReactorSim
 
       # **Somewhere to stand, not something to set**: a control point with no `node:`. In the
       # district unless it says otherwise, which is where the work that spends people is.
+      # --- supervision ----------------------------------------------------------------------
+      #
+      # **The official in charge underground**, and the one post whose work is other people. He
+      # walks the district and the pit bottom — fiated as a patrol — and steps into a quarrel there
+      # by staring them down or talking them round (`Animosity.authority`). Nobody posted, nobody
+      # steps in.
+      Parts.register(:overman, kind: :supervision, label: "Overman",
+                     description: "Walks the district and the pit bottom, and keeps the peace on both.",
+                     stats: { oversees: 2 }) do |_spec|
+        Fragment.new(
+          control_points: [
+            ControlPoint.new(id: :overseeing, label: "Overman", place: :district, capacity: 1,
+                             default: 100.0, effort: { charisma: 0.5, intelligence: 0.5 },
+                             exertion: 2.0e-4, oversees: %i[district pit_bottom])
+          ]
+        )
+      end
+
       def self.rest_fragment(capacity:, recovery_rate:, label:, id: :rest, place: :district)
         Fragment.new(
           control_points: [
@@ -1256,6 +1295,9 @@ module ReactorSim
           # starting pit, and the first a player hears of it is a man caught in the haulage.
           Slot.new(id: :manholes, accepts: :haulage_refuge, label: "Manholes", group: :crew,
                    required: false, default: fitted[:manholes]),
+          # Empty to start: a pit with nobody keeping the peace, until the first brawl.
+          Slot.new(id: :supervision, accepts: :supervision, label: "Supervision", group: :crew,
+                   required: false, default: fitted[:supervision]),
           # Only a single shaft has one: two shafts have nothing between them to partition.
           *(if spec[:single_shaft]
               [ Slot.new(id: :brattice, accepts: :brattice, label: "Brattice", group: :air,

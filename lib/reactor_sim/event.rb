@@ -51,6 +51,10 @@ module ReactorSim
       weather_turned
       nightfall
       daybreak
+      tub_fell
+      quarrel
+      quarrel_averted
+      grudge_formed
     ].freeze
 
     # Ascending. The client colours on these, so a new one is a delivery-tier change too.

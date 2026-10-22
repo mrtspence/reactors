@@ -78,9 +78,11 @@ module ReactorSim
       # the graph, and a restored snapshot installs its own state over the top — so the ground
       # a match was given survives a round trip whatever this was called with.
       # `conditions:` is the match's sky — `{ season:, climate:, start_hour:, severity: }` from setup
-      # — and nil is the standard sky a spec measures the pit under.
+      # — and nil is the standard sky a spec measures the pit under. `grudges:` is who among the
+      # crew already hates whom from earlier matches, by person.
       def build(id:, seed:, chassis: CHASSIS.keys.first, loadout: {}, crew: {}, ground: nil,
-                conditions: nil, time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
+                conditions: nil, grudges: nil, time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil,
+                content: nil)
         chassis = chassis.to_sym
         assembly = assembly_for(chassis, loadout, ground: ground, conditions: conditions)
         fragment = assembly.build!
@@ -89,7 +91,8 @@ module ReactorSim
         Operation.new(
           id: id, type: TYPE, seed: seed, time_scale: time_scale,
           state: state, rngs: rngs, content: content,
-          options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions }.compact,
+          options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions,
+                     grudges: Animosity.carried_over(grudges) }.compact,
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           # From the fragment, so a fitted cage contributes its own way through the shaft — the
@@ -185,15 +188,28 @@ module ReactorSim
 
         def suffers?(kind) = kind == :obstruction || super
 
-        # TODO: a tub that lands on the cage is a falling-object hazard to its riders — first
-        # caller is a hazard a mishap can raise; until then it falls on the cage and stops.
+        # **Half a tonne of tub on the cage roof**, to whoever is riding it.
+        TUB_ON_THE_CAGE = 2.0
+
+        def failure_hazards
+          @hoist ? { tub_fell: { tags: %i[impact crush], riders: { @hoist => TUB_ON_THE_CAGE } } } : {}
+        end
+
+        # What a mishap can make of it that is not a failure: a tub down the shaft onto the cage.
+        def mishap_modes = { tub_fell: {} }
+
         def suffer(state, mishap, ctx)
           return super unless mishap.fetch(:kind) == :obstruction
           return [ state, [] ] unless jam_m(state).nil?
 
-          return [ state, [] ] if cage_below?(ctx)
+          return [ state, [ tub_fell(ctx) ] ] if cage_below?(ctx)
 
           [ state.merge(jam_m: LODGE_M, hold: HOLD_NS * mishap.fetch(:share, 1.0)), [] ]
+        end
+
+        def tub_fell(ctx)
+          Event.build(type: :tub_fell, node: id, label: label, severity: :critical, tick: ctx.tick,
+                      mode: :tub_fell)
         end
 
         def cage_below?(ctx)
@@ -1988,11 +2004,11 @@ module ReactorSim
           # Neither is simply better in the road — they are exposed to different accidents.
           perils: [
             Peril.new(id: :caught_in_haulage, tags: %i[crush], severity: 2.2,
-                      scales_with: :tubs, places: %i[pit_bottom district]),
+                      scales_with: :tubs, places: %i[pit_bottom district], opportunity: true),
             Peril.new(id: :wedged, tags: %i[crush], severity: 2.6, scales_with: :tubs,
                       when_tagged: :hulking, places: %i[pit_bottom district]),
             Peril.new(id: :struck_by_tub, tags: %i[impact], severity: 1.4, scales_with: :tubs,
-                      unless_tagged: :hulking, places: %i[pit_bottom district])
+                      unless_tagged: :hulking, places: %i[pit_bottom district], opportunity: true)
           ]
         )
       end
@@ -2075,7 +2091,7 @@ module ReactorSim
           # Caught in the belt where it runs onto the drum: the attendant, clearing spillage at
           # the drive head.
           perils: [ Peril.new(id: :caught_in_the_belt, tags: %i[crush], severity: 2.4, scales_with: :belt,
-                              stations: %i[belt_attending]) ]
+                              stations: %i[belt_attending], opportunity: true) ]
         )
       end
 
@@ -2255,7 +2271,8 @@ module ReactorSim
                               mishap: { node: :shaft, kind: :obstruction, share: 1.0 },
                               stations: %i[banking], underfoot: BANK_FOOTING),
                     Peril.new(id: :slipped_on_the_deck, tags: %i[fall impact], severity: 1.2, rate: 0.1,
-                              scales_with: :tubs, stations: %i[banking], underfoot: BANK_FOOTING) ]
+                              scales_with: :tubs, stations: %i[banking], underfoot: BANK_FOOTING,
+                              opportunity: true) ]
         )
       end
 
@@ -2790,7 +2807,9 @@ module ReactorSim
                      name: sheet.fetch(:name),
                      minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
                      stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
-                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg))
+                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg),
+                     weapons: sheet.fetch(:weapons), grudges: sheet.fetch(:grudges),
+                     resented_by: sheet.fetch(:resented_by))
         end
       end
 

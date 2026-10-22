@@ -21,6 +21,7 @@ of those four rules silently destroys crash recovery, replay and reproducibility
 | **Build a new operation from scratch** | [`guides/build-an-operation.md`](guides/build-an-operation.md) |
 | Add a substance, reaction or material | [`guides/add-content.md`](guides/add-content.md) |
 | Know what is done and what is next | [`current_progress.md`](current_progress.md) |
+| Tune brawls, and see what a change does to every pairing | `ruby script/tuning/brawls.rb` → [`tuning/brawls.md`](tuning/brawls.md) |
 
 ## Reference vs rationale
 

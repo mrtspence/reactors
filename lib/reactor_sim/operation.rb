@@ -26,7 +26,7 @@ module ReactorSim
 
     attr_reader :id, :type, :nodes, :links, :paths, :gas_neighbours, :thermal_links, :drive_links, :layout,
                 :control_points, :diagnostics, :minions, :state, :content, :time_scale,
-                :options, :rngs, :routing
+                :options, :rngs, :routing, :grudges
 
     def initialize(id:, type:, nodes:, links: [], thermal_links: [], drive_links: [],
                    passages: [], places: [], control_points: [], diagnostics: [], minions: [],
@@ -53,6 +53,9 @@ module ReactorSim
       @layout = Layout.new(passages: passages, control_points: control_points,
                            places: places, nodes: @nodes)
       @routing = build_routing
+      # Who dislikes whom before anything has happened, earlier matches included (`grudges:`
+      # in `options:`, from the delivery tier).
+      @grudges = Animosity.table(@minions.values, @options[:grudges])
 
       validate_graph!
       # Routes are derived from the graph, which is configuration rather than state, so this
@@ -505,6 +508,20 @@ module ReactorSim
         end
       end
 
+      # The same of a post's openings: sabotage aimed at a part that cannot suffer it is a feud
+      # that silently does nothing.
+      @control_points.each_value do |control|
+        control.openings.each do |opening|
+          next unless opening.mishap
+
+          target = @nodes[opening.mishap.fetch(:node)]
+          next if target.respond_to?(:suffers?) && target.suffers?(opening.mishap.fetch(:kind))
+
+          raise Error, "opening #{opening.id}: #{opening.mishap.fetch(:node)} cannot suffer " \
+                       "#{opening.mishap.fetch(:kind)}"
+        end
+      end
+
       @links.each do |link|
         source = @nodes[link.from_node] or raise Error, "link #{link.id}: no node #{link.from_node}"
         sink   = @nodes[link.to_node]   or raise Error, "link #{link.id}: no node #{link.to_node}"
@@ -540,11 +557,13 @@ module ReactorSim
     # re-tuning it.
     # Scoped by operation, except for a node that names a **match-wide** stream — the sky — so
     # that every operation in a match draws the same one.
+    # Each person also has a temper stream (`Animosity.stream`).
     def build_rngs(seed)
-      (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys).to_h do |id|
+      streams = (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys).to_h do |id|
         shared = @nodes[id].respond_to?(:shared_stream) ? @nodes[id].shared_stream : nil
         [ id, Rng.stream(seed, shared || "#{@id}/#{id}") ]
       end
+      streams.merge(@minions.keys.to_h { |id| [ Animosity.stream(id), Rng.stream(seed, "#{@id}/#{Animosity.stream(id)}") ] })
     end
 
     # A snapshot round-trips through JSON, which stringifies symbol keys — and only keys.
@@ -601,7 +620,8 @@ module ReactorSim
                                  via: minion_state[:via]&.to_sym,
                                  riding: minion_state[:riding]&.to_sym,
                                  injury: minion_state[:injury]&.to_sym,
-                                 carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze)
+                                 carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze,
+                                 fight: restored_fight(minion_state[:fight]))
               .freeze ]
       end
 
@@ -620,18 +640,32 @@ module ReactorSim
         mishap.merge(node: mishap.fetch(:node).to_sym, kind: mishap.fetch(:kind).to_sym).freeze
       end
 
+      # A deliberate slip waiting for phase 0 names a lever and a slip kind, both values.
+      spite = state.fetch(:spite, []).map do |deed|
+        deed.merge(control: deed.fetch(:control).to_sym, slip: deed.fetch(:slip).to_sym).freeze
+      end
+
       state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze, controls: controls.freeze,
-                  minions: minions.freeze, mishaps: mishaps.freeze,
+                  minions: minions.freeze, mishaps: mishaps.freeze, spite: spite.freeze,
                   events: state.fetch(:events, [])).freeze
+    end
+
+    # Who somebody is fighting is a seat held as a value; restored as a String, the fight would
+    # name nobody and never end.
+    def restored_fight(fight)
+      fight && fight.merge(with: fight.fetch(:with).to_sym).freeze
     end
 
     def build_initial_state
       { nodes: @nodes.to_h { |id, n| [ id, n.initial_state(@rngs.fetch(id), @content) ] }.freeze,
         controls: @control_points.to_h { |id, c| [ id, c.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         diagnostics: @diagnostics.to_h { |id, d| [ id, d.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
-        minions: @minions.to_h { |id, m| [ id, m.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
+        minions: @minions.to_h { |id, m|
+          [ id, m.initial_state(@rngs.fetch(id)).merge(Animosity.initial_state(@rngs.fetch(Animosity.stream(id)))).freeze ]
+        }.freeze,
         ledger: Ledger.initial.freeze,
         mishaps: [].freeze,
+        spite: [].freeze,
         events: [] }.freeze
     end
   end

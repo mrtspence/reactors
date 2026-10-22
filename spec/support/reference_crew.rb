@@ -50,7 +50,8 @@ module ReferenceCrew
   # before mass existed, and an unburdened hand still reproduces all of them.
   ARCHETYPE = { label: "Test Hand", mass_kg: 70.0,
                 strength: 1.0, toughness: 1.0, endurance: TIRELESS,
-                intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} }.freeze
+                intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0,
+                combat_prowess: 1.0, tags: {} }.freeze
 
   # **Every dial at 1.0, and this one tires.** For a spec about a mechanic rather than about a
   # machine — somebody to stand in a room and have something happen to them. It lives here
@@ -58,7 +59,8 @@ module ReferenceCrew
   # declaring the same plain stat block silently overwrite each other, and which one wins
   # depends on the randomised file order.
   PLAIN_STATS = { strength: 1.0, toughness: 1.0, endurance: 1.0,
-                  intelligence: 1.0, dexterity: 1.0, charisma: 1.0 }.freeze
+                  intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0,
+                  combat_prowess: 1.0 }.freeze
 
   # What a person weighs, mirroring the `human` archetype — the reference frame `Burden` is
   # calibrated against. Here rather than inline in six unit specs, because it is a **content**

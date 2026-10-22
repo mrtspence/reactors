@@ -24,7 +24,7 @@ module ReactorSim
 
     attr_reader :id, :label, :node, :min, :max, :default, :unit, :stiffness, :effort, :aided_by,
                 :exertion, :recovery, :place, :gated_by, :capacity, :complexity, :requires,
-                :governor
+                :governor, :openings, :oversees
 
     # **A valve is not a job, and that distinction is what makes a crew matter.** Most controls
     # are valves: a regulator goes where you put it and who put it there is irrelevant. A few are
@@ -76,11 +76,18 @@ module ReactorSim
     # `requires:` names the tag a certificated post wants. Lacking it never forbids the posting
     # — a player may always put the wrong person on anything — it makes them likelier to get it
     # wrong, which is what a ticket actually buys.
+    #
+    # `openings:` are what somebody at this post who hates somebody could do to them with it
+    # (`Animosity::Opening`). `oversees:` makes it a boss's post: the places whose quarrels whoever
+    # stands here may step into.
     def initialize(id:, label: nil, node: nil, min: 0.0, max: 100.0, default: 0.0,
                    unit: "%", stiffness: Float::INFINITY, effort: nil, aided_by: nil,
                    exertion: 0.0, recovery: nil, place: nil, gated_by: nil, capacity: nil,
-                   complexity: 0.0, requires: nil, internal: false, governor: nil)
+                   complexity: 0.0, requires: nil, internal: false, governor: nil,
+                   openings: [], oversees: [])
       @id = id.to_sym
+      @openings = Array(openings).freeze
+      @oversees = Array(oversees).map(&:to_sym).freeze
       # **A lever nobody commands.** Its `actual` is written in phase 0 by the governor of the
       # post that works it, and `set_control` refuses it; it is not on the player's panel.
       @internal = internal

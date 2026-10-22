@@ -167,6 +167,13 @@ require_relative "reactor_sim/peril"
 # handed; read by `minion` and by `tick`.
 require_relative "reactor_sim/burden"
 require_relative "reactor_sim/minion"
+# One blow against one guard: the dice, landing, damage, criticals. Pure arithmetic, read by
+# whatever comes to blows — `animosity`'s brawls first.
+require_relative "reactor_sim/combat"
+# Grudges, tempers and what people do to each other. After `peril` and `minion`, whose margin it
+# copies and whose attack and defence it reads; `provoke` is its phase, and `tick` its only caller.
+require_relative "reactor_sim/animosity"
+require_relative "reactor_sim/provoke"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"
 require_relative "reactor_sim/diagnostics/displays"

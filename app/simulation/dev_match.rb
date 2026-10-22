@@ -177,6 +177,7 @@ module DevMatch
   # reset requested by the player, and posting a crew.
   def start!
     MinionCondition.advance!(DevPlayer::ID)
+    Grudge.fade!(DevPlayer::ID)
   rescue StandardError => e
     # A recovery clock that failed to tick must not stop a match from starting.
     Rails.logger.error("dev_match: could not advance recovery: #{e.class}: #{e.message}")
@@ -197,11 +198,16 @@ module DevMatch
       "operations" => operation_ids.to_h { |id| [ id.to_s, reset_spec(id) ] },
       # **One sky for the whole match**, carried once rather than per machine, so every machine is
       # rebuilt under the same season.
-      "conditions" => stored_conditions.transform_keys(&:to_s).transform_values(&:to_s) }
+      "conditions" => stored_conditions.transform_keys(&:to_s).transform_values(&:to_s),
+      # Who hates whom from earlier matches, for every machine's crew at once — the whole account,
+      # since the simulation reads only the people a machine actually fields.
+      "grudges" => stored_grudges }
   end
 
   # The season the match is set up for, as the simulation takes it.
   def stored_conditions = MatchSetup.for(ID).to_sim
+
+  def stored_grudges = Grudge.carried_for(DevPlayer::ID)
 
   # **Ask the runner to rebuild the match**, which is what a reset and a change of setup both are.
   # The command is built BEFORE the recovery clock advances, so somebody whose last match this was
@@ -244,21 +250,22 @@ module DevMatch
   # have hired anybody.
   # `specs:` is what a reset hands over, keyed by operation id; left unset, every machine falls
   # back to what is stored, which is what a cold boot wants.
-  # `conditions:` is what a reset hands over; left unset, the stored setup.
-  def build(specs: {}, conditions: nil)
+  # `conditions:` and `grudges:` are what a reset hands over; left unset, what is stored.
+  def build(specs: {}, conditions: nil, grudges: nil)
     sky = conditions ? conditions.to_h { |k, v| [ k.to_sym, v.to_sym ] } : stored_conditions
+    held = grudges || stored_grudges
     ReactorSim::Match.create(
       id: ID, seed: SEED, time_scale: time_scale, couplings: couplings,
-      operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}, sky) }
+      operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}, sky, held) }
     )
   end
 
-  # Every machine with slots is built under the match's sky. One without — the dev engine — has
-  # nothing outdoors.
-  def operation_spec(operation_id, given, sky = stored_conditions)
+  # Every machine with slots is built under the match's sky and with its crew's grudges. One
+  # without — the dev engine — has nothing outdoors and nobody in it.
+  def operation_spec(operation_id, given, sky = stored_conditions, grudges = stored_grudges)
     return { id: operation_id, type: kind_of(operation_id) } unless fittable?(operation_id)
 
-    { id: operation_id, type: kind_of(operation_id), conditions: sky,
+    { id: operation_id, type: kind_of(operation_id), conditions: sky, grudges: grudges,
       chassis: given["chassis"]&.to_sym || chassis(operation_id: operation_id),
       loadout: given["loadout"]&.to_h { |slot, part| [ slot.to_sym, part&.to_sym ] } ||
                stored_parts(operation_id: operation_id),

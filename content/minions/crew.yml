@@ -20,6 +20,8 @@
 #   archetype:  their race, from content/archetypes/. Required, and checked at boot.
 #   stats:      offsets, added to the race's
 #   tags:       their own traits, added to the race's
+#   grudges:    who they dislike, by race or by person, added to the race's
+#   resented_by: who dislikes THEM, by race or by person — a notorious past, written from their side
 #   hireable:   false for somebody who exists but cannot be unlocked. Defaults true.
 #
 # **No health, no fatigue, no injury, no equipment.** Those are either match state, minted fresh
@@ -30,42 +32,46 @@ jim:
   name: Jim Ashfield
   archetype: human
   stats:
+    mass_kg: 5.0
     strength: 0.15
     dexterity: -0.1
   tags:
     practised: true
-    heat_hardened: 0.2
 
 elowynne:
   name: Elowynne
   archetype: elf
   stats:
+    mass_kg: -10.0
     intelligence: 0.1
     dexterity: 0.15
-  tags:
-    keen_eyed: 0.25
+    agility: 0.15
 
-# The counter-example, and the reason the individual layer exists at all: another elf, and not
-# remotely the same worker as Elowynne. Strong for an elf, and heavy-handed with it.
 galathas:
   name: Galathas
   archetype: elf
-  stats:
-    strength: 0.35
-    toughness: 0.15
-    dexterity: -0.25
-  tags:
-    clumsy: 0.2
+  grudges:
+    throg: 0.6
 
-# The first ogre, and deliberately the plainest possible one: everything his race gives him and a
-# little more in the arms. An individual who adds nothing but a stat offset is worth having in
-# content precisely because it shows the layer working — the race is doing all the interesting
-# work here, and Throg is still not quite the same worker as the next ogre hired.
 throg:
   name: Throg Bigfist
   archetype: ogre
-  stats:
-    strength: 0.1
+
+urist:
+  name: Urist Glazecanyons
+  archetype: dwarf
+
+dalthu:
+  name: Dalthu Splintertusk
+  archetype: orc
+
+arunessa:
+  name: Arunessa
+  archetype: succubus
+
+rijgazh:
+  name: Rijgazh HateScowls
+  archetype: goblin
 
 # --- the last resort --------------------------------------------------------------------
 #

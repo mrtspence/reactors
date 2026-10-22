@@ -19,7 +19,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
 
   def worker(stats: {}, tags: {})
     base = { strength: 1.0, toughness: 1.0, endurance: 1.0, intelligence: 1.0,
-             dexterity: 1.0, charisma: 1.0 }
+             dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0 }
     ReactorSim::Minion.new(id: :hand, name: "Hand", station: :lever,
                            mass_kg: ReferenceCrew::HUMAN_KG,
                            stats: base.merge(stats), tags: tags)
@@ -375,10 +375,12 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
         op.nodes.each_value do |node|
           next unless node.respond_to?(:failure_hazards)
 
-          # A failure's modes, and the `:explosion` a node hosting a prompt reaction can have.
+          # A failure's modes, the `:explosion` a node hosting a prompt reaction can have, and what
+          # a mishap can make of it — a tub down the shaft.
           prompt = node.respond_to?(:prompt_modes) ? node.prompt_modes(op.content) : {}
+          mishap = node.respond_to?(:mishap_modes) ? node.mishap_modes : {}
           node.failure_hazards.each do |mode, declared|
-            expect(node.failure_modes.merge(prompt)).to have_key(mode),
+            expect(node.failure_modes.merge(prompt, mishap)).to have_key(mode),
                                                         "#{node.id} endangers on #{mode}, which it cannot enter"
             (declared[:stations] || {}).each_key do |station|
               expect(op.control_points).to have_key(station),
