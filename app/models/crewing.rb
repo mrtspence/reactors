@@ -16,9 +16,9 @@
 #
 # See docs/design_sketches/minions.md §8.
 class Crewing
-  # Somebody unavailable is not somebody who does not exist — they are on the injury list, and
-  # the screen has to say so rather than quietly omitting them. That is the moment the standin
-  # stops being an abstraction.
+  # Somebody unavailable is not somebody who does not exist — they are healing a wound that would
+  # carry them out, and the screen has to say so rather than quietly omitting them. That is the
+  # moment the standin stops being an abstraction.
   Candidate = Struct.new(:id, :name, :archetype, :unavailable_for, keyword_init: true) do
     def available? = unavailable_for.to_i.zero?
   end
@@ -150,15 +150,14 @@ class Crewing
   # standin does not re-default on the next render.
   def to_sim = seats.to_h { |seat| [ seat, posting(seat) ] }
 
-  # **Store, then build the command, then advance, then produce.** The roster has to be written
-  # before the command is built, or the command carries the previous crew; and the clock advances
-  # after the command is built, so somebody whose last match this was is still out for the
-  # machine being built now.
+  # **Store, then heal, then build the command, then produce.** The roster has to be written
+  # before the command is built, or the command carries the previous crew; and wounds heal before
+  # it, so the match being built is the one they come back to lesser.
   def fit!
     Roster.fit(match_id: DevMatch::ID, operation_id: operation_id, crew: to_sim,
                standin: standin_posting)
-    command = DevMatch.reset_command
     DevMatch.start!
+    command = DevMatch.reset_command
     CommandProducer.instance.produce(match_id: DevMatch::ID, command: command)
   rescue StandardError => e
     Rails.logger.error("crewing: fit failed: #{e.class}: #{e.message}")
@@ -201,7 +200,7 @@ class Crewing
   def owned_minions = @owned_minions ||= owned_ids(:minion).to_a
 
   def conditions
-    @conditions ||= MinionCondition.remaining_for(owner_id)
+    @conditions ||= Wound.remaining_for(owner_id)
   end
 
   # Both read off a built machine, because where a shift starts is decided by the operation and

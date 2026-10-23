@@ -33,7 +33,7 @@ module ReactorSim
                        # moving coal specifically, rather than a small bonus to everything.
                        tags: { shovelling: 0.5 },
                        # A heavy blade on a long handle: swung, and not a good weapon.
-                       weapon: { handling: { swing: 0.75, precision: 0.15 }, edge: 0.1, wounds: %i[impact] })
+                       weapon: { handling: { swing: 0.75, precision: 0.15 }, edge: 0.1, wounds: { impact: 1.0 } })
 
     # The shovel's opposite number, and the reason `aided_by:` is per station rather than per
     # job: the same person is better at one of the two depending on what is in their hand.
@@ -49,7 +49,7 @@ module ReactorSim
                        mass_kg: 0.8,
                        stats: { dexterity: 0.15 },
                        tags: { fitting: 0.3 },
-                       weapon: { handling: { swing: 0.6, precision: 0.3 }, edge: 0.05, wounds: %i[impact] })
+                       weapon: { handling: { swing: 0.6, precision: 0.3 }, edge: 0.05, wounds: { impact: 1.0 } })
 
     # The sketch's other worked example, and the one that shows a tag cutting both ways: the
     # candle is what lets you see down a drift, and it is what ignites the gas in one.
@@ -61,7 +61,7 @@ module ReactorSim
                        mass_kg: 4.0,
                        stats: { strength: 0.05 },
                        tags: { mining_effectiveness: 0.25, darkvision: 0.1, open_flame: true },
-                       weapon: { handling: { swing: 0.7, precision: 0.2 }, edge: 0.2, wounds: %i[puncture impact] })
+                       weapon: { handling: { swing: 0.7, precision: 0.2 }, edge: 0.2, wounds: { puncture: 0.6, impact: 0.4 } })
 
     # **The gate is multiplied, so a crude kit is 0.25 × 0.1 and genuinely hopeless.** That is
     # the design — a hewer with a stone pick and a candle is not a slightly worse hewer — but it
@@ -73,7 +73,7 @@ module ReactorSim
                        stats: { strength: 0.1 },
                        tags: { mining_effectiveness: 0.8, darkvision: 0.5, open_flame: true },
                        # A heavy point you swing hard: all arm, very little aim.
-                       weapon: { handling: { swing: 0.8, precision: 0.2 }, edge: 0.3, wounds: %i[puncture impact] })
+                       weapon: { handling: { swing: 0.8, precision: 0.2 }, edge: 0.3, wounds: { puncture: 0.6, impact: 0.4 } })
 
     # **What makes a casualty somebody else's problem rather than nobody's.** `Burden` reads
     # `stretcher` as an aid to the lift limit, so this is what lets a hand carry somebody their own
@@ -201,7 +201,7 @@ module ReactorSim
                        mass_kg: 0.2,
                        tags: { cutting: 0.3 },
                        # A blade is placed, not swung: nearly all of it is the hand's precision.
-                       weapon: { handling: { swing: 0.2, precision: 0.8 }, edge: 0.3, wounds: %i[puncture] })
+                       weapon: { handling: { swing: 0.2, precision: 0.8 }, edge: 0.3, wounds: { cut: 0.5, puncture: 0.5 } })
 
     # **What a crew wears against a succubus**, or anything else worth looking at instead of the
     # work: `focused` resists distraction. Narrows what they take in of everything else too.

@@ -49,26 +49,28 @@ module ReactorSim
       air_k + (exposure * (Nodes::Outdoors.feels_k(air_k, wind_m_s) - air_k))
     end
 
-    # Resilience ground away per second.
+    # Resilience ground away per second. Carried out is the `cold` wound reaching severe, so that is
+    # what the reference grinds through in its time.
     def rate(felt_k, minion)
       return 0.0 if felt_k.nil? || unfeeling?(minion)
 
       deficit = tolerated_k(minion) - felt_k
       return 0.0 unless deficit.positive?
 
-      ((deficit / (TOLERATED_K - REFERENCE_K))**EXPONENT) / REFERENCE_SECONDS
+      ((deficit / (TOLERATED_K - REFERENCE_K))**EXPONENT) * Wounds::BANDS.fetch(:severe) / REFERENCE_SECONDS
     end
 
-    # `[next_state, mode_or_nil]`, a mode only on a transition.
-    def advance(minion, state, felt_k, dt)
+    # **One `cold` wound, deepening while they stay.** `[next_state, mode_or_nil, wounds]`, a mode
+    # only on a transition.
+    def advance(minion, state, felt_k, dt, catalogue:, die:)
       bite = rate(felt_k, minion) * dt
-      return [ state, nil ] if bite <= 0.0
+      return [ state, nil, [] ] if bite <= 0.0
 
-      state, mode = Injury.grind(state, bite)
+      state, mode, wounds = Injury.endure(state, :cold, bite, catalogue: catalogue, die: die)
       state = state.merge(chilled: chilled(state) + bite) if state.fetch(:resilience) <= 0.0
-      return Injury.succumb(state, :mortal) if chilled(state) >= DWELL
+      return Injury.succumb(state, :mortal, kind: :cold, catalogue: catalogue, die: die) if chilled(state) >= DWELL
 
-      [ state, mode ]
+      [ state, mode, wounds ]
     end
 
     # How much harder labour is in this heat, as a multiple on what work costs. 1.0 in comfort.

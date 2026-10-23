@@ -236,7 +236,7 @@ module ReactorSim
           mass_kg: 52.0, material: :bronze, stress_rate: 120.0, wear_rate: 4.0e-7,
           oil_loss_kg_per_m: 2.0e-4,
           damages: { seized: { cylinder: 0.5, flywheel: 0.4 } },
-          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+          endangers: { seized: { wounds: { crush: 0.7, burn: 0.3 }, scales_with: :rim_speed_m_s,
                                  reference: 27.0, stations: { oiling: 1.0 } } }
         )
       end
@@ -269,7 +269,7 @@ module ReactorSim
           oil_charge_kg: 0.0, oil_loss_kg_per_m: 0.0,
           viscous_c: 1.2, stress_rate: 25.0, wear_rate: 6.0e-8,
           damages: { seized: { cylinder: 0.5, flywheel: 0.5 } },
-          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+          endangers: { seized: { wounds: { crush: 0.7, burn: 0.3 }, scales_with: :rim_speed_m_s,
                                  reference: 27.0, stations: { oiling: 1.0 } } }
         )
       end
@@ -307,7 +307,7 @@ module ReactorSim
           # 27 m/s is the reference rim speed — a 1.5 m flywheel at its working 18 rad/s — so a
           # seizure at ordinary running scales to 1.0 and one on a barred-over engine to almost
           # nothing.
-          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+          endangers: { seized: { wounds: { crush: 0.7, burn: 0.3 }, scales_with: :rim_speed_m_s,
                                  reference: 27.0, stations: { oiling: 1.0 } } }
         )
       end

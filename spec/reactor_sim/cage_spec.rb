@@ -226,9 +226,9 @@ RSpec.describe "the cage" do
     it "is held by its catches when the strap wears through, and not when it is torn out" do
       hazards = ->(part) { rod(rods(part)).failure_hazards }
 
-      expect(hazards.call(:caught_man_engine)[:parted][:tags]).not_to include(:fall)
-      expect(hazards.call(:caught_man_engine)[:torn_out][:tags]).to include(:fall)
-      expect(hazards.call(:man_engine)[:parted][:tags]).to include(:fall)
+      expect(Array(hazards.call(:caught_man_engine)[:parted][:causes])).not_to include(:fall)
+      expect(hazards.call(:caught_man_engine)[:torn_out][:causes]).to include(:fall)
+      expect(hazards.call(:man_engine)[:parted][:causes]).to include(:fall)
     end
 
     it "parts by wearing through when the strap is spent at working speed" do

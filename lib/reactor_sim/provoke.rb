@@ -13,13 +13,16 @@ module ReactorSim
 
       # `defence:` and `ambient:` are the tick's own readings of a person where they stand —
       # `Minion#defend` under their load, and the room as it reaches their wits.
+      # `wounds:` is the content's catalogue and `wound_dice:` each person's `wound:` die this tick.
       def initialize(minions:, table:, control_points:, opportunities:, dice:, carried:, ctx:,
-                     defence:, ambient:)
+                     defence:, ambient:, wounds:, wound_dice:)
         @minions = minions
         @table = table
         @control_points = control_points
         @opportunities = opportunities
         @dice = dice
+        @wounds = wounds
+        @wound_dice = wound_dice
         @carried = carried
         @ctx = ctx
         @defence = defence
@@ -34,7 +37,8 @@ module ReactorSim
         @spite = []
         @overseers = overseers
 
-        @entry.keys.sort.each { |id| bout(id) if led?(@entry.fetch(id)) }
+        rows
+        melees.each_value { |members| brawl(members) }
         @entry.keys.sort.each { |id| temper(id) }
 
         Result.new(minions: @out.transform_values(&:freeze).freeze, events: @events.freeze,
@@ -44,8 +48,6 @@ module ReactorSim
       private
 
       def dt = @ctx.dt
-
-      def led?(state) = state.dig(:fight, :led) == true
 
       # Somebody who can quarrel: here, on their feet, nobody's cargo, not in a cage.
       def able?(id, state = @entry[id])
@@ -59,6 +61,8 @@ module ReactorSim
       end
 
       def grudge(holder, target) = Animosity.grudge(@table, holder, @out.fetch(holder), target)
+
+      def hostility(holder, target) = Animosity.hostility(@minions.fetch(holder), grudge(holder, target))
 
       def irritation(other) = Animosity.irritation(@minions.fetch(other))
 
@@ -139,8 +143,8 @@ module ReactorSim
 
       def rumpus(id)
         place = @entry.fetch(id)[:place]
-        brawls = @entry.count { |other, s| other != id && led?(s) && s.dig(:fight, :blows) && s[:place] == place }
-        1.0 + (RUMPUS * brawls)
+        fighting = @entry.count { |other, s| other != id && Animosity.brawling?(s) && able?(other) && s[:place] == place }
+        1.0 + (RUMPUS * Math.sqrt(fighting / 2.0))
       end
 
       def release(id, kind)
@@ -165,13 +169,11 @@ module ReactorSim
         perform(id, target, *choice)
       end
 
-      # Anybody here or that their post reaches, by `Animosity.pick` on how much they resent each —
-      # **and nobody already in a fight**, so the one they hate most being busy turns them on
-      # somebody else rather than leaving them stewing.
+      # Anybody here or that their post reaches, by `Animosity.pick` on how much they resent each.
+      # Somebody already in a fight is as good a pick as anybody: a brawl joins it, a row heckles.
       def target_for(id, here)
         reachable = openings(id).flat_map { |opening| @entry.keys.select { |t| t != id && reached?(opening, id, t) } }
-        candidates = (here | reachable).reject { |t| Animosity.fighting?(@out.fetch(t)) }
-        scored = candidates.filter_map do |t|
+        scored = (here | reachable).filter_map do |t|
           score = grudge(id, t) + (here.include?(t) ? irritation(t) : 0.0)
           [ t, score ] if score.positive?
         end
@@ -203,10 +205,8 @@ module ReactorSim
       def acts(id, target, here)
         found = []
         if here
-          unless Animosity.fighting?(@out.fetch(target))
-            found << [ :row, 0.0, 0, nil ]
-            found << [ :brawl, BRAWL_HARM, 0, nil ]
-          end
+          found << [ :row, 0.0, 0, nil ]
+          found << [ :brawl, BRAWL_HARM, 0, nil ]
           state = @entry.fetch(target)
           @opportunities.each do |peril|
             next unless peril.applies_to?(@minions.fetch(target)) &&
@@ -226,19 +226,36 @@ module ReactorSim
 
       def perform(id, target, kind, harm, _bystanders, means)
         case kind
-        when :row
-          fight(id, target, blows: false, clock_s: ROW_S)
-          resent(target, id, ROW_GRIEVANCE)
-          release(id, :row)
-          quarrel(id, target, :row)
-        when :brawl
-          fight(id, target, blows: true, clock_s: 0.0)
-          resent(target, id, BRAWL_HARM * GRUDGE_PER_HARM)
-          full = @dice.fetch(id).fetch(:patience)
-          write(id, patience: 0.0, patience_full: full)
-          quarrel(id, target, :brawl)
+        when :row then row(id, target)
+        when :brawl then brawl_with(id, target)
         else deed(id, target, kind, harm, means)
         end
+      end
+
+      # **A row stops them for `ROW_S`**, and the one they go for too — unless that one is already
+      # in a fight, which a row from the sidelines does not stop: a heckle.
+      def row(id, target)
+        heckled = Animosity.fighting?(@out.fetch(target))
+        write(id, fight: { with: target, clock_s: ROW_S }.freeze)
+        write(target, fight: { with: id, clock_s: ROW_S }.freeze) unless heckled
+        resent(target, id, ROW_GRIEVANCE)
+        release(id, :row)
+        quarrel(id, target, heckled ? :heckle : :row)
+      end
+
+      # **Into their fight, or a new one.** A brawl on somebody already in one joins it; on
+      # somebody rowing, it ends their row.
+      def brawl_with(id, target)
+        theirs = @out.fetch(target)[:fight]
+        if theirs&.fetch(:melee, nil)
+          write(id, fight: { melee: theirs.fetch(:melee), clock_s: theirs.fetch(:clock_s), owed: {}.freeze }.freeze)
+        else
+          melee = :"#{id}@#{@ctx.tick}"
+          [ id, target ].each { |who| write(who, fight: { melee: melee, clock_s: 0.0, owed: {}.freeze }.freeze) }
+        end
+        resent(target, id, BRAWL_HARM * GRUDGE_PER_HARM)
+        write(id, patience: 0.0, patience_full: @dice.fetch(id).fetch(:patience))
+        quarrel(id, target, theirs&.fetch(:melee, nil) ? :joined : :brawl)
       end
 
       # **A shove or sabotage is all or nothing**: the target saw it coming or did not. Seen,
@@ -257,7 +274,7 @@ module ReactorSim
 
         if kind == :shove
           resent(target, id, harm * GRUDGE_PER_HARM)
-          hurt(target, { severity: means.severity, tags: means.tags }, cause: means.id, attacker: id)
+          hurt(target, means.hazard, cause: means.id, attacker: id)
           @mishaps << means.mishap if means.mishap?
         elsif means.mishap
           @mishaps << means.mishap
@@ -269,81 +286,158 @@ module ReactorSim
 
       # --- the fight ---------------------------------------------------------------
 
-      def fight(id, target, blows:, clock_s:)
-        write(id, fight: { with: target, blows: blows, led: true, clock_s: clock_s, owed: 0.0 }.freeze)
-        write(target, fight: { with: id, blows: blows, led: false, clock_s: clock_s, owed: 0.0 }.freeze)
+      # Each person's row runs on their own clock, so a heckle needs nobody else's.
+      def rows
+        @entry.keys.sort.each do |id|
+          fought = @entry.fetch(id)[:fight]
+          next if fought.nil? || fought[:melee]
+
+          clock = fought.fetch(:clock_s) - dt
+          write(id, fight: clock.positive? && able?(id) ? fought.merge(clock_s: clock).freeze : nil)
+        end
       end
 
-      # One exchange every `BOUT_S`, both ways at once, until the one who started it is sated,
-      # either of them is down or done in, or the boss gets between them.
-      def bout(id)
-        state = @entry.fetch(id)
-        other = state.dig(:fight, :with)
-        return finish(id, other) if over?(id, state, other)
+      # `{ melee => [members…] }`, by melee and by seat.
+      def melees
+        @entry.keys.sort.each_with_object({}) { |id, acc|
+          melee = @entry.fetch(id).dig(:fight, :melee) or next
+          (acc[melee] ||= []) << id
+        }.sort_by { |melee, _| melee.to_s }.to_h
+      end
 
-        clock = state.dig(:fight, :clock_s) - dt
-        return finish(id, other) if !state.dig(:fight, :blows) && clock <= 0.0
-        return tick(id, clock) if clock.positive? || !state.dig(:fight, :blows)
+      # **One exchange every `BOUT_S`, among everybody in the fight**, for as long as anybody in it
+      # is willing (§7.2 of the sketch): still angry, with somebody there they hold hostility
+      # against. The willing hit whoever they most want to; the spent hit back at whoever still
+      # wants them; whoever is neither steps out. Somebody carried out stays, for anybody who hates
+      # them enough to kick them; somebody dead, carried away or done in leaves.
+      def brawl(members)
+        place = @entry.fetch(members.first)[:place]
+        staying, gone = members.partition { |id| staying?(id, place) }
+        gone.each { |id| leave(id) }
+        standing = staying.select { |id| able?(id) }
+        downed = staying - standing
+        willing = standing.select { |id| willing?(id, standing, downed) }
+        return staying.each { |id| leave(id) } if willing.empty?
 
-        if (watch = stepped_in(id, other))
-          averted(id, watch, :brawl)
-          return finish(id, other)
+        clock = @entry.fetch(standing.first).dig(:fight, :clock_s) - dt
+        return staying.each { |id| clocked(id, clock) } if clock.positive?
+
+        if (pulled = parted(place, willing, staying))
+          standing -= [ pulled ]
+          willing -= [ pulled ]
+          return staying.each { |id| leave(id) } if willing.empty?
         end
 
-        escalate(id, other)
-        escalate(other, id)
-        landed = blow(id, other)
-        relieve(other, blow(other, id))
-        return finish(id, other) if relieve(id, landed) >= SATED * state.fetch(:patience_full, 1.0)
-
-        tick(id, BOUT_S)
+        exchange(standing, downed, willing)
+        staying.each { |id| clocked(id, BOUT_S) if Animosity.brawling?(@out.fetch(id)) }
       end
 
-      # **Both of them let off steam**, blow by blow and more for what lands, and far more once it
-      # has hurt them (`HURT_RELIEF`): a tooth out gives anybody pause, and an arm broken leaves
-      # nobody wanting another fight. Returns the new patience.
-      def relieve(id, landed)
-        full = @entry.fetch(id).fetch(:patience_full, 1.0)
-        gain = (BOUT_RELEASE + (LANDED_RELEASE * landed)) * full * HURT_RELIEF.fetch(@out.fetch(id)[:injury], 1.0)
-        patience = [ @out.fetch(id).fetch(:patience, 0.0) + gain, full ].min
-        write(id, patience: patience)
-        patience
+      # In the fight's place, not dead, not done in, and nobody's cargo.
+      def staying?(id, place)
+        state = @entry.fetch(id)
+        @minions.key?(id) && state[:place] == place && state[:injury] != :mortal && !state[:spent] &&
+          !@carried.key?(id) && state[:via].nil? && state[:riding].nil?
       end
 
-      def tick(id, clock)
+      def clocked(id, clock)
         write(id, fight: @out.fetch(id).fetch(:fight).merge(clock_s: clock).freeze)
       end
 
-      def over?(id, state, other)
-        theirs = @entry[other]
-        return true if theirs.nil? || theirs.dig(:fight, :with) != id
-        return true unless able?(id) && able?(other)
-
-        state[:spent] || theirs[:spent] || state[:place] != theirs[:place]
+      # Who they could go for: anybody on their feet they hold hostility against, and anybody
+      # carried out they hate enough to kick (`KICKING`).
+      def pickable(id, standing, downed)
+        minion = @minions.fetch(id)
+        (standing - [ id ]).select { |t| hostility(id, t).positive? } +
+          downed.select { |t| Animosity.ceiling(minion, grudge(id, t)) >= KICKING }
       end
 
-      def finish(id, other)
-        [ id, other ].compact.each do |who|
-          fought = @out[who]&.fetch(:fight, nil) or next
-          @out[who] = @out.fetch(who).merge(fight: nil)
-          resent(who, fought.fetch(:with), fought.fetch(:owed, 0.0))
+      def willing?(id, standing, downed)
+        state = @entry.fetch(id)
+        state.fetch(:patience, 0.0) < SATED * state.fetch(:patience_full, 1.0) && pickable(id, standing, downed).any?
+      end
+
+      # **The boss pulls one of them out an exchange** — the angriest, on their own `avert:` die.
+      def parted(place, willing, staying)
+        watch = @overseers[place] or return nil
+        return nil if staying.include?(watch[:boss])
+
+        angriest = willing.min_by { |id| [ patience_share(id), id.to_s ] }
+        return nil unless Animosity.averted?(watch[:effectiveness], watch[:wits], @dice.fetch(angriest).fetch(:avert))
+
+        averted(angriest, watch, :brawl)
+        release(angriest, :averted)
+        leave(angriest)
+        angriest
+      end
+
+      def patience_share(id)
+        state = @entry.fetch(id)
+        state.fetch(:patience, 0.0) / state.fetch(:patience_full, 1.0)
+      end
+
+      # **Everybody chooses at once, from the fight as the exchange began**; then each is defended
+      # against by how many came at them, the blows land in seat order, and everybody standing is
+      # relieved by what they did, what was done to them, and what they saw done.
+      def exchange(standing, downed, willing)
+        aims = standing.to_h { |id| [ id, aim(id, standing, downed, willing) ] }
+        aims.each { |id, target| leave(id) if target.nil? }
+        aims = aims.compact
+        ganged = aims.values.tally
+        @struck = []
+        aims.each { |id, target| escalate(id, target, standing) }
+        landed = aims.to_h { |id, target| [ id, blow(id, target, ganged.fetch(target)) ] }
+        aims.each_key { |id| relieve(id, landed.fetch(id)) }
+        (standing + downed).each { |id| leave(id) if @out.fetch(id)[:injury] == :mortal }
+      end
+
+      # **Who they hit**: the willing whoever they most want to, by hostility raised to `FOCUS`;
+      # the spent whoever wants them most. Nil for somebody nobody wants and who wants nobody.
+      def aim(id, standing, downed, willing)
+        die = @dice.fetch(id).fetch(:target)
+        return Animosity.pick(pickable(id, standing, downed).map { |t| [ t, hostility(id, t)**FOCUS ] }, die) if willing.include?(id)
+
+        wanting = willing.select { |w| pickable(w, standing, downed).include?(id) }
+        Animosity.pick(wanting.map { |w| [ w, hostility(w, id)**FOCUS ] }, die)
+      end
+
+      # **Everybody in it lets off steam**, blow by blow and more for what lands, far more once it
+      # has hurt them (`HURT_RELIEF`), and for each injury they saw anybody else in it take, by
+      # their grudge against them (`WITNESSED`). A tooth out gives anybody pause; an arm broken
+      # leaves nobody wanting another fight.
+      def relieve(id, landed)
+        full = @entry.fetch(id).fetch(:patience_full, 1.0)
+        own = (BOUT_RELEASE + (LANDED_RELEASE * landed)) * HURT_RELIEF.fetch(@out.fetch(id)[:injury], 1.0)
+        seen = @struck.sum do |hurt, mode|
+          hurt == id ? 0.0 : WITNESSED.fetch(mode, 0.0) * (WITNESS_BASE + grudge(id, hurt))
+        end
+        write(id, patience: [ @out.fetch(id).fetch(:patience, 0.0) + ((own + seen) * full), full ].min)
+      end
+
+      # Out of the fight, and what it did to them owed against whoever did it.
+      def leave(id)
+        fought = @out.fetch(id)[:fight] or return
+        write(id, fight: nil)
+        fought.fetch(:owed, {}).sort_by { |attacker, _| attacker.to_s }.each do |attacker, amount|
+          resent(id, attacker, amount) if @minions.key?(attacker)
         end
       end
 
       # **Reaching for what is in their hand**, on their `escalate:` die against how willing to
-      # kill they are, and far likelier once the other drew at an earlier exchange. Once drawn, it
-      # stays drawn for the fight.
-      def escalate(id, other)
+      # kill the one they are going for they are, and far likelier once anybody in the fight who
+      # wants them had a weapon out as the exchange began. Once drawn, it stays drawn.
+      def escalate(id, target, standing)
         minion = @minions.fetch(id)
         fought = @out.fetch(id).fetch(:fight)
         return if minion.weapons.empty? || fought[:armed]
 
-        threatened = @entry.dig(other, :fight, :armed) == true
-        chance = Animosity.escalation(minion, grudge(id, other), threatened: threatened)
+        threatened = standing.any? do |other|
+          other != id && @entry.dig(other, :fight, :armed) == true && hostility(other, id).positive?
+        end
+        chance = Animosity.escalation(minion, grudge(id, target), threatened: threatened)
         return unless @dice.fetch(id).fetch(:escalate) < chance
 
         write(id, fight: fought.merge(armed: true).freeze)
-        quarrel(id, other, :armed)
+        quarrel(id, target, :armed)
       end
 
       # **A blow, landing by how far the strike beat the defence** (`Minion#strike`: swing and
@@ -351,48 +445,67 @@ module ReactorSim
       # off this body, plus its edge, by `Combat.blow_severity`), the one die reading both. **A
       # critical finds the gap**: it meets no resistance kit and only part of the target's
       # toughness. Returns the share that landed.
-      def blow(from, to)
+      def blow(from, to, ganged)
         minion = @minions.fetch(from)
         state = @entry.fetch(from)
         weapon = minion.wielding(state, armed: @out.dig(from, :fight, :armed) == true)
         die = @dice.fetch(from).fetch(:attack)
         strike = Combat.rolled(minion.strike(state), die)
-        guard = Combat.rolled(defence_of(to), @dice.fetch(to).fetch(:defend))
+        guard = guard(to, die, ganged)
         share = Combat.landed(strike, guard)
         return 0.0 unless share.positive?
 
         severity = Combat.blow_severity(minion.hits(state, weapon), weapon.fetch(:edge), die, share)
         pierces = Combat::CRITICAL_TOUGHNESS if Combat.critical?(strike, guard)
-        hurt(to, { severity: severity, tags: weapon.fetch(:wounds), pierces: pierces }.compact,
+        hurt(to, { wounds: Wounds.dealt(weapon.fetch(:wounds), severity), pierces: pierces }.compact,
              cause: :brawl, attacker: from)
         share
       end
 
       def defence_of(id) = @defence.call(@minions.fetch(id), @entry.fetch(id))
 
+      # **What they defend with against this one attacker**: nothing at all lying down; otherwise
+      # their defence, divided by how many came at them this exchange (`GANGED`), on a die of their
+      # own for this attack — their `defend:` and the attacker's `attack:` summed, so no one bad
+      # moment lands every attacker at once.
+      def guard(id, attacker_die, ganged)
+        return 0.0 if Animosity.stood_down?(@entry.fetch(id))
+
+        die = (@dice.fetch(id).fetch(:defend) + attacker_die) % 1.0
+        Combat.rolled(defence_of(id) / (1.0 + (GANGED * (ganged - 1))), die)
+      end
+
       # --- what it leaves ----------------------------------------------------------
 
+      # Every wound counts towards what the others in the fight saw, so a string of knocks can sate
+      # them as surely as one bad blow.
       def hurt(id, hazard, cause:, attacker:)
         minion = @minions.fetch(id)
-        after, mode = Injury.check(minion, @out.fetch(id), hazard)
+        after, mode, wounds = Injury.check(minion, @out.fetch(id), hazard, catalogue: @wounds, die: @wound_dice.fetch(id, 0.0))
         @out[id] = after
         return if mode.nil?
 
         @events << Event.build(type: :minion_hurt, node: id, label: minion.name, severity: :critical,
                                tick: @ctx.tick, mode: mode, cause: cause,
                                detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
-                                         place: after[:place], by: @minions.fetch(attacker).minion })
-        wounded(id, mode) if cause == :brawl
+                                         place: after[:place], by: @minions.fetch(attacker).minion,
+                                         wounds: Tick.reported(wounds, after) })
+        return unless cause == :brawl
+
+        wounded(id, mode, attacker)
+        seen = wounds.map { |wound| wound.fetch(:tier) }
+        (seen.empty? ? [ mode ] : seen).each { |tier| @struck << [ id, tier ] }
       end
 
       # **A fight is resented for what it did, once it is over**: a wound bad enough to carry them
       # out is owed against the one who dealt it, and nothing lighter is.
-      def wounded(id, mode)
+      def wounded(id, mode, attacker)
         owed = WOUND_GRUDGE.fetch(mode, 0.0)
         fought = @out.fetch(id)[:fight]
         return unless owed.positive? && fought
 
-        write(id, fight: fought.merge(owed: fought.fetch(:owed, 0.0) + owed).freeze)
+        debts = fought.fetch(:owed, {})
+        write(id, fight: fought.merge(owed: debts.merge(attacker => debts.fetch(attacker, 0.0) + owed).freeze).freeze)
       end
 
       # **A wrong remembered**, by how much it hurt and how spiteful the one wronged is. Held for

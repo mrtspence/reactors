@@ -1,0 +1,66 @@
+# Wounds from being struck and from being crushed. Examples to be rewritten.
+#
+# ## The shape
+#
+# `kind → tier → variant`. Every kind declares all four tiers (`minor`, `significant`, `severe`,
+# `mortal`) and every tier exactly three variants, each a `label`, a `weight` (how often it is the
+# one picked against the others of its tier) and `derates`: stats it multiplies while carried, 0..1,
+# naming only stats. Refused at boot otherwise. See docs/design_sketches/wounds.md.
+#
+# **A variant's place in its tier matters**: a wound that heals or deepens across a tier becomes the
+# variant in the same place in the next, so the first of each tier should be the same injury
+# getting better or worse where it can be.
+
+impact:
+  minor:
+    knocked_out_tooth: { label: Knocked-out tooth, weight: 1, derates: { charisma: 0.9 } }
+    black_eye: { label: Black eye, weight: 1, derates: { intelligence: 0.95, dexterity: 0.95 } }
+    bruised_ribs: { label: Bruised ribs, weight: 1, derates: { endurance: 0.9, strength: 0.95 } }
+  significant:
+    concussion: { label: Concussion, weight: 1, derates: { intelligence: 0.7, dexterity: 0.8, agility: 0.85 } }
+    broken_nose: { label: Broken nose, weight: 1, derates: { endurance: 0.8, charisma: 0.75 } }
+    cracked_ribs: { label: Cracked ribs, weight: 1, derates: { endurance: 0.65, strength: 0.75, agility: 0.85 } }
+  severe:
+    fractured_skull: { label: Fractured skull, weight: 1, derates: { intelligence: 0.3, dexterity: 0.4, agility: 0.5 } }
+    broken_jaw: { label: Broken jaw, weight: 1, derates: { endurance: 0.5, charisma: 0.3 } }
+    stove_in_chest: { label: Stove-in chest, weight: 1, derates: { endurance: 0.25, strength: 0.4 } }
+  mortal:
+    crushed_skull: { label: Crushed skull, weight: 1, derates: { intelligence: 0.05, dexterity: 0.05, agility: 0.05 } }
+    broken_neck: { label: Broken neck, weight: 1, derates: { strength: 0.05, agility: 0.05 } }
+    burst_organs: { label: Burst organs, weight: 1, derates: { endurance: 0.05, strength: 0.1 } }
+
+crush:
+  minor:
+    crushed_fingers: { label: Crushed fingers, weight: 1, derates: { dexterity: 0.85 } }
+    crushed_toes: { label: Crushed toes, weight: 1, derates: { agility: 0.9 } }
+    pinched_hand: { label: Pinched hand, weight: 1, derates: { dexterity: 0.9, strength: 0.95 } }
+  significant:
+    broken_leg: { label: Broken leg, weight: 1, derates: { agility: 0.4, strength: 0.8 } }
+    broken_arm: { label: Broken arm, weight: 1, derates: { strength: 0.6, dexterity: 0.6, combat_prowess: 0.7 } }
+    crushed_foot: { label: Crushed foot, weight: 1, derates: { agility: 0.55 } }
+  severe:
+    shattered_leg: { label: Shattered leg, weight: 1, derates: { agility: 0.2, strength: 0.6 } }
+    broken_spine: { label: Broken spine, weight: 1, derates: { strength: 0.2, agility: 0.1 } }
+    crushed_pelvis: { label: Crushed pelvis, weight: 1, derates: { agility: 0.15, strength: 0.4 } }
+  mortal:
+    crushed_chest: { label: Crushed chest, weight: 1, derates: { endurance: 0.05, strength: 0.05 } }
+    severed_spine: { label: Severed spine, weight: 1, derates: { strength: 0.05, agility: 0.0 } }
+    pinned_and_crushed: { label: Pinned and crushed, weight: 1, derates: { strength: 0.05, agility: 0.05, endurance: 0.1 } }
+
+blast:
+  minor:
+    ringing_ears: { label: Ringing ears, weight: 1, derates: { intelligence: 0.9 } }
+    peppered_skin: { label: Peppered skin, weight: 1, derates: { dexterity: 0.95, charisma: 0.95 } }
+    winded: { label: Winded, weight: 1, derates: { endurance: 0.9 } }
+  significant:
+    burst_eardrums: { label: Burst eardrums, weight: 1, derates: { intelligence: 0.7, agility: 0.85 } }
+    blast_lung: { label: Blast lung, weight: 1, derates: { endurance: 0.6 } }
+    embedded_shrapnel: { label: Embedded shrapnel, weight: 1, derates: { strength: 0.75, agility: 0.75 } }
+  severe:
+    blinded: { label: Blinded, weight: 1, derates: { intelligence: 0.4, dexterity: 0.2, agility: 0.4 } }
+    torn_limb: { label: Torn limb, weight: 1, derates: { strength: 0.3, agility: 0.3, dexterity: 0.4 } }
+    collapsed_lung: { label: Collapsed lung, weight: 1, derates: { endurance: 0.2, strength: 0.5 } }
+  mortal:
+    blown_apart: { label: Blown apart, weight: 1, derates: { strength: 0.0, agility: 0.0 } }
+    shattered_by_the_blast: { label: Shattered by the blast, weight: 1, derates: { endurance: 0.05, strength: 0.05 } }
+    killed_by_the_shock: { label: Killed by the shock, weight: 1, derates: { endurance: 0.0 } }

@@ -54,7 +54,20 @@ module CrowdTuning
                      cast: cast, boss: boss)
       end
     end
-    crowd + bosses
+    crowd + bosses + melees
+  end
+
+  # **Fights of several**, in the shapes §7.9 of the sketch says to check.
+  FEUDING = %i[elowynne dalthu rijgazh urist].freeze
+
+  def self.melees
+    [ Scenario.new(group: :melees, name: "4 dwarves, a goblin over them", cast: Array.new(4, :urist), boss: :rijgazh),
+      Scenario.new(group: :melees, name: "2 goblins and a dwarf", cast: %i[rijgazh rijgazh urist]),
+      Scenario.new(group: :melees, name: "5 of the feuding races", cast: FEUDING + [ :galathas ]),
+      *[ nil, :throg, :arunessa ].map do |boss|
+        Scenario.new(group: :melees, name: "12 of the feuding races, #{boss ? "#{boss} over them" : 'no boss'}",
+                     cast: Array.new(12) { |i| FEUDING[i % FEUDING.length] }, boss: boss)
+      end ]
   end
 
   TUNABLE = [ ReactorSim::Combat, ReactorSim::Animosity, ReactorSim::Injury ].freeze
@@ -145,24 +158,40 @@ module CrowdTuning
     fighting_ticks = 0
     fighting_share = 0.0
     peak = 0
+    biggest = 0
     first = nil
     half_down = nil
     ticks.times do |t|
       events.concat(op.step!(tick: t + 1))
       states = op.state.fetch(:minions)
-      brawls = states.count { |_, s| s.dig(:fight, :led) && s.dig(:fight, :blows) }
       first ||= (t + 1) * ReactorSim::DT if events.any? { |e| e[:type] == :quarrel }
       half_down ||= (t + 1) * ReactorSim::DT if states.count { |_, s| ReactorSim::Animosity.stood_down?(s) } * 2 >= states.length
-      next unless brawls.positive?
+      fights = standing_fights(states)
+      next if fights.empty?
 
       fighting_ticks += 1
-      fighting_share += 2.0 * brawls / states.length
-      peak = [ peak, brawls ].max
+      fighting_share += fights.values.sum.fdiv(states.length)
+      peak = [ peak, fights.length ].max
+      biggest = [ biggest, fights.values.max ].max
     end
     states = op.state.fetch(:minions)
     { ticks: ticks, heads: people.length, events: events, acts: Thread.current[:crowd_acts],
-      fighting_ticks: fighting_ticks, fighting_share: fighting_share, peak: peak, first_s: first,
-      half_down_s: half_down, down: states.count { |_, s| ReactorSim::Animosity.stood_down?(s) } }
+      fighting_ticks: fighting_ticks, fighting_share: fighting_share, peak: peak, biggest: biggest,
+      first_s: first, half_down_s: half_down, down: states.count { |_, s| ReactorSim::Animosity.stood_down?(s) } }
+  end
+
+  # `{ melee => how many in it are on their feet }`.
+  def standing_fights(states)
+    states.each_with_object(Hash.new(0)) do |(_, s), acc|
+      melee = s.dig(:fight, :melee)
+      acc[melee] += 1 if melee && !ReactorSim::Animosity.stood_down?(s)
+    end
+  end
+
+  # Killed after already being carried out: the boot.
+  def kicked_to_death(events)
+    severe = events.select { |e| e[:type] == :minion_hurt && e[:mode] == :severe }.map { |e| e[:node] }
+    events.count { |e| e[:type] == :minion_hurt && e[:mode] == :mortal && severe.include?(e[:node]) }
   end
 
   # --- the report ----------------------------------------------------------------------------
@@ -190,6 +219,8 @@ module CrowdTuning
     { "IRRITATION" => animosity::IRRITATION, "SPEND_PER_S" => animosity::SPEND_PER_S,
       "MEND_PER_S" => animosity::MEND_PER_S, "RUMPUS" => animosity::RUMPUS,
       "ESCALATION" => animosity::ESCALATION, "VIOLENCE_HOSTILITY" => animosity::VIOLENCE_HOSTILITY,
+      "FOCUS" => animosity::FOCUS, "GANGED" => animosity::GANGED, "WITNESS_BASE" => animosity::WITNESS_BASE,
+      "WITNESSED" => animosity::WITNESSED.map { |mode, w| "#{mode} #{w}" }.join(", "), "KICKING" => animosity::KICKING,
       "AUTHORITY_HALF" => animosity::AUTHORITY_HALF, "MOST_AVERTED" => animosity::MOST_AVERTED }
       .each { |name, value| lines << "| `#{name}` | #{value} |" }
     lines << ""
@@ -197,15 +228,18 @@ module CrowdTuning
     results.group_by { |scenario, _| scenario.group }.each do |group, rows|
       lines << "## #{group.to_s.capitalize}"
       lines << ""
-      lines << "Ran out is how often anybody's patience ran out; it comes to a row, a brawl, a shove, " \
-               "a quarrel the boss averted, or nothing (seethed). Fighting is the share of the shift " \
-               "with a brawl going and, while one is, the share of the room in it; peak is the most " \
-               "brawls at once. Down is everybody carried out or killed by the end, of the room; half " \
-               "down is when half the room was, in the shifts it happened in."
+      lines << "Ran out is how often anybody's patience ran out; it comes to a row, a heckle at somebody " \
+               "fighting, a new brawl, joining one, a quarrel the boss averted, or nothing (seethed). " \
+               "Fighting is the share of the shift with a brawl going and, while one is, the share of the " \
+               "room on their feet in one; fights at once and the largest fight are the most there ever " \
+               "were. Kicked to death is killed after being carried out. Down is everybody carried out or " \
+               "killed by the end, of the room; half down is when half the room was, in the shifts it " \
+               "happened in."
       lines << ""
-      lines << "| Scenario | First quarrel | Ran out /h | Rows /h | Brawls /h | Shoves /h | Averted /h | Seethed /h | " \
-               "Drew /h | Hurt minor / significant / severe / mortal per h | Fighting: of shift, of room | Peak | Down | Half down |"
-      lines << "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+      lines << "| Scenario | First quarrel | Ran out /h | Rows / heckles /h | Brawls / joined /h | Averted /h | Seethed /h | " \
+               "Drew /h | Hurt minor / significant / severe / mortal per h | Kicked to death /h | " \
+               "Fighting: of shift, of room | Fights at once | Largest fight | Down | Half down |"
+      lines << "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
       rows.each { |scenario, runs| lines << row(scenario, runs, options) }
       lines << ""
     end
@@ -229,13 +263,14 @@ module CrowdTuning
     heads = runs.first[:heads]
     halves = runs.filter_map { |r| r[:half_down_s] }
     half = halves.empty? ? "never" : "#{num(halves.sum / halves.length / 60.0)} min (#{halves.length}/#{runs.length})"
-    "| #{scenario.name} | #{first} | #{num(per_hour(acts.length, runs, options))} | " \
-      "#{num(per_hour(quarrels(runs, :row), runs, options))} | #{num(per_hour(quarrels(runs, :brawl), runs, options))} | " \
-      "#{num(per_hour(quarrels(runs, :shove), runs, options))} | " \
-      "#{num(per_hour(acts.count { |a| a[:came_to] == :averted }, runs, options))} | " \
-      "#{num(per_hour(acts.count { |a| a[:came_to] == :seethed }, runs, options))} | " \
-      "#{num(per_hour(quarrels(runs, :armed), runs, options))} | #{injuries.join(' / ')} | " \
-      "#{pct(fighting, ticks)}, #{share} | #{runs.map { |r| r[:peak] }.max} | " \
+    hourly = ->(count) { num(per_hour(count, runs, options)) }
+    "| #{scenario.name} | #{first} | #{hourly.(acts.length)} | " \
+      "#{hourly.(quarrels(runs, :row))} / #{hourly.(quarrels(runs, :heckle))} | " \
+      "#{hourly.(quarrels(runs, :brawl))} / #{hourly.(quarrels(runs, :joined))} | " \
+      "#{hourly.(acts.count { |a| a[:came_to] == :averted })} | #{hourly.(acts.count { |a| a[:came_to] == :seethed })} | " \
+      "#{hourly.(quarrels(runs, :armed))} | #{injuries.join(' / ')} | " \
+      "#{hourly.(runs.sum { |r| kicked_to_death(r[:events]) })} | " \
+      "#{pct(fighting, ticks)}, #{share} | #{runs.map { |r| r[:peak] }.max} | #{runs.map { |r| r[:biggest] }.max} | " \
       "#{num(runs.sum { |r| r[:down] } / runs.length.to_f)} of #{heads} | #{half} |"
   end
 
@@ -276,7 +311,7 @@ module CrowdTuning
       end
       o.on("--minutes N", Float, "simulated minutes a shift (60)") { |n| options.minutes = n }
       o.on("--seeds N", Integer, "shifts per scenario (3)") { |n| options.seeds = n }
-      o.on("--only GROUPS", "crowds and/or bosses, comma-separated") { |g| options.only = g.split(",").map(&:to_sym) }
+      o.on("--only GROUPS", "crowds, bosses and/or melees, comma-separated") { |g| options.only = g.split(",").map(&:to_sym) }
       o.on("--out PATH", "where the report goes (docs/tuning/crowds.md)") { |p| options.out = p }
       o.on("--set NAME=VALUE", "try a figure on Combat, Animosity or Injury for this pass; repeatable") do |pair|
         name, value = pair.split("=", 2)

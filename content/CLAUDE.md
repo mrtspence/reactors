@@ -219,8 +219,9 @@ something the simulation may know about. `Registry#sheet(id)` returns the first 
   beside, `focused` resists it, `defence` is defensive gear, `cutting` is the knife's aid. An item
   may carry `weapon: { handling:, edge:, wounds: }` — a blend of what it asks of the hand (a pick
   swing-heavy, a knife precision-heavy, summing past one for a good weapon), severity its edge adds
-  whoever holds it, and the wounds it leaves; `puncture` is a blade's or a pick's, resisted as any
-  hazard tag is by `puncture_resistance`.
+  whoever holds it, and the kinds of wound a blow leaves as shares of it (`{ puncture: 0.6, impact:
+  0.4 }`), each resisted by its own `_resistance`. `regeneration` and `slow_healer` are how fast
+  somebody's wounds heal between matches.
 - **`strength` is a strength-to-WEIGHT ratio, and 1.0 is a human's.** Below 1.0 means worse
   pound-for-pound than a person, which is where most large things sit — strength grows with
   cross-section and weight with volume. So an ogre is **0.65** and overwhelming anyway, because
@@ -263,6 +264,15 @@ something the simulation may know about. `Registry#sheet(id)` returns the first 
 - **Values ADD across layers, then clamp. Consumers multiply.** Merge adds, use multiplies.
 - **Health, fatigue, station and injury are state, not content** — they change during a match and
   live in `state[:minions]`. Getting that backwards would make a hurt minion recover on restore.
+
+## Wounds
+
+`content/wounds/` is what a harm leaves on a body: **kind → tier → variant**, every kind
+(`Wounds::KINDS`), all four tiers, exactly three variants a tier, each a `label`, a `weight` and
+`derates:` on real stats, 0..1. Complete or refused at boot, so no wound falls back to a generic one.
+**A variant's place in its tier matters**: a wound that heals or deepens across a tier becomes the
+variant in the same place in the next. Guide:
+[`docs/guides/add-content.md`](../docs/guides/add-content.md#a-wound).
 
 ## Climates
 

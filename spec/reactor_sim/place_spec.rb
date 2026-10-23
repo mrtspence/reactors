@@ -64,7 +64,7 @@ RSpec.describe ReactorSim::Place do
   def hurt(events) = events.select { |e| e[:type] == :minion_hurt }.map { |e| e[:node] }
 
   describe "a hazard keyed by place" do
-    let(:by_place) { { rupture: { tags: [ :scald ], places: { engine_room: 9.0 } } } }
+    let(:by_place) { { rupture: { wounds: { scald: 1.0 }, places: { engine_room: 9.0 } } } }
 
     # The whole point: the passer-by holds no lever and is hurt anyway.
     it "reaches everybody in the room, posted or not" do
@@ -91,7 +91,7 @@ RSpec.describe ReactorSim::Place do
   # engine — behaving exactly as it did.
   describe "a hazard keyed by station" do
     it "reaches only the person posted there" do
-      op = rig(endangers: { rupture: { tags: [ :scald ], stations: { lever: 9.0 } } })
+      op = rig(endangers: { rupture: { wounds: { scald: 1.0 }, stations: { lever: 9.0 } } })
 
       expect(hurt(run!(op))).to contain_exactly(:driver)
     end
@@ -101,7 +101,7 @@ RSpec.describe ReactorSim::Place do
   # because the two arrived through different keys.
   describe "a hazard that names both" do
     it "adds the severities where both reach the same person" do
-      tags = { tags: [ :scald ] }
+      tags = { wounds: { scald: 1.0 } }
       both = rig(endangers: { rupture: tags.merge(places: { engine_room: 1.0 },
                                                   stations: { lever: 1.0 }) })
       place_only = rig(endangers: { rupture: tags.merge(places: { engine_room: 1.0 }) })

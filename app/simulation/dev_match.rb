@@ -166,21 +166,21 @@ module DevMatch
                           .slots.to_h { |slot| [ slot.id, slot.accepts ] }
   end
 
-  # **A match beginning, which is the one thing that advances the recovery clock.**
+  # **A match beginning, which is the one thing that heals wounds.**
   #
   # Not in `build`, which the web process also calls to rebuild a `Match` for the panel and the
-  # roster — a decrement there would tick somebody's recovery down every time a page rendered,
-  # so a player could heal their crew by refreshing.
+  # roster — healing there would mend somebody every time a page rendered, so a player could heal
+  # their crew by refreshing.
   #
   # TODO: expedient — this belongs on `match.lifecycle` as the `started` record, and the clock
   # belongs to whatever consumes it. Called today from the two places a match actually starts: a
   # reset requested by the player, and posting a crew.
   def start!
-    MinionCondition.advance!(DevPlayer::ID)
+    Wound.heal!(DevPlayer::ID)
     Grudge.fade!(DevPlayer::ID)
   rescue StandardError => e
-    # A recovery clock that failed to tick must not stop a match from starting.
-    Rails.logger.error("dev_match: could not advance recovery: #{e.class}: #{e.message}")
+    # Wounds that failed to heal must not stop a match from starting.
+    Rails.logger.error("dev_match: could not heal wounds: #{e.class}: #{e.message}")
   end
 
   # **The loadout and crew ride INSIDE this command, not merely referenced by it.** The runner
@@ -199,9 +199,11 @@ module DevMatch
       # **One sky for the whole match**, carried once rather than per machine, so every machine is
       # rebuilt under the same season.
       "conditions" => stored_conditions.transform_keys(&:to_s).transform_values(&:to_s),
-      # Who hates whom from earlier matches, for every machine's crew at once — the whole account,
-      # since the simulation reads only the people a machine actually fields.
-      "grudges" => stored_grudges }
+      # Who hates whom from earlier matches, and what they are still carrying from them, for every
+      # machine's crew at once — the whole account, since the simulation reads only the people a
+      # machine actually fields.
+      "grudges" => stored_grudges,
+      "wounds" => stored_wounds }
   end
 
   # The season the match is set up for, as the simulation takes it.
@@ -209,12 +211,14 @@ module DevMatch
 
   def stored_grudges = Grudge.carried_for(DevPlayer::ID)
 
+  def stored_wounds = Wound.carried_for(DevPlayer::ID)
+
   # **Ask the runner to rebuild the match**, which is what a reset and a change of setup both are.
-  # The command is built BEFORE the recovery clock advances, so somebody whose last match this was
-  # is still unavailable for the machine being built now.
+  # Wounds heal BEFORE the command is built, so the match being built now is the one a severe
+  # wound comes back to lesser — and whoever is still too hurt for it is unavailable for it.
   def request_reset!
-    command = reset_command
     start!
+    command = reset_command
     CommandProducer.instance.produce(match_id: ID, command: command)
   end
 
@@ -250,22 +254,23 @@ module DevMatch
   # have hired anybody.
   # `specs:` is what a reset hands over, keyed by operation id; left unset, every machine falls
   # back to what is stored, which is what a cold boot wants.
-  # `conditions:` and `grudges:` are what a reset hands over; left unset, what is stored.
-  def build(specs: {}, conditions: nil, grudges: nil)
+  # `conditions:`, `grudges:` and `wounds:` are what a reset hands over; left unset, what is stored.
+  def build(specs: {}, conditions: nil, grudges: nil, wounds: nil)
     sky = conditions ? conditions.to_h { |k, v| [ k.to_sym, v.to_sym ] } : stored_conditions
     held = grudges || stored_grudges
+    carried = wounds || stored_wounds
     ReactorSim::Match.create(
       id: ID, seed: SEED, time_scale: time_scale, couplings: couplings,
-      operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}, sky, held) }
+      operations: operation_ids.map { |id| operation_spec(id, (specs || {})[id.to_s] || {}, sky, held, carried) }
     )
   end
 
-  # Every machine with slots is built under the match's sky and with its crew's grudges. One
-  # without — the dev engine — has nothing outdoors and nobody in it.
-  def operation_spec(operation_id, given, sky = stored_conditions, grudges = stored_grudges)
+  # Every machine with slots is built under the match's sky, with its crew's grudges and wounds.
+  # One without — the dev engine — has nothing outdoors and nobody in it.
+  def operation_spec(operation_id, given, sky = stored_conditions, grudges = stored_grudges, wounds = stored_wounds)
     return { id: operation_id, type: kind_of(operation_id) } unless fittable?(operation_id)
 
-    { id: operation_id, type: kind_of(operation_id), conditions: sky, grudges: grudges,
+    { id: operation_id, type: kind_of(operation_id), conditions: sky, grudges: grudges, wounds: wounds,
       chassis: given["chassis"]&.to_sym || chassis(operation_id: operation_id),
       loadout: given["loadout"]&.to_h { |slot, part| [ slot.to_sym, part&.to_sym ] } ||
                stored_parts(operation_id: operation_id),
@@ -285,7 +290,7 @@ module DevMatch
 
   # **The roster is the player's INTENT; availability is applied when a machine is built.** A
   # player who posted Jim and then watched him carried out keeps Jim in the roster, and the
-  # labour exchange fills the job meanwhile; when his recovery runs out he is simply back, with
+  # labour exchange fills the job meanwhile; once his wounds have healed enough he is simply back, with
   # no second decision to make. Rewriting the row would silently discard a choice the player
   # made and leave them to notice and redo it.
   #
@@ -323,7 +328,7 @@ module DevMatch
   end
 
   def available(crew)
-    unavailable = MinionCondition.remaining_for(DevPlayer::ID)
+    unavailable = Wound.remaining_for(DevPlayer::ID)
     return crew if unavailable.empty?
 
     crew.to_h do |role_id, posting|

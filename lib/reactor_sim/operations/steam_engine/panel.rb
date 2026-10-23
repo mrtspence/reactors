@@ -458,9 +458,9 @@ module ReactorSim
              }) do |id:, seed:, time_scale: 1.0, state: nil,
                                                      rngs: nil, content: nil,
                                                      chassis: :high_pressure, loadout: {},
-                                                     crew: {}, conditions: nil, grudges: nil|
+                                                     crew: {}, conditions: nil, grudges: nil, wounds: nil|
       SteamEngine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
-                        conditions: conditions, grudges: grudges,
+                        conditions: conditions, grudges: grudges, wounds: wounds,
                         time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

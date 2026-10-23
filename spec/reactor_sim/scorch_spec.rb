@@ -22,16 +22,22 @@ RSpec.describe ReactorSim::Scorch do
     )
   end
 
-  def unhurt = { resilience: 1.0, initial_resilience: 1.0, injury: nil, burns: 0.0 }
+  # A fit hand's resilience, unmarked.
+  def unhurt = { resilience: 2.2, initial_resilience: 2.2, injury: nil, burns: 0.0, wounds: [], doses: {} }
 
   # A room full of air at a temperature, in the shape `Scorch.gas` reports.
   def air_at(kelvin) = [ kelvin, 1_231.0 ]
+
+  # A quarter-second in it.
+  def burn(minion, state, gas)
+    described_class.advance(minion, state, gas, 0.25, catalogue: ReactorSim::Content.default.wounds, die: 0.0)
+  end
 
   # Seconds of exposure before a tier is announced, or nil inside the window given.
   def seconds_to(minion, gas, tier, limit: 1_800.0)
     state = unhurt
     ((limit / 0.25).to_i).times do |i|
-      state, mode = described_class.advance(minion, state, gas, 0.25)
+      state, mode = burn(minion, state, gas)
       return (i + 1) * 0.25 if mode == tier
     end
     nil
@@ -49,7 +55,7 @@ RSpec.describe ReactorSim::Scorch do
     end
 
     it "leaves a minion untouched where there is no gas to stand in" do
-      state, mode = described_class.advance(hand, unhurt, nil, 0.25)
+      state, mode = burn(hand, unhurt, nil)
 
       expect(mode).to be_nil
       expect(state).to eq(unhurt)
@@ -119,11 +125,13 @@ RSpec.describe ReactorSim::Scorch do
   end
 
   describe "what it leaves behind" do
-    it "grinds resilience rather than tiring anybody" do
-      state, = described_class.advance(hand, unhurt, air_at(800.0), 0.25)
+    it "grinds resilience rather than tiring anybody, into one standing heat wound" do
+      state = unhurt
+      40.times { state, = burn(hand, state, air_at(800.0)) }
 
-      expect(state.fetch(:resilience)).to be < 1.0
+      expect(state.fetch(:resilience)).to be < unhurt.fetch(:resilience)
       expect(state).not_to have_key(:fatigue)
+      expect(state.fetch(:wounds).map { |w| w.fetch(:kind) }).to eq(%i[heat])
     end
 
     # **Burns do not drain, and that is the difference from suffocation.** Walking out of the
@@ -131,10 +139,10 @@ RSpec.describe ReactorSim::Scorch do
     # counterplay is the fan — there is no equivalent for having been burnt.
     it "does not heal when somebody walks out of it" do
       state = unhurt
-      40.times { state, = described_class.advance(hand, state, air_at(800.0), 0.25) }
+      40.times { state, = burn(hand, state, air_at(800.0)) }
       burnt = state.fetch(:resilience)
 
-      400.times { state, = described_class.advance(hand, state, air_at(290.0), 0.25) }
+      400.times { state, = burn(hand, state, air_at(290.0)) }
 
       expect(state.fetch(:resilience)).to eq(burnt)
     end
@@ -151,7 +159,7 @@ RSpec.describe ReactorSim::Scorch do
       state = unhurt
       modes = []
       400.times do
-        state, mode = described_class.advance(hand, state, air_at(1_300.0), 0.25)
+        state, mode = burn(hand, state, air_at(1_300.0))
         modes << mode if mode
       end
 
@@ -165,7 +173,7 @@ RSpec.describe ReactorSim::Scorch do
   it "draws no entropy" do
     runs = Array.new(2) do
       state = unhurt
-      100.times { state, = described_class.advance(hand, state, air_at(900.0), 0.25) }
+      100.times { state, = burn(hand, state, air_at(900.0)) }
       state
     end
 

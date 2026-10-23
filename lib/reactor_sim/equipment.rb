@@ -30,7 +30,7 @@ module ReactorSim
     #             swung, a knife is placed — whose weights may sum past one for a good weapon or
     #             short of it for a poor one
     #   edge      severity it adds to a landed blow whoever holds it: a point, a blade
-    #   wounds    the hazard tags of what it leaves
+    #   wounds    the kinds of wound a blow leaves, as shares of it (`Wounds.shares!`)
     #   mass_kg   what it weighs to swing — the item's own, which is what a fight tires you by
     def self.weapon_profile(owner, spec, mass_kg: 0.0)
       handling = spec.fetch(:handling).to_h { |stat, weight| [ stat.to_sym, weight.to_f ] }.freeze
@@ -39,13 +39,13 @@ module ReactorSim
       raise Error, "#{owner}: weapon handling weights cannot be negative" if handling.values.any?(&:negative?)
 
       { handling: handling, edge: spec.fetch(:edge, 0.0).to_f,
-        wounds: Array(spec.fetch(:wounds)).map(&:to_sym).freeze, mass_kg: mass_kg.to_f }.freeze
+        wounds: Wounds.shares!(owner, spec.fetch(:wounds)), mass_kg: mass_kg.to_f }.freeze
     end
 
     # **Bare hands, which are a poor weapon**: mostly swing, a little placement, at six tenths of
     # what a proper one gives — so somebody swinging a pick to kill is far deadlier than somebody
     # beating the brakes off a rival.
-    UNARMED = weapon_profile("fists", { handling: { swing: 0.42, precision: 0.18 }, wounds: %i[impact] })
+    UNARMED = weapon_profile("fists", { handling: { swing: 0.42, precision: 0.18 }, wounds: { impact: 1.0 } })
 
     # **`mass_kg:` is required, with no default.** What a thing weighs is half of what it costs to
     # carry it, so an item that does not say is a free upgrade by omission. Required rather than

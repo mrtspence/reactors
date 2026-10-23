@@ -27,9 +27,26 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
 
   def fresh(minion, seed: 1) = minion.initial_state(ReactorSim::Rng.stream(seed, "rig/hand"))
 
-  def hazard(severity, tags: [ :blast ])
-    { station: :lever, severity: severity, tags: tags, sources: [ :boiler ] }
+  # **A catalogue of its own**, so nothing here moves when the shipped one is rewritten: every
+  # kind, tier and variant, derating strength by tier.
+  def catalogue
+    left = { minor: 0.9, significant: 0.6, severe: 0.2, mortal: 0.0 }
+    @catalogue ||= ReactorSim::Wounds::Catalogue.new(
+      ReactorSim::Wounds::KINDS.to_h do |kind|
+        [ kind, ReactorSim::Wounds::TIERS.to_h do |tier|
+          [ tier, (1..3).to_h { |i| [ :"#{kind}_#{tier}_#{i}", { label: "#{kind} #{i}", weight: i, derates: { strength: left.fetch(tier) } } ] } ]
+        end ]
+      end
+    )
   end
+
+  def hazard(severity, wounds: { blast: 1.0 }, causes: [])
+    { station: :lever, wounds: ReactorSim::Wounds.dealt(wounds, severity), causes: causes, sources: [ :boiler ] }
+  end
+
+  def check(minion, state, harm, die: 0.0) = described_class.check(minion, state, harm, catalogue: catalogue, die: die)
+
+  def bite(minion, harm, kind) = harm.dig(:wounds, kind) - described_class.resisted(minion, harm, kind, harm.dig(:wounds, kind) / harm[:wounds].values.sum)
 
   def ctx_for(op)
     ReactorSim::Operation::Context.new(
@@ -40,40 +57,49 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
 
   describe "resistance" do
     # One naming convention rather than a lookup table: a hazard tag `:x` is resisted by the
-    # minion tag `:x_resistance`, so adding a hazard kind means adding gear that names it and
-    # nothing else.
-    it "is reduced by gear that names the hazard's own tag" do
-      bare = described_class.resistance(worker, hazard(2.0))
-      clad = described_class.resistance(worker(tags: { blast_resistance: 0.5 }), hazard(2.0))
+    # minion tag `:x_resistance`, so adding a kind or a cause means adding gear that names it.
+    it "is reduced by gear that names the kind of wound" do
+      clad = worker(tags: { blast_resistance: 0.5 })
 
-      expect(clad).to be_within(1e-9).of(bare + 0.5)
+      expect(bite(clad, hazard(2.0), :blast)).to be_within(1e-9).of(bite(worker, hazard(2.0), :blast) - 0.5)
+    end
+
+    it "is reduced by gear against what caused it" do
+      fall = hazard(2.0, wounds: { crush: 1.0 }, causes: %i[rockfall])
+      helmeted = worker(tags: { rockfall_resistance: 0.3 })
+
+      expect(bite(helmeted, fall, :crush)).to be < bite(worker, fall, :crush)
     end
 
     it "ignores gear that resists something else entirely" do
       clad = worker(tags: { scald_resistance: 0.9 })
 
-      expect(described_class.resistance(clad, hazard(2.0, tags: [ :blast ])))
-        .to be_within(1e-9).of(described_class.resistance(worker, hazard(2.0)))
+      expect(bite(clad, hazard(2.0), :blast)).to be_within(1e-9).of(bite(worker, hazard(2.0), :blast))
     end
 
     # **`clumsy` makes the bite worse**, which is what turns a day-labourer from merely useless
-    # into genuinely dangerous to employ — and it is the hook the unlit / no-rails / cramped
-    # operation upgrades will hang on.
-    it "is reduced by clumsiness rather than helped by it" do
-      expect(described_class.resistance(worker(tags: { clumsy: 0.3 }), hazard(2.0)))
-        .to be < described_class.resistance(worker, hazard(2.0))
+    # into genuinely dangerous to employ.
+    it "is reduced by clumsiness rather than helped by it, and improved by a sense for danger" do
+      expect(bite(worker(tags: { clumsy: 0.3 }), hazard(2.0), :blast)).to be > bite(worker, hazard(2.0), :blast)
+      expect(bite(worker(tags: { hazard_sense: 0.3 }), hazard(2.0), :blast)).to be < bite(worker, hazard(2.0), :blast)
     end
 
-    it "is improved by a sense for danger" do
-      expect(described_class.resistance(worker(tags: { hazard_sense: 0.3 }), hazard(2.0)))
-        .to be > described_class.resistance(worker, hazard(2.0))
+    # **Each kind on its own**: red-hot scrap is a crush and a burn, and a helmet turns only one.
+    it "resists each kind of a harm separately, and takes the same total as one kind would bare" do
+      scrap = hazard(3.0, wounds: { crush: 0.5, burn: 0.5 })
+      plated = worker(tags: { crush_resistance: 2.0 })
+      _, _, wounds = check(plated, fresh(plated), scrap)
+      split = bite(worker, scrap, :crush) + bite(worker, scrap, :burn)
+
+      expect(wounds.map { |w| w.fetch(:kind) }).to eq(%i[burn])
+      expect(split).to be_within(1e-9).of(bite(worker, hazard(3.0), :blast))
     end
   end
 
   describe "the ladder" do
     it "leaves somebody untouched by a hazard they out-resist" do
       hand = worker
-      state, mode = described_class.check(hand, fresh(hand), hazard(0.5))
+      state, mode = check(hand, fresh(hand), hazard(0.5))
 
       expect(mode).to be_nil
       expect(state.fetch(:resilience)).to eq(fresh(hand).fetch(:resilience))
@@ -81,7 +107,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
 
     it "kills outright when one blow is big enough that what is left does not matter" do
       hand = worker
-      _, mode = described_class.check(hand, fresh(hand), hazard(9.0))
+      _, mode = check(hand, fresh(hand), hazard(9.0))
 
       expect(mode).to be(:mortal)
     end
@@ -91,77 +117,157 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
       weak = worker(stats: { toughness: 0.4 }, tags: { clumsy: 0.3 })
       kitted = worker(stats: { toughness: 1.2 }, tags: { blast_resistance: 0.5 })
 
-      _, weak_mode = described_class.check(weak, fresh(weak), hazard(3.0))
-      _, kitted_mode = described_class.check(kitted, fresh(kitted), hazard(3.0))
+      _, weak_mode = check(weak, fresh(weak), hazard(3.0))
+      _, kitted_mode = check(kitted, fresh(kitted), hazard(3.0))
 
       expect(described_class::ORDER.index(weak_mode))
         .to be > described_class::ORDER.index(kitted_mode)
     end
 
-    # The accumulation route, and `Wearing`'s fatigue half: a long shift in a hot place tells
-    # eventually, even when no single moment was dramatic.
-    it "grinds somebody down over repeated small hazards" do
+    # **The flaw the wounds exist to fix**: a second harm no worse than the first still wounds.
+    it "wounds again for a second harm of a lesser tier, and the wounds stack" do
+      hand = worker
+      hurt, = check(hand, fresh(hand), hazard(1.6))
+      again, mode, = check(hand, hurt, hazard(1.3))
+
+      expect(mode).to be(:minor)
+      expect(again.fetch(:wounds).map { |w| w.fetch(:tier) }).to eq(%i[significant minor])
+      expect(hand.rate_multiplier(again)).to be < hand.rate_multiplier(hurt)
+    end
+
+    # The accumulation route: many small harms take somebody out of a shift with no single one
+    # being much, and enough of them kill.
+    it "collapses somebody whose resilience runs out whatever their wounds, and kills them far past it" do
       hand = worker
       state = fresh(hand)
-      modes = Array.new(12) do
-        state, mode = described_class.check(hand, state, hazard(1.2))
+      modes = Array.new(30) do
+        state, mode, = check(hand, state, hazard(1.3))
         mode
       end
 
-      expect(state.fetch(:resilience)).to be < fresh(hand).fetch(:resilience)
-      expect(modes.compact).to include(:minor)
+      expect(modes.compact).to include(:minor, :severe, :mortal)
+      expect(state.fetch(:wounds).map { |w| w.fetch(:tier) }.uniq).to eq(%i[minor])
     end
 
     # Being carried out clears the station, which is the whole mechanical consequence: whatever
     # that lever needed doing stops being done.
     it "stands a severely hurt minion down from their post" do
-      hand = worker(stats: { toughness: 0.5 })
-      state, mode = described_class.check(hand, fresh(hand), hazard(2.2))
+      hand = worker
+      state, mode = check(hand, fresh(hand), hazard(2.8))
 
       expect(mode).to be(:severe)
       expect(state.fetch(:station)).to be_nil
     end
 
-    it "leaves the walking wounded at their post" do
+    it "leaves the walking wounded at their post, and a knock costs them less than a wound" do
       hand = worker
-      state, mode = described_class.check(hand, fresh(hand), hazard(1.6))
+      wounded, mode = check(hand, fresh(hand), hazard(1.6))
+      knocked, knock = check(hand, fresh(hand), hazard(1.3))
 
       expect(mode).to be(:significant)
-      expect(state.fetch(:station)).to be(:lever)
-    end
-
-    it "knocks somebody before it wounds them, and a knock costs them far less" do
-      hand = worker
-      knocked, mode = described_class.check(hand, fresh(hand), hazard(1.3))
-      wounded, = described_class.check(hand, fresh(hand), hazard(1.6))
-
-      expect(mode).to be(:minor)
+      expect(knock).to be(:minor)
+      expect(wounded.fetch(:station)).to be(:lever)
       expect(hand.rate_multiplier(knocked)).to be > hand.rate_multiplier(wounded)
       expect(hand.rate_multiplier(knocked)).to be < hand.rate_multiplier(fresh(hand))
+    end
+
+    it "names every wound a harm left" do
+      hand = worker
+      _, _, wounds = check(hand, fresh(hand), hazard(4.0, wounds: { crush: 0.5, burn: 0.5 }))
+
+      expect(wounds.map { |w| w.fetch(:kind) }).to eq(%i[burn crush])
+      expect(wounds).to all(include(:label, :tier, :depth, :variant))
+    end
+  end
+
+  describe "the catalogue" do
+    it "picks among a tier's variants by weight, the same each time from the same die" do
+      picks = (0...60).map { |i| catalogue.pick(:crush, :severe, i / 60.0) }.tally
+
+      expect(picks.keys.sort).to eq([ 0, 1, 2 ])
+      expect(picks.fetch(2)).to be > picks.fetch(0)
+      expect(catalogue.pick(:crush, :severe, 0.42)).to eq(catalogue.pick(:crush, :severe, 0.42))
+    end
+
+    it "refuses one missing a tier, a variant, or naming a stat that is not one" do
+      complete = ReactorSim::Content.shipped_wounds
+      short_a_tier = complete.merge(crush: complete.fetch(:crush).except(:mortal))
+      short_a_variant = complete.merge(crush: complete.fetch(:crush).merge(minor: complete.dig(:crush, :minor).first(2).to_h))
+      misnamed = complete.merge(crush: complete.fetch(:crush).merge(
+        minor: complete.dig(:crush, :minor).transform_values { |e| e.merge(derates: { agilty: 0.5 }) }
+      ))
+
+      expect { ReactorSim::Wounds::Catalogue.new(short_a_tier) }.to raise_error(ReactorSim::Error, /crush has no mortal/)
+      expect { ReactorSim::Wounds::Catalogue.new(short_a_variant) }.to raise_error(ReactorSim::Error, /2 variants/)
+      expect { ReactorSim::Wounds::Catalogue.new(misnamed) }.to raise_error(ReactorSim::Error, /agilty/)
+    end
+
+    it "refuses a harm of no kind, an unknown kind, shares that do not sum, or an unknown cause" do
+      expect { ReactorSim::Wounds.shares!("x", nil) }.to raise_error(ReactorSim::Error, /says nothing/)
+      expect { ReactorSim::Wounds.shares!("x", { stab: 1.0 }) }.to raise_error(ReactorSim::Error, /stab/)
+      expect { ReactorSim::Wounds.shares!("x", { crush: 0.5 }) }.to raise_error(ReactorSim::Error, /sum/)
+      expect { ReactorSim::Wounds.causes!("x", %i[gremlins]) }.to raise_error(ReactorSim::Error, /gremlins/)
+    end
+  end
+
+  describe "a harm that keeps working" do
+    it "deepens one standing wound instead of adding one a tick" do
+      state = fresh(worker)
+      modes = Array.new(20) do
+        state, mode, = described_class.endure(state, :heat, 0.1, catalogue: catalogue, die: 0.0)
+        mode
+      end
+
+      expect(state.fetch(:wounds).map { |w| w.fetch(:kind) }).to eq(%i[heat])
+      expect(state.fetch(:wounds).first.fetch(:depth)).to be_within(1e-9).of(2.0)
+      expect(modes.compact).to include(:minor, :significant, :severe)
+    end
+
+    it "takes the standing wound to the tier it succumbs at" do
+      state, mode, = described_class.succumb(fresh(worker), :severe, kind: :breath, catalogue: catalogue, die: 0.0)
+
+      expect(mode).to be(:severe)
+      expect(state.fetch(:wounds).map { |w| w.values_at(:kind, :tier) }).to eq([ %i[breath severe] ])
+      expect(state.fetch(:station)).to be_nil
+    end
+  end
+
+  describe "between matches" do
+    it "brings wounds back, takes their depth off what they start with, and lets the healed go" do
+      held = [ { kind: :crush, depth: 0.8, variant: 1, ref: 7 }, { kind: :burn, depth: 0.05, variant: 0 } ]
+      start = fresh(worker)
+      carried = described_class.carried(start, held, catalogue)
+
+      expect(carried.fetch(:wounds).map { |w| w.values_at(:kind, :tier, :ref) }).to eq([ [ :crush, :significant, 7 ] ])
+      expect(carried.fetch(:resilience)).to be_within(1e-9).of(start.fetch(:resilience) - 0.8)
+    end
+
+    it "never starts somebody already collapsed" do
+      start = fresh(worker)
+      carried = described_class.carried(start, [ { kind: :crush, depth: 2.9, variant: 0 } ], catalogue)
+
+      expect(carried.fetch(:resilience)).to be >= start.fetch(:initial_resilience) * described_class::CARRIED_FLOOR
+    end
+
+    it "heals a flat depth a match, faster regenerating and slower for a slow healer, and never not at all" do
+      plain = ReactorSim::Wounds.heal(2.0, {})
+
+      expect(ReactorSim::Wounds.heal(2.0, { regeneration: 0.6 })).to be < plain
+      expect(ReactorSim::Wounds.heal(2.0, { slow_healer: 0.1 })).to be > plain
+      expect(ReactorSim::Wounds.heal(2.0, { slow_healer: 5.0 })).to be < 2.0
+      expect(ReactorSim::Wounds.tier(ReactorSim::Wounds.heal(0.3, {}))).to be_nil
     end
   end
 
   describe "escalation" do
     # Forward only, for the reason a burst drum is never re-described as merely split: the
     # conditions that caused the worse outcome are gone *because* it happened.
-    it "never relaxes back to a milder injury" do
+    it "never relaxes back to a milder condition" do
       hand = worker
-      hurt, = described_class.check(hand, fresh(hand), hazard(9.0))
-      after, mode = described_class.check(hand, hurt, hazard(1.9))
+      hurt, = check(hand, fresh(hand), hazard(9.0))
+      after, = check(hand, hurt, hazard(1.9))
 
       expect(after.fetch(:injury)).to be(:mortal)
-      expect(mode).to be_nil
-    end
-
-    # Emitted on a TRANSITION only. Re-deciding every tick would announce the same injury at the
-    # tick rate forever — the discipline `break_part` already follows.
-    it "says nothing when the tier has not changed" do
-      hand = worker(stats: { toughness: 0.5 })
-      hurt, first = described_class.check(hand, fresh(hand), hazard(2.2))
-      _, again = described_class.check(hand, hurt, hazard(2.2))
-
-      expect(first).to be(:severe)
-      expect(again).to be_nil
     end
 
     it "marks only the top of the ladder as outliving the match" do
@@ -177,15 +283,15 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     end
 
     it "takes a severely hurt minion to nothing at a lever" do
-      hand = worker(stats: { toughness: 0.5 })
-      hurt, = described_class.check(hand, fresh(hand), hazard(2.2))
+      hand = worker
+      hurt, = check(hand, fresh(hand), hazard(2.8))
 
       expect(hand.rate_multiplier(hurt)).to eq(0.0)
     end
 
     it "leaves the walking wounded working, badly" do
       hand = worker
-      state, = described_class.check(hand, fresh(hand), hazard(1.6))
+      state, = check(hand, fresh(hand), hazard(1.6))
 
       expect(hand.rate_multiplier(state)).to be_between(0.01, 0.99).exclusive
     end
@@ -260,6 +366,18 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
 
       expect(hurt.fetch(:injury)).to be_a(Symbol)
       expect(described_class::ORDER).to include(hurt.fetch(:injury))
+      expect(hurt.fetch(:wounds)).not_to be_empty
+      hurt.fetch(:wounds).each do |wound|
+        expect(wound.values_at(:kind, :tier, :id)).to all(be_a(Symbol))
+      end
+    end
+
+    it "refuses a machine whose harm says nothing of the wounds it deals" do
+      vessel = ReactorSim::Nodes::Vessel.new(id: :drum, label: "Drum", volume_m3: 1.0, heat_capacity: 1.0e4,
+                                             endangers: { rupture: { tags: [ :scald ], stations: { lever: 1.0 } } })
+
+      expect { ReactorSim::Operation.new(id: :rig, type: :test, seed: 1, nodes: [ vessel ]) }
+        .to raise_error(ReactorSim::Error, /declare wounds/)
     end
   end
 
@@ -289,7 +407,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     end
 
     def scaled(reference)
-      rig(endangers: { rupture: { tags: [ :scald ], scales_with: :pressure_pa,
+      rig(endangers: { rupture: { wounds: { scald: 1.0 }, scales_with: :pressure_pa,
                                   reference: reference, stations: { lever: 2.0 } } })
     end
 
@@ -328,7 +446,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     # A declaration with no `scales_with:` is flat, which is the right answer for most hazards —
     # a linkage snapping is a linkage snapping.
     it "falls back to the flat weight when nothing is declared to scale with" do
-      op = rig(endangers: { rupture: { tags: [ :scald ], stations: { lever: 9.0 } } })
+      op = rig(endangers: { rupture: { wounds: { scald: 1.0 }, stations: { lever: 9.0 } } })
 
       expect(hurt_in(op)[:mode]).to be(:mortal)
     end
@@ -337,7 +455,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     # would be a hazard switched off by a typo. It falls back to flat and the machine-wide check
     # below is what catches the wiring mistake.
     it "falls back to flat rather than to nothing when the figure is missing" do
-      op = rig(endangers: { rupture: { tags: [ :scald ], scales_with: :nothing_reported,
+      op = rig(endangers: { rupture: { wounds: { scald: 1.0 }, scales_with: :nothing_reported,
                                        reference: 10.0, stations: { lever: 9.0 } } })
 
       expect(hurt_in(op)[:mode]).to be(:mortal)

@@ -30,6 +30,7 @@ module BrawlMatrix
   LIGHT = 1.0
   MAX_TICKS = 2_400 # ten minutes: a fight longer than that is a finding, reported as a timeout
   ENDINGS = %i[sated target_down starter_down both_down spent].freeze
+  SEATS = %i[a b].freeze
   OFF_SHIFT = %i[severe mortal].freeze
 
   Options = Struct.new(:brawls, :tool, :out, :only, :set, :armed, :tags, keyword_init: true)
@@ -51,7 +52,7 @@ module BrawlMatrix
 
   # Every blow, as the phase threw it.
   module Recorder
-    def blow(from, to)
+    def blow(from, to, *)
       record = { from: from, to: to, armed: @out.dig(from, :fight, :armed) == true }
       Thread.current[:brawl_blow] = record
       share = super
@@ -64,8 +65,12 @@ module BrawlMatrix
 
     def hurt(id, hazard, cause:, attacker:)
       if (record = Thread.current[:brawl_blow]) && cause == :brawl
-        record[:severity] = hazard.fetch(:severity)
-        record[:bite] = hazard.fetch(:severity) - ReactorSim::Injury.resisted(@minions.fetch(id), hazard)
+        dealt = hazard.fetch(:wounds)
+        total = dealt.values.sum
+        record[:severity] = total
+        record[:bite] = dealt.sum do |kind, severity|
+          severity - ReactorSim::Injury.resisted(@minions.fetch(id), hazard, kind, severity / total)
+        end
       end
       super
     end
@@ -129,18 +134,18 @@ module BrawlMatrix
     minions = fresh.state.fetch(:minions)
     grievance = ReactorSim::Animosity::BRAWL_HARM * ReactorSim::Animosity::GRUDGE_PER_HARM *
                 ReactorSim::Animosity.spite(crew.last)
-    fight = { blows: true, clock_s: 0.0, owed: 0.0 }
+    fight = { melee: :brawl, clock_s: 0.0, owed: {} }
     fight = fight.merge(armed: true) if options.armed
     started = fresh.state.merge(minions: minions.merge(
-      a: minions.fetch(:a).merge(patience: 0.0, fight: fight.merge(with: :b, led: true)),
-      b: minions.fetch(:b).merge(grudges: { a: grievance }, fight: fight.merge(with: :a, led: false))
+      a: minions.fetch(:a).merge(patience: 0.0, fight: fight),
+      b: minions.fetch(:b).merge(grudges: { a: grievance }, fight: fight)
     ))
     op = operation(crew, seed, content, state: started, rngs: fresh.rngs)
 
     Thread.current[:brawl_log] = []
     events = []
     tick = 0
-    while op.state.dig(:minions, :a, :fight) && tick < MAX_TICKS
+    while SEATS.any? { |id| op.state.dig(:minions, id, :fight) } && tick < MAX_TICKS
       tick += 1
       events.concat(op.step!(tick: tick).map { |e| e.merge(at: Thread.current[:brawl_log].length / 2) })
     end
@@ -256,7 +261,8 @@ module BrawlMatrix
       lines << "| #{label(id, content)} | #{temperament(m)} | #{num(m.swing(state))} / #{num(m.precision(state))} | " \
                "#{num(m.strike(state))} | #{num(m.attack(state))} / #{armed} | " \
                "#{num(m.defend(state, ambient: { darkvision: LIGHT }))} | #{num(m.toughness)} | " \
-               "#{weapon.fetch(:wounds).join(', ')} | #{grudges.empty? ? '—' : grudges} | " \
+               "#{weapon.fetch(:wounds).map { |kind, share| "#{kind} #{num(share)}" }.join(', ')} | " \
+               "#{grudges.empty? ? '—' : grudges} | " \
                "#{format('%.1f%%', 100.0 * animosity.escalation(m, 0.0))} |"
     end
     lines << ""

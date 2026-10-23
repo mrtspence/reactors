@@ -124,10 +124,10 @@ RSpec.describe "the event pipeline" do
     # having nothing to do with what it was checking.
     #
     # What does not move with balance is the shape: a real injury on a real machine has to carry
-    # the PERSON and whether the injury lasts, because `InjuryList` cannot write the record
-    # without them. `node:` is the SEAT — the post outlives whoever was standing in it — and a
-    # consumer given only that could not put anybody on the injury list at all.
-    it "carries the person and the verdict on a real injury, not just the seat" do
+    # the PERSON and every wound it left, each with its place, because `WoundList` cannot write
+    # them down without both. `node:` is the SEAT — the post outlives whoever was standing in it —
+    # and a consumer given only that could not keep anybody's wounds at all.
+    it "carries the person and the wounds on a real injury, not just the seat" do
       allow(ReactorSim::Content).to receive(:default).and_return(ReferenceCrew::CONTENT)
       match = ReactorSim::Match.create(
         id: "p", seed: 42,
@@ -169,6 +169,7 @@ RSpec.describe "the event pipeline" do
       expect(hurt["node"]).to eq("crew_1")
       expect(hurt.fetch("detail")).to include("minion" => "test_hand_a")
       expect(hurt.fetch("detail")).to have_key("lasting")
+      expect(hurt.dig("detail", "wounds")).to all(include("kind", "depth", "variant", "slot"))
     end
 
     # The feed a player reads, reconstructed from the durable rows rather than from whatever

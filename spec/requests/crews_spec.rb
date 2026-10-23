@@ -104,10 +104,12 @@ RSpec.describe "crews" do
     expect(stored.fetch(:crew_2)[:minion]).to be_nil
   end
 
-  describe "somebody on the injury list" do
+  describe "somebody healing a wound that would carry them out" do
+    # Two matches' healing from below the severe band.
     before do
-      MinionCondition.record!(owner_id: DevPlayer::ID, minion_id: "jim", run_id: "r",
-                              cause: "boiler", matches: 2)
+      depth = Wound::OUT + (1.5 * ReactorSim::Wounds::HEAL_PER_MATCH)
+      Wound.create!(owner_id: DevPlayer::ID, minion_id: "jim", kind: "crush", depth: depth, variant: 0,
+                    run_id: "r", slot: 0)
     end
 
     # Refused rather than silently swapped. Substitution happens at BUILD for a post left empty,

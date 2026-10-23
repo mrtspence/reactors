@@ -321,12 +321,12 @@ module ReactorSim
                     stations: %i[shotfiring], mishap: { node: :shot_hole, kind: :misfire }),
           Peril.new(id: :misjudged_misfire, rate: MISFIRE_RATE, judged: :wrongly, scales_with: :firing,
                     stations: %i[shotfiring], mishap: { node: :shot_hole, kind: :misjudged }),
-          Peril.new(id: :premature_shot, tags: %i[blast burn], severity: 2.4, rate: 0.12,
+          Peril.new(id: :premature_shot, wounds: { blast: 0.7, burn: 0.3 }, severity: 2.4, rate: 0.12,
                     scales_with: :firing, stations: %i[shotfiring]),
-          Peril.new(id: :set_off_misfire, tags: %i[blast], severity: 3.0, rate: 0.6,
+          Peril.new(id: :set_off_misfire, wounds: { blast: 1.0 }, severity: 3.0, rate: 0.6,
                     scales_with: :misfired, stations: %i[shotfiring],
                     mishap: { node: :shot_hole, kind: :set_off }),
-          Peril.new(id: :struck_live_charge, tags: %i[blast], severity: 3.6, rate: 1.2,
+          Peril.new(id: :struck_live_charge, wounds: { blast: 1.0 }, severity: 3.6, rate: 1.2,
                     scales_with: :live, stations: %i[hewing],
                     mishap: { node: :shot_hole, kind: :struck })
         ]
@@ -420,8 +420,8 @@ module ReactorSim
 
       # **Who a falling rod hurts.** Everybody on it falls with it — unless catches hold a rod
       # whose strap wore through, when it drops a foot and stops.
-      ROD_FALL = { tags: %i[fall crush], riders: { man_engine: 3.0 } }.freeze
-      ROD_CAUGHT = { tags: %i[impact], riders: { man_engine: 0.4 } }.freeze
+      ROD_FALL = { wounds: { crush: 1.0 }, causes: %i[fall], riders: { man_engine: 3.0 } }.freeze
+      ROD_CAUGHT = { wounds: { impact: 1.0 }, riders: { man_engine: 0.4 } }.freeze
 
       def self.rod_hazards(catches)
         { parted: catches ? ROD_CAUGHT : ROD_FALL, torn_out: ROD_FALL }
@@ -441,19 +441,19 @@ module ReactorSim
       # jolt, the baulks at the bottom are as bad as the speed, and through the sheaves is a fall.
       # Wreckage from the headframe goes down the shaft and reaches the bank too.
       CAGE_HAZARDS = {
-        caught: { tags: %i[impact], scales_with: :speed_m_s, reference: 4.0,
+        caught: { wounds: { impact: 1.0 }, scales_with: :speed_m_s, reference: 4.0,
                   riders: { cage_drive: 0.6 } },
-        crashed: { tags: %i[impact], scales_with: :speed_m_s, reference: 4.0,
+        crashed: { wounds: { impact: 1.0 }, scales_with: :speed_m_s, reference: 4.0,
                    riders: { cage_drive: 2.6 } },
-        overwound: { tags: %i[fall impact], riders: { cage_drive: 3.4 }, places: { bank: 0.3 } }
+        overwound: { wounds: { impact: 1.0 }, causes: %i[fall], riders: { cage_drive: 3.4 }, places: { bank: 0.3 } }
       }.freeze
 
       # **A parted rope drops the cage**, and what happens next is whether it has catches. Without
       # them it falls to the sump and takes the shaft's guides with it; with them it is a jolt.
       # Hooked and tripped cages carry catches, which is what the tier buys besides the hook.
       ROPE_HAZARDS = {
-        parted: { tags: %i[fall impact], riders: { cage_drive: 3.4 } },
-        parted_held: { tags: %i[impact], riders: { cage_drive: 0.5 } }
+        parted: { wounds: { impact: 1.0 }, causes: %i[fall], riders: { cage_drive: 3.4 } },
+        parted_held: { wounds: { impact: 1.0 }, riders: { cage_drive: 0.5 } }
       }.freeze
 
       # **The winding rope, and what it is made of.** Flat hemp first; wrought-iron wire from the
@@ -501,11 +501,11 @@ module ReactorSim
 
       # **Riding the kibble**: standing in an unguided bucket that swings and catches the shaft
       # side, worse the faster it is wound. What the cage buys besides speed.
-      RIDING_THE_KIBBLE = Peril.new(id: :riding_the_kibble, tags: %i[fall impact], severity: 1.8,
+      RIDING_THE_KIBBLE = Peril.new(id: :riding_the_kibble, wounds: { impact: 1.0 }, causes: %i[fall], severity: 1.8,
                                     rate: 0.5, scales_with: :swing, riders: %i[cage_drive])
 
       # Wound away while somebody is still getting in: caught between the deck and the shaft side.
-      CAUGHT_BOARDING = { tags: %i[crush], severity: 2.0 }.freeze
+      CAUGHT_BOARDING = { wounds: { crush: 1.0 }, severity: 2.0 }.freeze
 
       # **The marshals' posts take some knowing**: a hand out of their depth slips, and a marshal
       # slipping rings a false ready.
@@ -998,7 +998,7 @@ module ReactorSim
       # Whoever is under it when it comes down: at bank, in the cage, at the bottom. Every pit has
       # a cage or a kibble; a man engine is optional, so its riders are not named here.
       # TODO: riders of the man engine — needs a hazard that can name a carrier only when fitted.
-      BEAM_FALL = { tags: %i[impact crush],
+      BEAM_FALL = { wounds: { impact: 0.5, crush: 0.5 },
                     places: { bank: 1.2, pit_bottom: 1.6 },
                     riders: { cage_drive: 2.6 } }.freeze
 

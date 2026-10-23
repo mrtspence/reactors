@@ -74,6 +74,9 @@ require_relative "reactor_sim/rng"
 require_relative "reactor_sim/sheet"
 # The escalation rule a failing part and a hurt person share. Before `concerns/`, which uses it.
 require_relative "reactor_sim/severity"
+# What a harm leaves on a body, and the catalogue of it. Before `content`, which validates the
+# catalogue against it, and before `equipment`, whose weapons declare the wounds they deal.
+require_relative "reactor_sim/wounds"
 require_relative "reactor_sim/content"
 # A leaf, required this early only because `Concerns::Wearing` emits one and concerns load
 # before nodes. Conceptually it belongs with the outputs, beside `diagnostics/player_view`.

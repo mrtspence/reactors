@@ -395,11 +395,11 @@ Rules worth knowing before you add one:
 - **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
   things are two different statements about one person, and a steady-handed worker who knocks
   things over is a real person.
-- **A hazard tag needs no engine change — it needs a resister with a matching name.** A peril
-  or a failure tagged `%i[crush impact]` is resisted by `crush_resistance` and
-  `impact_resistance` through one naming convention in `Injury.resistance`, so adding a kind
-  of harm means adding gear that names it and nothing else. The flip side is that **a hazard
-  tag nothing resists is simply unresistable**, silently — grep the tag before you invent it.
+- **Gear resists a kind of wound or a cause by name.** A harm dealing `{ crush: 0.6, impact: 0.4 }`
+  is resisted kind by kind, by `crush_resistance` and `impact_resistance`, and one with
+  `causes: %i[rockfall]` by `rockfall_resistance` too (`Injury.resisted`). Kinds are
+  `Wounds::KINDS` and causes `Wounds::CAUSES`; **a kind nothing resists is simply unresistable**,
+  so grep before you rely on one.
 - **`clumsy` and `boneheaded` are the same family at opposite ends.** Clumsy makes the *bite*
   worse once something has gone wrong; boneheaded makes the *mistake* likelier in the first
   place. Pulling the wrong lever is not the same failing as dropping it, and only one of them
@@ -414,9 +414,10 @@ Rules worth knowing before you add one:
   is simply present.
 - **Values add across layers and are then clamped; consumers multiply what they read.** Merge
   adds, use multiplies. Getting this the other way round makes every piece of kit a rounding error.
-- **Health, fatigue, station and injury are state, not content.** They change during a match and
-  live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion recovers on
-  restore.
+- **Health, fatigue, station, wounds and injury are state, not content.** They change during a
+  match and live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion
+  recovers on restore. **`regeneration`** and **`slow_healer`** are how fast somebody's wounds heal
+  between matches, added to and taken from `Wounds::HEAL_PER_MATCH`.
 - **A tag that gets used up is a rating here and a remainder in state**, and it needs both. A
   respirator declares `respirator:` (how well it filters) and `respirator_air:` (how many
   **ticks** it holds); `Minion#initial_state` seeds `apparatus` from the second and phase 6c
@@ -455,12 +456,45 @@ the fold. An equipment item may declare **`weapon: { handling:, edge:, wounds: }
   one for a good weapon or short of it for a poor one; bare hands are `{ swing: 0.42, precision:
   0.18 }`.
 - `edge:` is severity it adds to a landed blow whoever holds it.
-- `wounds:` are the hazard tags it leaves.
+- `wounds:` are the kinds of wound a blow leaves, as shares of it: a pick `{ puncture: 0.6,
+  impact: 0.4 }`, a knife `{ cut: 0.5, puncture: 0.5 }`.
 
 Its weight to swing is the item's own `mass_kg`, which is what a fight tires somebody by against
-their `force`. A fighter swings one weapon at a time, whichever suits them best. `puncture` is a
-blade's or a pick's, resisted by `puncture_resistance` like any hazard tag, and nothing resists it
-yet. **`cutting`** is the knife's aid at the rope and fuse posts.
+their `force`. A fighter swings one weapon at a time, whichever suits them best. `puncture` and
+`cut` are resisted by `puncture_resistance` and `cut_resistance` like any kind, and nothing resists
+them yet. **`cutting`** is the knife's aid at the rope and fuse posts.
+
+### A wound
+
+`content/wounds/*.yml` is the catalogue of what a harm leaves on a body: **kind → tier → variant**,
+every kind of `Wounds::KINDS`, all four tiers (`minor`, `significant`, `severe`, `mortal`), and
+exactly three variants a tier, each a `label`, a `weight` against the others of its tier, and
+`derates:` — stats it multiplies while carried, 0..1. Anything missing or misnamed is refused at
+boot.
+
+```yaml
+crush:
+  severe:
+    broken_spine: { label: Broken spine, weight: 1, derates: { strength: 0.2, agility: 0.1 } }
+    crushed_pelvis: { label: Crushed pelvis, weight: 1, derates: { agility: 0.15, strength: 0.4 } }
+    shattered_leg: { label: Shattered leg, weight: 1, derates: { agility: 0.2, strength: 0.6 } }
+```
+
+**A variant's place in its tier matters**: a wound that heals into a lesser tier, or deepens into a
+worse one, becomes the variant in the same place there. Which tier a wound is comes from the depth
+of the bite that made it, against `Wounds::BANDS`; healing wears the depth down between matches.
+See [`design_sketches/wounds.md`](../design_sketches/wounds.md).
+
+A harm a part or a place can do declares **`wounds:`** as shares of its severity, summing to one,
+and **`causes:`** for what protects against it, in the same declarations it always had:
+
+```ruby
+endangers: { roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], places: { district: 1.6 } } }
+Peril.new(id: :misstep, wounds: { crush: 1.0 }, causes: %i[fall], severity: 1.6, places: %i[shaft])
+```
+
+A machine whose harm says nothing of its wounds, or names a kind or cause nobody knows, does not
+build.
 
 ---
 

@@ -41,7 +41,7 @@ module ReactorSim
     # sheet.
     #
     # A posting with no `minion:` is the standin, which is what makes an unfilled crew slot and
-    # a minion on the injury list the same thing to the engine: somebody turned up, and they are
+    # a minion out healing the same thing to the engine: somebody turned up, and they are
     # not who you wanted.
     def resolve(posting, content:)
       posting ||= {}

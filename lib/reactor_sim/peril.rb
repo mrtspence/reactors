@@ -35,15 +35,20 @@ module ReactorSim
   #
   # **`opportunity: true` is somewhere a person can be pushed** — off the deck, in front of a tub —
   # by somebody who hates them enough (`Animosity`).
-  Peril = Struct.new(:id, :tags, :severity, :rate, :mishap, :scales_with, :when_tagged,
+  #
+  # **`wounds:` is what it does to a body**, as shares of its severity (`Wounds.shares!`), and
+  # `causes:` what protects against it; a peril that hurts must say.
+  Peril = Struct.new(:id, :wounds, :causes, :severity, :rate, :mishap, :scales_with, :when_tagged,
                      :unless_tagged, :places, :stations, :riders, :judged, :underfoot, :opportunity,
                      keyword_init: true) do
-    def initialize(id:, severity: 0.0, rate: nil, mishap: nil, tags: [], scales_with: nil,
+    def initialize(id:, severity: 0.0, rate: nil, mishap: nil, wounds: nil, causes: [], scales_with: nil,
                    when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil,
                    judged: nil, underfoot: {}, opportunity: false)
+      hurts = severity.to_f.positive?
       super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
             mishap: Peril.mishap(mishap),
-            tags: Array(tags).map(&:to_sym).freeze,
+            wounds: hurts ? Wounds.shares!("peril #{id}", wounds) : {}.freeze,
+            causes: Wounds.causes!("peril #{id}", causes),
             scales_with: scales_with&.to_sym,
             when_tagged: when_tagged&.to_sym, unless_tagged: unless_tagged&.to_sym,
             places: Array(places).map(&:to_sym).freeze,
@@ -68,6 +73,9 @@ module ReactorSim
     end
 
     def hurts? = severity.positive?
+
+    # What it does to whoever it catches, as the Danger Check takes it.
+    def hazard = { wounds: Wounds.dealt(wounds, severity), causes: causes }
 
     def mishap? = !mishap.nil?
 

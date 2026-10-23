@@ -103,6 +103,8 @@ elf:
     darkvision: 0.3
     conscientious: 0.2
     keen_eyed: 0.25
+    # Fine workers who mend slowly: their wounds heal a little less each match.
+    slow_healer: 0.1
   grudges:
     dwarf: 0.2
     orc: 0.75

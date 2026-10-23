@@ -2,7 +2,7 @@
 
 # Grudges formed in play, written down so they outlast the match.
 #
-# A third question about the stream beside the digest and the injury list: "who will hate whom
+# A third question about the stream beside the digest and the wounds: "who will hate whom
 # next time". Standins are nobody in particular and are never written.
 class GrudgeList
   def initialize(owner_id: DevPlayer::ID, logger: Rails.logger)
@@ -24,7 +24,7 @@ class GrudgeList
                    amount: detail["amount"], run_id: record.fetch("run_id"), tick: record["tick"])
     [ holder.to_s, target.to_s ]
   rescue StandardError => e
-    # One bad record must not stop the stream; see `InjuryList`.
+    # One bad record must not stop the stream; see `WoundList`.
     @logger.error("grudges: skipped #{holder} → #{target}: #{e.class}: #{e.message}")
     []
   end

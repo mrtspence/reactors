@@ -508,6 +508,8 @@ module ReactorSim
         end
       end
 
+      validate_hazards!
+
       # The same of a post's openings: sabotage aimed at a part that cannot suffer it is a feud
       # that silently does nothing.
       @control_points.each_value do |control|
@@ -557,13 +559,14 @@ module ReactorSim
     # re-tuning it.
     # Scoped by operation, except for a node that names a **match-wide** stream — the sky — so
     # that every operation in a match draws the same one.
-    # Each person also has a temper stream (`Animosity.stream`).
+    # Each person also has a temper stream (`Animosity.stream`) and a wound stream (`Injury.stream`).
     def build_rngs(seed)
       streams = (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys).to_h do |id|
         shared = @nodes[id].respond_to?(:shared_stream) ? @nodes[id].shared_stream : nil
         [ id, Rng.stream(seed, shared || "#{@id}/#{id}") ]
       end
-      streams.merge(@minions.keys.to_h { |id| [ Animosity.stream(id), Rng.stream(seed, "#{@id}/#{Animosity.stream(id)}") ] })
+      personal = @minions.keys.flat_map { |id| [ Animosity.stream(id), Injury.stream(id) ] }
+      streams.merge(personal.to_h { |stream| [ stream, Rng.stream(seed, "#{@id}/#{stream}") ] })
     end
 
     # A snapshot round-trips through JSON, which stringifies symbol keys — and only keys.
@@ -621,7 +624,8 @@ module ReactorSim
                                  riding: minion_state[:riding]&.to_sym,
                                  injury: minion_state[:injury]&.to_sym,
                                  carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze,
-                                 fight: restored_fight(minion_state[:fight]))
+                                 fight: restored_fight(minion_state[:fight]),
+                                 wounds: restored_wounds(minion_state[:wounds]))
               .freeze ]
       end
 
@@ -650,18 +654,53 @@ module ReactorSim
                   events: state.fetch(:events, [])).freeze
     end
 
-    # Who somebody is fighting is a seat held as a value; restored as a String, the fight would
-    # name nobody and never end.
-    def restored_fight(fight)
-      fight && fight.merge(with: fight.fetch(:with).to_sym).freeze
+    # **Every harm a part can do says what it does to a body**, known kinds as shares and known
+    # causes, or the machine does not build: nothing reaches the Danger Check untyped.
+    def validate_hazards!
+      @nodes.each do |id, node|
+        hazards = node.respond_to?(:failure_hazards) ? node.failure_hazards : {}
+        hazards.each do |mode, declared|
+          owner = "node #{id} #{mode}"
+          raise Error, "#{owner}: tags: is gone — declare wounds: and causes:" if declared.key?(:tags)
+
+          Wounds.shares!(owner, declared[:wounds])
+          Wounds.causes!(owner, declared[:causes])
+          crushed = declared.dig(:along, :crushed)
+          Wounds.shares!("#{owner} crushed", crushed[:wounds]) if crushed
+        end
+        boarding = node.respond_to?(:boarding_hazard) ? node.boarding_hazard : nil
+        Wounds.shares!("node #{id} boarding", boarding[:wounds]) if boarding
+      end
     end
+
+    # Who somebody is rowing with and which melee they are in are held as values; restored as
+    # Strings, a row would name nobody and a melee's members would each be in a fight of one.
+    def restored_fight(fight)
+      return nil if fight.nil?
+
+      fight.merge(fight.slice(:with, :melee).transform_values(&:to_sym)).freeze
+    end
+
+    # **A wound names its kind, tier, variant and cause as values**: a String kind matches no
+    # standing wound, so heat would open a second one beside the first, and a String tier is no
+    # rung of the ladder.
+    def restored_wounds(wounds)
+      Array(wounds).map do |wound|
+        wound.merge(wound.slice(:kind, :tier, :id, :cause).transform_values(&:to_sym)).freeze
+      end.freeze
+    end
+
+    # **What somebody brings from earlier matches**: `options[:wounds]` is
+    # `{ person => [{ kind:, depth:, variant:, cause: }] }`, healed already by the delivery tier.
+    def carried_wounds(minion) = (Wounds.carried_over(@options[:wounds]) || {}).fetch(minion.minion, [])
 
     def build_initial_state
       { nodes: @nodes.to_h { |id, n| [ id, n.initial_state(@rngs.fetch(id), @content) ] }.freeze,
         controls: @control_points.to_h { |id, c| [ id, c.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         diagnostics: @diagnostics.to_h { |id, d| [ id, d.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         minions: @minions.to_h { |id, m|
-          [ id, m.initial_state(@rngs.fetch(id)).merge(Animosity.initial_state(@rngs.fetch(Animosity.stream(id)))).freeze ]
+          fresh = m.initial_state(@rngs.fetch(id)).merge(Animosity.initial_state(@rngs.fetch(Animosity.stream(id))))
+          [ id, Injury.carried(fresh, carried_wounds(m), @content.wounds).freeze ]
         }.freeze,
         ledger: Ledger.initial.freeze,
         mishaps: [].freeze,

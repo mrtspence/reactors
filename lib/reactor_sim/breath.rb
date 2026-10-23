@@ -50,13 +50,9 @@ module ReactorSim
     # meaningless. Same trap as `Minion::PACE`; see the traps list.
     RESERVE = (0.5..2.0)
 
-    # How far past collapse somebody is, 0 to 1, and the reason rescue is worth doing.
-    #
-    # `Injury.check` cannot produce this on its own: grinding `resilience` to zero gives
-    # `:severe`, every bite after that proposes `:severe` again, and `Severity.escalate` rightly
-    # refuses to announce the same injury twice. Reaching `:mortal` needs a bite of
-    # `Injury::MORTAL_BITE`, which a steady hazard never grows. So the dwell is counted here,
-    # and at 1.0 the peril delivers a bite that size.
+    # How far past collapse somebody is, 0 to 1, and the reason rescue is worth doing. Bad air
+    # bites no resilience — it drains fatigue — so collapse and death are this dwell's: collapsed,
+    # the standing `breath` wound is severe; at 1.0, mortal (`Injury.succumb`).
     #
     # It drains in good air at the same rate it fills, which is what makes fixing the
     # ventilation the revival rather than a separate mechanic.

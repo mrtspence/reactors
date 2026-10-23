@@ -53,14 +53,13 @@ module ReactorSim
     REFERENCE_SECONDS = 10.0
     REFERENCE_RHO_C = 1_231.0
 
-    SCALE = REFERENCE_RHO_C * ((REFERENCE_K - TOLERATED_K)**EXPONENT) * REFERENCE_SECONDS
+    # Carried out is the `heat` wound reaching severe, so that is what the reference grinds through.
+    SCALE = REFERENCE_RHO_C * ((REFERENCE_K - TOLERATED_K)**EXPONENT) * REFERENCE_SECONDS /
+            Wounds::BANDS.fetch(:severe)
 
-    # How far past collapse somebody is, and the reason pulling them out is worth doing.
-    #
-    # `Injury.grind` cannot reach `:mortal` on its own: grinding resilience to zero proposes
-    # `:severe`, every bite after proposes `:severe` again, and `Severity.escalate` rightly
-    # refuses to announce the same injury twice. So the dwell past zero is counted here, exactly
-    # as `Breath` counts `asphyxia`, and at 1.0 the burn is mortal.
+    # How far past collapse somebody is, and the reason pulling them out is worth doing: the
+    # dwell past zero is counted here, exactly as `Breath` counts `asphyxia`, and at 1.0 the burn
+    # is mortal whatever is left of them.
     DWELL = 1.0
 
     module_function
@@ -101,18 +100,19 @@ module ReactorSim
       rho_c * (excess**EXPONENT) / SCALE
     end
 
-    # Returns `[next_state, mode_or_nil]`, a mode only on a transition — the discipline every
-    # other harm in the engine follows, because re-deciding each tick would announce the same
-    # injury at the tick rate forever.
-    def advance(minion, state, gas, dt)
+    # **One `heat` wound, deepening while they stay**, the pool ground by the same. Returns
+    # `[next_state, mode_or_nil, wounds]`, a mode only on a transition — the discipline every other
+    # harm in the engine follows, because re-deciding each tick would announce the same injury at
+    # the tick rate forever.
+    def advance(minion, state, gas, dt, catalogue:, die:)
       burn = rate(gas, minion) * dt
-      return [ state, nil ] if burn <= 0.0
+      return [ state, nil, [] ] if burn <= 0.0
 
-      state, mode = Injury.grind(state, burn)
+      state, mode, wounds = Injury.endure(state, :heat, burn, catalogue: catalogue, die: die)
       state = state.merge(burns: burns(state) + burn) if state.fetch(:resilience) <= 0.0
-      return Injury.succumb(state, :mortal) if burned?(state)
+      return Injury.succumb(state, :mortal, kind: :heat, catalogue: catalogue, die: die) if burned?(state)
 
-      [ state, mode ]
+      [ state, mode, wounds ]
     end
 
     # A heat a body does not answer to at all — a fire elemental, a thing made of slag. A gate

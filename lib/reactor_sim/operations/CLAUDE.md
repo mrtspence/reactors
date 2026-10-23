@@ -19,8 +19,8 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > snapshot.
 > `Crew.normalise` is its `Assembly#resolve_loadout` — every **seat** named including the
 > unfilled ones, every id symbolised, `:none` for a slot deliberately emptied. An unfilled seat
-> is not an empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "on the
-> injury list" the same thing to the engine.
+> is not an empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "out
+> healing" the same thing to the engine.
 >
 > **How many seats there are comes from the fitted crew quarters**, found by what its slot
 > *accepts* rather than by a slot id — `Assembly#crew_capacity` and `#crew_origin`. A roster

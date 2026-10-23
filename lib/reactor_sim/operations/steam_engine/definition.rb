@@ -50,9 +50,10 @@ module ReactorSim
       # loadout decides what is fitted in them. An empty `loadout:` is the stock engine.
       # See `parts.rb` and `docs/design_sketches/modular_components.md`.
       # `conditions:` is the match's sky from setup; nil is the standard sky. `grudges:` is who
-      # among the crew already hates whom from earlier matches, by person.
+      # among the crew already hates whom from earlier matches, by person, and `wounds:` what they
+      # are still carrying from them.
       def build(id:, seed:, chassis: :high_pressure, loadout: {}, crew: {}, conditions: nil, grudges: nil,
-                time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
+                wounds: nil, time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil, content: nil)
         # A restored snapshot brings these back from JSON as strings.
         chassis = chassis.to_sym
         assembly = assembly_for(chassis, loadout, conditions: conditions)
@@ -66,7 +67,7 @@ module ReactorSim
           # is re-defaulted on restore, so a deliberately-empty slot would grow its part back.
           # The roster is here for the same reason — a crew is a loadout by another name.
           options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions,
-                     grudges: Animosity.carried_over(grudges) }.compact,
+                     grudges: Animosity.carried_over(grudges), wounds: Wounds.carried_over(wounds) }.compact,
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           places: [ engine_house(fragment) ],
@@ -549,9 +550,9 @@ module ReactorSim
           # behind the plate is a different event from one nearly empty. 22.0 is the figure at a
           # real rupture (`crown_sheet_spec`), so these weights mean their face value there.
           endangers: {
-            explosion: { tags: %i[blast scald], scales_with: :flash_expansion, reference: 22.0,
+            explosion: { wounds: { blast: 0.6, scald: 0.4 }, scales_with: :flash_expansion, reference: 22.0,
                          stations: { stoking: 3.0, damper_open: 1.4 } },
-            seam_split: { tags: %i[scald heat], scales_with: :flash_expansion, reference: 22.0,
+            seam_split: { wounds: { scald: 1.0 }, scales_with: :flash_expansion, reference: 22.0,
                           stations: { stoking: 0.9, damper_open: 0.3 } }
           },
           # **The crown sheet is what makes a low glass dangerous.** `material:` takes the rating
@@ -1063,7 +1064,7 @@ module ReactorSim
       # roster leaves these empty is worked by the labour exchange and barely runs.
       #
       # **The roster, resolved.** An empty seat gets the standin, which is what makes an unfilled
-      # seat and a minion on the injury list the same thing to the engine: somebody turned up,
+      # seat and a minion out healing the same thing to the engine: somebody turned up,
       # and they are not who you wanted.
       #
       # NOTE the ids. The obvious name for the person shovelling coal is `stoker`, and `:stoker`

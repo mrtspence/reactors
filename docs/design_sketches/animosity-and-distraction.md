@@ -274,19 +274,15 @@ reuse: a swarm of bats or a wandering zombie attacks through the same contest.
   three-kilo pick costs a man half again; a kobold several times over; an ogre next to nothing.
 - **Orders wait.** A brawler's posting is still written, since the command is absolute and
   idempotent, but travel does not move them until the brawl ends. Then they go.
-- **It ends when:**
-  - the initiator is **sated**: every exchange restores some patience to **both** fighters, more
-    when a blow lands, twice as much once the fight has given them a minor injury and four times a
-    significant one (`HURT_RELIEF`), and the brawl stops once the initiator is back past a share of
-    full. A tooth out makes anybody think twice without stopping a determined attacker, and the one
-    set upon walks away calmer, not angrier;
-  - either fighter is stood down or spent;
-  - the boss breaks it up (§2.7).
-
-  Patience comes back every exchange, landed or not, so a brawl ends even between two people who
-  can never hit each other.
-- **Pile-ons are emergent.** A brawl spends everybody else's patience in the place faster while it
-  lasts.
+- **Any number can be in it**, and it lasts while anybody in it is willing: §7.2. Every exchange
+  restores some patience to everybody standing in it, more when a blow lands, twice as much once
+  the fight has given them a minor injury and four times a significant one (`HURT_RELIEF`), and some
+  for every injury they see (`WITNESSED`). A tooth out makes anybody think twice without stopping a
+  determined attacker, and the one set upon walks away calmer, not angrier. Patience comes back
+  every exchange, landed or not, so a brawl ends even between two people who can never hit each
+  other.
+- **Pile-ons are emergent.** Fighting spends everybody else's patience in the place faster while it
+  lasts, and anybody who runs out on somebody fighting joins in or heckles.
 
 ### 2.7 The pit boss
 
@@ -881,4 +877,330 @@ What it shows:
 - **Irritation still sums**, so a big room still quarrels more per head: each of 32 humans starts
   six rows an hour, each of 16 about two. Harmless in itself, since a row stops two people for `ROW_S`, but it
   is work lost and it scales with the room.
+
+## 7. Melee: a design pass
+
+**Status: built (§7.14 for what changed in the building).**
+
+A brawl today is a pair. The starter runs the exchanges, holds the clock, and is the only one
+whose relief can end the fight; anybody whose patience runs out on somebody already fighting picks
+somebody else. This section replaces the pair with a **melee**: any number of people in one place,
+each swinging at whoever they most want to hit, ending when nobody left wants to.
+
+### 7.1 What was asked, and what this pass keeps of it
+
+| Asked | Kept? |
+|---|---|
+| Each exchange, every fighter picks who to hit by the grudge-weighted die | Yes, with one change to the weights (§7.3) |
+| A stacking defence penalty for each attacker in the same exchange, flat 0.25 | Yes, as a divisor rather than a subtraction (§7.4) |
+| Running out on somebody already fighting joins their fight | Yes, replacing "pick somebody else"; the row-only heckle instead (§7.7) |
+| One person going down does not end it | Yes |
+| Relief when anybody in your fight is hurt, by your grudge and their injury | Yes, stacking with your own (§7.5) |
+| Mortally wounded leave the fight; seriously wounded fight on, worse | Yes; already true of `significant`, and the carried-out stay pickable by those who would kill them (§7.6) |
+| A truce once nobody has anybody left to hate, violence counting | Yes, folded into one ending rule (§7.2) |
+| It lasts while anybody is still willing, not until the starter is sated | Yes (§7.2) |
+
+### 7.2 Who is in it, and when it ends
+
+Two words do all the work:
+
+- **Willing:** still angry (patience under `SATED` of full) **and** holding hostility — grudge plus
+  violence, as escalation reads it — against somebody still in the fight.
+- **Wanted:** somebody still in the fight is willing and holds hostility against them.
+
+Each exchange:
+
+1. A **willing** fighter picks who to hit, by the weighted die, from everybody in the fight they
+   hold any hostility against.
+2. An **unwilling but wanted** fighter defends themselves: they hit back at somebody who wants
+   them, weighted by how much each wants them. Their own anger is spent; they are not walking away
+   from somebody still swinging at them.
+3. An **unwilling, unwanted** fighter steps out. Their fight is over even if others' is not.
+4. The fight ends when **nobody in it is willing**. Everybody left steps out at once.
+
+That one rule covers every ending in the request, without a separate truce check:
+
+| Ending asked for | Why it falls out |
+|---|---|
+| Everybody has run out of ire | Nobody is under `SATED`, so nobody is willing |
+| A truce: nobody has a grudge left against anybody still in it | Nobody holds hostility against anybody present, so nobody is willing |
+| Nobody left standing | Nobody present at all |
+| 100 % snaps at 99 %; the starter is sated first | The 99 % is still willing, so it goes on; the sated starter, wanted, defends |
+| Two orcs, having beaten a dwarf, keep going at each other | Violence is hostility towards everybody, so each stays willing until sated |
+| Four dwarves, having beaten a hated goblin boss, stop | With the boss gone, no dwarf holds hostility against another, so none is willing |
+
+**The starter stops being special.** Nobody leads; the exchange is the fight's, not anybody's.
+
+### 7.3 Who they hit
+
+The pick that starts a fight weighs **grudge + irritation**, so that anybody can quarrel with
+anybody. Inside a fight it should weigh **hostility only — grudge + violence, no irritation.**
+Irritation is what starts a row in a crowded shed; it is not a reason to punch a fellow dwarf in the
+middle of beating a goblin. With irritation in the weights, every melee would leak blows onto allies
+at about `IRRITATION` ÷ grudge of the time, and the uprising would turn on itself.
+
+**Violence against grudge, mid-fight.** Two goblins (violent 0.7, grudge 0.2 against dwarves) beating
+a dwarf weigh the dwarf at 0.9 and each other at 0.7, so with plain weights each goblin's blow goes at
+his mate 44 % of the time **while the dwarf is still standing**. That reads as chaos rather than
+"goblins turn on each other once the dwarf is down". A focus exponent on the weights sharpens it:
+
+| Weights raised to | Goblin hits the dwarf | Goblin hits his mate |
+|---|---|---|
+| 1 (plain) | 56 % | 44 % |
+| 2 | 62 % | 38 % |
+| **2.5 (chosen)** | 65 % | 35 % |
+| 3 | 68 % | 32 % |
+
+**Weights are raised to a `FOCUS` of 2.5**, a dial beside the others and a first target of tuning.
+The alternative, violence counting only once nobody with a grudge is left, is a special case of
+exactly the kind this pass is removing.
+
+### 7.4 Defending against several at once
+
+Everybody picks first, from the state the exchange starts in; then each person's attackers are
+counted. **Every attack on somebody hit by n people this exchange meets their defence ÷ (1 +
+`GANGED` × (n − 1))**, `GANGED` 0.25 to start.
+
+- **The same penalty for all of them, by count, not by order.** "Each time you are attacked" in a
+  simultaneous exchange needs an order to number the attacks, and any order is an order-dependence.
+  The count gives the same total and needs none.
+- **A divisor, not a subtraction.** A flat 0.25 off the figure takes a kobold's defence (about 0.6)
+  to nothing at three attackers and barely dents Arunessa's. Off a multiplier it never goes below
+  zero, and a ring of attackers keeps getting worse without a cliff:
+
+| Attackers | Subtracting 0.25 each | ÷ (1 + 0.25 × extra) |
+|---|---|---|
+| 1 | 1.00 | 1.00 |
+| 2 | 0.75 | 0.80 |
+| 3 | 0.50 | 0.67 |
+| 5 | 0.00 | 0.50 |
+| 8 | — | 0.36 |
+
+- **Criticals come for free.** A critical needs a margin of `CRITICAL_AT` (3.4); at three attackers
+  each of them needs only 2.25 of their unpenalised margin, so the cheap shot from behind is the
+  same arithmetic.
+- **Each attack meets its own defence roll**: the fractional part of the defender's `defend:` die
+  plus the attacker's `attack:` die. Uniform, independent per attacker, and nothing new drawn. One
+  die per exchange would have let one bad moment land every attacker at once, coupling the attacks
+  by more than the penalty and making the penalty hard to tune.
+- **No state is kept.** The count is made fresh each exchange; nothing needs clearing.
+
+### 7.5 Relief
+
+Per exchange, each fighter has their own relief: `BOUT_RELEASE`, `LANDED_RELEASE` for what they
+landed, and the `HURT_RELIEF` multiplier for their own injury. Added to it:
+
+**Seeing somebody in the fight hurt**: on each injury anybody in the fight suffers, everybody else in
+it gets `WITNESSED[mode]` × (`WITNESS_BASE` + their grudge against the one hurt) × full patience. It
+stacks with the rest; it does not replace landing, which is a different satisfaction. Inflicting it
+yourself counts for both.
+
+A start, as napkin figures. Unhurt, a fighter's own relief is about 0.075 of full an exchange, so
+eight exchanges from nothing to sated:
+
+| Injury | `WITNESSED` | Grudge 0 (base 0.2) | Grudge 0.5 | Grudge 0.75 |
+|---|---|---|---|---|
+| Minor | 0.025 | 0.005 | 0.018 | 0.024 |
+| Significant | 0.05 | 0.01 | 0.035 | 0.048 |
+| Severe | 0.15 | 0.03 | 0.105 | 0.14 |
+| Mortal | 0.30 | 0.06 | 0.21 | 0.29 |
+
+So watching a hated man go from minor to severe is worth about two exchanges of your own, a
+stranger's knock is next to nothing, and a huge brawl does not fizzle the moment the first two people
+lose a tooth: the knocks are cheap and the carrying-out is what tells.
+- **Converting rather than stacking** would mean taking `LANDED_RELEASE` down to pay for it. Don't:
+  landing is what lets two people who never injure each other wear themselves out.
+- **Should violence count in the witness weight?** Proposed no: an orc's love of a scrap keeps him in
+  it (§7.2), but a stranger's broken finger is not a satisfaction to him. That makes violent races
+  slower to sate, which is in character.
+
+**Numbers to check with the tools, not by argument:** how long a 12-person mutual scrum lasts, and
+how much `WITNESSED` shortens it. The request is that it still happens with a poor boss.
+
+### 7.6 Injuries in the fight
+
+What the ladder already does, for a human at each tier:
+
+| Tier | Strike | Defence | In the fight? |
+|---|---|---|---|
+| Minor | ~0.9 | ~0.92 | Yes |
+| Significant | ~0.71 | ~0.70 | Yes |
+| Severe | 0 | — | Stood down: neither fights nor can be picked |
+| Mortal | 0 | — | Stood down |
+
+- **"Seriously wounded fight on, worse" is already true of `significant`.** Its derates of agility,
+  strength, dexterity and intelligence reach strike and defence through swing, precision, wits and
+  nimbleness. At three attackers a significantly hurt man defends at 0.47.
+- **`combat_prowess` is derated by nothing.** A broken arm leaves the prowess untouched. Worth adding
+  to the `significant` derates (0.8?) if fighting hurt should cost more than working hurt.
+- **The real gap is `severe`.** Severe stands somebody down, so they leave the fight and nobody can
+  pick them, and a beating ends at severe. **A gang beating therefore carries people out faster, but
+  it does not kill more**, unless a single blow bites past `MORTAL_BITE` (in practice, a drawn
+  weapon). If the gang beating is meant to be deadlier, it needs one of:
+  - (a) **Putting the boot in.** A downed fighter stays pickable by anybody willing to kill them
+    (`ceiling` at least `LETHAL` towards them), and defends at nothing. Only hatred kills somebody
+    on the ground; a scrap does not.
+  - (b) **Severe stays in the fight**, as a figure who can still be hit but not swing. Simpler, and
+    lethal for everybody: a casual brawl kicks people to death.
+  - (c) **Leave it**: gang beatings carry out; weapons kill.
+
+  **Chosen: (a), putting the boot in**, on a dial of its own, `KICKING` (§7.14). A fighter carried
+  out stays in the fight as somebody who can be picked, by those who hate them enough to kick them
+  and by nobody else, and defends at nothing; they throw no blows and are neither willing nor wanted
+  for the ending rule.
+
+### 7.7 Joining
+
+The pick that starts a fight no longer passes over somebody already in one. Whoever runs out of
+patience picks, by grudge + irritation, from everybody present:
+
+- **Their pick is free:** they start a new fight with them, as today.
+- **Their pick is in a fight:** they join it, if they are willing to brawl that person (`ceiling` at
+  least `BRAWL_HARM`). The one they went for holds the onset grievance against them, as a brawl's
+  target does now.
+- **Their pick is in a fight, and they would only row:** they **heckle from the sidelines**. It is a
+  row on their side only: they stop work for `ROW_S` and the one they picked takes the row's
+  grievance, but stays in the fight and is not stopped by it. A heckler can be drawn into a row of
+  their own. A neutral human is never dragged into a fist fight this way.
+- **Their pick is in a row:** a brawl on somebody rowing ends the row for them and starts a fight.
+
+**Two fights in one room stay two fights.** Joining is what merges them: whoever joins goes into the
+fight of the person they picked. One fight per room would make every scuffle in a crowded pit one
+riot, and turn the uprising's dwarves on the orc in the corner who has nothing to do with it.
+
+**The runaway to watch: rumpus.** `RUMPUS` speeds everybody's spend by the number of brawls in the
+room. With melees, counted per fight it undercounts a scrum of twelve; counted per fighter it is a
+feedback loop, where a bigger scrum makes the room snap faster and the scrum grows. **Recommendation:
+by the square root of half the number fighting** (two fighters 1, eight 2, eighteen 3), so a scrum
+is worse than a scuffle and still saturates.
+
+### 7.8 Everything else it touches
+
+- **Weapons.** Escalation is read against whoever they picked this exchange. **Answering** fires if
+  anybody in the fight who holds hostility against them had a weapon out at the start of the
+  exchange, not only "the other one".
+- **The boss.** A boss overseeing the place may pull **one** fighter out each exchange, on their avert
+  die against the boss's authority, with the averted release and, by intimidation, the grudge
+  against the boss. A big scrum takes a good boss many exchanges and outlasts a poor one, which is
+  the request. A boss in the fight oversees nothing, so the uprising goes unchecked.
+- **Wound grudges** are owed against whoever dealt the blow that carried them out, so `owed` becomes
+  a map by attacker, formed when that person's fight ends.
+- **Fatigue, orders and work** are unchanged: a fighter mans nothing, does not walk, and tires.
+- **Events.** A `quarrel` with `mode: :joined` when somebody joins; `brawl` and `armed` as now. A
+  whole fight's summary is the deferred brawl report, which a melee makes more worth having.
+
+### 7.9 Scenarios to walk through, and check with the tools
+
+| Scenario | What should happen | What would be wrong |
+|---|---|---|
+| Four dwarves hate a goblin boss | They join one by one, hit only him (no dwarf hates a dwarf), he goes down, nobody is willing, it ends | The dwarves turning on each other |
+| Two goblins on a dwarf | Mostly at the dwarf, now and then at each other; once he is down, at each other until sated | Goblins ignoring the dwarf to fight each other from the start |
+| Five who all hate each other | A shifting melee; everybody's defence falls as the hits spread; ends by relief and attrition | Ending as soon as the first one goes down |
+| 100 % snaps at 99 % | Goes on until the 99 % is sated | Ending when the starter is |
+| Two who cannot hurt each other | Ends by `BOUT_RELEASE` after a few exchanges, as now | Lasting forever |
+| A calm man set upon | Hits back while wanted, then steps out as soon as nobody wants him | Joining the fight's other quarrels |
+| Twelve who hate each other, poor boss | A large scrap, for a while, many carried out | Never happening, or never ending |
+| A brawl in a room of neutral humans | They row each other and heckle the fighters; nobody joins it | Neutral bystanders pulled into a fist fight |
+| A hated boss carried out by the uprising | Those willing to kill him put the boot in; the rest stop | The whole uprising kicking him, or nobody |
+
+### 7.10 Alternatives considered
+
+- **Sides.** Grouping people into factions by who they hate, and fighting faction against faction.
+  Rejected: a faction is a summary of the grudges, and the weighted pick already acts on the
+  grudges themselves. Sides would also need breaking when allies fall out, which is §7.2 again.
+- **Pairs that overlap.** Keeping the pairwise fight and letting a person be in several. Rejected:
+  the defence penalty, the clock, the ending and the boss all need to know who is in the fight
+  together, which a set of overlapping pairs does not record.
+- **A shared fight record at the top of the state** (`state[:melees]`). Viable. **Recommendation: per
+  person, as now**: each fighter's `fight` names the fight (`melee:`, the founder's seat and the tick
+  it began, so it is unique) and carries its clock. The lowest seat id still able runs the exchange.
+  It keeps one place to normalise on restore, and nothing new at the top of the state.
+
+### 7.11 Determinism and state
+
+- Every pick, willingness and count is read from the state the phase begins with; blows and
+  injuries are applied in sorted attacker order. **Somebody downed early in an exchange still takes
+  the rest of that exchange's blows and still throws their own**, because everybody chose at once.
+  That is simultaneity, not an order-dependence, and it is part of why a ring is deadly.
+- No new die. The `target:` die that picks a fight's first target is free inside a fight, since
+  patience does not run while fighting.
+- **Restore** normalises `fight[:melee]` and every key of `owed` as symbols, beside `with:` today.
+
+### 7.12 Review decisions
+
+1. **`FOCUS` 2.5** to start, and a first target of tuning: the figure is arbitrary.
+2. **The ganged penalty is a divisor, by count.**
+3. **Each attack rolls its own defence**, from the defender's and the attacker's dice summed.
+4. **Witness relief stacks, without violence**, at half the proposed minor and significant figures
+   and 0.15 for severe, so a genuinely huge brawl does not fizzle the moment somebody loses a tooth
+   (§7.5).
+5. **Putting the boot in** (§7.6 (a)). Whether `significant` should also derate `combat_prowess`
+   was not decided, and stays a tuning question.
+6. **The row-only heckle from the sidelines** instead of re-picking (§7.7): they row at the
+   fighter, the fighter takes the row's grievance and fights on, and the heckler can be drawn into
+   rows of their own.
+7. **Rumpus by the square root of half those fighting**, and expected to be the biggest lever on
+   how fights spread.
+8. **The boss pulls out one fighter an exchange.**
+
+### 7.14 Settled while building
+
+- **Kicking is not killing.** The first cut let a downed fighter be picked by anybody willing to
+  kill them (`ceiling` at `LETHAL`) and counted the bites on them until `MORTAL_BITE` of them killed.
+  Both went. Stacking blows on a severe injury into a mortal one was undesirable, and wanting a few
+  cheap shots at a man on the ground is not wanting him dead; an attacker that hateful is also likely
+  armed, which would make every kicking a murder. **`KICKING`, 0.6 of `LETHAL`**, is the threshold
+  for picking the downed.
+- **Kicks did nothing at first.** A blow on somebody already at `severe` ground a resilience
+  already at nothing and proposed `severe` again, which `Severity.escalate` will not announce. That
+  was the injury model's flaw — **a second injury of the same tier or lower never stacked** — and
+  wounds fixed it ([`wounds.md`](wounds.md)): every kick wounds and comes off the pool, and far
+  enough past empty kills.
+- **Willingness is checked every tick**, not only when an exchange falls due, so a fight ends the
+  moment nobody in it wants it.
+- **Rows run on each person's own clock** (`fight: { with:, clock_s: }`), which is what makes a heckle
+  one row instead of a special case.
+- **A brawl's state is per person**: `fight: { melee:, clock_s:, owed: { attacker => grudge }, armed: }`.
+  The melee is named for its founder and the tick it began (`:"a@1204"`).
+
+### 7.15 The first melee measurements
+
+From `script/tuning/crowds.rb`, three seeds of an hour each:
+
+| Room | Brawls / joined an hour | Largest fight | Half down |
+|---|---|---|---|
+| 4 dwarves, a goblin boss | 1.7 / 0 | 2 | never |
+| 5 of the feuding races | 4.7 / 0 | 2 | 16 min |
+| 12 of the feuding races, no boss | 11.7 / 0.7 | 4 | 9 min |
+| 12 of the feuding races, Throg | 26 / 0.3 | 3 | 33 min |
+| 12 of the feuding races, Arunessa | 26 / 0 | 2 | never |
+| 16 of the gang | 16 / 0.3 | 3 | 30 min (25 before the melee) |
+
+`RUMPUS` raised to 3 and to 8 moves joining to 2–4 an hour and the largest fight to 4, no more.
+
+**Melees barely form, and rumpus is not the lever for it.** Joining needs somebody's patience to
+run out *during* a fight, which lasts half a minute; patience runs out on independent clocks
+minutes apart. Shortening everybody's fuse while a fight lasts hardly ever makes another one
+burn down in time. The uprising of §7.9 comes one dwarf at a time: the boss is set upon, carried
+out, and the others have nothing left to rise against.
+
+**Candidates for the next pass, for review:**
+- **Opportunity.** Somebody you resent being in a fight wears your patience against them far
+  faster: the man you hate is busy, his back is turned. Targeted: only those holding a grudge
+  against a fighter are pulled in, so a quiet room stays quiet and the uprising rises.
+- **Rumpus by grudge.** The same, broader: a fight speeds the patience of those who resent anybody
+  in it, not of everybody in the room.
+- **Longer fights.** Less relief per exchange, so fights last long enough to be joined. It also
+  makes every fight bloodier, which the carry-out rate does not need.
+
+When the target is the busy one, the pick now goes: averted by the boss 36 %, a new brawl with
+somebody else 28 %, a heckle 21 %, a row 12 %, joined 3 %.
+
+### 7.13 Measuring it
+
+The crowd tool gains melee scenarios beside the rooms it has: four dwarves and a goblin boss, two
+goblins and a dwarf, five mutual haters, twelve mutual haters with each boss, and the existing gang
+rooms. Its report gains each fight's size (largest and mean), its length, the fighters each
+person-on-person blow went to (a check that no ally is hit where §7.2 says none should be), and deaths
+by fists, by weapons and on the ground. The brawl matrix stays the one-on-one reference.
 

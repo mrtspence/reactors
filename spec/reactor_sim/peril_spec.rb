@@ -173,7 +173,7 @@ RSpec.describe "perils" do
     # any tick that happened to cost nothing returns several times what the road takes.
     it "hands nothing back to somebody still standing in the road" do
       hand = pit(:poor).minions.fetch(:crew_2)
-      quiet = { ReactorSim::Peril.new(id: :caught_in_haulage, severity: 2.2,
+      quiet = { ReactorSim::Peril.new(id: :caught_in_haulage, severity: 2.2, wounds: { crush: 1.0 },
                                       places: %i[pit_bottom]) => 0.0 }
       state = { margin: 0.5, margin_full: 1.4, fatigue: 0.0 }
 
@@ -224,7 +224,8 @@ RSpec.describe "perils" do
   # this tick, so the claims are about `Blunder.pick` and `Blunder.spend` themselves.
   describe "which accident it was" do
     def peril(id, rate:, severity: 1.0, **opts)
-      ReactorSim::Peril.new(id: id, severity: severity, rate: rate, places: %i[pit_bottom], **opts)
+      wounds = severity.positive? ? { wounds: { crush: 1.0 } } : {}
+      ReactorSim::Peril.new(id: id, severity: severity, rate: rate, places: %i[pit_bottom], **wounds, **opts)
     end
 
     let(:caught) { peril(:caught_in_haulage, rate: 1.0) }
@@ -269,7 +270,12 @@ RSpec.describe "perils" do
     end
 
     it "takes the rate from the severity when none is given" do
-      expect(ReactorSim::Peril.new(id: :plain, severity: 2.2, places: %i[x]).rate).to eq(2.2)
+      expect(ReactorSim::Peril.new(id: :plain, severity: 2.2, wounds: { crush: 1.0 }, places: %i[x]).rate).to eq(2.2)
+    end
+
+    it "refuses a peril that hurts and says nothing of the wounds it deals" do
+      expect { ReactorSim::Peril.new(id: :vague, severity: 2.2, places: %i[x]) }
+        .to raise_error(ReactorSim::Error, /says nothing of the wounds/)
     end
 
     it "lets a mishap and an injury compete in one pick" do

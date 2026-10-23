@@ -34,7 +34,7 @@ class Grudge < ApplicationRecord
     row
   end
 
-  # Called once per match START, beside the injury list's clock.
+  # Called once per match START, beside the healing of wounds.
   def self.fade!(owner_id, content: ReactorSim::Content.default)
     owned_by(owner_id).find_each do |row|
       tags = content.minions.key?(row.holder_id.to_sym) ? content.sheet(row.holder_id).fetch(:tags) : {}

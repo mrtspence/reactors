@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_21_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -97,17 +97,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_21_120000) do
     t.index ["match_id"], name: "index_match_setups_on_match_id", unique: true
   end
 
-  create_table "minion_conditions", force: :cascade do |t|
-    t.string "cause"
-    t.datetime "created_at", null: false
-    t.integer "matches_remaining", default: 0, null: false
-    t.string "minion_id", null: false
-    t.string "owner_id", null: false
-    t.string "run_id"
-    t.datetime "updated_at", null: false
-    t.index ["owner_id", "minion_id"], name: "index_minion_conditions_on_owner_id_and_minion_id", unique: true
-  end
-
   create_table "operations", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "kind", null: false
@@ -146,5 +135,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_21_120000) do
     t.string "owner_id", null: false
     t.datetime "updated_at", null: false
     t.index ["owner_id", "kind", "blueprint_id"], name: "index_unlocks_on_owner_id_and_kind_and_blueprint_id", unique: true
+  end
+
+  create_table "wounds", force: :cascade do |t|
+    t.string "cause"
+    t.datetime "created_at", null: false
+    t.float "depth", null: false
+    t.string "kind", null: false
+    t.string "minion_id", null: false
+    t.string "owner_id", null: false
+    t.string "run_id", null: false
+    t.integer "slot", null: false
+    t.datetime "updated_at", null: false
+    t.integer "variant", null: false
+    t.index ["owner_id", "minion_id", "run_id", "slot"], name: "index_wounds_on_owner_id_and_minion_id_and_run_id_and_slot", unique: true
   end
 end

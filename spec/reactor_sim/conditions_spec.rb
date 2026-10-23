@@ -153,7 +153,8 @@ RSpec.describe "conditions" do
     end
 
     it "makes a slip likelier on a wet deck and far likelier on an icy one" do
-      slip = ReactorSim::Peril.new(id: :slip, severity: 1.0, places: %i[deck], underfoot: { wet: 1.0, icy: 8.0 })
+      slip = ReactorSim::Peril.new(id: :slip, severity: 1.0, wounds: { impact: 1.0 }, causes: %i[fall],
+                                   places: %i[deck], underfoot: { wet: 1.0, icy: 8.0 })
 
       expect(slip.footing({ wet: 1.0 })).to be > slip.footing({})
       expect(slip.footing({ icy: 1.0 })).to be > slip.footing({ wet: 1.0 })

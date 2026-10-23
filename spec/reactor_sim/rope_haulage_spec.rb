@@ -190,9 +190,11 @@ RSpec.describe "rope haulage" do
       struck = tick.send(:run_hit, run, declared, 0.8, false, :haulage_rope)
       crushed = tick.send(:run_hit, run, declared, 0.8, true, :haulage_rope)
 
-      expect(crushed.fetch(:severity)).to eq(struck.fetch(:severity) * run.dig(:crushed, :factor))
+      total = ->(hit) { hit.fetch(:wounds).values.sum }
+
+      expect(total.(crushed)).to be_within(1e-9).of(total.(struck) * run.dig(:crushed, :factor))
       expect(crushed).to include(cause: :crushed_by_runaway)
-      expect(crushed.fetch(:tags)).to include(:crush)
+      expect(crushed.fetch(:wounds)).to have_key(:crush)
     end
 
     it "catches somebody far oftener the further down the road they are" do

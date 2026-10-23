@@ -430,6 +430,18 @@ built in five units, designed one at a time:
      when a brawl ends, saying how (sated, carried out, parted by the boss, exhausted), carrying the
      blow-by-blow in its detail (each exchange's strike, guard, share, critical, armed, bite) so a
      later UI pass can open it as an expanded report. Not built.
+   - **The melee is built**: brawls of any size, each fighter swinging at whoever they most want to
+     hit, a heckle from the sidelines for those who would only row, kicking the downed, and an end
+     when nobody left is willing. See
+     [§7 of the sketch](design_sketches/animosity-and-distraction.md#7-melee-a-design-pass).
+     `FOCUS`, `GANGED`, `WITNESSED`, `KICKING` and `RUMPUS` are first guesses.
+   - **Wounds are built**: every harm deals the kinds it declares, each bitten separately, each
+     leaving a named wound out of `content/wounds/` (three variants a tier, examples to rewrite);
+     wounds stack, derate, outlive the match and heal between them, and somebody is out while a
+     wound would carry them out. See [`design_sketches/wounds.md`](design_sketches/wounds.md). The
+     brawl matrix and the crowds want rerunning on it: the pool doubled and `MORTAL_BITE` rose.
+   - **Next — a wound taking from a tag** (the scald on `focused`), named as a seam in
+     `Wounds::Catalogue`: needs a state-aware `Minion#tag`.
 4. Mobile engines: steam shovels and locomotives as their own crewed engines.
 5. The open pit itself.
 

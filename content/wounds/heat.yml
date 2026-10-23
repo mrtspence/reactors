@@ -1,0 +1,59 @@
+# Wounds from fire, from steam and boiling water, and from standing too long in a hot place.
+# Examples to be rewritten. The shape is described in blunt.yml.
+#
+# `heat` is a continuous kind: one standing wound deepens while somebody stays in the heat, so its
+# tiers are one condition growing rather than separate accidents.
+
+burn:
+  minor:
+    scalded_skin: { label: Scalded skin, weight: 1, derates: { intelligence: 0.9 } }
+    singed_hands: { label: Singed hands, weight: 1, derates: { dexterity: 0.9 } }
+    blistered_arm: { label: Blistered arm, weight: 1, derates: { strength: 0.95, dexterity: 0.95 } }
+  significant:
+    burned_hands: { label: Burned hands, weight: 1, derates: { dexterity: 0.45, combat_prowess: 0.8 } }
+    burned_face: { label: Burned face, weight: 1, derates: { charisma: 0.6, intelligence: 0.8 } }
+    burned_back: { label: Burned back, weight: 1, derates: { strength: 0.7, endurance: 0.75 } }
+  severe:
+    charred_hands: { label: Charred hands, weight: 1, derates: { dexterity: 0.1, strength: 0.6 } }
+    burned_eyes: { label: Burned eyes, weight: 1, derates: { intelligence: 0.4, dexterity: 0.3 } }
+    burned_over_the_body: { label: Burned over the body, weight: 1, derates: { endurance: 0.2, strength: 0.4, agility: 0.5 } }
+  mortal:
+    burned_alive: { label: Burned alive, weight: 1, derates: { endurance: 0.0 } }
+    charred: { label: Charred, weight: 1, derates: { strength: 0.0, agility: 0.0 } }
+    seared_lungs: { label: Seared lungs, weight: 1, derates: { endurance: 0.05 } }
+
+scald:
+  minor:
+    scalded_hand: { label: Scalded hand, weight: 1, derates: { dexterity: 0.9 } }
+    scalded_feet: { label: Scalded feet, weight: 1, derates: { agility: 0.9 } }
+    steam_flash: { label: Steam flash, weight: 1, derates: { intelligence: 0.9, charisma: 0.95 } }
+  significant:
+    scalded_arms: { label: Scalded arms, weight: 1, derates: { strength: 0.7, dexterity: 0.6 } }
+    scalded_legs: { label: Scalded legs, weight: 1, derates: { agility: 0.5 } }
+    scalded_face: { label: Scalded face, weight: 1, derates: { intelligence: 0.75, charisma: 0.6 } }
+  severe:
+    boiled_hands: { label: Boiled hands, weight: 1, derates: { dexterity: 0.1, strength: 0.6 } }
+    scalded_to_the_waist: { label: Scalded to the waist, weight: 1, derates: { agility: 0.2, endurance: 0.4 } }
+    steam_in_the_eyes: { label: Steam in the eyes, weight: 1, derates: { intelligence: 0.4, dexterity: 0.3 } }
+  mortal:
+    boiled_alive: { label: Boiled alive, weight: 1, derates: { endurance: 0.0 } }
+    scalded_lungs: { label: Scalded lungs, weight: 1, derates: { endurance: 0.05 } }
+    scalded_from_head_to_foot: { label: Scalded from head to foot, weight: 1, derates: { strength: 0.05, agility: 0.05 } }
+
+heat:
+  minor:
+    heat_cramps: { label: Heat cramps, weight: 1, derates: { strength: 0.9, endurance: 0.9 } }
+    parched: { label: Parched, weight: 1, derates: { endurance: 0.85 } }
+    light_headed: { label: Light-headed, weight: 1, derates: { intelligence: 0.9 } }
+  significant:
+    heat_exhaustion: { label: Heat exhaustion, weight: 1, derates: { endurance: 0.5, strength: 0.75 } }
+    blistered_skin: { label: Blistered skin, weight: 1, derates: { dexterity: 0.7, endurance: 0.8 } }
+    delirious: { label: Delirious, weight: 1, derates: { intelligence: 0.5, dexterity: 0.8 } }
+  severe:
+    heat_stroke: { label: Heat stroke, weight: 1, derates: { endurance: 0.1, intelligence: 0.3 } }
+    roasted_skin: { label: Roasted skin, weight: 1, derates: { endurance: 0.2, dexterity: 0.3 } }
+    collapsed_in_the_heat: { label: Collapsed in the heat, weight: 1, derates: { endurance: 0.15, strength: 0.3 } }
+  mortal:
+    cooked: { label: Cooked, weight: 1, derates: { endurance: 0.0 } }
+    killed_by_the_heat: { label: Killed by the heat, weight: 1, derates: { endurance: 0.0, intelligence: 0.0 } }
+    burned_from_within: { label: Burned from within, weight: 1, derates: { endurance: 0.05 } }

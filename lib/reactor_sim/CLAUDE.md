@@ -45,10 +45,14 @@ What a person is subject to lives in eight pure modules over a state hash they d
 none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
 air), `scorch.rb` (the heat), `chill.rb` (the cold, and the strain of working in heat),
 `peril.rb` (the place, and the hidden margin it spends), `burden.rb` (what they are carrying) and
-`animosity.rb` (each other).
-**A harm that works continuously owes a dwell counter past collapse** — `asphyxia`, `burns` and
-`chilled` — because `Severity.escalate` will not announce the same tier twice and a steady
-grind therefore never reaches `:mortal` on its own.
+`animosity.rb` (each other). **What any of them leaves is wounds** (`wounds.rb`): a harm declares
+the kinds it deals as shares of its severity and its causes, each kind is bitten separately, and
+each bite past the first band leaves a named wound out of `content/wounds/`. Wounds stack, derate
+the stats they name, and outlive the match, healing between them; every bite also comes off
+`resilience`, which collapses somebody at empty and kills them far past it. `injury` is the
+condition all that comes to, derived. **A harm that works continuously deepens one standing wound
+of its kind** — heat, cold, bad air — rather than adding one a tick, from a running `dose`, and
+owes a dwell counter past collapse (`asphyxia`, `burns`, `chilled`) to reach `:mortal`.
 
 > **A burden is gear and people, and the arithmetic cannot tell them apart.** `mass_kg` is the
 > body; `worn_kg` is what is hanging off it; a carried person contributes both of theirs. Keeping
@@ -64,8 +68,9 @@ grind therefore never reaches `:mortal` on its own.
 > fatigue with the gate and **−0.068 without it**. Armour you can rest off; a body you cannot.
 
 > **Every die thrown for a person is thrown in phase 0, unconditionally for everybody** — in
-> `Tick#draw_fates` from their own stream, and in `Tick#draw_tempers` from a second stream of
-> their own (`Animosity.stream`), so a temper's dice never move a fate's. A conditional draw makes
+> `Tick#draw_fates` from their own stream, in `Tick#draw_tempers` from a second stream of
+> their own (`Animosity.stream`), and in `Tick#draw_wounds` from a third (`Injury.stream`), so
+> none moves another. A conditional draw makes
 > the RNG stream depend on the condition and the divergence surfaces as a snapshot replaying
 > differently, days later, somewhere unrelated. Keeping the count fixed and in one method per
 > stream is what makes it checkable — see
@@ -81,8 +86,10 @@ grind therefore never reaches `:mortal` on its own.
 > `state[:spite]`). A post with `oversees:` is a boss's. **Shoves and sabotage are all or
 > nothing; blows are graded** by how far `strike` beat `defend`, and hit by `attack` — the
 > contest itself (a bell-curved roll, landing, damage, a critical that `pierces:` the armour and
-> part of the toughness) is `combat.rb`, pure arithmetic any future fight reuses. A fighter mans nothing
-> (`Tick#crews` leaves them out) and does not walk. See
+> part of the toughness) is `combat.rb`, pure arithmetic any future fight reuses. **A brawl is a
+> melee of any size**, one `fight: { melee: }` per member and no shared record, lasting while anybody
+> in it is still angry with somebody there. A fighter mans nothing (`Tick#crews` leaves them out) and
+> does not walk. See
 > [`design_sketches/animosity-and-distraction.md`](../../docs/design_sketches/animosity-and-distraction.md).
 >
 > **`Minion#avoid` is every hazard's getting-out-of-the-way** — `√(wits × agility)`, the agility
@@ -237,9 +244,14 @@ the same lever costs a day-labourer far more than a strong fireman.
 
 > **The Danger Check throws no dice, and that is the design rather than a workaround.**
 > `resilience` is rolled ONCE, at `initial_state` — one of the three places entropy is permitted
-> — so every check afterwards is a deterministic comparison. Injuries therefore replay exactly,
-> survive a snapshot, and need no amendment to the entropy invariant. The uncertainty is the
-> hidden threshold, exactly as `durability_range` is for a part.
+> — so every check afterwards is a deterministic comparison; the one die it reads, which of a
+> tier's variants a wound is, was thrown in phase 0. Injuries therefore replay exactly, survive a
+> snapshot, and need no amendment to the entropy invariant. The uncertainty is the hidden
+> threshold, exactly as `durability_range` is for a part.
+>
+> **Nothing reaches it untyped.** A hazard with no `wounds:`, an unknown kind or cause, or shares
+> that do not sum to one is refused when the machine is built (`Operation#validate_hazards!`), a
+> peril or a weapon when it is made, and an incomplete catalogue at boot.
 >
 > A hazard's severity **scales with a figure the part reports on its failure event**
 > (`scales_with:`/`reference:`), because a small steam escape is not a large one. Reading the

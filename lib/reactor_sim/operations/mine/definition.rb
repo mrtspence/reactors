@@ -79,10 +79,11 @@ module ReactorSim
       # a match was given survives a round trip whatever this was called with.
       # `conditions:` is the match's sky — `{ season:, climate:, start_hour:, severity: }` from setup
       # — and nil is the standard sky a spec measures the pit under. `grudges:` is who among the
-      # crew already hates whom from earlier matches, by person.
+      # crew already hates whom from earlier matches, by person, and `wounds:` what they are still
+      # carrying from them.
       def build(id:, seed:, chassis: CHASSIS.keys.first, loadout: {}, crew: {}, ground: nil,
-                conditions: nil, grudges: nil, time_scale: DEFAULT_TIME_SCALE, state: nil, rngs: nil,
-                content: nil)
+                conditions: nil, grudges: nil, wounds: nil, time_scale: DEFAULT_TIME_SCALE, state: nil,
+                rngs: nil, content: nil)
         chassis = chassis.to_sym
         assembly = assembly_for(chassis, loadout, ground: ground, conditions: conditions)
         fragment = assembly.build!
@@ -92,7 +93,7 @@ module ReactorSim
           id: id, type: TYPE, seed: seed, time_scale: time_scale,
           state: state, rngs: rngs, content: content,
           options: { chassis: chassis, loadout: assembly.loadout, crew: roster, conditions: conditions,
-                     grudges: Animosity.carried_over(grudges) }.compact,
+                     grudges: Animosity.carried_over(grudges), wounds: Wounds.carried_over(wounds) }.compact,
           nodes: fragment.nodes, links: fragment.links,
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           # From the fragment, so a fitted cage contributes its own way through the shaft — the
@@ -192,7 +193,7 @@ module ReactorSim
         TUB_ON_THE_CAGE = 2.0
 
         def failure_hazards
-          @hoist ? { tub_fell: { tags: %i[impact crush], riders: { @hoist => TUB_ON_THE_CAGE } } } : {}
+          @hoist ? { tub_fell: { wounds: { impact: 0.5, crush: 0.5 }, riders: { @hoist => TUB_ON_THE_CAGE } } } : {}
         end
 
         # What a mishap can make of it that is not a failure: a tub down the shaft onto the cage.
@@ -264,7 +265,7 @@ module ReactorSim
       end
 
       # Who the frame falls on, and what it brings down with it.
-      HEADFRAME_FALL = { tags: %i[impact burn], places: { bank: 1.4 }, riders: { cage_drive: 1.2 } }.freeze
+      HEADFRAME_FALL = { wounds: { impact: 0.7, burn: 0.3 }, places: { bank: 1.4 }, riders: { cage_drive: 1.2 } }.freeze
 
       def headframe(timber_kg:)
         Headframe.new(
@@ -373,7 +374,7 @@ module ReactorSim
           heater_control_id: :furnace_stoking, igniter_kg_per_s: 0.002,
           # No temperature rating: its coal fire is the furnace working. Its gas going off is the
           # blast in the furnace drift, at the shaft bottom.
-          endangers: { explosion: { tags: %i[blast burn], scales_with: :joules, reference: 1.0e8,
+          endangers: { explosion: { wounds: { blast: 0.6, burn: 0.4 }, scales_with: :joules, reference: 1.0e8,
                                     places: { pit_bottom: 1.6 } } },
           ports: [ Port.new(id: :fuel_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 1.0),
                    Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
@@ -559,7 +560,7 @@ module ReactorSim
           max_torque: max_torque, rated_omega: rated_omega, curve: :constant,
           control_id: :rods, friction: 1.0, endangers: endangers, damages: damages,
           # A missed step, every stroke a chance of it. Mostly a fall onto the next sollar.
-          perils: [ Peril.new(id: :misstep, tags: %i[fall crush], severity: 1.6, rate: 0.6,
+          perils: [ Peril.new(id: :misstep, wounds: { crush: 1.0 }, causes: %i[fall], severity: 1.6, rate: 0.6,
                               scales_with: :strokes, riders: %i[man_engine]) ]
         )
       end
@@ -769,9 +770,9 @@ module ReactorSim
           # walled district has shed its heat long before it could wear through. A rupture is the
           # roadway itself giving way to a fire that went on burning.
           endangers: {
-            explosion: { tags: %i[blast burn], scales_with: :joules, reference: 3.0e9,
+            explosion: { wounds: { blast: 0.6, burn: 0.4 }, scales_with: :joules, reference: 3.0e9,
                          places: { district: 3.2, pit_bottom: 1.1 } },
-            rupture: { tags: %i[blast burn afterdamp], scales_with: :temperature_k,
+            rupture: { wounds: { blast: 0.6, burn: 0.4 }, causes: %i[afterdamp], scales_with: :temperature_k,
                        reference: 1_400.0,
                        places: { district: 3.2, pit_bottom: 1.1 } }
           },
@@ -832,7 +833,7 @@ module ReactorSim
           control_id: :ventilation, head_pa: head_pa,
           reverse_control_id: (:fan_reversed if reversible),
           driven_by: :line_shaft, efficiency: 0.55, rated_omega: rated_omega,
-          burst_ratio: 1.5, endangers: { burst: { tags: %i[impact], places: { bank: 1.6 } } }
+          burst_ratio: 1.5, endangers: { burst: { wounds: { impact: 1.0 }, places: { bank: 1.6 } } }
         )
       end
 
@@ -1131,7 +1132,7 @@ module ReactorSim
 
       # A fall drives the air out ahead of it, down the roads, at whoever is in them — by how much
       # came down.
-      WINDBLAST = { tags: %i[impact], scales_with: :hanging_m, reference: OldWorkings::FIRST_SPAN_M,
+      WINDBLAST = { wounds: { impact: 1.0 }, scales_with: :hanging_m, reference: OldWorkings::FIRST_SPAN_M,
                     places: { district: 1.8, pit_bottom: 0.6 } }.freeze
 
       # A pinned `ground:` draws no spans, so a spec measuring the machine has no falls.
@@ -1251,7 +1252,7 @@ module ReactorSim
       end
 
       # Breaking out: the waste's fire reaching the face.
-      GOB_BREAKOUT = { tags: %i[burn afterdamp], places: { district: 1.6 } }.freeze
+      GOB_BREAKOUT = { wounds: { burn: 1.0 }, causes: %i[afterdamp], places: { district: 1.6 } }.freeze
 
       # A pinned `ground:` inherits no heating waste.
       def gob(ground: nil)
@@ -1945,10 +1946,10 @@ module ReactorSim
       # ride. The hands working the road are somewhere along it, may reach a manhole, and, well down
       # it, may be pinned against the side or between it and a standing tub.
       RUNAWAY = {
-        tags: %i[impact], scales_with: :set_kg, reference: HaulageRope::SET_KG,
+        wounds: { impact: 1.0 }, scales_with: :set_kg, reference: HaulageRope::SET_KG,
         along: { from: :district, to: :pit_bottom, weight: 3.0, top_share: 0.1,
                  positions: { trapping: 0.9 }, roaming: %i[haulage],
-                 crushed: { chance: 0.5, factor: 2.0, tags: %i[crush], cause: :crushed_by_runaway } }
+                 crushed: { chance: 0.5, factor: 2.0, wounds: { crush: 1.0 }, cause: :crushed_by_runaway } }
       }.freeze
 
       # **A hooker-on coupling a set without its backstay**, by how hard the road is worked.
@@ -1990,7 +1991,7 @@ module ReactorSim
           endangers: {
             # `reference:` is in kg/s of unsupported cutting, the unit `unsupported` is reported
             # in: a full hand face wholly unsupported reads about 0.3 with a decent kit.
-            roof_fall: { tags: %i[rockfall crush], scales_with: :unsupported,
+            roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], scales_with: :unsupported,
                          reference: 0.2,
                          places: { pit_bottom: 2.6, district: 1.6 } }
           },
@@ -2003,11 +2004,11 @@ module ReactorSim
           # room, and a small one is missed by a driver where a big one would have been seen.
           # Neither is simply better in the road — they are exposed to different accidents.
           perils: [
-            Peril.new(id: :caught_in_haulage, tags: %i[crush], severity: 2.2,
+            Peril.new(id: :caught_in_haulage, wounds: { crush: 1.0 }, severity: 2.2,
                       scales_with: :tubs, places: %i[pit_bottom district], opportunity: true),
-            Peril.new(id: :wedged, tags: %i[crush], severity: 2.6, scales_with: :tubs,
+            Peril.new(id: :wedged, wounds: { crush: 1.0 }, severity: 2.6, scales_with: :tubs,
                       when_tagged: :hulking, places: %i[pit_bottom district]),
-            Peril.new(id: :struck_by_tub, tags: %i[impact], severity: 1.4, scales_with: :tubs,
+            Peril.new(id: :struck_by_tub, wounds: { impact: 1.0 }, severity: 1.4, scales_with: :tubs,
                       unless_tagged: :hulking, places: %i[pit_bottom district], opportunity: true)
           ]
         )
@@ -2086,11 +2087,11 @@ module ReactorSim
           advanced_by: :pick_line, supported_by: :timbering,
           id: :tub_road, label: "Belt Road", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 4.0e3, control_id: :haulage,
-          endangers: { roof_fall: { tags: %i[rockfall crush], scales_with: :unsupported, reference: 30.0,
+          endangers: { roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], scales_with: :unsupported, reference: 30.0,
                                     places: { pit_bottom: 2.6, district: 1.6 } } },
           # Caught in the belt where it runs onto the drum: the attendant, clearing spillage at
           # the drive head.
-          perils: [ Peril.new(id: :caught_in_the_belt, tags: %i[crush], severity: 2.4, scales_with: :belt,
+          perils: [ Peril.new(id: :caught_in_the_belt, wounds: { crush: 1.0 }, severity: 2.4, scales_with: :belt,
                               stations: %i[belt_attending], opportunity: true) ]
         )
       end
@@ -2270,7 +2271,7 @@ module ReactorSim
           perils: [ Peril.new(id: :tub_into_shaft, rate: 0.3, scales_with: :tubs,
                               mishap: { node: :shaft, kind: :obstruction, share: 1.0 },
                               stations: %i[banking], underfoot: BANK_FOOTING),
-                    Peril.new(id: :slipped_on_the_deck, tags: %i[fall impact], severity: 1.2, rate: 0.1,
+                    Peril.new(id: :slipped_on_the_deck, wounds: { impact: 1.0 }, causes: %i[fall], severity: 1.2, rate: 0.1,
                               scales_with: :tubs, stations: %i[banking], underfoot: BANK_FOOTING,
                               opportunity: true) ]
         )
@@ -2528,7 +2529,7 @@ module ReactorSim
 
       # Coal thrown into the face, and how hard it hits goes with how much: a median outburst at the
       # reference, the rare large one far worse.
-      OUTBURST_HARM = { tags: %i[crush impact], scales_with: :coal_t, reference: GasPocket::COAL_MEDIAN_T,
+      OUTBURST_HARM = { wounds: { crush: 0.6, impact: 0.4 }, scales_with: :coal_t, reference: GasPocket::COAL_MEDIAN_T,
                         places: { district: 2.4 } }.freeze
 
       def outburst

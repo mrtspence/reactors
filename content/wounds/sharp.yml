@@ -1,0 +1,38 @@
+# Wounds from points and edges: a pick, a knife, a splinter, a sharp edge of iron. Examples to be
+# rewritten. The shape is described in blunt.yml.
+
+puncture:
+  minor:
+    splinter: { label: Splinter, weight: 1, derates: { dexterity: 0.9 } }
+    stab_in_the_arm: { label: Stab in the arm, weight: 1, derates: { strength: 0.9 } }
+    pierced_hand: { label: Pierced hand, weight: 1, derates: { dexterity: 0.85 } }
+  significant:
+    stab_in_the_gut: { label: Stab in the gut, weight: 1, derates: { endurance: 0.6, strength: 0.75 } }
+    pierced_thigh: { label: Pierced thigh, weight: 1, derates: { agility: 0.5 } }
+    run_through_the_shoulder: { label: Run through the shoulder, weight: 1, derates: { strength: 0.6, combat_prowess: 0.7 } }
+  severe:
+    pierced_lung: { label: Pierced lung, weight: 1, derates: { endurance: 0.2, strength: 0.5 } }
+    gutted: { label: Gutted, weight: 1, derates: { endurance: 0.15, strength: 0.3 } }
+    lost_an_eye: { label: Lost an eye, weight: 1, derates: { intelligence: 0.6, dexterity: 0.4 } }
+  mortal:
+    pierced_heart: { label: Pierced heart, weight: 1, derates: { endurance: 0.0 } }
+    skewered: { label: Skewered, weight: 1, derates: { endurance: 0.05, strength: 0.05 } }
+    bled_out: { label: Bled out, weight: 1, derates: { endurance: 0.05, strength: 0.1 } }
+
+cut:
+  minor:
+    gashed_palm: { label: Gashed palm, weight: 1, derates: { dexterity: 0.85 } }
+    split_lip: { label: Split lip, weight: 1, derates: { charisma: 0.9 } }
+    cut_forearm: { label: Cut forearm, weight: 1, derates: { strength: 0.95, dexterity: 0.95 } }
+  significant:
+    deep_gash: { label: Deep gash, weight: 1, derates: { endurance: 0.7, strength: 0.8 } }
+    slashed_tendon: { label: Slashed tendon, weight: 1, derates: { agility: 0.5, dexterity: 0.7 } }
+    lost_a_finger: { label: Lost a finger, weight: 1, derates: { dexterity: 0.6 } }
+  severe:
+    severed_hand: { label: Severed hand, weight: 1, derates: { dexterity: 0.1, strength: 0.5, combat_prowess: 0.4 } }
+    opened_belly: { label: Opened belly, weight: 1, derates: { endurance: 0.15, strength: 0.3 } }
+    hamstrung: { label: Hamstrung, weight: 1, derates: { agility: 0.1, strength: 0.6 } }
+  mortal:
+    opened_throat: { label: Opened throat, weight: 1, derates: { endurance: 0.0 } }
+    severed_artery: { label: Severed artery, weight: 1, derates: { endurance: 0.05 } }
+    cut_to_pieces: { label: Cut to pieces, weight: 1, derates: { strength: 0.05, agility: 0.05 } }

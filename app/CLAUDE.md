@@ -10,7 +10,7 @@ app/kafka/        CommandProducer, EventProducer — web and runner side
 app/controllers/  Consoles, Commands, Loadouts, LoadoutDrafts, MatchResets, Crews, CrewDrafts
 app/channels/     OperationChannel — read-only, telemetry out, backfills a joining client
 app/components/   PanelComponent -> InstrumentComponent -> Instruments::{Needle,Digital,Prose,Lamp}
-app/services/     Outfitting, ProgressionDigest, InjuryList, GrudgeList — resolved arguments, never params
+app/services/     Outfitting, ProgressionDigest, WoundList, GrudgeList — resolved arguments, never params
 app/javascript/   controllers/console_controller.js, channels/consumer.js
 ```
 
@@ -154,15 +154,28 @@ every fittable operation as `conditions:`, and the reset command carries it once
 `DevMatch.request_reset!`, the one path a reset takes, so the season is chosen before the crew
 and the rig are outfitted for it. The weather inside the season is the seed's.
 
+## Wounds across matches
+
+**Taken in play, written down, handed back, healed.** `WoundList` (in `ProgressionConsumer`) writes
+every wound a `minion_hurt` names to a `Wound` row — written at the depth reported, keyed by the run
+and the wound's place among the person's (`slot`), or by its own row for a wound carried in (`ref`),
+so a replay changes nothing and a wound that deepens is the same row. `DevMatch` hands the account's
+wounds to every crewed machine as `wounds:`, and the reset command carries them once, as
+`"wounds"`. Each match start heals them (`Wound.heal!`, through `Wounds.heal`, faster for
+`regeneration`, slower for `slow_healer`) **before** the reset command is built, so the match being
+built is the one a severe wound comes back to lesser. **Somebody is unavailable while any wound would
+carry them out** (`Wound.remaining_for`, which the crew screen and `DevMatch#available` read), for as
+many matches as it takes to heal below that. The standin carries nothing.
+
 ## Grudges across matches
 
-**Formed in play, written down, handed back, worn away.** `GrudgeList` (beside `InjuryList` in
+**Formed in play, written down, handed back, worn away.** `GrudgeList` (beside `WoundList` in
 `ProgressionConsumer`) writes each `grudge_formed` to a `Grudge` row per owner, holder and target —
 person ids, never standins — idempotent per run and tick, because the stream is at-least-once.
 `DevMatch` hands the account's grudges to every crewed machine as `grudges:`, and the reset command
 carries them once, as `"grudges"`, for the same reason it carries the season. Each match start
-fades them (`Grudge.fade!`, by the holder's spite through `Animosity.faded`) beside the injury
-list's clock. Race and authored grudges are content and never written here. **Nothing shows them
+fades them (`Grudge.fade!`, by the holder's spite through `Animosity.faded`) beside the healing of
+wounds. Race and authored grudges are content and never written here. **Nothing shows them
 yet** — a report and a recruitment screen are where they belong.
 
 ## The outfitting screen
@@ -290,17 +303,17 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
 - **An owner nobody can name has earned nothing.** `earned?(id, owner_id: nil)` is `false`, not
   true: there is no auth yet, and an unattributable gate should stay shut rather than open for
   everybody.
-- **A roster is intent; availability is applied at build.** A minion on the injury list stays in
-  the `rosters` row and is dropped when the machine is built, so recovery restores them with no
+- **A roster is intent; availability is applied at build.** A minion too hurt to work stays in
+  the `rosters` row and is dropped when the machine is built, so healing restores them with no
   second decision from the player. It must be applied in **both** `DevMatch.build` and
   `reset_command` — the runner rebuilds from the command payload, not from the table, so
   filtering only one of them fields somebody the screen has just refused.
 - **Refusing and substituting are different statements.** Posting somebody unavailable is refused
   by the screen; leaving a post *empty* substitutes the standin silently, because that is a
   choice rather than a mistake.
-- **The recovery clock may not live in `DevMatch.build`.** The web process calls it to rebuild a
-  `Match` for the panel and the roster, so a decrement there would let a player heal their crew by
-  refreshing the page. `DevMatch.start!` is called where a match actually starts.
+- **Healing may not live in `DevMatch.build`.** The web process calls it to rebuild a `Match` for
+  the panel and the roster, so healing there would let a player mend their crew by refreshing the
+  page. `DevMatch.start!` is called where a match actually starts.
 - **Minions come from `Content.hireable`, never `Content.minions`.** The last-resort standin is an
   ordinary individual in content — one resolution path rather than a special case in the engine —
   and `hireable: false` is the single field keeping it out of the shop. Enumerate all minions and

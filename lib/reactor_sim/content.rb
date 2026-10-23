@@ -29,18 +29,23 @@ module ReactorSim
           reactions: read_all(File.join(dir, "reactions")),
           archetypes: read_all(File.join(dir, "archetypes")),
           minions: read_all(File.join(dir, "minions")),
-          climates: read_all(File.join(dir, "conditions"))
+          climates: read_all(File.join(dir, "conditions")),
+          wounds: read_all(File.join(dir, "wounds"))
         ).freeze
       end
 
       # Test seam: build a registry from literals with no filesystem involved. Every keyword
       # defaults, so a spec asks for the one table it cares about and gets empty ones for the
-      # rest — which is what keeps an unrelated substance from boiling mid-test.
-      def build(resources: {}, reactions: {}, archetypes: {}, minions: {}, climates: {})
+      # rest — which is what keeps an unrelated substance from boiling mid-test. **Wounds are the
+      # exception**: anybody can be hurt in any operation, so the catalogue defaults to the one
+      # shipped, read once, and a spec passes its own only to test the catalogue.
+      def build(resources: {}, reactions: {}, archetypes: {}, minions: {}, climates: {}, wounds: nil)
         Registry.new(resources: deep_sym(resources), reactions: deep_sym(reactions),
                      archetypes: deep_sym(archetypes), minions: deep_sym(minions),
-                     climates: deep_sym(climates)).freeze
+                     climates: deep_sym(climates), wounds: wounds ? deep_sym(wounds) : shipped_wounds).freeze
       end
+
+      def shipped_wounds = @shipped_wounds ||= read_all(File.join(ROOT, "wounds")).freeze
 
       # Public because `Registry#merging` needs it — a caller handing in literals should get the
       # same key treatment a YAML file gets, or a fixture written with string keys would be a
@@ -93,14 +98,16 @@ module ReactorSim
       REQUIRED_SEASON_KEYS = %i[day_of_year mean_k daily_range_k pressure_pa severity spells].freeze
       REQUIRED_SPELL_KEYS = %i[weight minutes offset_k precipitation wind_m_s pressure_trend].freeze
 
-      attr_reader :resources, :reactions, :archetypes, :minions, :climates
+      attr_reader :resources, :reactions, :archetypes, :minions, :climates, :wounds
 
-      def initialize(resources:, reactions:, archetypes: {}, minions: {}, climates: {})
+      def initialize(resources:, reactions:, archetypes: {}, minions: {}, climates: {}, wounds: Content.shipped_wounds)
         @resources = resources.freeze
         @reactions = reactions.freeze
         @archetypes = archetypes.freeze
         @minions = minions.freeze
         @climates = climates.freeze
+        @wounds_spec = wounds
+        @wounds = Wounds::Catalogue.new(wounds)
         @phase_pairs = index_phase_pairs.freeze
         @tags = @resources.to_h { |id, spec| [ id, spec.fetch(:tags, []).map(&:to_sym).freeze ] }.freeze
         validate!
@@ -166,7 +173,7 @@ module ReactorSim
         self.class.new(resources: @resources, reactions: @reactions,
                        archetypes: @archetypes.merge(Content.deep_symbolize(archetypes)),
                        minions: @minions.merge(Content.deep_symbolize(minions)),
-                       climates: @climates).freeze
+                       climates: @climates, wounds: @wounds_spec).freeze
       end
 
       # Precomputed. This is called once per parcel per port per link per tick, and the

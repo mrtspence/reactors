@@ -55,7 +55,9 @@ and also sweeps the source statically.
 > condition — and the divergence does not show up where you made it. It shows up days later
 > as a snapshot that replays differently, in a part of the match nothing connects to the
 > change. `draw_fates` exists as one method returning one fixed-size hash so the count is
-> checkable by reading it — and `draw_tempers` the same, on the temper stream.
+> checkable by reading it — and `draw_tempers` the same, on the temper stream, and
+> `draw_wounds`, one die a tick on the wound stream (`Injury.stream`) for which of a tier's
+> variants a wound is.
 >
 > **Adding or removing a draw there is a replay-breaking change to every existing snapshot.**
 > That is acceptable while nothing durable is stored and must be deliberate afterwards.

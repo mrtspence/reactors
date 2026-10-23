@@ -79,7 +79,7 @@ rijgazh:
 # **`hireable: false`, and that single field is the whole of what makes this different.** The
 # point of a last resort is that it cannot be taken away, so it is not a blueprint, cannot be
 # unlocked, cannot be trained and cannot be upgraded — it simply turns up, in any number, to
-# fill a crew slot nobody better is standing in. When a favourite is on the injury list, this
+# fill a crew slot nobody better is standing in. When a favourite is out healing, this
 # is who you get instead, and that is the sting.
 #
 # It lives here rather than as a special case in code so there is **one** way a minion's sheet

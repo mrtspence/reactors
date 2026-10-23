@@ -43,12 +43,14 @@ RSpec.describe "animosity" do
   end
 
   # A brute and somebody who cannot get out of the way: whatever is tried between them lands.
-  def brute(id, **rest) = person(id, stats: { strength: 3.0 }, mass_kg: 500.0, **rest)
-  def sitting_duck(id, **rest) = person(id, stats: { agility: 0.01, combat_prowess: 0.0 }, **rest)
+  def brute(id, stats: {}, **rest) = person(id, stats: { strength: 3.0 }.merge(stats), mass_kg: 500.0, **rest)
+  def sitting_duck(id, stats: {}, **rest) = person(id, stats: { agility: 0.01, combat_prowess: 0.0 }.merge(stats), **rest)
 
   # And the other way round: nothing tried by the first lands on the second.
-  def weakling(id, **rest) = person(id, stats: { strength: 0.05, combat_prowess: 0.0 }, mass_kg: 5.0, **rest)
-  def wary(id, **rest) = person(id, stats: { agility: 3.0, combat_prowess: 3.0 }, tags: { defence: 1.0 }, **rest)
+  def weakling(id, stats: {}, **rest) = person(id, stats: { strength: 0.05, combat_prowess: 0.0 }.merge(stats), mass_kg: 5.0, **rest)
+  def wary(id, stats: {}, tags: {}, **rest)
+    person(id, stats: { agility: 3.0, combat_prowess: 3.0 }.merge(stats), tags: { defence: 1.0 }.merge(tags), **rest)
+  end
 
   # Two rooms and a way between them, a post with whatever openings a spec gives it, and perhaps
   # a boss over one room.
@@ -179,7 +181,7 @@ RSpec.describe "animosity" do
       expect(scrapper.defend(state)).to be > green.defend(state)
     end
 
-    def profile(swing:, precision:, edge: 0.0, wounds: %i[puncture])
+    def profile(swing:, precision:, edge: 0.0, wounds: { puncture: 1.0 })
       ReactorSim::Equipment.weapon_profile("spec", { handling: { swing: swing, precision: precision },
                                                      edge: edge, wounds: wounds })
     end
@@ -220,18 +222,18 @@ RSpec.describe "animosity" do
     end
 
     it "swings one weapon at a time, whichever suits the hand, and only when it means to" do
-      pick = profile(swing: 0.8, precision: 0.2, wounds: %i[puncture impact])
-      knife = profile(swing: 0.2, precision: 0.8, wounds: %i[puncture])
+      pick = profile(swing: 0.8, precision: 0.2, wounds: { puncture: 0.6, impact: 0.4 })
+      knife = profile(swing: 0.2, precision: 0.8, wounds: { puncture: 1.0 })
       quick_armed = person(:k, stats: { agility: 1.5, dexterity: 1.5 }, weapons: [ pick, knife ])
 
       expect(quick_armed.wielding(state, armed: true)).to eq(knife)
       expect(quick_armed.wielding(state)).to eq(ReactorSim::Equipment::UNARMED)
       expect(quick_armed.attack(state, armed: true)).to be > quick_armed.attack(state)
-      expect(quick_armed.wounds(state, armed: true)).to eq(%i[puncture])
+      expect(quick_armed.wounds(state, armed: true)).to eq(puncture: 1.0)
     end
 
     it "refuses a weapon whose handling names something that is not a stat" do
-      expect { ReactorSim::Equipment.weapon_profile("x", { handling: { grip: 1.0 }, wounds: %i[impact] }) }
+      expect { ReactorSim::Equipment.weapon_profile("x", { handling: { grip: 1.0 }, wounds: { impact: 1.0 } }) }
         .to raise_error(ReactorSim::Error, /grip/)
     end
 
@@ -265,13 +267,15 @@ RSpec.describe "animosity" do
     it "lets a blow that pierces pass the armour and meet only part of the toughness" do
       tough = person(:t, stats: { toughness: 2.0 }, tags: { impact_resistance: 0.5 })
       frail = person(:f, stats: { toughness: 0.5 })
-      blow = { severity: 2.0, tags: %i[impact] }
+      blow = { wounds: { impact: 2.0 } }
       pierced = blow.merge(pierces: combat::CRITICAL_TOUGHNESS)
+      check = ->(minion, harm) { ReactorSim::Injury.check(minion, state, harm, catalogue: ReactorSim::Content.default.wounds, die: 0.0) }
+      resisted = ->(minion, harm) { ReactorSim::Injury.resisted(minion, harm, :impact, 1.0) }
 
-      expect(ReactorSim::Injury.check(tough, state, blow).last).to be_nil
-      expect(ReactorSim::Injury.check(tough, state, pierced).first.fetch(:resilience)).to be < state.fetch(:resilience)
-      expect(ReactorSim::Injury.resisted(tough, pierced)).to be < ReactorSim::Injury.resisted(tough, blow)
-      expect(ReactorSim::Injury.resisted(tough, pierced)).to be > ReactorSim::Injury.resisted(frail, pierced)
+      expect(check.(tough, blow)[1]).to be_nil
+      expect(check.(tough, pierced).first.fetch(:resilience)).to be < state.fetch(:resilience)
+      expect(resisted.(tough, pierced)).to be < resisted.(tough, blow)
+      expect(resisted.(tough, pierced)).to be > resisted.(frail, pierced)
     end
 
     # **A bell, not a tail**: most rolls near the middle, the far ones rare, and the median the
@@ -326,7 +330,7 @@ RSpec.describe "animosity" do
     end
 
     it "makes a fight hard work with no rest in it" do
-      brawling = state.merge(fight: { with: :b, blows: true })
+      brawling = state.merge(fight: { melee: :m, clock_s: 0.0, owed: {} })
       worked = ReactorSim::Fatigue.advance(person(:a), state, control: nil, dt: 1.0,
                                                               fighting: animosity.exertion(person(:a), brawling))
       rested = ReactorSim::Fatigue.advance(person(:a), state.merge(fatigue: 0.5), control: nil, dt: 1.0)
@@ -339,9 +343,9 @@ RSpec.describe "animosity" do
     # **A weapon is a weight to swing**, against the force behind it: the same pick tires a small
     # weak body far more than a big strong one, and bare hands cost no more than the fight.
     it "tires a fighter by the weight of the weapon against their force" do
-      pick = ReactorSim::Equipment.weapon_profile("pick", { handling: { swing: 0.8 }, wounds: %i[impact] }, mass_kg: 3.0)
-      armed = state.merge(fight: { with: :b, blows: true, armed: true })
-      fists = state.merge(fight: { with: :b, blows: true })
+      pick = ReactorSim::Equipment.weapon_profile("pick", { handling: { swing: 0.8 }, wounds: { impact: 1.0 } }, mass_kg: 3.0)
+      armed = state.merge(fight: { melee: :m, clock_s: 0.0, owed: {}, armed: true })
+      fists = state.merge(fight: { melee: :m, clock_s: 0.0, owed: {} })
       small = person(:s, stats: { strength: 0.7 }, mass_kg: 25.0, weapons: [ pick ])
       big = person(:g, stats: { strength: 0.65 }, mass_kg: 500.0, weapons: [ pick ])
 
@@ -441,17 +445,30 @@ RSpec.describe "animosity" do
       expect(picks.fetch(:c)).to be_positive
     end
 
-    it "turns on somebody else when the one they hate most is already fighting" do
-      crew = [ person(:a, grudges: { b: 0.9, c: 0.3 }), person(:b), person(:c), person(:d) ]
-      fight = { blows: true, clock_s: 100.0, owed: 0.0 }
-      op = with(rig(crew), crew, a: { patience: 1.0e-9 },
-                                 b: { fight: fight.merge(with: :d, led: true) },
-                                 d: { fight: fight.merge(with: :b, led: false) })
+    # In a fight with each other that is going on: both still angry.
+    def busy_with(other) = { patience: 0.0, fight: { melee: :m, clock_s: 100.0, owed: {} } }.merge(other)
+
+    it "joins the fight of somebody already in one, or heckles it, and never starts another" do
+      crew = [ brute(:a, grudges: { b: 0.9 }), person(:b, grudges: { d: 0.5 }), person(:d, grudges: { b: 0.5 }) ]
+      runs = (1..10).map do |seed|
+        op = with(rig(crew, seed: seed), crew, seed: seed, a: { patience: 1.0e-9 }, b: busy_with({}), d: busy_with({}))
+        mode = op.step!(tick: 1).find { |e| e[:type] == :quarrel && e[:node] == :a }&.fetch(:mode)
+        [ mode, op.state.dig(:minions, :a, :fight, :melee) ]
+      end
+
+      expect(runs.map(&:first) - %i[joined heckle]).to be_empty
+      expect(runs).to include([ :joined, :m ])
+    end
+
+    it "heckles somebody already in a fight from the sidelines, and leaves them in it" do
+      crew = [ person(:a, grudges: { b: 0.3 }, tags: { kindly: 0.5 }), person(:b, grudges: { d: 0.5 }), person(:d, grudges: { b: 0.5 }) ]
+      op = with(rig(crew), crew, a: { patience: 1.0e-9 }, b: busy_with({}), d: busy_with({}))
       events = op.step!(tick: 1)
 
-      targets = events.select { |e| e[:type] == :quarrel && e[:node] == :a }.map { |e| e.dig(:detail, :target) }
-      expect(targets.length).to eq(1)
-      expect(%i[c d]).to include(targets.first)
+      expect(events.find { |e| e[:type] == :quarrel && e[:node] == :a }).to include(mode: :heckle)
+      expect(op.state.dig(:minions, :a, :fight)).to include(with: :b)
+      expect(op.state.dig(:minions, :b, :fight, :melee)).to be(:m)
+      expect(held(op, :b, :a)).to be_positive
     end
 
     it "comes to a quarrel when it runs out, which stops the two of them" do
@@ -460,30 +477,101 @@ RSpec.describe "animosity" do
       events = op.step!(tick: 1)
 
       expect(types(events)).to include(:quarrel)
-      expect(op.state.dig(:minions, :a, :fight)).to include(with: :b, led: true)
-      expect(op.state.dig(:minions, :b, :fight)).to include(with: :a, led: false)
+      expect(op.state.dig(:minions, :a, :fight)).not_to be_nil
+      expect(op.state.dig(:minions, :b, :fight)).not_to be_nil
     end
   end
 
   describe "the fight" do
-    def fighting(holder, target, minions = nil, **fight)
-      crew = minions || [ holder, target ]
-      base = rig(crew)
-      with(base, crew,
-           holder.id => { fight: { with: target.id, blows: true, led: true, clock_s: 0.0, owed: 0.0 }.merge(fight) },
-           target.id => { fight: { with: holder.id, blows: true, led: false, clock_s: 0.0, owed: 0.0 } })
+    # Everybody given is in one melee, the exchange due; `fight:` is added to the first one's.
+    def melee(crew, seed: 1, **states)
+      fight = { melee: :m, clock_s: 0.0, owed: {} }
+      fields = crew.to_h { |m| [ m.id, { fight: fight } ] }
+      fields.each_key { |id| fields[id] = fields[id].merge(states.fetch(id, {})) }
+      with(rig(crew, seed: seed), crew, seed: seed, **fields)
     end
 
+    # As a brawl starts: the one who started it with nothing left of their patience.
+    def fighting(holder, target, **fight)
+      melee([ holder, target ], holder.id => { patience: 0.0, fight: { melee: :m, clock_s: 0.0, owed: {} }.merge(fight) })
+    end
+
+    def in_fight?(op, id) = !op.state.dig(:minions, id, :fight).nil?
+
     it "lands blows, and leaves a grudge for a wound that carried them out once it is over" do
-      op = fighting(brute(:a, grudges: { b: 0.5 }), sitting_duck(:b, stats: { toughness: 0.2 }))
+      op = fighting(brute(:a, grudges: { b: 0.3 }), sitting_duck(:b, stats: { toughness: 0.2 }))
       before = op.state.dig(:minions, :b, :resilience)
       op.step!(tick: 1)
 
       expect(op.state.dig(:minions, :b, :resilience)).to be < before
       expect(animosity::WOUND_GRUDGE).to have_key(op.state.dig(:minions, :b, :injury))
       op.step!(tick: 2)
-      expect(op.state.dig(:minions, :b, :fight)).to be_nil
+      expect(in_fight?(op, :b)).to be(false)
       expect(held(op, :b, :a)).to be_positive
+    end
+
+    it "goes on while anybody in it is still willing, whoever started it" do
+      crew = [ person(:a), person(:b, grudges: { a: 0.5 }) ]
+      full = rig(crew).state.dig(:minions, :a, :patience_full)
+      op = melee(crew, a: { patience: full }, b: { patience: 0.0 })
+      op.step!(tick: 1)
+
+      expect(in_fight?(op, :a)).to be(true)
+      expect(in_fight?(op, :b)).to be(true)
+    end
+
+    it "lets somebody nobody wants and who wants nobody step out" do
+      crew = [ person(:a, grudges: { b: 0.5 }), person(:b), person(:c) ]
+      op = melee(crew, a: { patience: 0.0 })
+      before = op.state.dig(:minions, :c, :resilience)
+      op.step!(tick: 1)
+
+      expect(in_fight?(op, :c)).to be(false)
+      expect(op.state.dig(:minions, :c, :resilience)).to eq(before)
+      expect(in_fight?(op, :b)).to be(true)
+    end
+
+    it "stops once the one they all hated is carried out, and does not turn on itself" do
+      dwarves = %i[a b c].map { |id| person(id, grudges: { x: 0.4 }) }
+      op = melee(dwarves + [ person(:x) ], **dwarves.to_h { |d| [ d.id, { patience: 0.0 } ] }, x: { injury: :severe })
+      op.step!(tick: 1)
+
+      expect(%i[a b c x].map { |id| in_fight?(op, id) }).to all(be(false))
+    end
+
+    it "keeps the violent at each other once nobody they hate is left" do
+      crew = [ person(:a, tags: { violent_nature: 0.7 }), person(:b, tags: { violent_nature: 0.7 }) ]
+      op = melee(crew, a: { patience: 0.0 }, b: { patience: 0.0 })
+      op.step!(tick: 1)
+
+      expect(in_fight?(op, :a) && in_fight?(op, :b)).to be(true)
+    end
+
+    it "puts the boot in on somebody carried out when they hate him enough, well short of wanting him dead" do
+      kicker = person(:a, grudges: { x: 0.5 })
+      scrapper = person(:a, grudges: { x: 0.3 })
+      down = { injury: :severe, resilience: 0.0 }
+      kicking = melee([ kicker, person(:x) ], a: { patience: 0.0 }, x: down)
+      spared = melee([ scrapper, person(:x) ], a: { patience: 0.0 }, x: down)
+      [ kicking, spared ].each { |op| op.step!(tick: 1) }
+
+      expect(in_fight?(kicking, :a)).to be(true)
+      expect(in_fight?(spared, :a)).to be(false)
+      expect(animosity.ceiling(kicker, 0.5)).to be < animosity::LETHAL
+    end
+
+    it "is harder to defend against several at once" do
+      landed = ->(attackers) {
+        (1..20).sum do |seed|
+          crew = Array.new(attackers) { |i| person(:"a#{i}", grudges: { x: 0.5 }) } + [ person(:x) ]
+          op = melee(crew, seed: seed, **crew.first(attackers).to_h { |m| [ m.id, { patience: 0.0 } ] })
+          before = op.state.dig(:minions, :x, :resilience)
+          op.step!(tick: 1)
+          (before - op.state.dig(:minions, :x, :resilience)) / attackers
+        end
+      }
+
+      expect(landed.(3)).to be > landed.(1)
     end
 
     it "lets the one set upon off steam too, and a fighter it has hurt far more" do
@@ -499,15 +587,15 @@ RSpec.describe "animosity" do
       expect(knocked.state.dig(:minions, :b, :patience)).to be > calm.state.dig(:minions, :b, :patience)
     end
 
-    it "stops once the one who started it is sated, whether or not anything landed, and leaves nothing new" do
+    it "stops once nobody in it is willing, whether or not anything landed, and leaves nothing new" do
       crew = [ weakling(:a, grudges: { b: 0.5 }), wary(:b) ]
       op = fighting(*crew)
       full = op.state.dig(:minions, :a, :patience_full)
       op = with(op, crew, a: { patience: full * animosity::SATED * 0.999 })
-      op.step!(tick: 1)
+      2.times { |i| op.step!(tick: i + 1) }
 
-      expect(op.state.dig(:minions, :a, :fight)).to be_nil
-      expect(op.state.dig(:minions, :b, :fight)).to be_nil
+      expect(in_fight?(op, :a)).to be(false)
+      expect(in_fight?(op, :b)).to be(false)
       expect(held(op, :b, :a)).to eq(0.0)
     end
 
@@ -539,14 +627,11 @@ RSpec.describe "animosity" do
     end
 
     it "draws on somebody who drew on them at an earlier exchange, and not on somebody who did not" do
-      knife = [ ReactorSim::Equipment.weapon_profile("knife", { handling: { precision: 1.0 }, wounds: %i[puncture] }) ]
+      knife = [ ReactorSim::Equipment.weapon_profile("knife", { handling: { precision: 1.0 }, wounds: { puncture: 1.0 } }) ]
       answered = ->(threat) {
         (1..20).count do |seed|
           crew = [ person(:a, grudges: { b: 0.5 }, weapons: knife), person(:b, tags: { gentle: 0.5 }, weapons: knife) ]
-          fight = { blows: true, clock_s: 0.0, owed: 0.0 }
-          op = with(rig(crew, seed: seed), crew, seed: seed,
-                    a: { fight: fight.merge(with: :b, led: true, armed: threat) },
-                    b: { fight: fight.merge(with: :a, led: false) })
+          op = melee(crew, seed: seed, a: { patience: 0.0, fight: { melee: :m, clock_s: 0.0, owed: {}, armed: threat } })
           op.step!(tick: 1).any? { |e| e[:type] == :quarrel && e[:mode] == :armed && e[:node] == :b }
         end
       }
@@ -556,7 +641,7 @@ RSpec.describe "animosity" do
     end
 
     it "fights armed when the hatred is deep and callous, and on fists when kind" do
-      pick = [ ReactorSim::Equipment.weapon_profile("pick", { handling: { swing: 1.5 }, edge: 1.0, wounds: %i[puncture impact] }) ]
+      pick = [ ReactorSim::Equipment.weapon_profile("pick", { handling: { swing: 1.5 }, edge: 1.0, wounds: { puncture: 0.6, impact: 0.4 } }) ]
       callous = fighting(brute(:a, grudges: { b: 1.0 }, tags: { callous: 1.0 }, weapons: pick), sitting_duck(:b, stats: { toughness: 3.0 }))
       kindly = fighting(brute(:a, grudges: { b: 1.0 }, tags: { kindly: 1.0 }, weapons: pick), sitting_duck(:b, stats: { toughness: 3.0 }))
       before = callous.state.dig(:minions, :b, :resilience)
@@ -574,7 +659,7 @@ RSpec.describe "animosity" do
       paused.step!(tick: 1)
       resumed = with(paused, crew)
 
-      expect(resumed.state.dig(:minions, :a, :fight, :with)).to be(:b)
+      expect(resumed.state.dig(:minions, :a, :fight, :melee)).to be(:m)
       2.times { |i| resumed.step!(tick: i + 2) }
       expect(ReactorSim.canonical(resumed.state.fetch(:minions))).to eq(ReactorSim.canonical(straight.state.fetch(:minions)))
     end
@@ -632,7 +717,7 @@ RSpec.describe "animosity" do
   end
 
   describe "a shove" do
-    let(:edge) { ReactorSim::Peril.new(id: :edge, tags: %i[fall], severity: 3.0, places: %i[yard], opportunity: true) }
+    let(:edge) { ReactorSim::Peril.new(id: :edge, wounds: { impact: 1.0 }, causes: %i[fall], severity: 3.0, places: %i[yard], opportunity: true) }
 
     it "gives the target the peril in full, on the seeds where that is what was chosen" do
       crew = [ brute(:a, grudges: { b: 1.0 }, tags: { callous: 1.0 }), sitting_duck(:b) ]

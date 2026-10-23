@@ -120,14 +120,39 @@ module ReactorSim
     Exposure = Struct.new(:stations, :places, :riders, :alongs, keyword_init: true) do
       def empty? = stations.empty? && places.empty? && riders.empty? && alongs.empty?
 
-      # Severity ADDS and tags union, the same rule two failures at one post already follow.
+      # Each kind's severity ADDS and causes union, the same rule two failures at one post already
+      # follow.
       def at(station, place, via = nil)
         found = [ stations[station], places[place], riders[via] ].compact
         return nil if found.empty?
         return found.first if found.one?
 
-        found.reduce do |a, b|
-          a.merge(b) { |key, x, y| key == :severity ? x + y : x | y }
+        found.reduce { |a, b| Tick.combined(a, b) }
+      end
+    end
+
+    # **Every wound a harm left, for the record** — nobody's broken leg goes unmentioned because
+    # they were also badly burned. Carries what the delivery tier keeps between matches: the kind,
+    # the depth and the variant, and **which wound it is** — its place among theirs this match
+    # (`slot`), or the delivery tier's own name for one carried in (`ref`) — so a wound that
+    # deepens is the same wound.
+    def self.reported(wounds, state)
+      held = state.fetch(:wounds, [])
+      wounds.map do |wound|
+        { kind: wound.fetch(:kind), tier: wound.fetch(:tier), id: wound.fetch(:id),
+          label: wound.fetch(:label), depth: wound.fetch(:depth).round(3),
+          variant: wound.fetch(:variant), cause: wound[:cause], ref: wound[:ref],
+          slot: held.index { |w| w.equal?(wound) } }.compact
+      end
+    end
+
+    # Two hazards reaching one person at once, as one.
+    def self.combined(first, second)
+      first.merge(second) do |key, x, y|
+        case key
+        when :wounds then x.merge(y) { |_, a, b| a + b }
+        when :causes, :sources then x | y
+        else x
         end
       end
     end
@@ -157,6 +182,7 @@ module ReactorSim
     def call(tick:, dt:)
       fates = @fates = draw_fates                               # phase 0
       @tempers = draw_tempers                                   # phase 0
+      @wound_dice = draw_wounds                                 # phase 0
       controls = actuate(dt, fates)                             # phase 0
       read = state.fetch(:nodes)                                # phase 1
       # `control_values` builds `@ignition` from the same lever positions, so it comes first.
@@ -1271,8 +1297,8 @@ module ReactorSim
         hazard = along(exposure.alongs, minion, minion_state, hazard, events, ctx)
         next [ id, minion_state ] if hazard.nil?
 
-        hurt, mode = Injury.check(minion, minion_state, hazard)
-        events << hurt_event(minion, hurt, mode, hazard, ctx) if mode
+        hurt, mode, wounds = injure(minion, minion_state, hazard)
+        events << hurt_event(minion, hurt, mode, wounds, hazard, ctx) if mode
         [ id, hurt.freeze ]
       end
 
@@ -1300,11 +1326,9 @@ module ReactorSim
         end
 
         hit = run_hit(run, declared, scale * share, on_road && caught?(run, minion, minion_state, share), source)
-        acc ? acc.merge(hit) { |key, x, y| key == :severity ? x + y : merged(x, y) } : hit
+        acc ? Tick.combined(acc, hit) : hit
       end
     end
-
-    def merged(first, second) = first.is_a?(Array) ? first | second : first
 
     # **A run with a `catch:` stops most of what passes it**: further down than `at`, what is left
     # of the share is `1 − holds` of it. Above the catch, unchanged.
@@ -1388,16 +1412,18 @@ module ReactorSim
       }.freeze
     end
 
+    # A set that catches somebody does `factor` times the harm, and of the kinds `crushed:` says.
     def run_hit(run, declared, weight, crushed, source)
       severity = run.fetch(:weight) * weight
-      tags = Array(declared[:tags])
+      shares = declared.fetch(:wounds)
       cause = nil
       if crushed
         severity *= run.dig(:crushed, :factor)
-        tags = Array(run.dig(:crushed, :tags)) | tags
+        shares = run.dig(:crushed, :wounds)
         cause = run.dig(:crushed, :cause)
       end
-      { severity: severity, tags: tags, sources: [ source ], cause: cause }.compact
+      { wounds: Wounds.dealt(shares, severity), causes: Array(declared[:causes]), sources: [ source ],
+        cause: cause }.compact
     end
 
     # This tick's die for somebody, thrown in phase 0 (`draw_fates`).
@@ -1442,8 +1468,8 @@ module ReactorSim
         tired, spent = Fatigue.check_spent(tired)
         events << spent_event(minion, control, ctx) if spent
 
-        tired, mode = choke(tired, choking, ctx.dt)
-        events << suffocated_event(minion, tired, mode, ctx) if mode
+        tired, mode, wounds = choke(id, tired, choking, ctx.dt)
+        events << suffocated_event(minion, tired, mode, wounds, ctx) if mode
         [ id, tired.freeze ]
       end
 
@@ -1478,13 +1504,26 @@ module ReactorSim
       minions.keys.to_h { |id| [ id, Animosity.draw(rngs.fetch(Animosity.stream(id))) ] }
     end
 
+    # Phase 0 again: **the die that picks which of a tier's wounds somebody takes**, one a person a
+    # tick from their own wound stream, whether or not anything hurts them.
+    def draw_wounds
+      minions.keys.to_h { |id| [ id, rngs.fetch(Injury.stream(id)).float ] }
+    end
+
+    # **The Danger Check, with what it needs from the tick**: the catalogue and this person's die.
+    def injure(minion, minion_state, hazard)
+      Injury.check(minion, minion_state, hazard, catalogue: content.wounds, die: wound_die(minion.id))
+    end
+
+    def wound_die(id) = (@wound_dice || {}).fetch(id, 0.0)
+
     # Phase 6d′. **What people do to each other** — after their own blunders, before anybody
     # walks, so a brawler is held where the fight is. See `Animosity::Provoke`.
     def provoke(minions_state, states, ctx)
       Animosity::Provoke.new(
         minions: minions, table: @grudges, control_points: control_points,
         opportunities: opportunities(states, ctx.dt), dice: @tempers, carried: being_carried(minions_state),
-        ctx: ctx,
+        ctx: ctx, wounds: content.wounds, wound_dice: @wound_dice,
         defence: ->(minion, s) { minion.defend(s, ambient: ambient_for(minion, s), burden: Burden.ratio(minion, s, minions)) },
         ambient: ->(minion, s) { ambient_for(minion, s) }
       ).call(minions_state)
@@ -1540,8 +1579,8 @@ module ReactorSim
       events << mishap_event(minion, minion_state, peril, ctx) if peril.mishap?
       return after unless peril.hurts?
 
-      hurt, mode = Injury.check(minion, after, { severity: peril.severity, tags: peril.tags })
-      events << blundered_event(minion, hurt, mode, peril, ctx) if mode
+      hurt, mode, wounds = injure(minion, after, peril.hazard)
+      events << blundered_event(minion, hurt, mode, wounds, peril, ctx) if mode
       hurt
     end
 
@@ -1614,11 +1653,11 @@ module ReactorSim
     # a Danger Check, a tier, a station possibly cleared — and the engine's job is to report
     # transitions while the delivery tier composes meaning. `cause:` carries which peril, so
     # "hurt by machinery" and "hurt by their own bad luck" are still different sentences.
-    def blundered_event(minion, state, mode, peril, ctx)
+    def blundered_event(minion, state, mode, wounds, peril, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: :critical, tick: ctx.tick, mode: mode, cause: peril.id,
                   detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
-                            place: state[:place] })
+                            place: state[:place], wounds: Tick.reported(wounds, state) })
     end
 
     # Phase 6b′. **What the heat where somebody is standing does to them.**
@@ -1638,8 +1677,9 @@ module ReactorSim
         minion = minions[id]
         next [ id, minion_state ] if minion.nil?
 
-        burned, mode = Scorch.advance(minion, minion_state, heat[minion_state[:place]], ctx.dt)
-        events << burned_event(minion, burned, mode, ctx) if mode
+        burned, mode, wounds = Scorch.advance(minion, minion_state, heat[minion_state[:place]], ctx.dt,
+                                              catalogue: content.wounds, die: wound_die(id))
+        events << burned_event(minion, burned, mode, wounds, ctx) if mode
         [ id, burned.freeze ]
       end
 
@@ -1670,8 +1710,9 @@ module ReactorSim
         minion = minions[id]
         next [ id, minion_state ] if minion.nil?
 
-        cold, mode = Chill.advance(minion, minion_state, felt[minion_state[:place]], ctx.dt)
-        events << chilled_event(minion, cold, mode, ctx) if mode
+        cold, mode, wounds = Chill.advance(minion, minion_state, felt[minion_state[:place]], ctx.dt,
+                                           catalogue: content.wounds, die: wound_die(id))
+        events << chilled_event(minion, cold, mode, wounds, ctx) if mode
         [ id, cold.freeze ]
       end
 
@@ -1688,19 +1729,20 @@ module ReactorSim
       end
     end
 
-    def chilled_event(minion, state, mode, ctx)
+    def chilled_event(minion, state, mode, wounds, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: :critical, tick: ctx.tick, mode: mode, cause: :cold,
                   detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
-                            place: state[:place], chilled: state.fetch(:chilled, 0.0).round(3) })
+                            place: state[:place], chilled: state.fetch(:chilled, 0.0).round(3),
+                            wounds: Tick.reported(wounds, state) })
     end
 
-    def burned_event(minion, state, mode, ctx)
+    def burned_event(minion, state, mode, wounds, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: :critical, tick: ctx.tick, mode: mode, cause: :burns,
                   detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
                             place: state[:place],
-                            burns: state.fetch(:burns, 0.0).round(3) })
+                            burns: state.fetch(:burns, 0.0).round(3), wounds: Tick.reported(wounds, state) })
     end
 
     # **The air in each room, once per tick rather than once per person.** Read off the state
@@ -1740,21 +1782,22 @@ module ReactorSim
     # a stoker flat out reaches it too and is merely spent. Pinned there *in bad air* is a
     # different thing, and the dwell from there to a mortal injury is what makes going back for
     # somebody worth doing: fix the ventilation and the clock runs backwards.
-    def choke(state, rate, dt)
+    def choke(id, state, rate, dt)
       state = Breath.advance(state, rate, dt)
-      return [ state, nil ] unless rate.positive? && state.fetch(:fatigue) >= Fatigue::RANGE.end
+      return [ state, nil, [] ] unless rate.positive? && state.fetch(:fatigue) >= Fatigue::RANGE.end
 
-      Injury.succumb(state, Breath.suffocated?(state) ? :mortal : :severe)
+      Injury.succumb(state, Breath.suffocated?(state) ? :mortal : :severe, kind: :breath,
+                                                                            catalogue: content.wounds, die: wound_die(id))
     end
 
     # **`cause:` is a top-level field, the same one `break_part` sets**, because the feed reads
     # it there. Inside `detail:` it is invisible to every consumer and the line reads "unknown".
-    def suffocated_event(minion, state, mode, ctx)
+    def suffocated_event(minion, state, mode, wounds, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: :critical, tick: ctx.tick, mode: mode, cause: :asphyxia,
                   detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
                             place: state[:place],
-                            asphyxia: state.fetch(:asphyxia, 0.0).round(3) })
+                            asphyxia: state.fetch(:asphyxia, 0.0).round(3), wounds: Tick.reported(wounds, state) })
     end
 
     # Phase 6e. Where everybody has got to.
@@ -2053,15 +2096,16 @@ module ReactorSim
       hazard = nodes.fetch(passage.hoist).boarding_hazard
       return alight(minion, state.merge(boarding_s: 0.0), here) if hazard.nil?
 
-      hurt, mode = Injury.check(minion, state, hazard)
-      events << caught_boarding_event(minion, hurt, mode, ctx) if mode
+      dealt = { wounds: Wounds.dealt(hazard.fetch(:wounds), hazard.fetch(:severity)), causes: Array(hazard[:causes]) }
+      hurt, mode, wounds = injure(minion, state, dealt)
+      events << caught_boarding_event(minion, hurt, mode, wounds, ctx) if mode
       alight(minion, hurt.merge(boarding_s: 0.0), here)
     end
 
-    def caught_boarding_event(minion, state, mode, ctx)
+    def caught_boarding_event(minion, state, mode, wounds, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: :critical, tick: ctx.tick, mode: mode, cause: :caught_boarding,
-                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode),
+                  detail: { minion: minion.minion, lasting: Injury.lasting?(mode), wounds: Tick.reported(wounds, state),
                             place: state[:place] })
     end
 
@@ -2150,9 +2194,9 @@ module ReactorSim
 
     def accrue(index, key_name, weights, declared, scale, source)
       (weights || {}).each do |key, weight|
-        at = index[key] ||= { key_name => key, severity: 0.0, tags: [], sources: [] }
-        at[:severity] += weight.to_f * scale
-        at[:tags] |= Array(declared[:tags])
+        at = index[key] ||= { key_name => key, wounds: {}, causes: [], sources: [] }
+        at[:wounds] = at[:wounds].merge(Wounds.dealt(declared.fetch(:wounds), weight.to_f * scale)) { |_, a, b| a + b }
+        at[:causes] |= Array(declared[:causes])
         at[:sources] |= [ source ]
       end
     end
@@ -2187,24 +2231,25 @@ module ReactorSim
     # `node:` is the JOB and `minion:` is the person, and both have to be on the record.
     #
     # The job is what a panel labels — "the fireman has been carried out" — and it is the id
-    # everything inside the operation is keyed by. But the **injury list belongs to a person**:
-    # Jim is out for two matches, and the fireman's job is still there for somebody else to
-    # stand in. A consumer given only the role could not write that down.
+    # everything inside the operation is keyed by. But **wounds belong to a person**: Jim is out
+    # healing for two matches, and the fireman's job is still there for somebody else to stand
+    # in. A consumer given only the role could not write that down.
     # **`cause:` is the KIND of harm, not the part.** "Rockfall" is what a player needs to read
-    # off the feed; which node's failure delivered it is already on the record as `by:`. A
-    # hazard that declared no tags falls back to naming the part, because "unknown" next to a
-    # dead minion is the one thing the line must never say.
-    def hurt_event(minion, hurt, mode, hazard, ctx)
+    # off the feed; which node's failure delivered it is already on the record as `by:`. With no
+    # cause it is the first kind of wound, and the part only as a last resort, because "unknown"
+    # next to a dead minion is the one thing the line must never say.
+    def hurt_event(minion, hurt, mode, wounds, hazard, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
                   severity: Injury::MODES.dig(mode, :stood_down) ? :critical : :warning,
                   tick: ctx.tick, mode: mode,
-                  cause: hazard[:cause] || hazard[:tags].first || hazard[:sources].first,
+                  cause: hazard[:cause] || hazard.fetch(:causes, []).first || hazard.fetch(:wounds).keys.min ||
+                         hazard[:sources].first,
                   detail: { minion: minion.minion,
                             lasting: Injury.lasting?(mode),
                             station: hazard[:station],
                             place: hazard[:place],
                             by: hazard[:sources],
-                            tags: hazard[:tags],
+                            wounds: Tick.reported(wounds, hurt),
                             resilience_left: hurt.fetch(:resilience).round(3) })
     end
 

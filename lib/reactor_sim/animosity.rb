@@ -29,7 +29,8 @@ module ReactorSim
     # among itself — more for somebody `annoying`, less for somebody `calming` (`irritation`).
     IRRITATION = 0.02
 
-    # How much a brawl in the room shortens everybody else's temper, per brawl.
+    # How much fighting in the room shortens everybody else's temper: this, by the square root of
+    # half the people fighting there, so a scrum is worse than a scuffle and still saturates.
     RUMPUS = 1.0
 
     # Tiredness shortens a temper the way it spends a margin.
@@ -76,9 +77,28 @@ module ReactorSim
     # A brawl is an exchange of blows this often, each one a `Combat` contest.
     BOUT_S = 3.0
 
+    # **Who a fighter goes for, in a fight**: by hostility raised to this, so the one they hate
+    # most draws most of their blows and the rest some. Two goblins on a dwarf mostly hit the dwarf.
+    FOCUS = 2.5
+
+    # **Defending against several at once**: each attacker past the first this exchange adds this
+    # to the divisor of everybody's defence against them.
+    GANGED = 0.25
+
+    # **Seeing somebody in your fight hurt** gives back this share of patience by their injury,
+    # times a base plus your grudge against them. Cheap for a knock, so a huge brawl does not fizzle
+    # at the first tooth; dear for a carrying-out.
+    WITNESSED = { minor: 0.025, significant: 0.05, severe: 0.15, mortal: 0.3 }.freeze
+    WITNESS_BASE = 0.2
+
+    # **Putting the boot in**: somebody carried out of a fight can still be kicked by anybody who
+    # would do them this much harm — well short of `LETHAL`, so wanting a few cheap shots at a man on
+    # the ground is not the same as wanting him dead.
+    KICKING = 0.6 * LETHAL
+
     # **How much an act gives back of the new patience**, so one grudge does not fire the next act
-    # at once. A brawl gives it back to both, blow by blow, and stops once the one who started it is
-    # sated; a fighter it has hurt gets it back faster.
+    # at once. A brawl gives it back to everybody in it, blow by blow, and a fighter is willing until
+    # it is back past `SATED`; a fighter it has hurt gets it back faster.
     RELEASE = { row: 0.3, shove: 0.8, sabotage: 0.8, foiled: 0.3, averted: 0.5, seethed: 0.2 }.freeze
     BOUT_RELEASE = 0.05
     LANDED_RELEASE = 0.05
@@ -272,13 +292,19 @@ module ReactorSim
       believed <= ceiling(minion, grudge) && believed * bystanders <= tolerance(minion)
     end
 
+    # In a row or a brawl: either stops them working and walking.
     def fighting?(state) = !state[:fight].nil?
 
-    # Fatigue a fight costs per second, before endurance and strain: nothing outside a brawl, the
-    # flat rate bare-handed, and the weapon's weight against their `force` on top once drawn.
+    # In a brawl — one of everybody whose `fight` names the same `melee:`.
+    def brawling?(state) = !state.dig(:fight, :melee).nil?
+
+    # Fatigue a fight costs per second, before endurance and strain: nothing outside a brawl or
+    # lying in one, the flat rate bare-handed, and the weapon's weight against their `force` on top
+    # once drawn.
     def exertion(minion, state)
-      fight = state[:fight] or return 0.0
-      return 0.0 unless fight[:blows]
+      return 0.0 unless brawling?(state) && !stood_down?(state)
+
+      fight = state.fetch(:fight)
       return FIGHTING_EXERTION unless fight[:armed]
 
       swung = minion.wielding(state, armed: true).fetch(:mass_kg)
