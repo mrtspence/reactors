@@ -77,11 +77,13 @@ module ReactorSim
     BOUT_S = 3.0
 
     # **How much an act gives back of the new patience**, so one grudge does not fire the next act
-    # at once. A brawl gives it back blow by blow and stops once the one who started it is sated.
+    # at once. A brawl gives it back to both, blow by blow, and stops once the one who started it is
+    # sated; a fighter it has hurt gets it back faster.
     RELEASE = { row: 0.3, shove: 0.8, sabotage: 0.8, foiled: 0.3, averted: 0.5, seethed: 0.2 }.freeze
     BOUT_RELEASE = 0.05
     LANDED_RELEASE = 0.05
     SATED = 0.6
+    HURT_RELIEF = { minor: 2.0, significant: 4.0 }.freeze
 
     # Grudge left per unit of harm done, before spite.
     GRUDGE_PER_HARM = 0.1
@@ -162,10 +164,23 @@ module ReactorSim
 
     def roll(rng) = rng.between(SPREAD.begin, SPREAD.end)
 
-    # Phase 0's dice for one person, from their own temper stream: always all seven.
+    # Phase 0's dice for one person, from their own temper stream: always all eight.
     def draw(rng)
       { patience: roll(rng), act: rng.float, judge: rng.float, avert: rng.float,
-        attack: rng.float, defend: rng.float, escalate: rng.float }
+        attack: rng.float, defend: rng.float, escalate: rng.float, target: rng.float }
+    end
+
+    # **Who they go for, by a die weighted by how much they resent each**, so the most resented is
+    # the likeliest and never the only one. `scored` is `[[id, score], ...]`, every score positive.
+    def pick(scored, die)
+      ordered = scored.sort_by { |id, _| id.to_s }
+      mark = die * ordered.sum { |_, score| score }
+      ordered.each do |id, score|
+        return id if mark < score
+
+        mark -= score
+      end
+      ordered.last&.first
     end
 
     # **Holder → target → amount**, over seats, from everything but this match. `account` is

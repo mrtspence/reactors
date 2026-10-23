@@ -67,7 +67,7 @@ module ReactorSim
       @description = description
       # Offsets, so an item that says nothing about a stat leaves it alone. Unlike an
       # archetype, which must declare every one, an item almost always speaks to one or two.
-      @stats = stats.to_h { |k, v| [ k.to_sym, v.to_f ] }.freeze
+      @stats = Sheet.offsets("equipment #{@id}", stats)
       # Valued, and added to whatever the layers above supply. `true` for simply present.
       @tags = tags.to_h { |k, v| [ k.to_sym, v ] }.freeze
       @weapon = weapon && self.class.weapon_profile("equipment #{@id}", weapon, mass_kg: @mass_kg)

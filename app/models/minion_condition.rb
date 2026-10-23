@@ -2,7 +2,7 @@
 
 # Somebody who is not available, and for how much longer.
 #
-# The injury list. `:mortal` is the only tier that reaches here — minor and severe are match
+# The injury list. `:mortal` is the only tier that reaches here — every lesser one is match
 # state and die with the match, so a bad shift does not follow somebody into next week, but
 # being carried out in a box does.
 #

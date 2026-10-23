@@ -89,15 +89,20 @@ Each axis is a pair of tags read net (`a − b`), on a convex curve as `daftness
 
 - **Rolled and renewed like `Blunder`'s margin.** `patience` is rolled wide at `initial_state`, and
   each time it runs out the next one is drawn.
-- **Spent** each second, for each person the holder shares a place with.
-  - The rate is `(IRRITATION + grudge)`, scaled by temper and by fatigue.
+- **Spent** each second while the holder shares a place with anybody.
+  - The rate is the deepest grudge held against anybody present, plus `IRRITATION` for each person
+    present, scaled by temper and by fatigue. Two people one hates wear no faster than the worse of
+    them; a crowd wears by its size.
   - `IRRITATION` is a small baseline towards anyone, so a crowded gang of short-tempered orcs rows
     with no grudge at all, and crew size becomes a temper cost. Each person's share of it is
     scaled by their own `annoying` − `calming`, so one grating hand wears down a room and one
     calming one settles it.
   - An operation with no geometry is one place.
 - **Mended only while nobody it is spent on is present.**
-- **Runs out:** an act aimed at the most resented person present, ties broken by id.
+- **Runs out:** an act aimed at somebody present who is not already in a row or a brawl, chosen by
+  the `target:` die weighted by how much each is resented (`Animosity.pick`), so the most resented
+  is the likeliest and never the only one. With the one they hate most busy, they turn on somebody
+  else; with nobody free, they seethe.
 - **The act releases it.** The act restores some of the new patience: a little for a row, more for
   a shove or sabotage that lands, and a share per exchange in a brawl (§2.6). Release is what
   stops one grudge from setting off the next act at once, and what stops a brawl lasting forever.
@@ -270,8 +275,11 @@ reuse: a swarm of bats or a wandering zombie attacks through the same contest.
 - **Orders wait.** A brawler's posting is still written, since the command is absolute and
   idempotent, but travel does not move them until the brawl ends. Then they go.
 - **It ends when:**
-  - the initiator is **sated**: every exchange restores some patience, more when a blow lands, and
-    the brawl stops once it is back past a share of full;
+  - the initiator is **sated**: every exchange restores some patience to **both** fighters, more
+    when a blow lands, twice as much once the fight has given them a minor injury and four times a
+    significant one (`HURT_RELIEF`), and the brawl stops once the initiator is back past a share of
+    full. A tooth out makes anybody think twice without stopping a determined attacker, and the one
+    set upon walks away calmer, not angrier;
   - either fighter is stood down or spent;
   - the boss breaks it up (§2.7).
 
@@ -370,14 +378,15 @@ figures, so it keeps its baselines.
 
 ### 2.11 Determinism and state
 
-- **A second stream per person** draws seven figures every tick, unconditionally:
+- **A second stream per person** draws eight figures every tick, unconditionally:
   - patience renewal;
   - which act;
   - the bonehead's misjudgement;
   - the boss stepping in;
   - the attack die;
   - the defence die;
-  - the escalation die.
+  - the escalation die;
+  - who they go for.
 
   The existing per-person draws are untouched, **so every existing seeded spec keeps its numbers**.
   The stream's id joins the flat namespace and `validate_graph!` checks it.
@@ -776,3 +785,100 @@ somebody it holds nothing against) and the squared term in escalation. It still 
 Per exchange against a stranger: Rijgazh 1.6 %, Dalthu 1.0 %, everybody else nothing. Deaths stay at
 0–1 % of brawls even for the more violent goblin. The matrix starts every brawl, so it does not
 measure the other half of the change, how often a violent nature picks a brawl over a row.
+
+### Crowds: the first look
+
+`script/tuning/crowds.rb` puts 2–32 people in one lit room for an hour, three seeds each. Nobody
+works, everybody carries miner's tools, and nobody is revived. Figures from
+[`tuning/crowds.md`](../tuning/crowds.md):
+
+| Room | First quarrel | Rows / brawls an hour | Half the room down |
+|---|---|---|---|
+| 2 or 4 humans, any temperament | never | 0 / 0 | never |
+| 8 humans | 35 min | 3 / 0 | never |
+| 8 humans, 2 annoying 0.6 | 20 min | 11 / 0 | never |
+| 16 humans | 14 min | 26 / 1 | never |
+| 16 humans, all calming 0.3 | 40 min | 2 / 0 | never |
+| 32 humans | 6 min | 76 / 1 | never |
+| 4 of the gang | 4.5 min | 0 / 2 | 13 min |
+| 8 of the gang | 1.8 min | 10 / 9 | 16 min |
+| 16 of the gang | 0.7 min | 19 / 12 | 6 min |
+| 32 of the gang | 0.2 min | 41 / 27 | 5 min |
+
+With a boss over 16 of the gang, half the room was down at:
+
+| Boss | Style | Averted an hour | Half down |
+|---|---|---|---|
+| None | — | 0 | 6 min |
+| Throg (ogre) | stares | 24 | 10 min |
+| Dalthu (orc) | stares | 6 | 7 min |
+| Rijgazh (goblin) | talks | 3 | 7 min |
+| Elowynne (elf) | talks | 77 | 26 min |
+| Arunessa (succubus) | talks | 427 | never (7 of 17 down) |
+
+What it shows:
+- **A brawl is never more than two.** Somebody whose most resented is already in a row or a brawl
+  only ever seethes: 100 % of such running-outs without a boss. Nobody joins, turns on somebody
+  else, or waits for them. A fight spreads only through `RUMPUS` speeding everybody else's spend,
+  and through the seething, which hands back a fifth of a patience and so runs out again soon.
+- **The most resented is a tie broken by seat id**, so where nobody holds a grudge, everybody picks
+  on the same person: in 16 humans over half an hour, every quarrel was aimed at `p00` (or at `p01`
+  by `p00`).
+- **Patience is spent on the sum of everybody present**, so each person runs out in proportion to
+  the room, and the room's quarrels grow faster than its size: 3 → 35 → 290 running-outs an hour at
+  8, 16 and 32 humans.
+- **A brawl takes somebody off the shift often**: carried out or killed in 18–62 % of brawls between
+  the gang's grudge-holders, and 18–28 % between two elves on fists, since a long fight grinds the
+  loser's resilience to nothing. With nobody revived, a mixed room is half down inside a quarter of
+  an hour.
+- **A boss's chance is authority × wits**, and on paper Elowynne and Arunessa tie (0.95), well
+  ahead of Throg (0.45), Dalthu (0.47) and Rijgazh (0.52). What separates them in a room is
+  **whether the boss stays on their feet**: a boss in a fight or carried out oversees nothing. Nobody
+  much resents Arunessa, so she averts six times what Elowynne does, whom the orcs and goblins
+  resent. Over 16 of the gang, on one seed, the boss was carried out at: Rijgazh 1.5 min, Dalthu
+  3.4, Elowynne 7, Throg 11, Arunessa never.
+
+### Crowds: the second pass
+
+Changed, from the first look:
+- **The target is picked by a die weighted by resentment**, from everybody not already in a row or
+  a brawl. Waiting for the busy one and going for them when their fight ended was considered and
+  dropped: it would keep a resented boss in fights without end.
+- **Patience wears by the deepest grudge present**, plus `IRRITATION` for each person there.
+- **Both fighters are relieved each exchange**, and a hurt fighter more: twice at a minor injury,
+  four times at a significant one (`HURT_RELIEF`), instead of yielding.
+- **A new `minor` tier** (a knock: a tooth, a finger, a rib, a ringing head) at under 80 % of
+  resilience, derating by a tenth or so. The old walking wounded is **`significant`**, its derates
+  unchanged, moved to under 45 % from 60 %.
+
+| Room | Half down: before → after | Brawls an hour | Ran out / seethed an hour |
+|---|---|---|---|
+| 4 of the gang | 13 → 18 min (2 of 3 shifts) | 2.3 → 2.3 | 2 / 0 → 4 / 0 |
+| 8 of the gang | 16 → 19 min | 9 → 7 | 20 / 2 → 13 / 0 |
+| 16 of the gang | 6 → 25 min | 12 → 18 | 60 / 28 → 49 / 0 |
+| 32 of the gang | 5 → 14 min | 27 → 31 | 302 / 234 → 124 / 0 |
+| 32 humans | never → never | 1 → 6 | 290 / 213 → 198 / 0 |
+
+| Over 16 of the gang | Half down: before → after |
+|---|---|
+| No boss | 6 → 25 min |
+| Throg | 10 → 24 min |
+| Dalthu | 7 → 35 min |
+| Rijgazh | 7 → 24 min |
+| Elowynne | 26 → 28 min (2 of 3 shifts) |
+| Arunessa | never → never (6 of 17 down) |
+
+Over 8 of the gang, Throg and Arunessa now keep half the room up for the whole shift.
+
+What it shows:
+- **The seething is gone and the riots slowed by a factor of two to four**, and the fighting
+  spread: 32 humans row 192 times an hour against 76, because they are no longer all queuing for
+  `p00`.
+- **The engine of attrition is still one brawl's carry-out rate**: 16 of the gang has 18 brawls
+  and 9 severe injuries an hour. Nothing but the starter's relief ends a fight, so a victim takes
+  blows until the starter is satisfied; the matrix carries somebody out in 20–37 % of the gang's
+  grudge pairings, and the kobold in nearly all of them.
+- **Irritation still sums**, so a big room still quarrels more per head: each of 32 humans starts
+  six rows an hour, each of 16 about two. Harmless in itself, since a row stops two people for `ROW_S`, but it
+  is work lost and it scales with the room.
+

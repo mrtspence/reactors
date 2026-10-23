@@ -126,8 +126,18 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
       hand = worker
       state, mode = described_class.check(hand, fresh(hand), hazard(1.6))
 
-      expect(mode).to be(:minor)
+      expect(mode).to be(:significant)
       expect(state.fetch(:station)).to be(:lever)
+    end
+
+    it "knocks somebody before it wounds them, and a knock costs them far less" do
+      hand = worker
+      knocked, mode = described_class.check(hand, fresh(hand), hazard(1.3))
+      wounded, = described_class.check(hand, fresh(hand), hazard(1.6))
+
+      expect(mode).to be(:minor)
+      expect(hand.rate_multiplier(knocked)).to be > hand.rate_multiplier(wounded)
+      expect(hand.rate_multiplier(knocked)).to be < hand.rate_multiplier(fresh(hand))
     end
   end
 

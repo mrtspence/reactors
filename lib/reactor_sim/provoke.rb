@@ -111,13 +111,19 @@ module ReactorSim
         here = present(id)
         was = state.fetch(:patience, state.fetch(:patience_full, 1.0))
         full = state.fetch(:patience_full, 1.0)
-        spent = here.sum { |other| irritation(other) + grudge(id, other) } * SPEND_PER_S * Animosity.temper(minion) *
-                tired(state) * rumpus(id) * dt
+        spent = wearing(id, here) * SPEND_PER_S * Animosity.temper(minion) * tired(state) * rumpus(id) * dt
 
         return mend(id, was, full) unless spent.positive?
         return write(id, patience: was - spent) if was - spent > 0.0
 
         act(id, here)
+      end
+
+      # **The worst of them, and the crowd**: the deepest grudge present, and a little for everybody
+      # there. Two people one hates wear no faster than the worse of them; a crowd wears by its size.
+      def wearing(id, here)
+        worst = here.map { |other| grudge(id, other) }.max || 0.0
+        worst + here.sum { |other| irritation(other) }
       end
 
       # Filling up ends an episode as running out does, so a long calm reveals nothing.
@@ -159,15 +165,17 @@ module ReactorSim
         perform(id, target, *choice)
       end
 
-      # The most resented of everybody they could get at: anybody here, and anybody their post
-      # reaches.
+      # Anybody here or that their post reaches, by `Animosity.pick` on how much they resent each —
+      # **and nobody already in a fight**, so the one they hate most being busy turns them on
+      # somebody else rather than leaving them stewing.
       def target_for(id, here)
         reachable = openings(id).flat_map { |opening| @entry.keys.select { |t| t != id && reached?(opening, id, t) } }
-        scored = (here | reachable).filter_map do |t|
+        candidates = (here | reachable).reject { |t| Animosity.fighting?(@out.fetch(t)) }
+        scored = candidates.filter_map do |t|
           score = grudge(id, t) + (here.include?(t) ? irritation(t) : 0.0)
           [ t, score ] if score.positive?
         end
-        scored.min_by { |t, score| [ -score, t.to_s ] }&.first
+        Animosity.pick(scored, @dice.fetch(id).fetch(:target))
       end
 
       def openings(id) = @control_points[@entry.fetch(id)[:station]]&.openings || []
@@ -285,13 +293,21 @@ module ReactorSim
         escalate(id, other)
         escalate(other, id)
         landed = blow(id, other)
-        blow(other, id)
-        full = state.fetch(:patience_full, 1.0)
-        patience = [ @out.fetch(id).fetch(:patience, 0.0) + ((BOUT_RELEASE + (LANDED_RELEASE * landed)) * full), full ].min
-        write(id, patience: patience)
-        return finish(id, other) if patience >= SATED * full
+        relieve(other, blow(other, id))
+        return finish(id, other) if relieve(id, landed) >= SATED * state.fetch(:patience_full, 1.0)
 
         tick(id, BOUT_S)
+      end
+
+      # **Both of them let off steam**, blow by blow and more for what lands, and far more once it
+      # has hurt them (`HURT_RELIEF`): a tooth out gives anybody pause, and an arm broken leaves
+      # nobody wanting another fight. Returns the new patience.
+      def relieve(id, landed)
+        full = @entry.fetch(id).fetch(:patience_full, 1.0)
+        gain = (BOUT_RELEASE + (LANDED_RELEASE * landed)) * full * HURT_RELIEF.fetch(@out.fetch(id)[:injury], 1.0)
+        patience = [ @out.fetch(id).fetch(:patience, 0.0) + gain, full ].min
+        write(id, patience: patience)
+        patience
       end
 
       def tick(id, clock)

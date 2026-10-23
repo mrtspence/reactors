@@ -360,8 +360,9 @@ export default class extends Controller {
     injury.textContent = crew.injury ? this.words(crew.injury) : ""
     injury.classList.toggle("hidden", !crew.injury)
     // A scratch and being carried out are not the same news.
-    injury.classList.toggle("text-amber-400", crew.injury === "minor")
-    injury.classList.toggle("text-rose-400", Boolean(crew.injury) && crew.injury !== "minor")
+    const onTheirFeet = crew.injury === "minor" || crew.injury === "significant"
+    injury.classList.toggle("text-amber-400", onTheirFeet)
+    injury.classList.toggle("text-rose-400", Boolean(crew.injury) && !onTheirFeet)
   }
 
   // Carrying, and being carried — two sides of one fact, painted from opposite ends.

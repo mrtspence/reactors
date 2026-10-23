@@ -9,8 +9,8 @@
 #
 # `content/archetypes/` is the baseline; everything here is an **offset** on the race named in
 # `archetype:`, and training and equipment offset it further. So two elves are not the same
-# worker, which is the whole reason this layer exists: Elowynne is quick and observant where
-# Galathas is unusually strong for an elf and clumsier with it.
+# worker, which is the whole reason this layer exists: Elowynne is slight, quick and deft, where
+# Galathas is an elf like any other with a quarrel of his own.
 #
 # Omit a stat to take the race's figure unchanged. `stats:` may be omitted entirely.
 #
@@ -18,7 +18,8 @@
 #
 #   name:       what a panel calls them. Required — an individual without one is an archetype.
 #   archetype:  their race, from content/archetypes/. Required, and checked at boot.
-#   stats:      offsets, added to the race's
+#   mass_kg:    an offset on the race's weight, beside stats and never inside them
+#   stats:      offsets, added to the race's — stats only; anything else is refused at boot
 #   tags:       their own traits, added to the race's
 #   grudges:    who they dislike, by race or by person, added to the race's
 #   resented_by: who dislikes THEM, by race or by person — a notorious past, written from their side
@@ -31,8 +32,8 @@
 jim:
   name: Jim Ashfield
   archetype: human
+  mass_kg: 5.0
   stats:
-    mass_kg: 5.0
     strength: 0.15
     dexterity: -0.1
   tags:
@@ -41,11 +42,11 @@ jim:
 elowynne:
   name: Elowynne
   archetype: elf
+  mass_kg: -10.0
   stats:
-    mass_kg: -10.0
     intelligence: 0.1
-    dexterity: 0.15
-    agility: 0.15
+    dexterity: 0.1
+    agility: 0.1
 
 galathas:
   name: Galathas

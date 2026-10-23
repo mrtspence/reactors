@@ -83,6 +83,12 @@ module ReactorSim
       # itself lives in `Sheet`, with the folding rules it belongs to.
       REQUIRED_ARCHETYPE_KEYS = ([ :label ] + Sheet::STATS).freeze
 
+      # **Every key either layer may hold, and nothing else is accepted.** The sheet is folded by
+      # picking out what it knows, so a misplaced or misspelt key is not an error there — it is
+      # simply never read, and the person is quietly somebody else.
+      ARCHETYPE_KEYS = (REQUIRED_ARCHETYPE_KEYS + %i[mass_kg tags grudges]).freeze
+      MINION_KEYS = (REQUIRED_MINION_KEYS + %i[mass_kg stats tags grudges resented_by hireable]).freeze
+
       # A climate's season declares all of these; its spells each declare `SPELL_KEYS`.
       REQUIRED_SEASON_KEYS = %i[day_of_year mean_k daily_range_k pressure_pa severity spells].freeze
       REQUIRED_SPELL_KEYS = %i[weight minutes offset_k precipitation wind_m_s pressure_trend].freeze
@@ -275,12 +281,16 @@ module ReactorSim
           raise Error, "archetype #{id}: missing #{missing.join(', ')}" if missing.any?
           raise Error, "archetype #{id}: resented_by belongs to a person" if spec.key?(:resented_by)
 
+          refuse_unknown!("archetype #{id}", spec.keys, ARCHETYPE_KEYS)
           validate_grudges!("archetype #{id}", spec)
         end
 
         @minions.each do |id, spec|
           missing = REQUIRED_MINION_KEYS.reject { |k| spec.key?(k) }
           raise Error, "minion #{id}: missing #{missing.join(', ')}" if missing.any?
+
+          refuse_unknown!("minion #{id}", spec.keys, MINION_KEYS)
+          Sheet.offsets("minion #{id}", spec[:stats])
 
           validate_grudges!("minion #{id}", spec)
 
@@ -293,6 +303,13 @@ module ReactorSim
         end
 
         validate_climates!
+      end
+
+      def refuse_unknown!(owner, keys, known)
+        unknown = keys.map(&:to_sym) - known
+        return if unknown.empty?
+
+        raise Error, "#{owner}: unknown #{unknown.join(', ')} (known: #{known.join(', ')})"
       end
 
       # A season missing a figure would surface as a nil inside the weather's arithmetic, a minute

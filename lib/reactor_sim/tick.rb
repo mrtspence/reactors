@@ -2196,7 +2196,7 @@ module ReactorSim
     # dead minion is the one thing the line must never say.
     def hurt_event(minion, hurt, mode, hazard, ctx)
       Event.build(type: :minion_hurt, node: minion.id, label: minion.name,
-                  severity: mode == :minor ? :warning : :critical,
+                  severity: Injury::MODES.dig(mode, :stood_down) ? :critical : :warning,
                   tick: ctx.tick, mode: mode,
                   cause: hazard[:cause] || hazard[:tags].first || hazard[:sources].first,
                   detail: { minion: minion.minion,

@@ -26,8 +26,10 @@ module ReactorSim
     # needs no second declaration that could disagree with the first — the same trick
     # `failure_modes` uses.
     MODES = {
+      # A knock: a cracked rib, a broken finger, a tooth out, a ringing head. Barely slower.
+      minor: { derates: { strength: 0.9, dexterity: 0.85, intelligence: 0.95, agility: 0.9 } },
       # Walking wounded. Still at their post, and worse at it.
-      minor: { derates: { strength: 0.6, dexterity: 0.7, intelligence: 0.85, agility: 0.6 } },
+      significant: { derates: { strength: 0.6, dexterity: 0.7, intelligence: 0.85, agility: 0.6 } },
       # Carried out. Their station is cleared, so whatever they were doing stops being done.
       severe: { derates: { strength: 0.0, dexterity: 0.0, intelligence: 0.0, agility: 0.0 },
                 stood_down: true },
@@ -42,14 +44,15 @@ module ReactorSim
     # `overload?` half: a drum letting go beside somebody is not a question about their stamina.
     MORTAL_BITE = 2.5
 
-    # Resilience below this fraction of what they started with is the walking-wounded band. Above
-    # it a bite still costs them, it simply does not show yet, which makes a long shift tell later
-    # rather than immediately.
+    # Resilience below these fractions of what they started with is a knock, then the walking
+    # wounded. Above the first a bite still costs them, it simply does not show yet, which makes a
+    # long shift tell later rather than immediately.
     #
-    # **Keep this wide.** Bites large enough to get through a minion's resistance at all are a
+    # **Keep the bands wide.** Bites large enough to get through a minion's resistance at all are a
     # decent fraction of what they have, so a narrow band takes a worker from unmarked to
-    # carried-out in two hits and `:minor` fires only on a coincidence.
-    WALKING_WOUNDED = 0.6
+    # carried-out in two hits and the tier between fires only on a coincidence.
+    KNOCKED = 0.8
+    WALKING_WOUNDED = 0.45
 
     # Hidden, and multiplied by toughness so a tough minion has more in reserve as well as
     # shrugging more off. The spread is what a player cannot see and cannot plan around; it is
@@ -130,7 +133,9 @@ module ReactorSim
     def tier(bite, remaining, started)
       return :mortal if bite >= MORTAL_BITE
       return :severe if remaining <= 0.0
-      return :minor if started.positive? && remaining < (started * WALKING_WOUNDED)
+      return nil unless started.positive?
+      return :significant if remaining < (started * WALKING_WOUNDED)
+      return :minor if remaining < (started * KNOCKED)
 
       nil
     end

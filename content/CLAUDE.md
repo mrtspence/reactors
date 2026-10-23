@@ -186,15 +186,19 @@ elf:
     darkvision: 0.3
 
 # content/minions/crew.yml — layer two: who they actually are, as OFFSETS
-galathas:
-  name: Galathas        # required. A name is what separates a person from a race.
+elowynne:
+  name: Elowynne        # required. A name is what separates a person from a race.
   archetype: elf        # required, and checked — an unknown race is refused at boot
+  mass_kg: -10.0        # an offset, beside stats and never inside them
   stats:
-    strength: 0.35      # strong for an elf…
-    dexterity: -0.25    # …and heavy-handed with it
-  tags:
-    clumsy: 0.2
+    intelligence: 0.1   # quicker than most elves…
+    agility: 0.1        # …and lighter on her feet
 ```
+
+**Every key on an archetype or an individual is checked against the keys that layer may hold**,
+and so is every key under an individual's `stats:` — and an item's or a course's — against the
+stats. The sheet is folded by picking out what it knows, so anything else would never be read and
+nothing would say so — a `mass_kg` under `stats:` would leave somebody at their race's weight.
 
 Four layers in all: **archetype → individual → training → equipment**, each offsetting the last.
 The last two are the delivery tier's, because they are things a player *owns* and ownership is not

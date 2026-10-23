@@ -415,6 +415,15 @@ RSpec.describe "animosity" do
       expect(spent.fetch(nil)).to be > spent.fetch(:calming)
     end
 
+    it "wears by the worst of them, not by how many of them there are" do
+      one = rig([ person(:a, grudges: { b: 0.5 }), person(:b), person(:c) ])
+      two = rig([ person(:a, grudges: { b: 0.5, c: 0.5 }), person(:b), person(:c) ])
+      before = patience(one, :a)
+      [ one, two ].each { |op| op.step!(tick: 1) }
+
+      expect(before - patience(two, :a)).to be_within(1.0e-12).of(before - patience(one, :a))
+    end
+
     it "spends faster on a deeper grudge" do
       deep = rig([ person(:a, grudges: { b: 0.9 }), person(:b) ])
       shallow = rig([ person(:a, grudges: { b: 0.2 }), person(:b) ])
@@ -422,6 +431,27 @@ RSpec.describe "animosity" do
       [ deep, shallow ].each { |op| op.step!(tick: 1) }
 
       expect(before - patience(deep, :a)).to be > before - patience(shallow, :a)
+    end
+
+    it "goes for the most resented most often and never only for them" do
+      scored = [ [ :b, 3.0 ], [ :c, 1.0 ] ]
+      picks = (0...100).map { |i| animosity.pick(scored, i / 100.0) }.tally
+
+      expect(picks.fetch(:b)).to be > picks.fetch(:c)
+      expect(picks.fetch(:c)).to be_positive
+    end
+
+    it "turns on somebody else when the one they hate most is already fighting" do
+      crew = [ person(:a, grudges: { b: 0.9, c: 0.3 }), person(:b), person(:c), person(:d) ]
+      fight = { blows: true, clock_s: 100.0, owed: 0.0 }
+      op = with(rig(crew), crew, a: { patience: 1.0e-9 },
+                                 b: { fight: fight.merge(with: :d, led: true) },
+                                 d: { fight: fight.merge(with: :b, led: false) })
+      events = op.step!(tick: 1)
+
+      targets = events.select { |e| e[:type] == :quarrel && e[:node] == :a }.map { |e| e.dig(:detail, :target) }
+      expect(targets.length).to eq(1)
+      expect(%i[c d]).to include(targets.first)
     end
 
     it "comes to a quarrel when it runs out, which stops the two of them" do
@@ -454,6 +484,19 @@ RSpec.describe "animosity" do
       op.step!(tick: 2)
       expect(op.state.dig(:minions, :b, :fight)).to be_nil
       expect(held(op, :b, :a)).to be_positive
+    end
+
+    it "lets the one set upon off steam too, and a fighter it has hurt far more" do
+      crew = [ person(:a, grudges: { b: 0.5 }), person(:b) ]
+      calm = fighting(*crew)
+      knocked = with(calm, crew, b: { injury: :minor })
+      low = { patience: 0.1 }
+      calm = with(calm, crew, b: low)
+      knocked = with(knocked, crew, b: low)
+      [ calm, knocked ].each { |op| op.step!(tick: 1) }
+
+      expect(calm.state.dig(:minions, :b, :patience)).to be > 0.1
+      expect(knocked.state.dig(:minions, :b, :patience)).to be > calm.state.dig(:minions, :b, :patience)
     end
 
     it "stops once the one who started it is sated, whether or not anything landed, and leaves nothing new" do

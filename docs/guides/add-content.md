@@ -326,15 +326,18 @@ elf:
     orc: 0.4
 
 # content/minions/crew.yml — layer two, who they are, written as OFFSETS
-galathas:
-  name: Galathas        # required — a name is what separates a person from a race
+elowynne:
+  name: Elowynne        # required — a name is what separates a person from a race
   archetype: elf        # required, and checked at boot
-  mass_kg: 8.0          # optional offset — a big elf. Absent means "weighs what elves weigh"
-  stats:
-    strength: 0.35      # strong for an elf…
-    dexterity: -0.25    # …and heavy-handed with it
-  tags:
-    clumsy: 0.2
+  mass_kg: -10.0        # optional offset, beside stats and never inside them — a slight elf
+  stats:                # stats only — any other key is refused at boot
+    intelligence: 0.1   # quicker than most elves…
+    dexterity: 0.1
+    agility: 0.1        # …and lighter on her feet
+
+galathas:               # nothing but his race, and one quarrel of his own
+  name: Galathas
+  archetype: elf
   grudges:
     throg: 0.6          # a person, this time
   # resented_by: { dwarf: 0.5 }   # who dislikes HIM — a notorious past, written from his side

@@ -94,6 +94,28 @@ RSpec.describe ReactorSim::Content do
         described_class.build(archetypes: { human: human }, minions: { jim: { archetype: :human } })
       }.to raise_error(ReactorSim::Error, /jim: missing name/)
     end
+
+    # The sheet folds what it knows, so anything else is never read and nobody is told.
+    it "refuses a key neither layer holds, and anything under stats that is not a stat" do
+      misspelt = { name: "Jim", archetype: :human, grudge: { human: 0.2 } }
+      misplaced = { name: "Jim", archetype: :human, stats: { mass_kg: 5.0 } }
+
+      expect { described_class.build(archetypes: { human: human }, minions: { jim: misspelt }) }
+        .to raise_error(ReactorSim::Error, /jim: unknown grudge/)
+      expect { described_class.build(archetypes: { human: human }, minions: { jim: misplaced }) }
+        .to raise_error(ReactorSim::Error, /jim: stats name unknown mass_kg/)
+      expect { described_class.build(archetypes: { human: human.merge(agilty: 1.0) }) }
+        .to raise_error(ReactorSim::Error, /human: unknown agilty/)
+      expect { described_class.build(archetypes: { human: human }, minions: { jim: misplaced.except(:stats).merge(mass_kg: 5.0) }) }
+        .not_to raise_error
+    end
+
+    it "refuses an item or a course whose stats name something that is not a stat" do
+      expect { ReactorSim::Equipment.new(id: :x, slot: :gear, mass_kg: 1.0, stats: { agilty: 0.1 }) }
+        .to raise_error(ReactorSim::Error, /equipment x: stats name unknown agilty/)
+      expect { ReactorSim::Training.new(id: :y, mass_kg: 0.0, stats: { mass_kg: 1.0 }) }
+        .to raise_error(ReactorSim::Error, /training y: stats name unknown mass_kg/)
+    end
   end
 
   # Layers one and two of the four. Training and equipment are the delivery tier's, because they
@@ -120,7 +142,7 @@ RSpec.describe ReactorSim::Content do
     end
 
     # **Two members of the same race are not the same worker**, which is the entire reason the
-    # individual layer exists. Galathas is strong for an elf and heavy-handed with it.
+    # individual layer exists. The heavy one is strong for an elf and heavy-handed with it.
     it "separates two individuals of one race" do
       quick = registry.sheet(:quick)[:stats]
       heavy = registry.sheet(:heavy)[:stats]

@@ -92,6 +92,17 @@ module ReactorSim
 
     module_function
 
+    # **Stat offsets as a layer declares them, refusing any key that is not a stat.** `add_stats`
+    # picks out the stats it knows, so a misplaced `mass_kg` or a misspelt `agilty` would otherwise
+    # never be read and nothing would say so.
+    def offsets(owner, stats)
+      offsets = (stats || {}).to_h { |k, v| [ k.to_sym, v.to_f ] }
+      unknown = offsets.keys - STATS
+      raise Error, "#{owner}: stats name unknown #{unknown.join(', ')} (stats: #{STATS.join(', ')})" if unknown.any?
+
+      offsets.freeze
+    end
+
     # **Merge adds; use multiplies.** Gear reads as "+0.25 mining_effectiveness", which is how
     # the content is written — so folding is addition. Whoever *reads* a sheet multiplies, which
     # is why a crude pick and a candle is a punishing 0.25 × 0.1 rather than a middling 0.35.

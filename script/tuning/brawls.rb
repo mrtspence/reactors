@@ -321,7 +321,7 @@ module BrawlMatrix
     lines << "| Starter | Target | Exch. | Ended: sated / target down / starter down / both down / spent | " \
              "Starter: landed, clean, crit, median margin, mean sev., max bite, drew @, fatigue | " \
              "Target: landed, clean, crit, median margin, mean sev., max bite, drew @, fatigue | " \
-             "Target minor / severe / dead | Starter minor / severe / dead |"
+             "Target minor / significant / severe / dead | Starter minor / significant / severe / dead |"
     lines << "|---|---|---|---|---|---|---|---|"
     results.each do |(starter, target), runs|
       ended = ENDINGS.map { |e| pct(runs.count { |r| r[:ended] == e }, runs.length) }
@@ -349,7 +349,7 @@ module BrawlMatrix
   # What was done TO this side: the other side's `inflicted`.
   def injuries(runs, side)
     other = side == :a ? :b : :a
-    %i[minor severe mortal].map { |mode| pct(runs.count { |r| r.fetch(other)[:inflicted] == mode }, runs.length) }.join(" / ")
+    ReactorSim::Injury::ORDER.map { |mode| pct(runs.count { |r| r.fetch(other)[:inflicted] == mode }, runs.length) }.join(" / ")
   end
 
   def argv_echo(options)

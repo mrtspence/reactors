@@ -91,6 +91,8 @@ minion:
     materials: {}
   arunessa:
     materials: {}
+  rijgazh:
+    materials: {}
 
 # **Priced by the ITEM, not by the (minion, item) pair.** Ownership is per minion — Jim's apron
 # and Elowynne's apron are two separate unlocks with ids `jim/leather_apron` and

@@ -410,7 +410,11 @@ built in five units, designed one at a time:
        `ruby script/tuning/brawls.rb`** (any directory; `--set NAME=VALUE` tries a figure without
        editing code, `--tag [ID.]TAG=VALUE` tries a temperament, `--armed` starts every brawl with
        weapons out, `--tool` gives everybody one item): every character against every other, 100 brawls a pairing, written to
-       [`tuning/brawls.md`](tuning/brawls.md) and deterministic, so a pass is a diff.
+       [`tuning/brawls.md`](tuning/brawls.md) and deterministic, so a pass is a diff. **Crowds
+       with `ruby script/tuning/crowds.rb`** (`--only crowds|bosses`, `--sizes`, `--minutes`,
+       `--seeds`, `--set`): a room of 2–32 for a shift, with and without annoying or calming hands
+       and five bosses, written to [`tuning/crowds.md`](tuning/crowds.md); the full run takes
+       over an hour, so try a change with `--sizes` first.
        Measured once with an orc among elves and a dwarf at bank: his first brawl came at about
        3½ minutes and one every few minutes after, and a clean blow from him puts an elf straight
        into severe.
