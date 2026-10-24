@@ -6,33 +6,49 @@ puncture:
     splinter: { label: Splinter, weight: 1, derates: { dexterity: 0.9 } }
     stab_in_the_arm: { label: Stab in the arm, weight: 1, derates: { strength: 0.9 } }
     pierced_hand: { label: Pierced hand, weight: 1, derates: { dexterity: 0.85 } }
+    nail_through_the_boot: { label: Nail through the boot, weight: 1, derates: { agility: 0.9 } }
+    jabbed_side: { label: Jabbed side, weight: 1, derates: { endurance: 0.9 } }
   significant:
     stab_in_the_gut: { label: Stab in the gut, weight: 1, derates: { endurance: 0.6, strength: 0.75 } }
     pierced_thigh: { label: Pierced thigh, weight: 1, derates: { agility: 0.5 } }
     run_through_the_shoulder: { label: Run through the shoulder, weight: 1, derates: { strength: 0.6, combat_prowess: 0.7 } }
+    stab_in_the_back: { label: Stab in the back, weight: 1, derates: { strength: 0.7, endurance: 0.7 } }
+    pierced_forearm: { label: Pierced forearm, weight: 1, derates: { dexterity: 0.55, strength: 0.8 } }
   severe:
     pierced_lung: { label: Pierced lung, weight: 1, derates: { endurance: 0.2, strength: 0.5 } }
     gutted: { label: Gutted, weight: 1, derates: { endurance: 0.15, strength: 0.3 } }
     lost_an_eye: { label: Lost an eye, weight: 1, derates: { intelligence: 0.6, dexterity: 0.4 } }
+    pierced_kidney: { label: Pierced kidney, weight: 1, derates: { endurance: 0.2, strength: 0.4 } }
+    pinned_through_the_thigh: { label: Pinned through the thigh, weight: 1, derates: { agility: 0.1, strength: 0.6 } }
   mortal:
     pierced_heart: { label: Pierced heart, weight: 1, derates: { endurance: 0.0 } }
     skewered: { label: Skewered, weight: 1, derates: { endurance: 0.05, strength: 0.05 } }
     bled_out: { label: Bled out, weight: 1, derates: { endurance: 0.05, strength: 0.1 } }
+    pick_through_the_skull: { label: Pick through the skull, weight: 1, derates: { intelligence: 0.0, agility: 0.05 } }
+    run_through: { label: Run through, weight: 1, derates: { endurance: 0.0, strength: 0.05 } }
 
 cut:
   minor:
     gashed_palm: { label: Gashed palm, weight: 1, derates: { dexterity: 0.85 } }
     split_lip: { label: Split lip, weight: 1, derates: { charisma: 0.9 } }
     cut_forearm: { label: Cut forearm, weight: 1, derates: { strength: 0.95, dexterity: 0.95 } }
+    nicked_scalp: { label: Nicked scalp, weight: 1, derates: { intelligence: 0.95, charisma: 0.95 } }
+    sliced_shin: { label: Sliced shin, weight: 1, derates: { agility: 0.9 } }
   significant:
     deep_gash: { label: Deep gash, weight: 1, derates: { endurance: 0.7, strength: 0.8 } }
     slashed_tendon: { label: Slashed tendon, weight: 1, derates: { agility: 0.5, dexterity: 0.7 } }
     lost_a_finger: { label: Lost a finger, weight: 1, derates: { dexterity: 0.6 } }
+    slashed_face: { label: Slashed face, weight: 1, derates: { charisma: 0.55, intelligence: 0.85 } }
+    laid_open_arm: { label: Laid-open arm, weight: 1, derates: { strength: 0.6, combat_prowess: 0.75 } }
   severe:
     severed_hand: { label: Severed hand, weight: 1, derates: { dexterity: 0.1, strength: 0.5, combat_prowess: 0.4 } }
     opened_belly: { label: Opened belly, weight: 1, derates: { endurance: 0.15, strength: 0.3 } }
     hamstrung: { label: Hamstrung, weight: 1, derates: { agility: 0.1, strength: 0.6 } }
+    lost_an_ear: { label: Lost an ear, weight: 1, derates: { charisma: 0.4, intelligence: 0.7 } }
+    cut_to_the_bone: { label: Cut to the bone, weight: 1, derates: { strength: 0.3, endurance: 0.4 } }
   mortal:
     opened_throat: { label: Opened throat, weight: 1, derates: { endurance: 0.0 } }
     severed_artery: { label: Severed artery, weight: 1, derates: { endurance: 0.05 } }
     cut_to_pieces: { label: Cut to pieces, weight: 1, derates: { strength: 0.05, agility: 0.05 } }
+    disembowelled: { label: Disembowelled, weight: 1, derates: { endurance: 0.0, strength: 0.05 } }
+    bled_white: { label: Bled white, weight: 1, derates: { endurance: 0.05, intelligence: 0.1 } }

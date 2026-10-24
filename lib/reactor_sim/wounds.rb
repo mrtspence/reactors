@@ -10,7 +10,7 @@ module ReactorSim
   module Wounds
     # What a body suffers. The last three are continuous: one standing wound deepens while they
     # last (§3.6 of the sketch).
-    KINDS = %i[impact crush puncture cut burn scald blast heat cold breath].freeze
+    KINDS = %i[impact crush puncture cut burn blast heat cold breath].freeze
     CONTINUOUS = %i[heat cold breath].freeze
 
     # What did it, as far as protection goes: a helmet against `rockfall`, a belt against `fall`.
@@ -21,9 +21,9 @@ module ReactorSim
 
     # **The depth each tier begins at**, absolute, as a bite past resistance. Under `minor` a bite
     # costs resilience and leaves nothing to show.
-    BANDS = { minor: 0.15, significant: 0.6, severe: 1.6, mortal: 3.0 }.freeze
+    BANDS = { minor: 0.15, significant: 0.6, severe: 1.6, mortal: 5.0 }.freeze
 
-    VARIANTS = 3
+    VARIANTS = 5
 
     # **Healing between matches**: this much depth off every wound a match, plus `regeneration`
     # and less `slow_healer`, and never less than `LEAST_HEAL`, so nobody stops healing altogether
@@ -86,7 +86,7 @@ module ReactorSim
     # refused at boot.
     class Catalogue
       # TODO: `tags:` on an entry — a wound taking from a tag as it takes from a stat; first caller
-      # is the scald that takes the edge off `focused`. Needs a state-aware `Minion#tag`, since tags
+      # is the burn that takes the edge off `focused`. Needs a state-aware `Minion#tag`, since tags
       # are read without state today. Untested until then.
       ENTRY_KEYS = %i[label weight derates].freeze
 

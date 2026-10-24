@@ -190,7 +190,7 @@ module ReactorSim
         def suffers?(kind) = kind == :obstruction || super
 
         # **Half a tonne of tub on the cage roof**, to whoever is riding it.
-        TUB_ON_THE_CAGE = 2.0
+        TUB_ON_THE_CAGE = 8.0
 
         def failure_hazards
           @hoist ? { tub_fell: { wounds: { impact: 0.5, crush: 0.5 }, riders: { @hoist => TUB_ON_THE_CAGE } } } : {}
@@ -265,7 +265,7 @@ module ReactorSim
       end
 
       # Who the frame falls on, and what it brings down with it.
-      HEADFRAME_FALL = { wounds: { impact: 0.7, burn: 0.3 }, places: { bank: 1.4 }, riders: { cage_drive: 1.2 } }.freeze
+      HEADFRAME_FALL = { wounds: { impact: 0.7, burn: 0.3 }, places: { bank: 5.6 }, riders: { cage_drive: 4.8 } }.freeze
 
       def headframe(timber_kg:)
         Headframe.new(
@@ -375,7 +375,7 @@ module ReactorSim
           # No temperature rating: its coal fire is the furnace working. Its gas going off is the
           # blast in the furnace drift, at the shaft bottom.
           endangers: { explosion: { wounds: { blast: 0.6, burn: 0.4 }, scales_with: :joules, reference: 1.0e8,
-                                    places: { pit_bottom: 1.6 } } },
+                                    places: { pit_bottom: 6.4 } } },
           ports: [ Port.new(id: :fuel_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 1.0),
                    Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 40.0),
                    Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 40.0) ]
@@ -771,10 +771,10 @@ module ReactorSim
           # roadway itself giving way to a fire that went on burning.
           endangers: {
             explosion: { wounds: { blast: 0.6, burn: 0.4 }, scales_with: :joules, reference: 3.0e9,
-                         places: { district: 3.2, pit_bottom: 1.1 } },
+                         places: { district: 12.8, pit_bottom: 1.1 } },
             rupture: { wounds: { blast: 0.6, burn: 0.4 }, causes: %i[afterdamp], scales_with: :temperature_k,
                        reference: 1_400.0,
-                       places: { district: 3.2, pit_bottom: 1.1 } }
+                       places: { district: 12.8, pit_bottom: 1.1 } }
           },
           # The blast goes down the roads and blows the haulage door out of its frame, so the air
           # that might have cleared the afterdamp takes the short way back to the fan instead. **It
@@ -833,7 +833,7 @@ module ReactorSim
           control_id: :ventilation, head_pa: head_pa,
           reverse_control_id: (:fan_reversed if reversible),
           driven_by: :line_shaft, efficiency: 0.55, rated_omega: rated_omega,
-          burst_ratio: 1.5, endangers: { burst: { wounds: { impact: 1.0 }, places: { bank: 1.6 } } }
+          burst_ratio: 1.5, endangers: { burst: { wounds: { impact: 1.0 }, places: { bank: 6.4 } } }
         )
       end
 
@@ -1133,7 +1133,7 @@ module ReactorSim
       # A fall drives the air out ahead of it, down the roads, at whoever is in them — by how much
       # came down.
       WINDBLAST = { wounds: { impact: 1.0 }, scales_with: :hanging_m, reference: OldWorkings::FIRST_SPAN_M,
-                    places: { district: 1.8, pit_bottom: 0.6 } }.freeze
+                    places: { district: 7.2, pit_bottom: 0.6 } }.freeze
 
       # A pinned `ground:` draws no spans, so a spec measuring the machine has no falls.
       def goaf(kg:, seam_kg:, sour: nil, ground: nil)
@@ -1252,7 +1252,7 @@ module ReactorSim
       end
 
       # Breaking out: the waste's fire reaching the face.
-      GOB_BREAKOUT = { wounds: { burn: 1.0 }, causes: %i[afterdamp], places: { district: 1.6 } }.freeze
+      GOB_BREAKOUT = { wounds: { burn: 1.0 }, causes: %i[afterdamp], places: { district: 6.4 } }.freeze
 
       # A pinned `ground:` inherits no heating waste.
       def gob(ground: nil)
@@ -1993,7 +1993,7 @@ module ReactorSim
             # in: a full hand face wholly unsupported reads about 0.3 with a decent kit.
             roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], scales_with: :unsupported,
                          reference: 0.2,
-                         places: { pit_bottom: 2.6, district: 1.6 } }
+                         places: { pit_bottom: 10.4, district: 6.4 } }
           },
           # **What the road does to people with nothing broken at all**, which is the majority
           # of what a haulage road ever did to anybody. Both scale with the traffic, so the
@@ -2088,7 +2088,7 @@ module ReactorSim
           id: :tub_road, label: "Belt Road", accepts: [ :solid ],
           max_kg_per_s: max_kg_per_s, heat_capacity: 4.0e3, control_id: :haulage,
           endangers: { roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], scales_with: :unsupported, reference: 30.0,
-                                    places: { pit_bottom: 2.6, district: 1.6 } } },
+                                    places: { pit_bottom: 10.4, district: 6.4 } } },
           # Caught in the belt where it runs onto the drum: the attendant, clearing spillage at
           # the drive head.
           perils: [ Peril.new(id: :caught_in_the_belt, wounds: { crush: 1.0 }, severity: 2.4, scales_with: :belt,
@@ -2530,7 +2530,7 @@ module ReactorSim
       # Coal thrown into the face, and how hard it hits goes with how much: a median outburst at the
       # reference, the rare large one far worse.
       OUTBURST_HARM = { wounds: { crush: 0.6, impact: 0.4 }, scales_with: :coal_t, reference: GasPocket::COAL_MEDIAN_T,
-                        places: { district: 2.4 } }.freeze
+                        places: { district: 9.6 } }.freeze
 
       def outburst
         Outburst.new(id: :outburst, label: "Outburst", accepts: [], pocket: :gas_pocket,

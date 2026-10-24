@@ -204,6 +204,10 @@ module CrowdTuning
 
   def quarrels(runs, mode) = runs.sum { |r| r[:events].count { |e| e[:type] == :quarrel && e[:mode] == mode } }
 
+  def averted_pile_ins(runs)
+    runs.sum { |r| r[:events].count { |e| e[:type] == :quarrel_averted && e[:mode] == :pile_in } }
+  end
+
   def report(results, options)
     lines = []
     lines << "# Crowds"
@@ -221,6 +225,9 @@ module CrowdTuning
       "ESCALATION" => animosity::ESCALATION, "VIOLENCE_HOSTILITY" => animosity::VIOLENCE_HOSTILITY,
       "FOCUS" => animosity::FOCUS, "GANGED" => animosity::GANGED, "WITNESS_BASE" => animosity::WITNESS_BASE,
       "WITNESSED" => animosity::WITNESSED.map { |mode, w| "#{mode} #{w}" }.join(", "), "KICKING" => animosity::KICKING,
+      "BOUT_S" => animosity::BOUT_S, "SATED" => animosity::SATED,
+      "DRAG_IN" => animosity::DRAG_IN, "HECKLED" => animosity::HECKLED, "SPOILING" => animosity::SPOILING,
+      "EDGE" => animosity::EDGE, "ON_EDGE" => animosity::ON_EDGE,
       "AUTHORITY_HALF" => animosity::AUTHORITY_HALF, "MOST_AVERTED" => animosity::MOST_AVERTED }
       .each { |name, value| lines << "| `#{name}` | #{value} |" }
     lines << ""
@@ -230,16 +237,19 @@ module CrowdTuning
       lines << ""
       lines << "Ran out is how often anybody's patience ran out; it comes to a row, a heckle at somebody " \
                "fighting, a new brawl, joining one, a quarrel the boss averted, or nothing (seethed). " \
+               "Dragged in is a fighter turning on somebody watching; piled in is somebody joining a fight " \
+               "before their patience ran out, and a boss stopping that counts as averted (pile-ins). " \
                "Fighting is the share of the shift with a brawl going and, while one is, the share of the " \
                "room on their feet in one; fights at once and the largest fight are the most there ever " \
                "were. Kicked to death is killed after being carried out. Down is everybody carried out or " \
                "killed by the end, of the room; half down is when half the room was, in the shifts it " \
                "happened in."
       lines << ""
-      lines << "| Scenario | First quarrel | Ran out /h | Rows / heckles /h | Brawls / joined /h | Averted /h | Seethed /h | " \
+      lines << "| Scenario | First quarrel | Ran out /h | Rows / heckles /h | Brawls / joined /h | " \
+               "Dragged / piled in /h | Averted (pile-ins) /h | Seethed /h | " \
                "Drew /h | Hurt minor / significant / severe / mortal per h | Kicked to death /h | " \
                "Fighting: of shift, of room | Fights at once | Largest fight | Down | Half down |"
-      lines << "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+      lines << "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
       rows.each { |scenario, runs| lines << row(scenario, runs, options) }
       lines << ""
     end
@@ -267,7 +277,9 @@ module CrowdTuning
     "| #{scenario.name} | #{first} | #{hourly.(acts.length)} | " \
       "#{hourly.(quarrels(runs, :row))} / #{hourly.(quarrels(runs, :heckle))} | " \
       "#{hourly.(quarrels(runs, :brawl))} / #{hourly.(quarrels(runs, :joined))} | " \
-      "#{hourly.(acts.count { |a| a[:came_to] == :averted })} | #{hourly.(acts.count { |a| a[:came_to] == :seethed })} | " \
+      "#{hourly.(quarrels(runs, :dragged))} / #{hourly.(quarrels(runs, :piled_in))} | " \
+      "#{hourly.(acts.count { |a| a[:came_to] == :averted })} (#{hourly.(averted_pile_ins(runs))}) | " \
+      "#{hourly.(acts.count { |a| a[:came_to] == :seethed })} | " \
       "#{hourly.(quarrels(runs, :armed))} | #{injuries.join(' / ')} | " \
       "#{hourly.(runs.sum { |r| kicked_to_death(r[:events]) })} | " \
       "#{pct(fighting, ticks)}, #{share} | #{runs.map { |r| r[:peak] }.max} | #{runs.map { |r| r[:biggest] }.max} | " \

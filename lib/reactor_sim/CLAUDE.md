@@ -49,7 +49,11 @@ air), `scorch.rb` (the heat), `chill.rb` (the cold, and the strain of working in
 the kinds it deals as shares of its severity and its causes, each kind is bitten separately, and
 each bite past the first band leaves a named wound out of `content/wounds/`. Wounds stack, derate
 the stats they name, and outlive the match, healing between them; every bite also comes off
-`resilience`, which collapses somebody at empty and kills them far past it. `injury` is the
+`resilience`, which collapses somebody at empty. **Only grave harm kills by attrition** — the
+continuous harms and acute bites of the severe band or worse, counted in `grave` — so no pile of
+knocks finishes anybody, and a run of stab wounds does. **One bite of `OUTRIGHT` times their
+toughness kills outright** however much is left, which is the only route to death a person's own
+build moves. `injury` is the
 condition all that comes to, derived. **A harm that works continuously deepens one standing wound
 of its kind** — heat, cold, bad air — rather than adding one a tick, from a running `dose`, and
 owes a dwell counter past collapse (`asphyxia`, `burns`, `chilled`) to reach `:mortal`.
@@ -88,7 +92,9 @@ owes a dwell counter past collapse (`asphyxia`, `burns`, `chilled`) to reach `:m
 > contest itself (a bell-curved roll, landing, damage, a critical that `pierces:` the armour and
 > part of the toughness) is `combat.rb`, pure arithmetic any future fight reuses. **A brawl is a
 > melee of any size**, one `fight: { melee: }` per member and no shared record, lasting while anybody
-> in it is still angry with somebody there. A fighter mans nothing (`Tick#crews` leaves them out) and
+> in it is still angry with somebody there. **It spreads**: a fighter drags in somebody watching, and
+> somebody standing by piles in — spoiling for it, or near snapping with somebody in it they hate. A
+> fighter mans nothing (`Tick#crews` leaves them out), so a fight empties every post it takes in, and
 > does not walk. See
 > [`design_sketches/animosity-and-distraction.md`](../../docs/design_sketches/animosity-and-distraction.md).
 >

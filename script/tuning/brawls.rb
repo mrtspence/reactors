@@ -237,7 +237,11 @@ module BrawlMatrix
       "ANSWER" => animosity::ANSWER, "GRUDGE_HARDENS" => animosity::GRUDGE_HARDENS,
       "VIOLENCE_HOSTILITY" => animosity::VIOLENCE_HOSTILITY,
       "WOUND_GRUDGE" => animosity::WOUND_GRUDGE.map { |mode, g| "#{mode} #{g}" }.join(", "),
-      "BOUT_S" => animosity::BOUT_S, "SATED" => animosity::SATED, "MORTAL_BITE" => ReactorSim::Injury::MORTAL_BITE }
+      "BOUT_S" => animosity::BOUT_S, "SATED" => animosity::SATED,
+      "WITNESSED" => animosity::WITNESSED.map { |mode, w| "#{mode} #{w}" }.join(", "),
+      "KICKING" => animosity::KICKING, "GROUNDED_GUARD" => animosity::GROUNDED_GUARD,
+      "MORTAL_BITE" => ReactorSim::Injury::MORTAL_BITE, "OUTRIGHT" => ReactorSim::Injury::OUTRIGHT,
+      "DEATH_SHARE" => ReactorSim::Injury::DEATH_SHARE }
       .each { |name, value| lines << "| `#{name}` | #{value} |" }
     lines << ""
     lines << "**The cast.** Strike decides whether a blow lands, against defence; a blow's weight is " \

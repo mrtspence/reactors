@@ -34,7 +34,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     @catalogue ||= ReactorSim::Wounds::Catalogue.new(
       ReactorSim::Wounds::KINDS.to_h do |kind|
         [ kind, ReactorSim::Wounds::TIERS.to_h do |tier|
-          [ tier, (1..3).to_h { |i| [ :"#{kind}_#{tier}_#{i}", { label: "#{kind} #{i}", weight: i, derates: { strength: left.fetch(tier) } } ] } ]
+          [ tier, (1..ReactorSim::Wounds::VARIANTS).to_h { |i| [ :"#{kind}_#{tier}_#{i}", { label: "#{kind} #{i}", weight: i, derates: { strength: left.fetch(tier) } } ] } ]
         end ]
       end
     )
@@ -72,7 +72,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     end
 
     it "ignores gear that resists something else entirely" do
-      clad = worker(tags: { scald_resistance: 0.9 })
+      clad = worker(tags: { burn_resistance: 0.9 })
 
       expect(bite(clad, hazard(2.0), :blast)).to be_within(1e-9).of(bite(worker, hazard(2.0), :blast))
     end
@@ -136,17 +136,57 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     end
 
     # The accumulation route: many small harms take somebody out of a shift with no single one
-    # being much, and enough of them kill.
-    it "collapses somebody whose resilience runs out whatever their wounds, and kills them far past it" do
+    # being much — and never finish them, however many.
+    it "collapses somebody whose resilience runs out whatever their wounds, and never kills them with knocks" do
       hand = worker
       state = fresh(hand)
-      modes = Array.new(30) do
+      modes = Array.new(60) do
         state, mode, = check(hand, state, hazard(1.3))
         mode
       end
 
-      expect(modes.compact).to include(:minor, :severe, :mortal)
+      expect(modes.compact).to include(:minor, :severe)
+      expect(modes).not_to include(:mortal)
       expect(state.fetch(:wounds).map { |w| w.fetch(:tier) }.uniq).to eq(%i[minor])
+    end
+
+    it "kills outright on one bite past its share of their toughness, however much they had left, and a tougher body takes it" do
+      frail = worker
+      tough = worker(stats: { toughness: 2.0 })
+      blow = hazard(4.5)
+      killed, frail_mode, wounds = check(frail, fresh(frail), blow)
+      _, tough_mode, = check(tough, fresh(tough), blow)
+
+      expect(bite(frail, blow, :blast)).to be < described_class::MORTAL_BITE
+      expect(killed.fetch(:resilience)).to be > -killed.fetch(:initial_resilience)
+      expect(frail_mode).to be(:mortal)
+      expect(wounds.map { |w| w.fetch(:tier) }).to eq(%i[mortal])
+      expect(tough_mode).to be(:severe)
+    end
+
+    # **A critical is the blow that missed the helmet**, so the killing check meets the body and
+    # nothing it wears.
+    it "kills outright through a critical whatever armour they wear, where the same blow plain is stopped by it" do
+      bare = worker
+      helmeted = worker(tags: { impact_resistance: 1.0 })
+      blow = hazard(3.0, wounds: { impact: 1.0 })
+      critical = blow.merge(pierces: ReactorSim::Combat::CRITICAL_TOUGHNESS)
+
+      expect(check(bare, fresh(bare), critical)[1]).to be(:mortal)
+      expect(check(helmeted, fresh(helmeted), critical)[1]).to be(:mortal)
+      expect(check(helmeted, fresh(helmeted), blow)[1]).not_to be(:mortal)
+    end
+
+    it "kills somebody who takes enough grave wounds, none of them mortal alone" do
+      hand = worker
+      state = fresh(hand)
+      modes = Array.new(10) do
+        state, mode, = check(hand, state, hazard(2.8))
+        mode
+      end
+
+      expect(bite(hand, hazard(2.8), :blast)).to be < described_class::MORTAL_BITE
+      expect(modes.compact).to include(:severe, :mortal)
     end
 
     # Being carried out clears the station, which is the whole mechanical consequence: whatever
@@ -184,8 +224,9 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     it "picks among a tier's variants by weight, the same each time from the same die" do
       picks = (0...60).map { |i| catalogue.pick(:crush, :severe, i / 60.0) }.tally
 
-      expect(picks.keys.sort).to eq([ 0, 1, 2 ])
-      expect(picks.fetch(2)).to be > picks.fetch(0)
+      last = ReactorSim::Wounds::VARIANTS - 1
+      expect(picks.keys.sort).to eq((0..last).to_a)
+      expect(picks.fetch(last)).to be > picks.fetch(0)
       expect(catalogue.pick(:crush, :severe, 0.42)).to eq(catalogue.pick(:crush, :severe, 0.42))
     end
 
@@ -374,7 +415,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
 
     it "refuses a machine whose harm says nothing of the wounds it deals" do
       vessel = ReactorSim::Nodes::Vessel.new(id: :drum, label: "Drum", volume_m3: 1.0, heat_capacity: 1.0e4,
-                                             endangers: { rupture: { tags: [ :scald ], stations: { lever: 1.0 } } })
+                                             endangers: { rupture: { tags: [ :burn ], stations: { lever: 1.0 } } })
 
       expect { ReactorSim::Operation.new(id: :rig, type: :test, seed: 1, nodes: [ vessel ]) }
         .to raise_error(ReactorSim::Error, /declare wounds/)
@@ -407,7 +448,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     end
 
     def scaled(reference)
-      rig(endangers: { rupture: { wounds: { scald: 1.0 }, scales_with: :pressure_pa,
+      rig(endangers: { rupture: { wounds: { burn: 1.0 }, scales_with: :pressure_pa,
                                   reference: reference, stations: { lever: 2.0 } } })
     end
 
@@ -446,7 +487,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     # A declaration with no `scales_with:` is flat, which is the right answer for most hazards —
     # a linkage snapping is a linkage snapping.
     it "falls back to the flat weight when nothing is declared to scale with" do
-      op = rig(endangers: { rupture: { wounds: { scald: 1.0 }, stations: { lever: 9.0 } } })
+      op = rig(endangers: { rupture: { wounds: { burn: 1.0 }, stations: { lever: 9.0 } } })
 
       expect(hurt_in(op)[:mode]).to be(:mortal)
     end
@@ -455,7 +496,7 @@ RSpec.describe ReactorSim::Injury, crew: :reference do
     # would be a hazard switched off by a typo. It falls back to flat and the machine-wide check
     # below is what catches the wiring mistake.
     it "falls back to flat rather than to nothing when the figure is missing" do
-      op = rig(endangers: { rupture: { wounds: { scald: 1.0 }, scales_with: :nothing_reported,
+      op = rig(endangers: { rupture: { wounds: { burn: 1.0 }, scales_with: :nothing_reported,
                                        reference: 10.0, stations: { lever: 9.0 } } })
 
       expect(hurt_in(op)[:mode]).to be(:mortal)

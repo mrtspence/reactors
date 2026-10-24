@@ -24,8 +24,9 @@ module ReactorSim
   # it, and torque is transmitted after node effects so a prime mover has computed the torque
   # before it is charged for it.
   class Tick
-    # Bounds a hazard scaled by a runaway figure. Four times the reference is already far past
-    # `Injury::MORTAL_BITE`, so this bounds a bug without bounding the design. See `#hazard_scale`.
+    # Bounds a hazard scaled by a runaway figure. Four times the reference of anything meant to kill
+    # is already far past `Injury::MORTAL_BITE`, so this bounds a bug without bounding the design.
+    # See `#hazard_scale`.
     HAZARD_SCALE = (0.0..4.0)
 
     # Everything a node is allowed to see. Note the absence of a clock: `dt` is simulated

@@ -1196,6 +1196,147 @@ out, and the others have nothing left to rise against.
 When the target is the busy one, the pick now goes: averted by the boss 36 %, a new brawl with
 somebody else 28 %, a heckle 21 %, a row 12 %, joined 3 %.
 
+**Once wounds stacked, about half of every death in a crowd was a kicking**: guard zero on the
+ground made every kick a critical with the weapon in hand. The answer — half a guard, the boot from
+anybody short of wanting him dead, `KICKING` at 0.4 of `LETHAL`, `LETHAL` its own figure, and the
+murderous willing to do anything to their target — is §12 of
+[`wounds.md`](wounds.md#12-acute-harm-grave-harm-and-a-man-on-the-ground-second-pass-for-review),
+with the wound side of the same change.
+
+### 7.16 Fights that spread (for review)
+
+Since §7.15, fights last longer (an exchange every ten seconds, `SATED` 0.8: about nine exchanges,
+a minute and a half) and kill and carry out at rates that are about right. **They still stay small**:
+a largest fight of three or four, joins two to four an hour in a room of twelve. Joining needs a
+patience to run out during somebody else's fight; nothing else brings a newcomer in. Two
+mechanics, each a decision somebody makes on a die of their own:
+
+**1. Dragged in.** A fighter turns on somebody standing near the fight and hits *them* instead.
+
+- **Who can**: any *willing* fighter (still angry; the spent only hit back), each exchange, on a
+  chance that grows with their hostility towards the bystander — `DRAG_IN × hostility²`, so a
+  grudge or a violent nature is what does it and a peaceable man never lashes out at an onlooker.
+- **Who they turn on**: by `Animosity.pick`, hostility to the `FOCUS`, among everybody standing in the
+  place and in no melee — a heckler included, a boss included, somebody working included (they
+  stop). **A heckle already leaves the heckled fighter a grudge against the heckler**
+  (`ROW_GRIEVANCE`), but only 0.025 a heckle — through the square, nothing to a peaceable fighter
+  and a nudge to a violent one. So the comeuppance needs a hand (question 4).
+- **What it does**: this exchange's blow goes to the bystander, who is now in the melee, resents
+  whoever dragged them in as a brawl's target does (`BRAWL_HARM`), and fights on the existing rules
+  — hitting back while wanted, stepping out once nobody wants them, staying if they are angry
+  enough themselves. Their patience is not touched.
+- **The die**: one more phase-0 die, `drag:`. Whether, `drag < chance`; whom, by `drag ÷ chance`,
+  which is uniform again inside the chance, so no second die.
+
+**2. Piling in.** Somebody not yet in a fight joins one going on in their place, without their
+patience having run out. Two reasons, summed into one chance a second:
+
+- **Spoiling for it** — a violent nature: `SPOILING × violence²` (steep, as every trouble tag is). On
+  joining, **their patience halves**, so they are willing and stay a while.
+- **On the edge** — your band at the bottom of a temper: somebody whose patience is below `EDGE` of
+  full (0.25 to start) and who holds hostility against somebody standing in the fight:
+  `ON_EDGE × hostility × (EDGE − share) ÷ EDGE`, growing as they near snapping. Already below
+  `SATED`, they need nothing done to their patience. **This is what makes an uprising rise at
+  once**: when the first dwarf goes for the boss, every other dwarf near the end of his tether is
+  pulled in in the next minute instead of waiting for his own fuse.
+- **Who they go for**: the melee's own rule, hostility to the `FOCUS` among its members.
+- **A boss stops it** the way they stop a quarrel: `stepped_in` on the newcomer's `avert:` die,
+  reported as `quarrel_averted` with `mode: :pile_in`, and resented as staring-down is. A strong
+  boss keeps the violent out of a scrap; a weak one watches it grow.
+- **The die**: one more phase-0 die, `join:`, against `rate × dt`; and who in the fight by the
+  existing `target:` die.
+
+**Both are reported** as `quarrel`, `mode: :dragged` and `mode: :piled_in`, so the feed says how a
+fight grew, and `crowds.rb` counts them beside joins and heckles.
+
+**What they cost the engine**: two dice added to `Animosity.draw`, drawn unconditionally as every
+temper die is. That moves every temper roll after them, so every seeded outcome moves once;
+seed-swept specs are unaffected. Every decision reads the entry state, as the rest of 6d′ does.
+
+**Alternatives considered:**
+
+- **Rumpus by grudge** (§7.15): patience wears faster beside a fight for those who resent somebody
+  in it. Gentler and uses an existing dial, but still waits for each fuse to run down on its own
+  clock, so the uprising still comes one at a time — the problem the edge band answers directly.
+- **Merging melees** when somebody in one is dragged into another: the biggest brawls of all, but a
+  fight renamed under somebody mid-exchange, and two fights' clocks to reconcile. Left out: dragging
+  takes only people in *no* melee.
+- **The dragged bystander loses patience too** (as a violent joiner does): they would stay and fight
+  on, and the fight grows faster. Left out to start — being hit and wanted is already enough to keep
+  them in it, and the grudge they take away is the lasting cost.
+
+**Figures to start**, all for the sweep: `DRAG_IN` 0.15 an exchange at a whole hostility (a goblin's
+0.7 violence is about 7%); `SPOILING` 0.005 a second at a whole violence (the goblin about one in
+eight a minute beside a fight); `EDGE` 0.25; `ON_EDGE` 0.02 a second at a whole hostility and the
+very edge.
+
+**Specs (relational):** a fighter with a grudge drags in somebody near the fight and a peaceable one
+never does; a heckler is dragged in more often than a quiet onlooker; a dragged bystander hits back
+and steps out once unwanted; a violent onlooker piles in and a gentle one does not; somebody near
+the edge who hates somebody in the fight piles in and somebody calm does not; a boss over the place
+stops some pile-ins and none elsewhere; all of it replays through a snapshot.
+
+**Questions:**
+
+1. **May a boss be dragged in?** Proposed yes — a violent crew turning on the man standing over the
+   fight is the uprising's other door.
+2. **Piling in for the violent: halve what patience they have, or take half a full patience off?**
+   Proposed halving what they have: never negative, and somebody already near the edge goes nearly
+   to nothing.
+3. **Is somebody working at a post a candidate for both?** Proposed yes — they drop it, which is the
+   cost the player sees and the reason to spread the violent out.
+4. **How hecklers get their comeuppance.** (a) A heckler counts as somebody the fighter is hostile
+   to by at least `HECKLED` (say 0.4) while the heckle lasts — a rule of its own, read only for
+   dragging, and the heckled need no grudge at all to turn on him. (b) Raise `ROW_GRIEVANCE` — no new
+   rule, but every row then leaves a deeper grudge, heckle or not. (c) Leave it to grudges as they
+   are. Proposed (a): it is the one that makes a heckler the likeliest man dragged in, which is the
+   point.
+
+**Review decisions:** a boss may be dragged in — often the most hated man on the shift; a violent
+joiner's patience halves; somebody at a post is a candidate for both, so a fight leaves a post empty
+and whatever it was keeping from going wrong can; and a heckler counts as at least `HECKLED`
+hostile to the fighter he is heckling, for dragging in, while the heckle lasts (4a). **Built as
+decided**, with the figures above; the exchange moved to every ten seconds in the same pass.
+
+**First measurements** (`crowds.rb --only melees`, against the same at ten seconds without them):
+
+| Room | Dragged / piled in an hour | Largest fight | Of the room in it | Half down |
+|---|---|---|---|---|
+| 5 of the feuding races | 1.3 / 1.0 | 3 → 5 (all of them) | 42% → 42% | 17 → 20 min |
+| 12, no boss | 6.3 / 3.0 | 3 → 9 | 22% → 30% | 8 → 6 min |
+| 12, Throg over them | 11.7 / 5.3 | 4 → 8 | 21% → 27% | 23 → 17 min |
+| 12, Arunessa over them | 6.3 / 3.7, 2.7 pile-ins stopped | 3 → 7 | 17% → 25% | never → 25 min (1 shift in 3) |
+
+### 7.17 Why a hard boss falls
+
+A probe of Throg over the twelve, ten shifts: he was carried out in seven and lay down 38% of the
+shift, and 62 of the 94 crew carried out or killed went down while he was fighting, rowing or down.
+**He was seldom dragged in. He was hated into it**: every quarrel he stared down left 0.05 more
+grudge (a goblin stared down thirteen times in fourteen minutes held 0.65 against him, with no race
+grudge at all), the goblins' violence took their hostility to the cap, they snapped at *him*, drew,
+and his defence of 0.68 — the worst in the cast — let a pick or knife critical carry him out in
+seconds. And short-tempered himself, he rowed his crew and watched nobody while he did.
+
+**Decided:**
+
+- **A stare-down is resented by what is left to hate** (`INTIMIDATION_GRUDGE × (1 − grudge)`), so
+  the tenth adds far less than the first.
+- **Being stopped puts somebody in line**: their patience back to `RELEASE[:averted]` (a half, as
+  before) and `PUT_IN_LINE` more — a sixth for a stare-down, a twelfth for talking round. The
+  seam for an `intimidating` tag on the boss to raise it is left in `Provoke#averted`, named and
+  untested.
+- **A boss in a row still oversees**; one in a brawl does not.
+
+**Measured after:** Throg at his post 57% → 68% of the shift and down 38% → 25%, carried out in six
+shifts of ten rather than seven; half the twelve down at 32 minutes against 17 (`crowds.rb`), the
+largest fight six against eight. Arunessa now holds the room outright — nobody carried out in three
+shifts, 182 quarrels talked round an hour. The rooms with no boss are unchanged to the decimal.
+
+**Deferred, to be built as kit and training rather than rules:** a boss's weapon that raises
+charisma and gives a rowdy git a whacking (the mace of discipline, carrying `intimidating`); a
+hazard-awareness course for keen eyes, which raises defence through wits; and a course in keeping
+one's temper, against a boss starting his own fights.
+
 ### 7.13 Measuring it
 
 The crowd tool gains melee scenarios beside the rooms it has: four dwarves and a goblin boss, two

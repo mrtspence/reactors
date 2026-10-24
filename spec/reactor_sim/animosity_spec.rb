@@ -162,6 +162,16 @@ RSpec.describe "animosity" do
       expect(animosity.willing?(careful, 1.0, harm, 3)).to be(false)
     end
 
+    it "balks at no harm to somebody they want dead, and still minds who else it catches" do
+      murderous = person(:a)
+      crushing = 10.0 * animosity::LETHAL
+
+      expect(animosity.ceiling(murderous, 1.0)).to be >= animosity::LETHAL
+      expect(animosity.willing?(murderous, 1.0, crushing, 0)).to be(true)
+      expect(animosity.willing?(murderous, 1.0, crushing, 3)).to be(false)
+      expect(animosity.willing?(murderous, 0.5, crushing, 0)).to be(false)
+    end
+
     it "lets a bonehead do what they would never do, by taking it for harmless" do
       kindly = person(:a, tags: { kindly: 1.0 })
 
@@ -532,7 +542,7 @@ RSpec.describe "animosity" do
     end
 
     it "stops once the one they all hated is carried out, and does not turn on itself" do
-      dwarves = %i[a b c].map { |id| person(id, grudges: { x: 0.4 }) }
+      dwarves = %i[a b c].map { |id| person(id, grudges: { x: 0.3 }) }
       op = melee(dwarves + [ person(:x) ], **dwarves.to_h { |d| [ d.id, { patience: 0.0 } ] }, x: { injury: :severe })
       op.step!(tick: 1)
 
@@ -558,6 +568,110 @@ RSpec.describe "animosity" do
       expect(in_fight?(kicking, :a)).to be(true)
       expect(in_fight?(spared, :a)).to be(false)
       expect(animosity.ceiling(kicker, 0.5)).to be < animosity::LETHAL
+    end
+
+    it "kicks a man on the ground bare-handed, and only somebody who wants him dead takes a weapon to him" do
+      pick = [ ReactorSim::Equipment.weapon_profile("pick", { handling: { swing: 1.5 }, edge: 1.0, wounds: { puncture: 0.6, impact: 0.4 } }) ]
+      armed = { patience: 0.0, fight: { melee: :m, clock_s: 0.0, owed: {}, armed: true } }
+      left = ->(grudge) {
+        (1..10).flat_map do |seed|
+          op = melee([ person(:a, grudges: { x: grudge }, weapons: pick), person(:x) ], seed: seed,
+                     a: armed, x: { injury: :severe, resilience: 0.0 })
+          op.step!(tick: 1)
+          op.state.dig(:minions, :x, :wounds).map { |w| w.fetch(:kind) }
+        end
+      }
+
+      expect(animosity.ceiling(person(:a), 0.5)).to be < animosity::LETHAL
+      expect(animosity.ceiling(person(:a), 1.0)).to be >= animosity::LETHAL
+      expect(left.(0.5)).to all(be(:impact))
+      expect(left.(1.0)).to include(:puncture)
+    end
+
+    it "lets a man on the ground still cover up, so a wary one takes less of a kicking than a sitting duck" do
+      kicked = ->(target) {
+        (1..20).sum do |seed|
+          op = melee([ brute(:a, grudges: { x: 0.5 }), target ], seed: seed,
+                     a: { patience: 0.0 }, x: { injury: :severe, resilience: 0.0 })
+          op.step!(tick: 1)
+          -op.state.dig(:minions, :x, :resilience)
+        end
+      }
+
+      expect(kicked.(wary(:x))).to be < kicked.(sitting_duck(:x))
+    end
+
+    describe "spreading" do
+      # A fight between `fighters` with `onlookers` standing by in none; each chance is made certain
+      # by its figure, so what is asserted is who it can take and who it never does.
+      def watched(fighters, onlookers, seed: 1, oversees: nil, **states)
+        fight = { melee: :m, clock_s: 0.0, owed: {} }
+        crew = fighters + onlookers
+        fields = crew.to_h do |m|
+          [ m.id, (fighters.include?(m) ? { fight: fight } : {}).merge(states.fetch(m.id, {})) ]
+        end
+        with(rig(crew, seed: seed, oversees: oversees), crew, seed: seed, **fields)
+      end
+
+      def melee_of(op, id) = op.state.dig(:minions, id, :fight, :melee)
+
+      it "drags in somebody watching whom they hate, who resents it, and a peaceable fighter never does" do
+        stub_const("ReactorSim::Animosity::DRAG_IN", 10.0)
+        hateful = watched([ person(:a, grudges: { b: 0.5, c: 1.0 }), person(:b) ], [ person(:c) ], a: { patience: 0.0 })
+        peaceable = watched([ person(:a, grudges: { b: 0.5 }), person(:b) ], [ person(:c) ], a: { patience: 0.0 })
+        [ hateful, peaceable ].each { |op| op.step!(tick: 1) }
+
+        expect(melee_of(hateful, :c)).to be(:m)
+        expect(held(hateful, :c, :a)).to be > 0.0
+        expect(in_fight?(peaceable, :c)).to be(false)
+      end
+
+      it "drags in a heckler, and not the quiet man beside him" do
+        stub_const("ReactorSim::Animosity::DRAG_IN", 10.0)
+        op = watched([ person(:a, grudges: { b: 0.5 }), person(:b) ], [ person(:h), person(:q) ],
+                     a: { patience: 0.0 }, h: { fight: { with: :a, clock_s: 30.0 } })
+        op.step!(tick: 1)
+
+        expect(melee_of(op, :h)).to be(:m)
+        expect(in_fight?(op, :q)).to be(false)
+      end
+
+      it "lets somebody violent pile in, their patience halved, and never somebody gentle" do
+        stub_const("ReactorSim::Animosity::SPOILING", 100.0)
+        op = watched([ person(:a, grudges: { b: 0.5 }), person(:b) ],
+                     [ person(:v, tags: { violent_nature: 1.0 }), person(:g, tags: { gentle: 1.0 }) ],
+                     a: { patience: 0.0 }, v: { patience: 1.0, patience_full: 1.0 })
+        op.step!(tick: 1)
+
+        expect(melee_of(op, :v)).to be(:m)
+        expect(op.state.dig(:minions, :v, :patience)).to be < 1.0
+        expect(in_fight?(op, :g)).to be(false)
+      end
+
+      it "pulls in somebody near the end of their tether who hates a man in it, and not somebody calm who hates him as much" do
+        stub_const("ReactorSim::Animosity::ON_EDGE", 100.0)
+        op = watched([ person(:a, grudges: { b: 0.5 }), person(:b) ],
+                     [ person(:e, grudges: { b: 0.5 }), person(:c, grudges: { b: 0.5 }) ],
+                     a: { patience: 0.0 }, e: { patience: 0.1, patience_full: 1.0 },
+                     c: { patience: 1.0, patience_full: 1.0 })
+        op.step!(tick: 1)
+
+        expect(melee_of(op, :e)).to be(:m)
+        expect(in_fight?(op, :c)).to be(false)
+      end
+
+      it "is stopped some of the time by a boss over the place, and never all of it" do
+        stub_const("ReactorSim::Animosity::SPOILING", 100.0)
+        boss = person(:boss, stats: { charisma: 3.0, intelligence: 2.0, strength: 0.2 })
+        runs = (1..40).map do |seed|
+          op = watched([ person(:a, grudges: { b: 0.5 }), person(:b) ], [ person(:v, tags: { violent_nature: 1.0 }), boss ],
+                       seed: seed, oversees: %i[yard], a: { patience: 0.0 }, boss: { station: :bossing, posting: :bossing })
+          op.step!(tick: 1)
+        end
+        stopped = runs.count { |events| events.any? { |e| e[:type] == :quarrel_averted && e[:mode] == :pile_in } }
+
+        expect(stopped).to be_between(1, runs.length - 1)
+      end
     end
 
     it "is harder to defend against several at once" do
@@ -733,12 +847,25 @@ RSpec.describe "animosity" do
   end
 
   describe "the boss" do
-    def quarrels(oversees, boss)
+    def quarrels(oversees, boss, **states) = stopped(oversees, boss, **states).map(&:last)
+
+    # `[[op, events]]` a seed each, the boss posted over `oversees` and `a` about to snap at `b`.
+    def stopped(oversees, boss, a: {}, boss_state: {})
+      snapping = { patience: 1.0e-9 }.merge(a)
+      posted = { station: :bossing, posting: :bossing }.merge(boss_state)
       (1..40).map do |seed|
         crew = [ person(:a, grudges: { b: 0.5 }), person(:b), boss ]
-        op = with(rig(crew, oversees: oversees, seed: seed), crew, seed: seed,
-                  a: { patience: 1.0e-9 }, boss.id => { station: :bossing, posting: :bossing })
-        op.step!(tick: 1)
+        op = with(rig(crew, oversees: oversees, seed: seed), crew, seed: seed, a: snapping, boss.id => posted)
+        [ op, op.step!(tick: 1) ]
+      end
+    end
+
+    def put_in_line(runs)
+      runs.filter_map do |op, events|
+        next unless types(events).include?(:quarrel_averted)
+
+        state = op.state.dig(:minions, :a)
+        state.fetch(:patience) / state.fetch(:patience_full)
       end
     end
 
@@ -761,6 +888,34 @@ RSpec.describe "animosity" do
       expect(stared).not_to be_empty
       expect(stared).to all(include(include(type: :grudge_formed, detail: include(target: :boss))))
       expect(talked.flatten.select { |e| e[:type] == :grudge_formed }).to be_empty
+    end
+
+    it "resents a stare-down less the more they already hate him" do
+      gained = ->(held) {
+        stopped(%i[yard], ogre, a: { grudges: { boss: held } }).sum do |op, events|
+          types(events).include?(:quarrel_averted) ? op.state.dig(:minions, :a, :grudges, :boss) - held : 0.0
+        end
+      }
+
+      expect(gained.(0.8)).to be < gained.(0.0)
+    end
+
+    it "puts somebody in line with patience back, more by a stare than by talking them round" do
+      stared = put_in_line(stopped(%i[yard], ogre))
+      talked = put_in_line(stopped(%i[yard], talker))
+
+      expect(stared).not_to be_empty
+      expect(talked).not_to be_empty
+      expect(stared.min).to be > talked.max
+      expect(talked.min).to be > animosity::RELEASE.fetch(:averted)
+    end
+
+    it "keeps an eye on the rest while rowing with somebody, and not while in a brawl" do
+      rowing = quarrels(%i[yard], talker, boss_state: { fight: { with: :b, clock_s: 30.0 } })
+      brawling = quarrels(%i[yard], talker, boss_state: { fight: { melee: :n, clock_s: 5.0, owed: {} } })
+
+      expect(averted(rowing)).to be_positive
+      expect(averted(brawling)).to eq(0)
     end
   end
 

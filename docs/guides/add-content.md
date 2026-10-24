@@ -456,8 +456,10 @@ the fold. An equipment item may declare **`weapon: { handling:, edge:, wounds: }
   one for a good weapon or short of it for a poor one; bare hands are `{ swing: 0.42, precision:
   0.18 }`.
 - `edge:` is severity it adds to a landed blow whoever holds it.
-- `wounds:` are the kinds of wound a blow leaves, as shares of it: a pick `{ puncture: 0.6,
-  impact: 0.4 }`, a knife `{ cut: 0.5, puncture: 0.5 }`.
+- `wounds:` are the kinds of wound a blow leaves, as shares of it: a pick `{ puncture: 0.8,
+  impact: 0.2 }`, a knife `{ puncture: 0.8, cut: 0.2 }`. **Give the main kind most of it**: each
+  kind's share is a wound of its own, tiered on its own bite, so an even split leaves two lesser
+  wounds where the blow deserved one bad one, and never reaches `OUTRIGHT`.
 
 Its weight to swing is the item's own `mass_kg`, which is what a fight tires somebody by against
 their `force`. A fighter swings one weapon at a time, whichever suits them best. `puncture` and
@@ -468,16 +470,18 @@ them yet. **`cutting`** is the knife's aid at the rope and fuse posts.
 
 `content/wounds/*.yml` is the catalogue of what a harm leaves on a body: **kind → tier → variant**,
 every kind of `Wounds::KINDS`, all four tiers (`minor`, `significant`, `severe`, `mortal`), and
-exactly three variants a tier, each a `label`, a `weight` against the others of its tier, and
+exactly five variants a tier (`Wounds::VARIANTS`), each a `label`, a `weight` against the others of its tier, and
 `derates:` — stats it multiplies while carried, 0..1. Anything missing or misnamed is refused at
 boot.
 
 ```yaml
 crush:
   severe:
+    shattered_leg: { label: Shattered leg, weight: 1, derates: { agility: 0.2, strength: 0.6 } }
     broken_spine: { label: Broken spine, weight: 1, derates: { strength: 0.2, agility: 0.1 } }
     crushed_pelvis: { label: Crushed pelvis, weight: 1, derates: { agility: 0.15, strength: 0.4 } }
-    shattered_leg: { label: Shattered leg, weight: 1, derates: { agility: 0.2, strength: 0.6 } }
+    mangled_hand: { label: Mangled hand, weight: 1, derates: { dexterity: 0.1, strength: 0.6, combat_prowess: 0.5 } }
+    crushed_ribs: { label: Crushed ribs, weight: 1, derates: { endurance: 0.2, strength: 0.4 } }
 ```
 
 **A variant's place in its tier matters**: a wound that heals into a lesser tier, or deepens into a
@@ -489,12 +493,20 @@ A harm a part or a place can do declares **`wounds:`** as shares of its severity
 and **`causes:`** for what protects against it, in the same declarations it always had:
 
 ```ruby
-endangers: { roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], places: { district: 1.6 } } }
+endangers: { roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], places: { district: 6.4 } } }
 Peril.new(id: :misstep, wounds: { crush: 1.0 }, causes: %i[fall], severity: 1.6, places: %i[shaft])
 ```
 
 A machine whose harm says nothing of its wounds, or names a kind or cause nobody knows, does not
 build.
+
+**Where a severity sits.** A blow in a brawl is about 1. An everyday peril — a slip, a tub, the
+belt — sits at 1–3, in the severe band (1.6–5.0) at worst, so it hurts and sometimes carries
+somebody out. A catastrophe meant to kill whoever is near — an explosion, a fall of ground, a
+blast — sits well past the mortal band at its reference, around 10, on its **near side**, so no
+body and no kit survives there and a small one, scaled down, still carries people out. Its far
+side — the next room along, the man at the damper — keeps an everyday figure, so where somebody
+stood still decides whether they live.
 
 ---
 

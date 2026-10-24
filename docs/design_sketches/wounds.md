@@ -38,8 +38,8 @@ which found that kicking somebody already carried out does nothing, and why.
 
 ### 3.1 Two words: a cause and a kind
 
-- **A kind** is what the body suffers: `impact`, `crush`, `puncture`, `cut`, `burn`, `scald`,
-  `blast`, and the continuous ones, `heat`, `cold` and `breath`. **A wound is always of a kind.**
+- **A kind** is what the body suffers: `impact`, `crush`, `puncture`, `cut`, `burn` (fire, steam
+  and boiling water alike), `blast`, and the continuous ones, `heat`, `cold` and `breath`. **A wound is always of a kind.**
 - **A cause** is what did it: `rockfall`, `fall`, `tub`, `brawl`, `afterdamp`, a part. A cause selects
   protection (a helmet against `rockfall`, a belt against `fall`) and is what the feed says. It is
   never a wound.
@@ -70,7 +70,7 @@ That is the sweep (§4): every hazard in the game says what it does, once.
   The depth is kept on the wound, because healing (§3.8) wears it down and the tier is read from
   what is left.
 - **Its name and effects come from a catalogue** (§3.4), by kind and tier: a severe crush is a
-  broken spine, a minor burn a scald.
+  broken spine, a minor burn scalded skin.
 - **Wounds stack.** A person holds a list of them, and every one counts.
 
 ### 3.3 The pool, and what a body can take
@@ -117,13 +117,13 @@ A wound type per kind and tier, each a name, a description, and what it does:
 - **The catalogue is content**: `content/wounds/*.yml`, data rather than code, validated at boot and
   read through the registry like the races are. `Injury.check` takes it from the tick's context,
   which already carries the content, so nothing reaches for it mid-tick.
-- **Three variants per kind and tier**, each with a weight, picked by a new phase-0 die per person
+- **Five variants per kind and tier** (three at first; §11), each with a weight, picked by a new phase-0 die per person
   (`wound:`, drawn unconditionally in `draw_fates` like every other). A severe crush is a broken
   spine, a crushed pelvis or a shattered leg. The first file ships with examples, to be rewritten.
 - **The catalogue is complete or the game does not boot**: every kind has every tier and every tier
-  three variants, each naming only real stats, checked at load, so a wound never falls back to a
+  five variants, each naming only real stats, checked at load, so a wound never falls back to a
   generic one.
-- **A wound may also reduce a tag**: the scald that takes the edge off `focused`. Tags are read off
+- **A wound may also reduce a tag**: the scalded skin that takes the edge off `focused`. Tags are read off
   the minion without state today, so this needs a state-aware tag read. **It follows straight after
   the first pass**, and is named as a seam in it.
 
@@ -208,7 +208,8 @@ grep -rn "tags: %i\[" lib/reactor_sim/operations lib/reactor_sim/nodes lib/react
 
 | Today's tag | Becomes |
 |---|---|
-| `crush`, `impact`, `puncture`, `burn`, `scald`, `blast` | A kind, with its share of the severity |
+| `crush`, `impact`, `puncture`, `burn`, `blast` | A kind, with its share of the severity |
+| `scald` | `burn` (§11) |
 | `rockfall`, `fall`, `afterdamp`, `heat` | A cause |
 | A weapon's `wounds: %i[puncture impact]` | Shares of the blow: a pick `{ puncture: 0.6, impact: 0.4 }`, a knife `{ cut: 0.7, puncture: 0.3 }` |
 
@@ -251,7 +252,7 @@ is the one to check, since firedamp is neither.
 - A run-out pool stands somebody down whatever their wounds; far past it, they die.
 - Kicking somebody carried out wears them towards death; stopping spares them.
 - A severe crush cripples strength and agility more than a minor burn does anything.
-- Every kind has every tier and three variants in the catalogue, naming only real stats; a hazard
+- Every kind has every tier and five variants in the catalogue, naming only real stats; a hazard
   naming an unknown kind or no kind is refused at build.
 - The variant die picks among a tier's variants by weight, and the same seed picks the same one.
 - A continuous harm deepens one wound and does not add one a tick.
@@ -321,3 +322,207 @@ resistances), `spec/CLAUDE.md`, `current_progress.md`, and `minions.md` §5 as h
 - **The injury list is gone**: `MinionCondition`, `InjuryList` and the `minion_conditions` table, for
   `Wound`, `WoundList` and the `wounds` table.
 - **The shipped catalogue is examples**, to be rewritten; the specs run on a catalogue of their own.
+- **`scald` went into `burn`.** The difference between steam and fire did not earn a kind of its
+  own: the boiler's explosion and seam split now burn, and the kit's `scald_resistance` became
+  `burn_resistance` (the asbestos suit already had more of it; the oilskin keeps its 0.35).
+- **Five variants a tier, not three**: three was not enough variety, mechanically or for flavour.
+
+## 12. Acute harm, grave harm, and a man on the ground (second pass; for review)
+
+### 12.1 What the sweeps showed
+
+Against the pre-wounds reports (`script/tuning/brawls.rb` on six of the cast at 50 a pairing,
+`crowds.rb --only melees`, and the crowds to eight with every boss):
+
+- **A single brawl ends calmer**: 64–88% sated against 15–60%, carried out a third to half as
+  often. **Deaths did not fall with it** (0–12% a brawl, about as before), so a death is now a third
+  to half of the serious outcomes where it was a fifth.
+- **A crowd churns more and dies more.** Fewer are carried out, so more stay up to quarrel: 12 of
+  the feuding races go from 12 brawls an hour to 31 and from 0.7 deaths to 3.0.
+- **About half of every death in a crowd is somebody kicked to death.** A man on the ground has a
+  guard of zero, so every kick lands whole and is a critical — through the armour, past most of
+  his toughness, with whatever is in the kicker's hand. Before wounds stacked that came to nothing
+  more; now a few kicks drain the pool past death.
+- **The rest are single armed criticals**, bites of 4–5.5 against a mortal band of 3.0. Severe —
+  carried out alive — is the narrow band from 1.6 to 3.0.
+- **A pick outhits a boiler.** The industrial hazards sit at 1.2–3.6 at their reference magnitude;
+  an armed critical bites harder than an exploding boiler does at its reference.
+
+### 12.2 The proposal
+
+Seven parts, meant to land together. The figures are starting points for the sweep, not decisions.
+
+1. **A wider severe band.** `BANDS[:mortal]` 3.0 → **5.0**; severe runs 1.6–5.0. A single blow has
+   to be extraordinary to kill a standing man.
+2. **A deeper pool.** `RESILIENCE_SPREAD` 1.7–2.7 → **2.5–4.0**, times toughness, so a long fight
+   wears somebody down through more knocks before it collapses them.
+3. **Acute harm collapses; only grave harm kills by attrition.** A second running total beside
+   the pool, `grave`, takes **every continuous bite** (heat, cold, bad air — these compound, as they
+   should) **and every acute bite of the severe band or worse**. The pool still decides collapse,
+   from every bite; **death by attrition reads `grave`**, at `(1 + DEATH_SHARE) × initial` — the
+   same total the pool kills at now. A single bite in the mortal band still kills outright. So a
+   kobold can contuse an ogre into a heap and never kill him, and a goblin stabbing a downed foe
+   again and again bleeds him out.
+4. **Half a guard on the ground.** A fighter carried out defends at `GROUNDED_GUARD` **0.5** of his
+   defence, still divided by how many came at him. Wounded as he will be, it comes nearer a
+   quarter, but kicks stop being certain and stop all being criticals.
+5. **The boot and the blade.** Somebody on the ground is hit with a weapon only by an attacker
+   whose ceiling against him reaches `LETHAL`; anybody else who wants at him (`KICKING`) puts the
+   boot in, bare-handed, armed or not. And the gap widens: `KICKING` 0.6 → **0.4** × `LETHAL`. So the
+   crew can give a pit boss they hate a kicking, and the goblin who wants him dead finishes him.
+6. **Catastrophes outscale people.** The industrial hazards that are meant to kill — explosions,
+   blasting, falls of ground, outbursts, a headframe coming down — go up **×4** at their reference,
+   so the near side of one is past any body and any kit (toughness 1.6, a sense for danger and a
+   suit together resist about 3), and a small one, scaled down by its magnitude, still carries
+   people out. **The everyday perils keep their figures** (slips, tubs, the belt, boarding, the
+   kibble): they are meant to hurt and sometimes kill, and the wider band makes them kill less.
+
+| Hazard | Where | Now | Proposed |
+|---|---|---|---|
+| Boiler explosion | stoking / damper | 3.0 / 1.4 | 12.0 / 1.4 |
+| Boiler seam split | stoking / damper | 0.9 / 0.3 | unchanged |
+| Firedamp explosion, rupture | district / pit bottom | 3.2 / 1.1 | 12.8 / 1.1 |
+| Furnace drift explosion | pit bottom | 1.6 | 6.4 |
+| Roof fall (face, roadway) | pit bottom / district | 2.6 / 1.6 | 10.4 / 6.4 |
+| Outburst | district | 2.4 | 9.6 |
+| Windblast (old workings) | district / pit bottom | 1.8 / 0.6 | 7.2 / 0.6 |
+| Gob breakout | district | 1.6 | 6.4 |
+| Headframe fall | bank / cage | 1.4 / 1.2 | 5.6 / 4.8 |
+| Fan burst | bank | 1.6 | 6.4 |
+| Tub down the shaft onto the cage | riders | 2.0 | 8.0 |
+| Struck a live charge, set off a misfire, premature shot | the face | 3.6 / 3.0 / 2.4 | 14.4 / 12.0 / 9.6 |
+| Runaway set | along the road | 3.0 (crushed ×2) | unchanged |
+| Caught in haulage, wedged, struck by a tub, caught in the belt, misstep, riding the kibble, caught boarding, slipped | — | 1.2–2.6 | unchanged |
+
+`Tick::HAZARD_SCALE` stays 0–4; its comment names `MORTAL_BITE` and is rewritten.
+
+7. **`LETHAL` stops following the mortal band.** It is the scale the willingness to kill is read
+   against — escalation, the ceiling, `KICKING` — and those were tuned at 3.0. Raising the band
+   under it would cut the chance of drawing by (3/5)², about two-thirds, as a side effect. It
+   becomes its own figure on `Animosity`, 3.0, and the comment says what it is: how much harm
+   somebody must be willing to do to count as wanting to kill.
+
+### 12.3 What does not change
+
+The kinds, the bands below mortal, the catalogue, healing, the continuous harms' own death rules
+(they read the dose and the dwell, not the pool), and the dice: nothing new is drawn. `grave` is a
+float on the state hash beside `resilience`, so it snapshots as it is. A carried wound lowers the
+starting pool as now, and not `grave`: the next match starts no nearer death.
+
+### 12.4 Specs (relational)
+
+- A run of minor acute bites collapses a body and never kills it; the same total of severe bites
+  does.
+- Heat, cold and bad air still compound to death.
+- A grounded fighter's guard is above zero and below a standing one's.
+- An armed attacker below `LETHAL` hits a man on the ground bare-handed; one at `LETHAL` with the
+  weapon.
+- `KICKING` stays below `LETHAL` by the stated share.
+- Every catastrophe at its reference kills the best-protected minion in its weight; the relative
+  order of the hazards is unchanged.
+
+### 12.5 Review decisions
+
+1. **The grave line is severe and up.** Significant wounds, however many, do not kill.
+2. **The figures as proposed** as a first effort: mortal 5.0, the pool 2.5–4.0, `KICKING` 0.4,
+   catastrophes ×4. Tuned from the sweeps as needed.
+3. **`LETHAL` stays at 3.0**, a figure of its own: the grudge, violence and draw-rate tuning was good
+   and is not to move.
+4. **The boot hits as fists do** (`Equipment::UNARMED`). Against half a guard it is likelier to be a
+   critical, which is the harder kick on average.
+5. **The same intent sets what they will push somebody into** (raised in review): anybody whose
+   ceiling against the target reaches `LETHAL` is willing to do them any harm at all, so a goblin
+   who would pull a knife on somebody does not balk at a machine that would crush them. What it
+   would do to bystanders still weighs, by their recklessness.
+
+### 12.6 Settled while building
+
+- **Half a guard is half of what their wounds leave them.** Carried out, every stat reads nothing,
+  so `defend` on the stood-down state is zero and half of it still nothing; the guard is read as
+  if they were on their feet with the wounds they have, then halved.
+- **No spec walks "every catastrophe kills the best-protected"**: nothing marks a hazard as a
+  catastrophe rather than an everyday peril, and the line is a judgement per hazard. The guide
+  (`add-content.md`) says where a severity sits instead.
+- **Only the near side of a catastrophe went up.** Scaled everywhere, the firedamp blast killed the
+  putter at the pit bottom, two hundred metres off, and `afterdamp_spec`'s claim — the same event
+  kills at the face and only stands somebody down further off — failed. The far side keeps its
+  figure: the pit bottom's share of the district's blast and rupture (1.1), of the windblast (0.6),
+  and the boiler's at the damper (1.4).
+- **The first sweep after it killed nobody in a fight** — one death in 700 brawls, none in the
+  melees. A goblin's pick rarely bites into the severe band against somebody down, the fighter is
+  sated again a few kicks later, and death by attrition needs half as much again as the now-deeper
+  pool. More edge alone (0.6, 1.2 on the pick) carried more people out and killed hardly more.
+- **A mortal wound is out far longer**: 5.0 deep at `HEAL_PER_MATCH` 0.5 is seven matches before it
+  is below the severe band, where 3.0 was three. A deep severe wound is out longer too.
+
+### 12.7 The first tuning pass
+
+Decided in review, to give the fights their deaths back and make pile-ons likelier:
+
+- **Killed outright** (`Injury::OUTRIGHT`, 3.0 to start, to be tuned between 2.5 and 3.5): one bite
+  that many times their toughness is a mortal wound whatever was left, recorded at least as deep as
+  the mortal band so it reads and heals as one. Never below the severe band, so kit that strips
+  somebody's toughness cannot make a scratch fatal. Volatile by nature — a critical lands it.
+- **Less relief from dealing and seeing an injury**: `WITNESSED` halved. Being hurt yourself
+  (`HURT_RELIEF`) is unchanged; a broken arm makes anybody think twice.
+- **An exchange every five seconds** (`BOUT_S` 3 → 5): longer fights to be joined, and fewer
+  exchanges to compute a sweep.
+- **More edge**: the picks +0.2 (miner's 0.5, crude 0.4), the clasp knife +0.3 (0.6).
+
+At `OUTRIGHT` 3.0 a fight still all but never killed (largest bite in the matrix 3.7), so the
+second round aims at longer fights rather than a new lever: more exchanges, more weapons out, more
+chances for a critical on somebody down.
+
+- **`OUTRIGHT` 2.0.**
+- **Less relief from the fight itself**: `LANDED_RELEASE` halved (0.025), `BOUT_RELEASE` to two
+  thirds (0.0333).
+- **Fatigue was left alone**: it reaches a fight only as weaker blows, a shorter fuse (`tired`),
+  and dropping out when spent, and fighters end at about 0.09 — nothing there sates anybody.
+
+| Six-person matrix, the 14 pairings that fight | Exchanges | Target severe / dead | Starter severe / dead |
+|---|---|---|---|
+| Wounds, before §12 | 5.6 | 8.7% / 2.1% | 12.6% / 4.4% |
+| §12 and the first round | 5.7 | 5.7% / 0.1% | 11.1% / 1.0% |
+| The second round | 7.8 | 8.3% / 2.4% | 10.9% / 4.9% |
+
+In the melees (12 of the feuding races, no boss): severe 9.3 an hour against 6–7.7, deaths 0.3,
+joins 3.3 against 1–2, a largest fight of four, and half the room down at 12 minutes against 24–32.
+**Still nobody killed on the ground.** A goblin's pick on a downed human, critical and all, bites
+about 0.8–1.3 against the man's third of a toughness — short of the severe band, so it never adds
+to `grave`, and short of `OUTRIGHT`'s 2.0. Dalthu's heavier swing reaches it now and then; the
+goblin's does not.
+
+**Why: a weapon's blow was split down.** Each kind's share is a wound of its own, tiered on its own
+bite, so a pick at 0.6 puncture needed a whole bite of 2.67 before its puncture was severe, and the
+50/50 knife 3.2. More edge alone would have had to reach about 1.8 on the pick and 2.2 on the knife.
+The third round **concentrates each weapon on its main kind** — the picks `{ puncture: 0.8, impact:
+0.2 }`, the knife `{ puncture: 0.8, cut: 0.2 }` — and raises every edge: the miner's pick 1.0, the
+crude 0.8, the knife 1.3 (the blade does more of the work than any tool), the shovel 0.2, the
+spanner 0.1. A critical on a downed human from the goblin is then severe at a median die with
+either, and kills on a good knife critical. **A critical still meets no armour**, in the killing
+check as in the bite: `pierces:` takes only its share of the body's toughness and no `_resistance`,
+and nothing worn raises toughness (only training does).
+
+| Six-person matrix, the 14 pairings that fight | Exchanges | Target severe / dead | Starter severe / dead |
+|---|---|---|---|
+| The third round | 7.4 | 11.0% / 4.9% | 11.9% / 6.3% |
+
+In the melees (12 of the feuding races, no boss): severe 8.7 an hour, deaths 2.3, the first killed
+on the ground (0.3), joins 4.3, a largest fight of four, half the room down at 12 minutes.
+
+**The fourth round lengthens fights by the one lever that does it alone, `SATED`** — how far
+patience must come back before a fighter is done — 0.6 → 0.8. It cannot pass 1.0, since patience
+stops at full, so it buys about two exchanges at most; a hurt fighter's own relief
+(`HURT_RELIEF`) is what ends most fights, and is meant to.
+
+| Six-person matrix, the 14 pairings that fight | Exchanges | Target severe / dead | Starter severe / dead |
+|---|---|---|---|
+| `SATED` 0.7 | 8.1 | 12.6% / 5.7% | 14.0% / 6.7% |
+| **`SATED` 0.8** | 8.7 | 14.9% / 6.1% | 16.6% / 7.1% |
+| `SATED` 0.9 | 9.2 | 16.7% / 7.0% | 18.0% / 7.7% |
+| `LANDED_RELEASE` halved again instead | 8.0 | 13.0% / 5.6% | 12.6% / 6.6% |
+| Both (`SATED` 0.8, landed halved) | 9.3 | 17.1% / 7.0% | 17.6% / 7.7% |
+
+In the melees at `SATED` 0.8: fewer brawls an hour and each one worse — 12 of the feuding races
+with no boss go from 16.3 brawls and 8.7 severe an hour to 13.3 and 10.3, deaths 1.7, joins down
+from 4.3 to 2.0. Under Throg, 11 of 13 are down by the end and half by 22 minutes, against 38.

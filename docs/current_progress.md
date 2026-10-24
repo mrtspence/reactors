@@ -435,12 +435,28 @@ built in five units, designed one at a time:
      when nobody left is willing. See
      [§7 of the sketch](design_sketches/animosity-and-distraction.md#7-melee-a-design-pass).
      `FOCUS`, `GANGED`, `WITNESSED`, `KICKING` and `RUMPUS` are first guesses.
+   - **Fights spread** ([§7.16](design_sketches/animosity-and-distraction.md#716-fights-that-spread-for-review)):
+     a fighter drags in somebody watching (`DRAG_IN`, a heckler first), and somebody standing by
+     piles in, spoiling for it (`SPOILING`) or near snapping (`EDGE`, `ON_EDGE`), unless a boss
+     stops them. Exchanges every ten seconds. First figures, being tuned on `crowds.rb --only melees`.
+   - **A boss puts somebody in line** ([§7.17](design_sketches/animosity-and-distraction.md#717-why-a-hard-boss-falls)):
+     patience back by style, a stare-down resented by what is left to hate, and a boss in a row
+     still oversees.
+   - **Next for bosses — kit and training, not rules**: the mace of discipline (charisma, and the
+     `intimidating` tag whose seam is in `Provoke#averted`), a hazard-awareness course (keen eyes,
+     so defence), and a course in keeping one's temper.
    - **Wounds are built**: every harm deals the kinds it declares, each bitten separately, each
-     leaving a named wound out of `content/wounds/` (three variants a tier, examples to rewrite);
+     leaving a named wound out of `content/wounds/` (five variants a tier, examples to rewrite);
      wounds stack, derate, outlive the match and heal between them, and somebody is out while a
-     wound would carry them out. See [`design_sketches/wounds.md`](design_sketches/wounds.md). The
-     brawl matrix and the crowds want rerunning on it: the pool doubled and `MORTAL_BITE` rose.
-   - **Next — a wound taking from a tag** (the scald on `focused`), named as a seam in
+     wound would carry them out. See [`design_sketches/wounds.md`](design_sketches/wounds.md).
+   - **Acute harm collapses and only grave harm kills by attrition** (§12 of the wounds sketch):
+     the mortal band at 5.0, a deeper pool, a man on the ground at half a guard and kicked
+     bare-handed by anybody short of wanting him dead, anybody who does want him dead willing to
+     do him any harm, the industrial catastrophes ×4 on their near side, and one bite of
+     `OUTRIGHT` times toughness killing outright. Every figure is a first effort. Being
+     tuned on the short sweeps (the six-person brawl matrix, `crowds.rb --only melees`); the full
+     brawl matrix and crowds, and `docs/tuning/`, are rerun once it settles.
+   - **Next — a wound taking from a tag** (scalded skin on `focused`), named as a seam in
      `Wounds::Catalogue`: needs a state-aware `Minion#tag`.
 4. Mobile engines: steam shovels and locomotives as their own crewed engines.
 5. The open pit itself.

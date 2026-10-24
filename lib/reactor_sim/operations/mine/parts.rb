@@ -321,12 +321,12 @@ module ReactorSim
                     stations: %i[shotfiring], mishap: { node: :shot_hole, kind: :misfire }),
           Peril.new(id: :misjudged_misfire, rate: MISFIRE_RATE, judged: :wrongly, scales_with: :firing,
                     stations: %i[shotfiring], mishap: { node: :shot_hole, kind: :misjudged }),
-          Peril.new(id: :premature_shot, wounds: { blast: 0.7, burn: 0.3 }, severity: 2.4, rate: 0.12,
+          Peril.new(id: :premature_shot, wounds: { blast: 0.7, burn: 0.3 }, severity: 9.6, rate: 0.12,
                     scales_with: :firing, stations: %i[shotfiring]),
-          Peril.new(id: :set_off_misfire, wounds: { blast: 1.0 }, severity: 3.0, rate: 0.6,
+          Peril.new(id: :set_off_misfire, wounds: { blast: 1.0 }, severity: 12.0, rate: 0.6,
                     scales_with: :misfired, stations: %i[shotfiring],
                     mishap: { node: :shot_hole, kind: :set_off }),
-          Peril.new(id: :struck_live_charge, wounds: { blast: 1.0 }, severity: 3.6, rate: 1.2,
+          Peril.new(id: :struck_live_charge, wounds: { blast: 1.0 }, severity: 14.4, rate: 1.2,
                     scales_with: :live, stations: %i[hewing],
                     mishap: { node: :shot_hole, kind: :struck })
         ]

@@ -14,9 +14,10 @@ module ReactorSim
   #
   # **A harm deals wounds of the kinds it declares**, each bitten separately (`Wounds`), and the
   # wounds stack: a second harm of any tier still wounds. **Every bite comes off one pool**,
-  # `resilience` — run out and they collapse whatever their wounds; far enough past empty and they
-  # die. `injury` is the condition this comes to, derived and never set apart from it: the worst
-  # of their wounds and of the pool.
+  # `resilience` — run out and they collapse whatever their wounds. **Only grave harm kills by
+  # attrition**: `grave` counts the continuous harms and the acute bites of the severe band or
+  # worse, so knocks can put somebody down and never finish them. `injury` is the condition this
+  # comes to, derived and never set apart from it: the worst of their wounds and of the two totals.
   #
   # See `docs/design_sketches/wounds.md`.
   module Injury
@@ -39,13 +40,18 @@ module ReactorSim
 
     ORDER = MODES.keys.freeze
 
-    # A bite this large is a mortal wound on its own, whatever was left — the scale willingness to
-    # kill is read against (`Animosity::LETHAL`).
+    # A bite this large is a mortal wound on its own, whatever was left.
     MORTAL_BITE = Wounds::BANDS.fetch(:mortal)
 
-    # **How far past empty a pool goes before it kills**, as a share of what they started with:
-    # a beating that goes on is a killing.
+    # **How much grave harm kills**, as a share past what they started with: a stabbing that goes
+    # on is a killing. A bite of this band or worse is grave; anything continuous always is.
     DEATH_SHARE = 0.5
+    GRAVE_BAND = Wounds::BANDS.fetch(:severe)
+
+    # **Killed outright**: one bite this many times their toughness is a mortal wound however much
+    # they had left — a skull is only so thick — and never less than the severe band, so a body
+    # with no toughness to speak of is not killed by a scratch.
+    OUTRIGHT = 2.0
 
     # **A wound carried into a match takes its depth off the resilience they start with**, never
     # below this share of it, so a chain of bad shifts tells and nobody starts already collapsed.
@@ -58,7 +64,7 @@ module ReactorSim
     #
     # **Roomier than a severe wound bites**, so a body takes more than one bad wound before it
     # collapses, and knocks and wounds wear it down in between.
-    RESILIENCE_SPREAD = (1.7..2.7)
+    RESILIENCE_SPREAD = (2.5..4.0)
 
     # **Several wounds in one tick each need their own variant die**: the phase-0 die stepped by
     # this for each wound already carried, which keeps the steps uniform and unrelated.
@@ -73,7 +79,7 @@ module ReactorSim
     def initial_state(rng, toughness)
       rolled = toughness * rng.between(RESILIENCE_SPREAD.begin, RESILIENCE_SPREAD.end)
 
-      { resilience: rolled, initial_resilience: rolled, injury: nil, wounds: [].freeze, doses: {}.freeze }
+      { resilience: rolled, initial_resilience: rolled, grave: 0.0, injury: nil, wounds: [].freeze, doses: {}.freeze }
     end
 
     # **What stands against one kind of a harm.** The body's own share of it — toughness and a
@@ -114,10 +120,14 @@ module ReactorSim
         bite = severity - resisted(minion, hazard, kind, severity / total)
         next unless bite.positive?
 
-        state = state.merge(resilience: state.fetch(:resilience) - bite)
-        tier = Wounds.tier(bite) or next
+        state = bitten(state, kind, bite)
+        killing = bite >= [ OUTRIGHT * minion.toughness, GRAVE_BAND ].max
+        tier = killing ? :mortal : Wounds.tier(bite)
+        next if tier.nil?
 
-        wound = inflict(state, kind, bite, tier, hazard, catalogue, die)
+        # A wound that killed them is a mortal one wherever it is read, and heals as one.
+        depth = killing ? [ bite, MORTAL_BITE ].max : bite
+        wound = inflict(state, kind, depth, tier, hazard, catalogue, die)
         state = state.merge(wounds: (state.fetch(:wounds, []) + [ wound ]).freeze)
         fresh << wound
       end
@@ -130,8 +140,7 @@ module ReactorSim
       return [ state, nil, [] ] unless bite.positive?
 
       before = state.fetch(:injury)
-      state = state.merge(resilience: state.fetch(:resilience) - bite)
-      deepen(state, before, kind, bite, catalogue, die, cause)
+      deepen(bitten(state, kind, bite), before, kind, bite, catalogue, die, cause)
     end
 
     # **Harm that is not a bite**, and so nothing to resist: suffocation past collapse, a burn or
@@ -166,19 +175,27 @@ module ReactorSim
       settled
     end
 
-    # What the pool and the wounds come to: the worst wound, collapsed at an empty pool, dead far
-    # past it.
+    # What the wounds and the totals come to: the worst wound, collapsed at an empty pool, dead of
+    # enough grave harm.
     def condition(state)
       worst = state.fetch(:wounds, []).map { |wound| wound.fetch(:tier) }.max_by { |tier| ORDER.index(tier) }
       Severity.escalate(worst, spent(state), ORDER)
     end
 
-    # What the pool alone comes to: collapsed at empty, dead far past it, or nothing.
+    # What the totals alone come to: dead of enough grave harm, collapsed at an empty pool, or
+    # nothing.
     def spent(state)
-      left = state.fetch(:resilience)
-      return :mortal if left <= -DEATH_SHARE * state.fetch(:initial_resilience)
+      return :mortal if state.fetch(:grave, 0.0) >= (1.0 + DEATH_SHARE) * state.fetch(:initial_resilience)
 
-      :severe if left <= 0.0
+      :severe if state.fetch(:resilience) <= 0.0
+    end
+
+    # Off the pool, and off what kills too when it is grave.
+    def bitten(state, kind, bite)
+      state = state.merge(resilience: state.fetch(:resilience) - bite)
+      return state unless Wounds::CONTINUOUS.include?(kind) || bite >= GRAVE_BAND
+
+      state.merge(grave: state.fetch(:grave, 0.0) + bite)
     end
 
     # Being carried out clears the station, which is the whole mechanical consequence of a severe

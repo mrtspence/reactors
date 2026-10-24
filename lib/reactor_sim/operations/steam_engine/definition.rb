@@ -550,9 +550,9 @@ module ReactorSim
           # behind the plate is a different event from one nearly empty. 22.0 is the figure at a
           # real rupture (`crown_sheet_spec`), so these weights mean their face value there.
           endangers: {
-            explosion: { wounds: { blast: 0.6, scald: 0.4 }, scales_with: :flash_expansion, reference: 22.0,
-                         stations: { stoking: 3.0, damper_open: 1.4 } },
-            seam_split: { wounds: { scald: 1.0 }, scales_with: :flash_expansion, reference: 22.0,
+            explosion: { wounds: { blast: 0.6, burn: 0.4 }, scales_with: :flash_expansion, reference: 22.0,
+                         stations: { stoking: 12.0, damper_open: 1.4 } },
+            seam_split: { wounds: { burn: 1.0 }, scales_with: :flash_expansion, reference: 22.0,
                           stations: { stoking: 0.9, damper_open: 0.3 } }
           },
           # **The crown sheet is what makes a low glass dangerous.** `material:` takes the rating

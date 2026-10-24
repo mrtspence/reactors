@@ -45,8 +45,10 @@ module ReactorSim
     CEILING = 2.0
     TOLERANCE = 1.0
 
-    # The harm at which somebody is willing to kill — the scale escalation is read against.
-    LETHAL = Injury::MORTAL_BITE
+    # **How much harm somebody must be willing to do to count as wanting to kill** — the scale
+    # escalation, `KICKING` and a weapon on a man on the ground are read against. A willingness, not
+    # a wound band: it is tuned on its own and does not follow `Injury::MORTAL_BITE`.
+    LETHAL = 3.0
 
     # **Reaching for a weapon is a chance each exchange, not a switch**: `ESCALATION` for a grudge
     # that would kill at a neutral temperament, as the square of how deep their `hostility` is
@@ -75,7 +77,7 @@ module ReactorSim
     ROW_S = 30.0
 
     # A brawl is an exchange of blows this often, each one a `Combat` contest.
-    BOUT_S = 3.0
+    BOUT_S = 10.0
 
     # **Who a fighter goes for, in a fight**: by hostility raised to this, so the one they hate
     # most draws most of their blows and the rest some. Two goblins on a dwarf mostly hit the dwarf.
@@ -85,24 +87,44 @@ module ReactorSim
     # to the divisor of everybody's defence against them.
     GANGED = 0.25
 
-    # **Seeing somebody in your fight hurt** gives back this share of patience by their injury,
-    # times a base plus your grudge against them. Cheap for a knock, so a huge brawl does not fizzle
-    # at the first tooth; dear for a carrying-out.
-    WITNESSED = { minor: 0.025, significant: 0.05, severe: 0.15, mortal: 0.3 }.freeze
+    # **Seeing somebody in your fight hurt** — your own doing or another's — gives back this share of
+    # patience by their injury, times a base plus your grudge against them. Cheap for a knock, so a
+    # huge brawl does not fizzle at the first tooth; dearer for a carrying-out, but well short of
+    # what being hurt yourself gives (`HURT_RELIEF`).
+    WITNESSED = { minor: 0.0125, significant: 0.025, severe: 0.075, mortal: 0.15 }.freeze
     WITNESS_BASE = 0.2
 
     # **Putting the boot in**: somebody carried out of a fight can still be kicked by anybody who
     # would do them this much harm — well short of `LETHAL`, so wanting a few cheap shots at a man on
-    # the ground is not the same as wanting him dead.
-    KICKING = 0.6 * LETHAL
+    # the ground is not the same as wanting him dead. A kick is bare-handed; only somebody who would
+    # kill them takes a weapon to them there.
+    KICKING = 0.4 * LETHAL
+
+    # **A man on the ground still covers up**: this share of his defence, before `GANGED`.
+    GROUNDED_GUARD = 0.5
+
+    # **Dragged in**: each exchange, a willing fighter turns on somebody standing near the fight and
+    # in none, on this chance times the square of their hostility towards them. **A heckler counts
+    # as at least `HECKLED` hostile** to the fighter he is heckling, for this alone, so he is the
+    # likeliest man dragged in.
+    DRAG_IN = 0.15
+    HECKLED = 0.4
+
+    # **Piling in**: somebody not fighting joins a fight in their place, a chance a second. Spoiling
+    # for it, by the square of a violent nature — and their patience halves, so they stay a while.
+    # Or on the edge: patience under `EDGE` of full, by their hostility towards somebody in it and how
+    # near snapping they are, so a hated man set upon brings the rest of the crew down on him at once.
+    SPOILING = 0.005
+    EDGE = 0.25
+    ON_EDGE = 0.02
 
     # **How much an act gives back of the new patience**, so one grudge does not fire the next act
     # at once. A brawl gives it back to everybody in it, blow by blow, and a fighter is willing until
     # it is back past `SATED`; a fighter it has hurt gets it back faster.
     RELEASE = { row: 0.3, shove: 0.8, sabotage: 0.8, foiled: 0.3, averted: 0.5, seethed: 0.2 }.freeze
-    BOUT_RELEASE = 0.05
-    LANDED_RELEASE = 0.05
-    SATED = 0.6
+    BOUT_RELEASE = 0.0333
+    LANDED_RELEASE = 0.025
+    SATED = 0.8
     HURT_RELIEF = { minor: 2.0, significant: 4.0 }.freeze
 
     # Grudge left per unit of harm done, before spite.
@@ -115,8 +137,13 @@ module ReactorSim
     WOUND_GRUDGE = { severe: 0.15, mortal: 0.3 }.freeze
 
     # What being stared down leaves the one stared down holding against the boss, and what being
-    # shouted at leaves the one shouted at holding — both before spite.
+    # shouted at leaves the one shouted at holding — both before spite. A stare-down's is taken off
+    # what is still to hate, so the tenth adds far less than the first.
     INTIMIDATION_GRUDGE = 0.05
+
+    # **Put in line**: somebody a boss stops gets back `RELEASE[:averted]` of their patience and this
+    # share more by how it was done — staring them down settles them more than talking them round.
+    PUT_IN_LINE = { intimidation: 1.0 / 6, persuasion: 1.0 / 12 }.freeze
     ROW_GRIEVANCE = 0.025
 
     # A boss's authority is worth half its ceiling at this figure.
@@ -187,7 +214,8 @@ module ReactorSim
     # Phase 0's dice for one person, from their own temper stream: always all eight.
     def draw(rng)
       { patience: roll(rng), act: rng.float, judge: rng.float, avert: rng.float,
-        attack: rng.float, defend: rng.float, escalate: rng.float, target: rng.float }
+        attack: rng.float, defend: rng.float, escalate: rng.float, target: rng.float,
+        drag: rng.float, join: rng.float }
     end
 
     # **Who they go for, by a die weighted by how much they resent each**, so the most resented is
@@ -286,10 +314,13 @@ module ReactorSim
     end
 
     # **Whether they would do it.** `harmless:` is a bonehead who has taken it for harmless — to
-    # the target and to everybody caught with them.
+    # the target and to everybody caught with them. **Somebody who wants the target dead balks at
+    # no harm to them**, so a machine that would crush them is no worse than a knife; what it does
+    # to anybody else still weighs.
     def willing?(minion, grudge, harm, bystanders, harmless: false)
       believed = harmless ? 0.0 : harm
-      believed <= ceiling(minion, grudge) && believed * bystanders <= tolerance(minion)
+      most = ceiling(minion, grudge)
+      (most >= LETHAL || believed <= most) && believed * bystanders <= tolerance(minion)
     end
 
     # In a row or a brawl: either stops them working and walking.
