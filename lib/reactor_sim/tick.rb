@@ -266,35 +266,47 @@ module ReactorSim
         [ id, control_points.fetch(id).nudge(cp_state, moved.fetch(id, 0.0))
                             .merge(slips.fetch(id, NO_SLIP)).compact.freeze ]
       end
-      governed(levers)
+      governed(levers, dt)
     end
 
     # **A post whose occupant drives other levers** — the engineman working the clutches and brake
-    # to send the cage where the player named. From the machine's frozen last-tick state, so it
-    # cannot depend on phase order. With nobody posted nothing runs, and the levers it drives hold
-    # where they were left: their target is written with their actual, so they have nowhere to
-    # travel to.
-    def governed(levers)
+    # to send the cage where the player named, a mobile engine's driver working its throttle and
+    # feed. From the machine's frozen last-tick state, so it cannot depend on phase order. With
+    # nobody posted nothing runs, and the levers it drives hold where they were left: their target is
+    # written with their actual, so they have nowhere to travel to.
+    def governed(levers, dt)
       control_points.each_value.select(&:governor).reduce(levers) do |acc, post|
         minion_id = occupant(post.id) or next acc
         minion = minions[minion_id] or next acc
 
         governor = post.governor
-        drum = nodes.fetch(governor.hoist)
-        drum_state = state.fetch(:nodes).fetch(governor.hoist)
-        destination = governor.dispatch(
-          commanded: post.value(acc.fetch(post.id)), shuttling: shuttling?(governor, acc),
-          drum: drum, drum_state: drum_state, states: state.fetch(:nodes),
-          calls: calls_for(governor.hoist)
-        )
-        outputs = governor.govern(
-          destination: destination, drum: drum, drum_state: drum_state,
-          lateness: lateness(post, minion), frozen: acc.fetch(post.id)[:slip] == :freeze,
-          held: governor.levers.to_h { |id| [ id, control_points.fetch(id).value(acc.fetch(id)) ] },
-          ready: signalled?(governor.hoist, acc)
-        )
+        held = governor.levers.to_h { |id| [ id, control_points.fetch(id).value(acc.fetch(id)) ] }
+        frozen = acc.fetch(post.id)[:slip] == :freeze
+        outputs =
+          if governor.respond_to?(:hoist)
+            winding(governor, post, minion, acc, held, frozen)
+          else
+            governor.govern(commanded: post.value(acc.fetch(post.id)), nodes: nodes, states: state.fetch(:nodes),
+                            content: content, dt: dt, frozen: frozen, held: held, lateness: lateness(post, minion))
+          end
         acc.merge(outputs.to_h { |id, value| [ id, acc.fetch(id).merge(target: value, actual: value).freeze ] })
       end
+    end
+
+    # The winding engineman: where the cage is to go, then the clutches and brake to take it there.
+    def winding(governor, post, minion, acc, held, frozen)
+      drum = nodes.fetch(governor.hoist)
+      drum_state = state.fetch(:nodes).fetch(governor.hoist)
+      destination = governor.dispatch(
+        commanded: post.value(acc.fetch(post.id)), shuttling: shuttling?(governor, acc),
+        drum: drum, drum_state: drum_state, states: state.fetch(:nodes),
+        calls: calls_for(governor.hoist)
+      )
+      governor.govern(
+        destination: destination, drum: drum, drum_state: drum_state,
+        lateness: lateness(post, minion), frozen: frozen, held: held,
+        ready: signalled?(governor.hoist, acc)
+      )
     end
 
     # **The signal board**: what each winder's cage is doing and waiting on, written onto its drum
@@ -302,7 +314,7 @@ module ReactorSim
     # settled — the boarders, the marshals at their posts, the decks being worked — because no node
     # can see the people, the same reason `advect` hands a conduit its `carried_kg`.
     def signal_winding(states, minions_state, levers)
-      control_points.each_value.select(&:governor).reduce(states) do |acc, post|
+      control_points.each_value.select { |post| post.governor.respond_to?(:hoist) }.reduce(states) do |acc, post|
         governor = post.governor
         passage = layout.passages.find { |p| p.hoist == governor.hoist } or next acc
         drum = nodes.fetch(governor.hoist)
@@ -2190,7 +2202,29 @@ module ReactorSim
         accrue(exposure.riders, :via, declared[:riders], declared, scale, event[:node])
       end
 
+      exposure.places.replace(carried(exposure.places)) unless exposure.places.empty?
       exposure
+    end
+
+    # **A carried place shares hazards with the place it stands in**, by its `shares:`, both ways —
+    # a boiler bursting on a footplate reaches the bench it stands beside, and a boom coming down
+    # on the bench reaches the train under it. Where it stands is its carrier's last tick, and each
+    # share is taken from the hazards before any sharing, so nothing is counted twice and the order
+    # places are walked in cannot matter.
+    def carried(places)
+      shared = places.dup
+      layout.carried_places.each do |place|
+        share = place.shares.to_f
+        next unless share.positive?
+
+        host = nodes.fetch(place.carried_by).place_at(state.fetch(:nodes).fetch(place.carried_by)) or next
+        [ [ place.id, host ], [ host, place.id ] ].each do |from, to|
+          at = places[from] or next
+          passed = at.merge(place: to, wounds: at.fetch(:wounds).transform_values { |severity| severity * share })
+          shared[to] = shared[to] ? Tick.combined(shared[to], passed) : passed
+        end
+      end
+      shared
     end
 
     def accrue(index, key_name, weights, declared, scale, source)

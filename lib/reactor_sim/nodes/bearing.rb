@@ -230,6 +230,11 @@ module ReactorSim
       # **Metal on metal, once the lining has wiped**: a steel journal dry on its bronze shell.
       METAL_ON_METAL_MU = 0.35
 
+      # **Slower than this the shaft has stopped and nothing rubs.** A drag halves a shaft per tick
+      # at most, so a stopped one decays towards zero for ever without reaching it; a few minutes
+      # in, the boundary law's `÷ ω` overflows and a full journal on a still shaft wipes in a tick.
+      STILL_OMEGA = 1.0e-6
+
       # **Coulomb friction, divided by ω to become a conductance.** The rubbing term is a force
       # times a lever and does not fall away as the shaft slows, so its conductance diverges at
       # rest — which is stiction, correctly, and why the caller caps it.
@@ -353,7 +358,7 @@ module ReactorSim
         return 0.0 unless @wear_rate.positive?
 
         omega = ctx.node_omega(@supports).to_f
-        return 0.0 unless omega.positive?
+        return 0.0 unless omega > STILL_OMEGA
 
         boundary_conductance(state, ctx, omega) * omega * omega * @wear_rate
       end

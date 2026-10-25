@@ -236,6 +236,19 @@ RSpec.describe ReactorSim::Nodes::Bearing do
       state = { parcels: [], joules: 0.0, failure: nil }
       expect(syrupy.rubbing_wear(state, ctx)).to eq(plain.rubbing_wear(state, ctx))
     end
+
+    # **A stopped shaft never quite reaches zero** — a drag halves it per tick at most — and a few
+    # minutes in, the boundary law's `÷ ω` overflowed and wiped a full journal in one tick.
+    it "does not wear on a shaft that has all but stopped, however long it stands" do
+      bearing = ReactorSim::Nodes::Bearing.new(id: :journal, supports: :shaft, heat_capacity: 1.0e4,
+                                               oil_charge_kg: 0.0, wear_rate: 7.3e-7)
+      ctx = Struct.new(:dt, :content, :states, :nodes).new(ReactorSim::DT, content, {}, {})
+      def ctx.node_omega(_id) = 1.0e-306
+      def ctx.node_state(_id) = nil
+      def ctx.node_pressure(_id) = 0.0
+
+      expect(bearing.rubbing_wear({ parcels: [], joules: 0.0, failure: nil }, ctx)).to eq(0.0)
+    end
   end
 
   # `Concerns::Fusible`. **Not a temperature bound** — measured, 6 kg of babbitt takes 31 K off

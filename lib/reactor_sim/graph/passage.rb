@@ -136,6 +136,9 @@ module ReactorSim
 
     def exposed_places = @declared.values.select { |place| place.exposed.positive? }.map(&:id)
 
+    # Places something carries about, sorted by id so whatever walks them sums in one order.
+    def carried_places = @declared.values.select(&:carried?).sort_by(&:id)
+
     # **Every node the weather reaches, and how much**: those in exposed places. Configuration,
     # so the tick reads it rather than walking the places.
     attr_reader :node_exposure
@@ -245,7 +248,10 @@ module ReactorSim
         acc[place.id] = known.nil? ? place : Place.new(id: place.id, label: known.label,
                                                        nodes: known.nodes + place.nodes,
                                                        air: known.air || place.air,
-                                                       exposure: known.exposure || place.exposure)
+                                                       exposure: known.exposure || place.exposure,
+                                                       open_air: known.open_air || place.open_air,
+                                                       carried_by: known.carried_by || place.carried_by,
+                                                       shares: known.shares || place.shares)
       end
     end
 
@@ -264,15 +270,19 @@ module ReactorSim
     # transport. The fan and the blower are conduits and carry air *through*; what somebody
     # standing here breathes is what the room holds.
     def derive_breathes(nodes)
+      sky = atmosphere(nodes)
       @declared.keys.to_h do |place_id|
         place = @declared.fetch(place_id)
         next [ place_id, place.air ] if place.air
+        next [ place_id, sky ] if place.open_air
 
         holders = place.nodes.filter_map { |id| nodes[id] }
                        .select { |node| breathable_volume?(node) }
         [ place_id, holders.first&.id ]
       end
     end
+
+    def atmosphere(nodes) = nodes.values.find { |node| node.is_a?(Nodes::Atmosphere) }&.id
 
     def breathable_volume?(node)
       !node.transport? && node.respond_to?(:parcels) &&
@@ -302,6 +312,18 @@ module ReactorSim
 
       validate_marshals!
       validate_air!(nodes)
+      validate_carried!(nodes)
+    end
+
+    # A carried place whose carrier cannot say where it is would share its hazards with nowhere.
+    def validate_carried!(nodes)
+      return if nodes.empty?
+
+      carried_places.each do |place|
+        carrier = nodes[place.carried_by]
+        raise Error, "place #{place.id}: carried by #{place.carried_by.inspect}, which cannot say where it is" unless
+          carrier.respond_to?(:place_at)
+      end
     end
 
     # A marshal who is not a station at that landing stops nobody.
@@ -320,6 +342,12 @@ module ReactorSim
       return if nodes.empty?
 
       @declared.each_value do |place|
+        if place.open_air && !place.air
+          raise Error, "place #{place.id} is open air and the operation has no atmosphere" unless atmosphere(nodes)
+
+          next
+        end
+
         holders = place.nodes.filter_map { |id| nodes[id] }.select { |n| breathable_volume?(n) }
         raise Error, "place #{place.id} has no air: nothing in it holds gas" if holders.empty?
         next if place.air

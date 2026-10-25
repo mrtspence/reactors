@@ -2212,43 +2212,16 @@ module ReactorSim
 
       COAL_BULK_KG_M3 = 800.0
 
-      # **A landing: tubs run on or off the deck, but only with the cage standing there.** Whoever
-      # works it is the lever (`control_id:`, an effort station), so with nobody at the landing no
-      # coal moves however long the cage stands.
+      # **Tubs run on or off the deck only with the cage standing at the landing** (`Nodes::Landing`).
+      # The bank's tubs are the banksman's, so its traffic is what his peril scales with: the busier
+      # the bank, the likelier a tub runs past him into the shaft.
       #
-      # **The bank's tubs are the banksman's**, so its traffic is what his peril scales with: the
-      # busier the bank, the likelier a tub runs past him into the shaft.
-      class Landing < Nodes::Conduit
-        def initialize(hoist:, landing_m:, perils: [], **opts)
-          @hoist = hoist.to_sym
-          @landing_m = landing_m.to_f
-          @perils = perils.freeze
-          super(**opts)
-        end
-
-        attr_reader :hoist, :landing_m, :perils
-
-        def throughput_kg(state, ctx)
-          drum = ctx.nodes[@hoist]
-          drum_state = ctx.node_state(@hoist)
-          return 0.0 unless drum_state && drum.cage_stopped_at?(drum_state, @landing_m)
-
-          super
-        end
-
-        def activity(state, quantity, dt)
-          return nil unless quantity == :tubs
-
-          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
-        end
-      end
-
       # The onsetter running full tubs onto the deck at the pit bottom. `max_kg_per_s` is one
       # onsetter's.
       def deck_loading(max_kg_per_s:, crew: LANDING_CREW)
-        Landing.new(id: :deck_loading, label: "Onsetting", accepts: [ :solid ],
-                    hoist: :cage_drive, landing_m: SHAFT_DEPTH_M, max_kg_per_s: max_kg_per_s,
-                    heat_capacity: 2.0e3, control_id: :onsetting, worked: true, crew: crew)
+        Nodes::Landing.new(id: :deck_loading, label: "Onsetting", accepts: [ :solid ],
+                           carrier: :cage_drive, mark_m: SHAFT_DEPTH_M, traffic: :tubs, max_kg_per_s: max_kg_per_s,
+                           heat_capacity: 2.0e3, control_id: :onsetting, worked: true, crew: crew)
       end
 
       # Two to a landing: one running the tubs on or off and one at the gate.
@@ -2260,9 +2233,9 @@ module ReactorSim
 
       # The banksman running them off at bank.
       def deck_unloading(max_kg_per_s:, crew: LANDING_CREW)
-        Landing.new(
+        Nodes::Landing.new(
           id: :deck_unloading, label: "Banking", accepts: [ :solid ],
-          hoist: :cage_drive, landing_m: 0.0, max_kg_per_s: max_kg_per_s,
+          carrier: :cage_drive, mark_m: 0.0, traffic: :tubs, max_kg_per_s: max_kg_per_s,
           heat_capacity: 2.0e3, control_id: :banking, worked: true, crew: crew,
           # Rare beside the haulage road's, because it is one tub in many hundreds — and it hurts
           # nobody at bank; it is the shaft that suffers it. **Both are the deck's footing**: a wet

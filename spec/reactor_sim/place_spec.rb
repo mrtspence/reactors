@@ -163,6 +163,23 @@ RSpec.describe ReactorSim::Place do
       }.to raise_error(ReactorSim::Error, /more than one node/)
     end
 
+    # **One atmosphere, many places under the sky**: an open-air place breathes it without owning it.
+    it "lets an open-air place breathe the operation's atmosphere" do
+      op = rig(endangers: {}, places: ROOMS + [ described_class.new(id: :bench, open_air: true) ],
+               standing: :bench)
+
+      expect(op.layout.breathes(:bench)).to be(:sky)
+    end
+
+    # A carried place shares its hazards with where its carrier is; a carrier that cannot say
+    # where that is would share them with nowhere.
+    it "refuses a place carried by something that cannot say where it is" do
+      expect {
+        rig(endangers: {}, places: ROOMS + [ described_class.new(id: :footplate, carried_by: :drum, shares: 0.5,
+                                                                  open_air: true) ])
+      }.to raise_error(ReactorSim::Error, /footplate: carried by :drum, which cannot say where it is/)
+    end
+
     # And a station's place, which is the same rule reached the other way.
     it "refuses a station standing in a place nobody declared" do
       expect {

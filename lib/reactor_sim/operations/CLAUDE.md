@@ -126,6 +126,51 @@ banksman's and the onsetter's false all-clear, the banksman's tub down the shaft
 loosed set and the shotfirer's charge left live, with the overman in a `supervision` slot. Checklist:
 [`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-people-in-it-and-each-other).
 
+## Mobile engines
+
+**A shovel's or a locomotive's engine is its own** (`MobileEngine`), never a load on the line
+shaft: the stationary engine's own pieces at a tenth the size, under the engine's own names. An
+operation carrying one fits `MobileEngine.slots(engine, place:)` among its own slots — the engine
+itself, then the safety valve, what reads the water and the pressure, a plug, the bunker and the
+tank — and supplies the rest: the `Atmosphere`, the place it stands in, and whatever its flywheel
+drives. `MobileEngine.driver(assembly, engine, place:)` is the driver's post, built after assembly
+because he reads by whatever was fitted.
+
+- **Every id is the engine's** (`Names`): `names.(:boiler)` is `:shovel_1_boiler`, so two shovels
+  are two engines. The prefix is the engine's own slot name, unique by construction. A
+  `SteamEngine` builder or fragment helper a mobile engine shares takes `names:`, defaulting to
+  `SteamEngine::HOUSE` — no prefix, so the stationary engine is bit-identical.
+- **Two people work it**: the fireman, an effort post at the blueprint's rate, and the driver, a
+  governor post working the throttle to his post's lever and the feed to the water he reads. Every
+  other lever is `internal:` and held where the part declares. A sidegrade that gives the player a
+  lever is a different part, not a flag.
+- **The gauges are the driver's**: a reading part builds nothing and sets how finely he reads.
+- **He keeps her from racing**: past her governed speed he eases the throttle, and shuts it a fifth
+  over — a shovel's work comes and goes with every swing.
+
+**A steam shovel is a mobile engine digging** (`MobileEngine.shovel_slots(shovel, place:, bench:, car:,
+standpipe:)`): the engine's slots plus the dipper, its chain and its boom. The host gives it the
+bench it digs, the car it fills and the standpipe its hose draws on. **`Dipper` is a holder going round
+dig, swing, dump, swing back**, filled as hard as the craneman's effort and the shaft's speed allow, the
+cut, the lift and the swing charged off the shaft as drags — so hard ground slows the engine. It
+declares **both ports every tick**, a zero where it is not taking or giving: a holder that declared
+nothing would let the path drive the flow, and the bench would pour through it into the car. The
+pitmen keep the face in `reach` (and splice a parted `Chain`); the `Boom` tires past its rating and
+can be damaged by anything that fails beside it. Its board in words is `MobileEngine.board`.
+
+**A locomotive is a mobile engine on wheels** (`MobileEngine.locomotive_slots(loco, place:, track:,
+serves:, dump:)`): the engine's slots plus its train — running gear and cars tiered together, because
+a train is weighed and braked as one — and its brake. **`Train` is the hoist laid flat**, running a
+`Track` the host supplies (sections each with a place and a grade, and `loading` and `dump` marks),
+geared to the engine's flywheel through a forward and a reverse clutch as the winder's drum is. The
+shovel it `serves:` dumps through the train's **loading landing** (`shovel_slots(..., dumps_into:)`),
+and the dumpmen tip it into the host's `dump:` through another — a `Nodes::Landing` each, so nothing
+moves while the train is away. **The driver runs the round** (`locomotive_driver`, a `Round` around
+the engine's `Driver`): he believes his brake does what it does on the steepest bank empty, and eases
+in and brakes late by his lateness. **`place:` is the footplate**, a place the train carries
+(`Place#carried_by`) that shares its hazards with wherever the train stands. Its board is
+`MobileEngine.train_board`.
+
 ## Assembled from parts
 
 An operation is built from a **chassis** (the frame: fixed topology, which slots exist) and a
@@ -134,7 +179,8 @@ An operation is built from a **chassis** (the frame: fixed topology, which slots
 
 ```ruby
 Parts.register(:id, kind:, provides: [], instruments: []) { |spec| Fragment.new(...) }
-Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass: [...])
+Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass: [...],
+         spec: { names: Names.new(prefix, place:) })   # what this slot tells its part about itself
 Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisories:)
 ```
 

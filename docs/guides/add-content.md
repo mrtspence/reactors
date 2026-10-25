@@ -6,11 +6,14 @@ disk, and only once, never during a tick.
 
 ```
 content/
-  resources/    water.yml, combustion.yml, damps.yml, materials.yml
+  resources/    substances, by family (water, combustion, damps, ground, materials, …)
   reactions/    combustion.yml
   archetypes/   races.yml     — kinds of person
   minions/      crew.yml      — the people themselves
+  wounds/       the wound catalogue
 ```
+
+The files themselves are a snapshot: `ls content/*/` is the truth.
 
 Every `*.yml` in a folder is loaded and merged, so file names are organisational only.
 

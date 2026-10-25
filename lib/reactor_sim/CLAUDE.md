@@ -225,7 +225,9 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > and misses the fireman who left two minutes ago. Prefer `places:` for anything that fills a
 > room; keep `stations:` for the genuinely hands-on, and for an operation with no geometry, which
 > has only stations to name. Both keys are walked by `injury_spec`, because a declaration in the
-> namespace nobody looks up is a hazard that silently hurts nobody.
+> namespace nobody looks up is a hazard that silently hurts nobody. **A place can move**: a
+> footplate is carried by its train (`carried_by:`), and phase 6b shares what reaches it with the
+> place the train stands in, and back, by its `shares:` — nothing else about it moves.
 
 `injury.rb` is `Concerns::Wearing` for people, and the copied shape is deliberate while the
 vocabulary is not: a part has `durability` and a `failure`, a person has `resilience` and an
@@ -264,8 +266,9 @@ the same lever costs a day-labourer far more than a strong fireman.
 > event rather than the node keeps phase 6b order-independent and puts the magnitude on the
 > durable record.
 
-Plus the assembly layer — `part.rb` (`Part` and `Fragment`), `parts.rb` (the registry),
-`slot.rb`, `assembly.rb`. **All four are build-time only.** They resolve a chassis and a
+Plus the assembly layer — `names.rb` (what a machine built more than once calls its pieces),
+`part.rb` (`Part` and `Fragment`), `parts.rb` (the registry), `slot.rb`, `assembly.rb`. **All five
+are build-time only.** They resolve a chassis and a
 loadout into the flat lists `Operation` has always taken, and nothing in them is reachable from
 `Tick`, `Arbiter` or any node. Keep it that way: a `Context` method taking a slot id would put
 assembly structure on the hot path for a lookup that could have been decided at build.

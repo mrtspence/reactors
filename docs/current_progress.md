@@ -458,8 +458,30 @@ built in five units, designed one at a time:
      brawl matrix and crowds, and `docs/tuning/`, are rerun once it settles.
    - **Next — a wound taking from a tag** (scalded skin on `focused`), named as a seam in
      `Wounds::Catalogue`: needs a state-aware `Minion#tag`.
-4. Mobile engines: steam shovels and locomotives as their own crewed engines.
-5. The open pit itself.
+4. Mobile engines: steam shovels and locomotives as their own crewed engines. In three units:
+   **4a, the engine itself, is built** ([`design_sketches/mobile-engines.md`](design_sketches/mobile-engines.md)):
+   `MobileEngine` — a vertical-boiler engine of about 80 kW from the stationary engine's own pieces
+   under its own names, a fireman and a driver who works the throttle and the feed by whatever reads
+   the water and the pressure, the tiered safety valve, readings, plug, bunker and tank. **4b, the
+   steam shovel, is built** ([`design_sketches/steam-shovel.md`](design_sketches/steam-shovel.md)):
+   a dipper going round dig, swing, dump on its engine's shaft, the craneman and the pitmen keeping
+   the face in reach, the hoisting chain (iron or steel) that parts and is spliced, the boom that comes
+   down, struck by the swing, water by hose, fittings per shovel, and the board in words. **4c, the
+   locomotive, is built** ([`design_sketches/locomotive.md`](design_sketches/locomotive.md)): a dinkey
+   on the vertical engine, its `Train` the hoist laid flat on a host's `Track`, geared through two
+   clutches, a hand or steam brake, loaded at the shovel and tipped by the dumpmen through
+   `Nodes::Landing` (the mine's, made stock), a driver who runs the round and brakes late by his
+   lateness, crashing into the shovel, over the tip or off the rails, and **a footplate the train
+   carries** (`Place#carried_by`) that shares its hazards with where it stands.
+   - **Next for mobile engines — automatic cylinder cocks**, so a standing engine drains its own
+     condensate without anybody working them. Undesigned; a standing locomotive asked for nothing
+     cools with steam in its cylinder.
+   - **The pitmen are spent in about ten minutes** at full effort on plain hands (exertion 6e-4), and
+     the shovel then stands moving up. For the shovel's tuning, with the pit's shifts.
+5. The open pit itself. Owed to it from unit 4 ([`locomotive.md`](design_sketches/locomotive.md) §12):
+   a second train per shovel and the passing track, the track as the pit's geometry, boarding a train
+   at a stand, the coaling stage and the water column; and wheel slip on a wet or icy rail
+   (`DriveLink#max_torque` is declared and read by nothing).
 
 ### Mine accidents — four units, designed one draft at a time
 
@@ -2203,6 +2225,13 @@ before the simulation rewrite but is unaffected by it.
 
 Each of these is a rule, and each is the kind a fresh reader breaks by accident. They are
 documented where they matter and collected here because the collection is worth reading once.
+
+- **A stopped shaft never reaches zero, so never divide by its speed unguarded.** A drag halves a
+  shaft per tick at most (`max_drag_conductance` is `I/dt`), so a shaft left standing decays
+  geometrically into denormals. `Bearing#boundary_conductance` divides by `ω`; about five minutes
+  into a stopped mobile engine it overflowed, the wear went infinite and a full ring set wiped in a
+  tick at 293 K. The drag survived only because the stall cap clamps it. Floor the speed
+  (`Bearing::STILL_OMEGA`) wherever a law has `÷ ω` and is not capped.
 
 - **Check which clock a rate is against before calibrating it.** `dt` is `ReactorSim::DT × the
   operation's time_scale`, and `DT` is **0.25 s**. The steam engine sets `time_scale: 1.0`

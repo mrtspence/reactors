@@ -27,20 +27,31 @@ module ReactorSim
   # ambient follows the outdoor temperature by its place's exposure, and the sky's light and what
   # lies underfoot are offered to people there in proportion. Nil means it was not said, which a
   # merge treats as nothing so the room's own declaration wins.
-  Place = Struct.new(:id, :label, :nodes, :air, :exposure, keyword_init: true) do
-    def initialize(id:, label: nil, nodes: [], air: nil, exposure: nil)
+  #
+  # `open_air: true` is a place under the sky that **breathes the operation's `Atmosphere`**
+  # without owning it — one atmosphere, and an open pit has many places in it.
+  #
+  # `carried_by:` names a node that carries the place about — a footplate on its train — and
+  # answers `place_at(state)`, the place it stands in. `shares:` is how much of a hazard on it
+  # reaches the place it stands in, and of one there reaches it.
+  Place = Struct.new(:id, :label, :nodes, :air, :exposure, :open_air, :carried_by, :shares, keyword_init: true) do
+    def initialize(id:, label: nil, nodes: [], air: nil, exposure: nil, open_air: nil, carried_by: nil, shares: nil)
       super(id: id.to_sym, label: label || id.to_s.tr("_", " ").capitalize,
             nodes: Array(nodes).map(&:to_sym).uniq.freeze, air: air&.to_sym,
-            exposure: exposure&.to_f)
+            exposure: exposure&.to_f, open_air: open_air, carried_by: carried_by&.to_sym, shares: shares&.to_f)
       raise Error, "place #{id}: air #{air.inspect} is not one of its nodes" if
         air && !nodes.map(&:to_sym).include?(air.to_sym)
       raise Error, "place #{id}: exposure #{exposure} is not between 0 and 1" if
         exposure && !(0.0..1.0).cover?(exposure.to_f)
+      raise Error, "place #{id}: shares #{shares} is not between 0 and 1" if
+        shares && !(0.0..1.0).cover?(shares.to_f)
 
       freeze
     end
 
     def exposed = exposure || 0.0
+
+    def carried? = !carried_by.nil?
 
     def holds?(node_id) = nodes.include?(node_id&.to_sym)
   end

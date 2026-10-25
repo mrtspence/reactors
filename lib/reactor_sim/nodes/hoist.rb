@@ -129,6 +129,9 @@ module ReactorSim
         (cage_m(state) - mark_m).abs < LANDING_M && cage_speed_m_s(state).abs < STOPPED_M_S
       end
 
+      # What a landing asks of its carrier.
+      def standing_at?(state, mark_m) = cage_stopped_at?(state, mark_m)
+
       # What is in cage A, as the tick sees it — every rider committed to this drum, and whatever
       # is on its deck as of last tick.
       def cargo_kg(ctx)

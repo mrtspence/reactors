@@ -117,6 +117,7 @@ require_relative "reactor_sim/concerns/prompt_reaction"
 
 require_relative "reactor_sim/graph/node"
 require_relative "reactor_sim/nodes/conduit"
+require_relative "reactor_sim/nodes/landing"
 require_relative "reactor_sim/nodes/vessel"
 require_relative "reactor_sim/nodes/wall"
 require_relative "reactor_sim/nodes/boiler"
@@ -188,6 +189,7 @@ require_relative "reactor_sim/operations"
 
 # Parts and slots: how an operation is assembled from swappable components. Pure
 # configuration, resolved once at build — nothing below this line is reachable from the tick.
+require_relative "reactor_sim/names"
 require_relative "reactor_sim/part"
 require_relative "reactor_sim/parts"
 require_relative "reactor_sim/slot"
@@ -202,6 +204,14 @@ require_relative "reactor_sim/match"
 require_relative "reactor_sim/operations/steam_engine/definition"
 require_relative "reactor_sim/operations/steam_engine/parts"
 require_relative "reactor_sim/operations/steam_engine/panel"
+
+require_relative "reactor_sim/operations/mobile_engine/driver"
+require_relative "reactor_sim/operations/mobile_engine/engine_board"
+require_relative "reactor_sim/operations/mobile_engine/shovel"
+require_relative "reactor_sim/operations/mobile_engine/train"
+require_relative "reactor_sim/operations/mobile_engine/round"
+require_relative "reactor_sim/operations/mobile_engine/definition"
+require_relative "reactor_sim/operations/mobile_engine/parts"
 
 require_relative "reactor_sim/operations/mine/winding"
 require_relative "reactor_sim/operations/mine/definition"

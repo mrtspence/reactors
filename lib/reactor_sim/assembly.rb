@@ -213,7 +213,7 @@ module ReactorSim
       @built[slot.id] ||= begin
         fitted_part = part(slot.id)
         if fitted_part
-          fitted_part.build(@spec)
+          fitted_part.build(slot.spec.empty? ? @spec : @spec.merge(slot.spec))
         else
           link = slot.bypass_link
           link ? Fragment.new(links: [ link ]) : Fragment.empty
@@ -286,7 +286,9 @@ module ReactorSim
           end
         end
 
-        missing = fitted.provides - pieces.nodes.map(&:id)
+        # A role is named as the slot names it, so the first shovel's boiler is `shovel_1_boiler`.
+        names = slot.spec[:names] || @spec[:names]
+        missing = fitted.provides.map { |role| names ? names.(role) : role } - pieces.nodes.map(&:id)
         next if missing.empty?
 
         errors << "#{fitted.label} declares it provides #{missing.join(', ')} but does not build " \

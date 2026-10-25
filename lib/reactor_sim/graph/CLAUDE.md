@@ -155,7 +155,9 @@ DriveLink.new(a:, b:, stiffness:, max_torque:, ratio:, control_id:, id:,  # gear
 Passage.new(a:, b:, metres:, speed_m_s:, requires:, control_id:, driven_by:, rated_omega:,
             hoist:, staffed_by:,                                         # ridden, if hoist:
             through:, rated_kg:, marshals: { landing => station })
-Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they join
+Place.new(id:, label:, nodes: [node_id, ...],   # not an edge — the space they join
+          air:, exposure:, open_air:,          # what is breathed there, the weather it gets
+          carried_by:, shares:)                # a footplate: where it is, and what it shares
 ```
 
 - `accepts: []` means "anything".
@@ -206,6 +208,14 @@ Place.new(id:, label:, nodes: [node_id, ...])   # not an edge — the space they
   operation does not have, a node two places both claim, and a passage endpoint or station in a
   place nobody declared — because for a hazard system **silence must never be the safe answer**.
   An operation declaring no places skips all of it and keys its hazards by station as before.
+- **An open-air place breathes the operation's `Atmosphere`** (`open_air: true`) without owning it,
+  because there is one atmosphere and an open pit has many places under it. `Layout` refuses one in
+  an operation with no atmosphere.
+- **A place can be carried.** `carried_by:` names a node answering `place_at(state)` — a train
+  carrying its footplate — and `shares:` is how much of a hazard on the carried place reaches the
+  place it stands in, and of one there reaches it (`Tick#carried`, in phase 6b, from the carrier's
+  last tick). `Layout` refuses a carrier that cannot say where it is. Nothing else moves: the
+  footplate's nodes, air and weather are an ordinary place's.
 
 ## `Node`
 

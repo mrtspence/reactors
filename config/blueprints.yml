@@ -661,3 +661,81 @@ part:
   # A man and a wage, not a thing built — free until wages are a cost.
   overman:
     materials: {}
+  # --- mobile engines ----------------------------------------------------------------------
+  # The shovel's and the locomotive's own engine, and what is tiered around it. A bigger bunker or
+  # tank is paid for partly in the coal the pit has raised.
+  vertical_engine:
+    materials:
+      wrought_iron: 2600    # the upright boiler and its firebox
+      cast_iron: 900        # cylinder, flywheel, bedplate
+      steel: 120
+      bronze: 30
+  small_bunker:
+    materials:
+      wrought_iron: 140
+  large_bunker:
+    materials:
+      wrought_iron: 320
+      coal: 2000
+  small_tank:
+    materials:
+      wrought_iron: 260
+  large_tank:
+    materials:
+      wrought_iron: 600
+      coal: 3000
+  dead_weight_valve:
+    materials:
+      cast_iron: 40
+  spring_safety_valve:
+    materials:
+      bronze: 18
+      steel: 10
+  mobile_fusible_plug:
+    materials:
+      fusible_alloy: 2
+  mobile_try_cocks:
+    materials: {}
+  # The shovel's working parts.
+  yard_dipper:
+    materials:
+      steel: 900           # the bucket, its teeth and door
+      cast_iron: 400       # the swing gear
+  iron_chain:
+    materials:
+      wrought_iron: 160
+  steel_chain:
+    materials:
+      steel: 140
+  timber_boom:
+    materials:
+      wood: 700
+      wrought_iron: 150    # the truss rods
+  steel_boom:
+    materials:
+      steel: 1400
+  dinkey_train:
+    materials:
+      cast_iron: 2500      # the frame, the wheels and the gearing
+      wrought_iron: 800
+      wood: 2400           # four side-dump bodies
+  dinkey_steel_train:
+    materials:
+      cast_iron: 2500
+      wrought_iron: 800
+      steel: 4200          # six steel side-dump bodies
+      coal: 2000
+  hand_brake:
+    materials:
+      wrought_iron: 120
+  steam_brake:
+    materials:
+      wrought_iron: 200
+      cast_iron: 150       # the brake cylinder
+  mobile_gauge_glass:
+    materials:
+      bronze: 6
+  mobile_pressure_gauge:
+    materials:
+      bronze: 5
+      steel: 2

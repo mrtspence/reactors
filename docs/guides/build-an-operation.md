@@ -111,6 +111,23 @@ Every `Thermal` node also needs an `ambient_conductance` or the operation become
 heat accumulator. Waste heat is not optional — it is what makes conservation cheap *and*
 physically sensible.
 
+**Fixed plant is a load on the operation's line shaft; mobile plant carries its own engine.** A
+shovel or a locomotive fits `MobileEngine.slots(engine, place:)` among the operation's slots and
+gets a complete small steam engine under its own names, worked by a fireman and a driver
+(`MobileEngine.driver(assembly, engine, place:)`, added to the control points after assembly). The
+operation supplies the `Atmosphere`, the place the engine stands in — which breathes the atmosphere,
+as its `air:` or as an `open_air:` place — and a drive link from `names.(:flywheel)` to whatever it
+drives. Its routes are `MobileEngine.routes(engine, place:)`. A **steam shovel** is
+`MobileEngine.shovel_slots` instead, and its host also gives it, by id, the bench it digs (a holder of
+what is dug), the car it fills and the standpipe its tank is hosed from; `MobileEngine.board` is its
+status in words for the panel. A **locomotive** is `MobileEngine.locomotive_slots(loco, place:,
+track:, serves:, dump:)`: the host gives it a `Track` (sections with their places and grades, a
+`loading` and a `dump` mark), the shovel it serves — whose `shovel_slots` then takes the train's cars
+as its `car:` and its loading landing as `dumps_into:` — and the holder it is tipped into. Its driver
+post is `MobileEngine.locomotive_driver(assembly, loco, place:, track:)` and its board
+`MobileEngine.train_board`. `place:` is its footplate: the host puts the engine's nodes there, and the
+train carries it. See `spec/support/mobile_rig.rb` for the smallest host of all three.
+
 ### 4. What can the player touch?
 
 ```ruby

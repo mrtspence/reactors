@@ -1,0 +1,9 @@
+# What is dug: the ground over the ore and, in time, the ore under it.
+#
+# **Overburden** — the clay, gravel and soft rock lying over an ore body, the thing a stripping
+# shovel moves. Broken, about 1.8 t/m³; it is not burnt or worked, only shifted, so it carries
+# nothing but its bulk and a little heat.
+overburden:
+  tags: [solid]
+  specific_heat_j_per_kg_k: 900
+  density_kg_per_m3: 1800
