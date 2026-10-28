@@ -95,7 +95,7 @@ module ReactorSim
     # coupling above it then slipped 65% and burned 39% of shaft power. Halving `dt` halved the
     # gap, which is the signature. See `docs/design_sketches/bearings.md` §1.1.
     # `sources` is optional: `{ node_id => rate }`, a constant flow into a body — gravity on a
-    # winding drum. It adds to the right-hand side and nothing to the matrix, so whatever drags and
+    # hoisting drum. It adds to the right-hand side and nothing to the matrix, so whatever drags and
     # couplings that body has reach equilibrium with it in the same step. The caller applies
     # `rate × dt` to the body itself; nothing is returned for it.
     def settle(links, capacities, potentials, dt, heads = nil, limits = nil, drags = nil,

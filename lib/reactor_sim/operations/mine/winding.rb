@@ -164,7 +164,7 @@ module ReactorSim
           return drum_state[:failure] if drum_state[:failure]
           return :hung if drum.slack_m(drum_state) >= HUNG_M
 
-          :lodged if drum.shaft && states.dig(drum.shaft, :jam_m)
+          :lodged if drum.obstructed_by && states.dig(drum.obstructed_by, :jam_m)
         end
 
         def at_landing(landing, states, shuttling:, marshals:, slipping:, boarding:, waiting:)

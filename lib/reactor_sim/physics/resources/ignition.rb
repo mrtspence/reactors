@@ -41,7 +41,7 @@ module ReactorSim
 
       # **A fuel hot enough lights itself.** Past `autoignition_k` the node's own heat seeds the
       # fire at this rate, exactly as a match would — so timber against a seized sheave, or coal
-      # heating in the goaf, catches with nothing alight beside it. Opt-in per reaction.
+      # heating in waste, catches with nothing alight beside it. Opt-in per reaction.
       AUTO_SEED_KG_PER_S = 0.01
 
       # Returns the next ignition state: `{ kg:, oxidiser_kg: }`. `hottest_k` is the hottest point
@@ -52,7 +52,7 @@ module ReactorSim
         fuel_kg = fuel_mass(spec, parcels, content)
 
         # Nothing to burn means nothing alight. A grate that runs empty goes out, and refilling
-        # it does not bring the fire back — which is exactly what a stoker has to prevent.
+        # it does not bring the fire back — which is exactly what whoever tends it has to prevent.
         return { kg: 0.0, oxidiser_kg: oxidiser } if fuel_kg <= Parcel::EPSILON
 
         seed_kg += self_seed_kg(spec, [ temperature_k, hottest_k.to_f ].max, dt)

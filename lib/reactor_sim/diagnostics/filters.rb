@@ -222,7 +222,7 @@ module ReactorSim
       # **Once wrong, stay wrong.** Redrawing every tick makes an incompetent observer merely
       # jittery, and jitter is a tell a player can read straight through — whereas somebody
       # who cannot really tell forms a belief and reports it steadily. A gas reading sitting
-      # confidently at 2% while the district climbs through 6% is the failure that kills a
+      # confidently at 2% while the room climbs through 6% is the failure that kills a
       # shift, and it needs the reading to hold while the truth moves underneath it.
       #
       # Holding also keeps the delta protocol compressing: a held value reports no change.
