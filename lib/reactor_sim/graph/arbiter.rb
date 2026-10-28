@@ -255,7 +255,7 @@ module ReactorSim
     # molar mass, so flue gas and air are compared on the same footing.
     #
     # **The cold column is the outside air**, so it moves with the weather in full: a chimney
-    # stands in it, and a mine's downcast is filled from it. So a winter's day draws a stack
+    # stands in it, and an intake is filled from it. So a winter's day draws a stack
     # harder than a summer's, and a natural draught weakens as the day warms.
     def path_head(path, nodes, states, content, ctx)
       fixed = path.conduits.sum { |id| nodes.fetch(id).head_pa(ctx) }
@@ -342,7 +342,7 @@ module ReactorSim
     # is not on a rate-driven path.** A rate limit is a mass throughput and an affinity may only
     # redistribute it; moles of gas crossing a conductance are unaffected by a droplet hitching a
     # lift, so the liquid rides on top and the gas figure is preserved exactly. Solids still take
-    # the rate term — a stoker really is rated in mass, and coal does not ride on steam.
+    # the rate term — a feed of solids really is rated in mass, and solids do not ride on steam.
     #
     # **Liquid is rated by the bore, gas by the conductance.** The entrainment term is capped by
     # `rate`, and uncapped it is unbounded: `scale = desired / gas_share` grows without limit as

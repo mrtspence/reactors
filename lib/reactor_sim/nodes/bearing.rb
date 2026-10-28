@@ -294,7 +294,7 @@ module ReactorSim
       # thing that wears it, which is the connection the whole mechanic rests on.
       #
       # **Or by the pull of a rope**: a node that answers `bearing_load_n(ctx)` says itself what it
-      # presses on the bearing — a winding rope over its sheave.
+      # presses on the bearing — a hoisting rope over its sheave.
       def load_n(ctx)
         return @static_load_n if @loaded_by.nil?
 

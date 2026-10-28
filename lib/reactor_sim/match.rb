@@ -15,7 +15,7 @@ module ReactorSim
     # connection is declared rather than inferred — an operation may have several loads and only
     # one of them is sold.
     #
-    #   Coupling.new(from: [ :engine, :load ], to: [ :mine, :line_shaft ], ratio: 0.78)
+    #   Coupling.new(from: [ :engine, :load ], to: [ :consumer, :line_shaft ], ratio: 0.78)
     #
     # `ratio` is the `from` end's speed per unit of the `to` end's: the gearing. `stiffness` is the
     # rope's conductance in the `to` end's frame, and defaults to what that end declares.
@@ -200,7 +200,7 @@ module ReactorSim
     #
     # Scaling the transfer to compensate would mint energy. Two operations joined by a rope are
     # in the same world at the same time, so they run on the same clock — which means a coupled
-    # mine runs at its engine's rate, whatever `tick.md` says a lone mine might prefer.
+    # consumer runs at its engine's rate, whatever `tick.md` says it might prefer alone.
     def validate_couplings!
       @couplings.each do |coupling|
         source = operation(coupling.from_operation)
@@ -235,7 +235,7 @@ module ReactorSim
 
     # **A rope stiffer than an end's `I/dt` rings.** Each end sees the other's speed a tick late,
     # so the gap between them scales by `(I/dt − k)/(I/dt + k)` per tick and changes sign past
-    # `k = I/dt`. Measured on an engine roped to a pit: no reversal at the line shaft's `I/dt`, a
+    # `k = I/dt`. Measured on an engine roped to a consumer: no reversal at the line shaft's `I/dt`, a
     # reversal every other tick at twice it. Checked against each end's own inertia, which is
     # conservative for an end drive-linked to a heavier wheel.
     def validate_rope_stiffness!(coupling, rope, source, sink)

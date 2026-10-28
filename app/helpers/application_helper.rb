@@ -24,7 +24,11 @@ module ApplicationHelper
     other: { label: "Other", blurb: "", accent: "text-slate-300", rule: "border-slate-800" }
   }.freeze
 
-  def slot_group(group) = SLOT_GROUPS.fetch(group, SLOT_GROUPS.fetch(:other))
+  # A group with no entry of its own — a pit's faces, each of its machines — is headed by its own
+  # name rather than lumped under "Other".
+  def slot_group(group)
+    SLOT_GROUPS.fetch(group) { SLOT_GROUPS.fetch(:other).merge(label: group.to_s.tr("_", " ").capitalize) }
+  end
 
   # Part stats are a display hash and nothing in the simulation reads them, so they can be
   # anything a part author found worth saying. Render them without pretending to know more.

@@ -17,7 +17,7 @@ module ReactorSim
   #     water  997 × 4181  = 4 168 457          — three thousand times the air
   #
   # **Ambient exposure reads the gas phase only.** You stand *beside* water, not in it,
-  # and a sump at the pit bottom must not cook everybody standing near it. Liquids and melts
+  # and hot water standing in a room must not cook everybody standing near it. Liquids and melts
   # reach people as a splash instead, which is an event rather than a room.
   #
   # Burns differ from suffocation in one way that matters: **they do not drain.** Walking out of

@@ -58,7 +58,7 @@ module MobileRig
       drive_links: fragment.drive_links, control_points: fragment.control_points + drivers,
       diagnostics: shovels.map { |shovel| me.board(shovel, place: where) } +
                    trains.keys.map { |loco| me.train_board(loco, place: footplate(loco)) },
-      places: trains.empty? ? [ ReactorSim::Place.new(id: PLACE, air: :atmosphere, nodes: fragment.nodes.map(&:id)) ] : track_places(fragment, trains),
+      places: trains.empty? ? [ ReactorSim::Place.new(id: PLACE, air: :atmosphere, exposure: 1.0, nodes: fragment.nodes.map(&:id)) ] : track_places(fragment, trains),
       minions: engines.flat_map { |engine| crew(engine, where) } +
                shovels.flat_map { |shovel| crew(shovel, where) + gang(shovel, where) } +
                trains.keys.flat_map { |loco| crew(loco, footplate(loco)) + dumpmen(loco) }
@@ -77,9 +77,9 @@ module MobileRig
     pit = free - aboard.values.flatten
     fragment.places +
       aboard.map { |loco, ids| ReactorSim::Place.new(id: footplate(loco), nodes: ids) } +
-      [ ReactorSim::Place.new(id: :pit, label: "Pit", air: :atmosphere, nodes: pit),
-        ReactorSim::Place.new(id: :haul_road, label: "Haul Road", open_air: true),
-        ReactorSim::Place.new(id: :dump, label: "Dump", open_air: true, nodes: [ DUMP ]) ]
+      [ ReactorSim::Place.new(id: :pit, label: "Pit", air: :atmosphere, exposure: 1.0, nodes: pit),
+        ReactorSim::Place.new(id: :haul_road, label: "Haul Road", open_air: true, exposure: 1.0),
+        ReactorSim::Place.new(id: :dump, label: "Dump", open_air: true, exposure: 1.0, nodes: [ DUMP ]) ]
   end
 
   def assembly_for(engines, shovels, trains, loadout, where)
@@ -178,44 +178,18 @@ module MobileRig
 
   # --- at work ---------------------------------------------------------------------------
 
-  # **A vertical-boiler engine as it was observed at work**: raised, then run ten minutes with its
-  # driver asked for 60 and the load at 60 — 81 kW from an 890 kW fire, the drum at 8 atm on its
-  # dead-weight valve, the shaft at 34 rad/s, the fire burning what the fireman feeds it. The
-  # advance shift raised her steam, so this is how every engine starts; read off a running engine,
-  # so the state is one the engine reaches.
-  AT_WORK = {
-    firebox: { kelvin: 1_033.3, air: 0.172, ash: 0.0007, coal: 0.044, flue_gas: 0.247, alight_kg: 0.0203 },
-    boiler: { kelvin: 443.6, water: 493.3, steam: 2.79 },
-    injector: { kelvin: 355.7, steam: 0.10, water: 0.0001 },
-    steam_chest: { kelvin: 430.8, steam: 0.447, water: 0.005 },
-    cylinder: { kelvin: 291.6, steam: 0.039, water: 0.0091 },
-    walls: { boiler_tubes: 530.3, flue: 422.4, ash_pan: 336.8, injector_steam: 354.9, throttle: 443.5,
-             piston_rings: 359.4, relief: 423.2 },
-    flywheel_l: 9_962.1, load_l: 620.8, throttle: 60.0, feed: 0.0
-  }.freeze
+  # The test load as it was observed beside an engine at work (`MobileEngine::AT_WORK`).
+  LOAD_AT_WORK_L = 620.8
 
-  # `op` with `engine` at work, asked for `demand`.
+  # `op` with `engine` at work, asked for `demand` — the library's own start
+  # (`MobileEngine.raised`), and the rig's test load turning with it where there is one.
   def at_work(op, engine = :engine, demand: 60.0)
+    op = ReactorSim::Operations::MobileEngine.raised(op, [ engine ], demand: demand)
     n = names(engine)
-    w = AT_WORK
-    holder = ->(role, figures) { body(op, n.(role), figures.fetch(:kelvin), **figures.except(:kelvin)) }
-    fire = w.fetch(:firebox)
-    nodes = {
-      n.(:firebox) => body(op, n.(:firebox), fire.fetch(:kelvin), **fire.slice(:air, :ash, :coal, :flue_gas))
-                        .merge(ignition: { coal_combustion: { kg: fire.fetch(:alight_kg) } }),
-      n.(:boiler) => holder.(:boiler, w.fetch(:boiler)),
-      n.(:injector) => holder.(:injector, w.fetch(:injector)),
-      n.(:steam_chest) => holder.(:steam_chest, w.fetch(:steam_chest)),
-      n.(:cylinder) => holder.(:cylinder, w.fetch(:cylinder)),
-      n.(:flywheel) => { angular_momentum: w.fetch(:flywheel_l) }
-    }
-    nodes[n.(:load)] = { angular_momentum: w.fetch(:load_l) } if op.nodes.key?(n.(:load))
-    w.fetch(:walls).each { |role, kelvin| nodes.merge!(wall(op, n.(role), kelvin)) }
-    lever = ->(value) { { target: value, actual: value } }
-    controls = { n.(:driving) => lever.(demand), n.(:throttle_open) => lever.(w.fetch(:throttle)),
-                 n.(:feed) => lever.(w.fetch(:feed)) }
-    controls[n.(:load_demand)] = lever.(60.0) if op.control_points.key?(n.(:load_demand))
-    seed(op, nodes: nodes, controls: controls)
+    return op unless op.nodes.key?(n.(:load))
+
+    seed(op, nodes: { n.(:load) => { angular_momentum: LOAD_AT_WORK_L } },
+             controls: { n.(:load_demand) => { target: 60.0, actual: 60.0 } })
   end
 
   # --- readings -------------------------------------------------------------------------

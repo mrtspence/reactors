@@ -6,7 +6,7 @@ module ReactorSim
   #
   # Shaped like `Scorch`: a pure module over a state hash it does not own, drawing no entropy. The
   # quantity is the air **as it feels** — its temperature with the wind on it, as far as the place
-  # is open to the wind — because that is what takes the warmth out of a man at bank in a gale.
+  # is open to the wind — because that is what takes the warmth out of somebody outside in a gale.
   #
   # Cold grinds resilience below a tolerance and costs nothing above it, which is nearly every
   # match. Heat is not a burn — outdoor summer air is nowhere near `Scorch`'s threshold — it is

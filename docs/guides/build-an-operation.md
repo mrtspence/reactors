@@ -128,6 +128,20 @@ post is `MobileEngine.locomotive_driver(assembly, loco, place:, track:)` and its
 `MobileEngine.train_board`. `place:` is its footplate: the host puts the engine's nodes there, and the
 train carries it. See `spec/support/mobile_rig.rb` for the smallest host of all three.
 
+**A machine can be an upgrade.** `upgrade: "Stripping Shovel"` on `shovel_slots` or
+`locomotive_slots` makes its principal slot — the dipper, the train — optional and empty to start,
+and every other slot of the machine `needs:` it (`Slot#needs`): built only while it is fitted, not
+required while it is not, a group of its own on the outfitting screen. **`needs_at_least:`** asks
+more of the slot it needs — a stat its part must reach — so a washhouse of four bays builds a
+fourth bay and one of three does not (`OpenPit.washing_slots`). `shovel_routes` and
+`locomotive_routes` take the same `upgrade:` so their reach is checked only when the machine is
+there, and the host builds the driver's post and the board only for what is fitted. **A host wires
+its faces for what is fitted**, read off the loadout before building the slots (`OpenPit.assembly_for`
+is the worked example): with a train, the shovel dumps through the train's loading landing and casts
+onto the muck (`cast_to:`) while none stands (`cars:`), as its casting lever says. **A fresh build
+starts its engines at work** with `MobileEngine.raised(op, engines)`, the observed figures in
+`MobileEngine::AT_WORK`; a restore carries its own state and is left alone.
+
 ### 4. What can the player touch?
 
 ```ruby
@@ -180,16 +194,21 @@ command (`assign_minion`, absolute and idempotent like `set_control`).
 
 Things to know:
 
-- **Nobody starts at a working station, and it has to stay that way.** A machine that lets an
-  effort station be a starting post hands the player a shift already at the face for free — which
-  for a mine is most of the operation given away. Deploying the shift is the opening move.
+- **Nobody starts at a working station — except the crew of a machine that was already running
+  when the match began.** A shift already at the face for free is most of a mine given away, so
+  deploying the shift is the opening move. But a mobile engine's steam was raised by the advance
+  shift, and its driver and fireman are at their posts because the engine is at work: a part
+  declaring `stats: { advance_posts: [roles] }` deals a seat to each of those posts, named as its
+  slot names them (`Assembly#advance_shifts`). Use it for exactly that case and no other.
 - **A seat may start in a different PLACE, which is a different statement.** The mine's shift
   parts start the last seats in the district and at the pit bottom with **no station at all**:
   they are somewhere useful and still posted to nothing, so the opening move is still the
   player's. Without them a spatial operation's first five minutes are a walk. Build it the same
   way — a fitted part declaring `stats: { advance_seats:, advance_place: }`, read by
-  `assembly.advance_shifts` in slot order and dealt onto `place:` on the `Minion` at build, never
-  by the roster. Being a part is what lets a player buy a bigger head start.
+  `assembly.advance_shifts` in slot order and dealt onto `place:` on the `Minion` at build
+  (`Crew.minions`), never by the roster. Being a part is what lets a player buy a bigger head
+  start. A part fitted in several slots — a hut that may stand at either of two benches — leaves
+  out `advance_place:` and takes its slot's `spec[:names].place`.
 - **A station has room for so many, and their work sums.** `capacity:` on a `ControlPoint` is how
   many people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
   posting nobody can walk to. **A lever defaults to one**; a part with room for a gang says so —

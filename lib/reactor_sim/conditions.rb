@@ -68,7 +68,7 @@ module ReactorSim
     end
 
     # **The sun.** A match is an hour of a real day, starting at a drawn hour: most are day shifts,
-    # some cross dusk or dawn, and a few are night shifts dark at bank throughout.
+    # some cross dusk or dawn, and a few are night shifts dark outside throughout.
     module Daylight
       module_function
 

@@ -310,7 +310,7 @@ RSpec.describe ReactorSim::Nodes::Hoist do
     # is fitted.
     def near_its_end(op, minions: {}, cage: nil)
       at = { position_m: 30.0 }.merge(cage.to_h)
-      holds_kg = drum(op).cage_kg + rope(op).hanging_kg(at.fetch(:position_m)) + (2 * PitRig::COLLIER.fetch(:mass_kg))
+      holds_kg = drum(op).conveyance_kg + rope(op).hanging_kg(at.fetch(:position_m)) + (2 * PitRig::COLLIER.fetch(:mass_kg))
       integrity = holds_kg * ReactorSim::Units::GRAVITY_M_PER_S2 / rope(op).breaking_n
       worn = integrity * rope_state(op).fetch(:initial_durability)
       seed(op, nodes: { cage_drive: at, winding_rope: { durability: worn } }, minions: minions)

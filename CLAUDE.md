@@ -116,6 +116,23 @@ So: before you call a piece of work done, check this table and update what your 
 - **`docs/design_sketches/` is the exception** and may stay verbose — it is the home for
   reasoning, alternatives and back-and-forth. Link to it instead of reproducing it.
 
+### Shared code speaks no operation's language
+
+**Everything outside an operation's own folder is shared** — the tick, the graph, the stock nodes,
+the concerns, physics, diagnostics, people, assembly — **and its names are generic.** Identifiers,
+state keys, config keys and comments say *room*, *post*, *conveyance*, *carrier*, *way*, *traffic*,
+*vessel*; never one operation's *district*, *cage*, *hewer*, *fireman*, *pit bottom*, *train* or
+*footplate*. A stock node may be named for the generic thing it is (`Boiler`, `Hoist`, `Rope`), and
+that is not an operation's word. **Content is named for what it is** — a resource, an item of kit, a
+ticket (`coal`, the Pit Helmet, the Shotfirer's Ticket) — wherever its catalogue lives.
+
+- **Describe the mechanism, not the case that motivated it.** The operation's example belongs in its
+  own `operations/<name>/` code or its design sketch.
+- **Inside `operations/<name>/`, specific names are right.** The colliery's banksman is the
+  banksman.
+- **Before finishing a change to a shared file, grep it for operation words.** A shared file that
+  knows one operation's vocabulary is the first step to a shared file that knows its behaviour.
+
 ### A seam left for later must say so, in the code, by name
 
 The one forward-looking exception to "no dialectic". **Anything built ahead of its first

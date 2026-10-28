@@ -2,8 +2,8 @@
 
 module ReactorSim
   module Nodes
-    # **Where the operation's output goes.** Screens at the pit bank, a gas main, a pipeline
-    # outlet, a wagon on the weighbridge.
+    # **Where the operation's output goes.** Screens, a gas main, a pipeline outlet, a wagon on the
+    # weighbridge.
     #
     # Shaped like `Atmosphere` — a bottomless sink that resets to empty each tick and books what
     # crossed from the grant rather than from a before/after delta — and separate from it for one

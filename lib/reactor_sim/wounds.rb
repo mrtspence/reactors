@@ -14,8 +14,11 @@ module ReactorSim
     CONTINUOUS = %i[heat cold breath].freeze
 
     # What did it, as far as protection goes: a helmet against `rockfall`, a belt against `fall`.
-    # Never a wound.
-    CAUSES = %i[rockfall fall afterdamp].freeze
+    # Never a wound. `drowning` is the water's, on the asphyxia pathway: its resistance keeps
+    # somebody afloat (`Breath.treading`).
+    # TODO: nothing carries `drowning_resistance` yet — first callers a cork jacket, and a race at
+    # home in the water.
+    CAUSES = %i[rockfall fall afterdamp drowning].freeze
 
     TIERS = %i[minor significant severe mortal].freeze
 
@@ -114,6 +117,15 @@ module ReactorSim
           mark -= entry.fetch(:weight)
         end
         entries.length - 1
+      end
+
+      # **The place a named variant holds in its tier**, which is the same place in every tier.
+      def place_of(kind, id)
+        @variants.fetch(kind).each_value do |entries|
+          index = entries.index { |entry| entry.fetch(:id) == id.to_sym }
+          return index if index
+        end
+        raise Error, "wounds: #{kind} has no variant #{id}"
       end
 
       private

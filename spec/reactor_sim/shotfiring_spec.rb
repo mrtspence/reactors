@@ -130,8 +130,8 @@ RSpec.describe "shotfiring" do
       live = hole(op).merge(live: 1)
 
       expect(peril(op, :struck_live_charge).stations).to eq(%i[hewing])
-      expect(node.activity(live.merge(hewing: 1.0), :live, 0.25)).to eq(1.0)
-      expect(node.activity(live.merge(hewing: 0.0), :live, 0.25)).to eq(0.0)
+      expect(node.activity(live.merge(struck: 1.0), :live, 0.25)).to eq(1.0)
+      expect(node.activity(live.merge(struck: 0.0), :live, 0.25)).to eq(0.0)
     end
 
     it "struck, goes off: the charge is spent and the room has a flame in it for a tick" do

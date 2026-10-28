@@ -29,9 +29,13 @@ module ReactorSim
       # one part; what is tiered around it — the safety valve, what reads the water and the pressure,
       # a fusible plug, the bunker and the tank — are slots of their own. `host:` is what the
       # operation it stands in gives it, by id: a shovel's `bench:`, `car:` and `standpipe:`.
-      def slots(engine, place:, **host)
+      # `needs:` is the slot the engine belongs to, where the machine is an upgrade: every engine
+      # slot is then built only while that one is fitted (`Slot#needs`), and the machine's slots
+      # are a group of their own on the outfitting screen, named for it.
+      def slots(engine, place:, needs: nil, **host)
         spec = { names: names(engine, place: place), host: host.freeze }
-        slot = ->(role, **opts) { Slot.new(id: spec.fetch(:names).(role), spec: spec, group: :engine, **opts) }
+        group = needs ? engine.to_sym : :engine
+        slot = ->(role, **opts) { Slot.new(id: spec.fetch(:names).(role), spec: spec, group: group, needs: needs, **opts) }
 
         [
           slot.(:engine, accepts: :mobile_engine, label: "Engine", required: true, default: :vertical_engine),
@@ -48,16 +52,24 @@ module ReactorSim
       # host's `bench:` into its `car:`, and its tank fills by hose from its `standpipe:`.
       # `dumps_into:` is the `[node, port]` the dipper dumps into, where that is not the car's own
       # inlet — a train's loading landing.
-      def shovel_slots(shovel, place:, bench:, car:, standpipe:, dumps_into: nil)
-        host = { bench: bench, car: car, standpipe: standpipe, dumps_into: dumps_into }.compact
-        engine = slots(shovel, place: place, **host)
+      #
+      # `cast_to:` is the `[node, port]` it casts onto while no train stands at `cars:` — the
+      # train's `{ carrier:, mark_m: }` — if the player lets it (`names.(:casting)`). `upgrade:`
+      # makes the whole shovel optional: its dipper slot, labelled so, empty to start, and every
+      # other slot `needs:` it.
+      def shovel_slots(shovel, place:, bench:, car:, standpipe:, dumps_into: nil, cast_to: nil, cars: nil, upgrade: nil)
+        host = { bench: bench, car: car, standpipe: standpipe, dumps_into: dumps_into, cast_to: cast_to, cars: cars }.compact
+        principal = names(shovel, place: place).(:dipper)
+        engine = slots(shovel, place: place, needs: upgrade && principal, **host)
         spec = engine.first.spec
-        slot = ->(role, **opts) { Slot.new(id: spec.fetch(:names).(role), spec: spec, group: :engine, **opts) }
+        slot = ->(role, **opts) { Slot.new(id: spec.fetch(:names).(role), spec: spec, group: engine.first.group, **opts) }
+        needs = upgrade && principal
 
         engine + [
-          slot.(:dipper, accepts: :shovel_dipper, label: "Dipper", required: true, default: :yard_dipper),
-          slot.(:chain, accepts: :shovel_chain, label: "Hoisting Chain", required: true, default: :iron_chain),
-          slot.(:boom, accepts: :shovel_boom, label: "Boom", required: true, default: :timber_boom)
+          upgrade ? slot.(:dipper, accepts: :shovel_dipper, label: upgrade, default: nil)
+                  : slot.(:dipper, accepts: :shovel_dipper, label: "Dipper", required: true, default: :yard_dipper),
+          slot.(:chain, accepts: :shovel_chain, label: "Hoisting Chain", required: true, default: :iron_chain, needs: needs),
+          slot.(:boom, accepts: :shovel_boom, label: "Boom", required: true, default: :timber_boom, needs: needs)
         ]
       end
 
@@ -70,21 +82,25 @@ module ReactorSim
       end
 
       # The dig reaches the car whatever it goes through on the way.
-      def shovel_routes(shovel, place:, bench:, car:, standpipe:, **)
+      # A shovel that is an `upgrade:` is checked only while it is fitted.
+      def shovel_routes(shovel, place:, bench:, car:, standpipe:, upgrade: nil, **)
         n = names(shovel, place: place)
-        routes(shovel, place: place) +
+        needs = upgrade && n.(:dipper)
+        routes(shovel, place: place, needs: needs) +
           [ { from: bench, to: car, carrying: :solid, as: "#{shovel}: nothing carries the dig from the bench to the car" },
             { from: standpipe, to: n.(:supply), carrying: :liquid, as: "#{shovel}: no hose from the standpipe" } ]
+            .map { |route| needs ? route.merge(needs: needs) : route }
       end
 
       # What "this engine can run at all" means, as `SteamEngine::ROUTES` does for the stationary one.
-      def routes(engine, place:)
+      def routes(engine, place:, needs: nil)
         n = names(engine, place: place)
         [ { from: n.(:bunker), to: n.(:firebox), carrying: :fuel, as: "#{engine}: no route for coal to the grate" },
           { from: :atmosphere, to: n.(:firebox), carrying: :gas, as: "#{engine}: no route for air to the fire" },
           { from: n.(:firebox), to: :atmosphere, carrying: :gas, as: "#{engine}: the fire cannot breathe out" },
           { from: n.(:supply), to: n.(:boiler), carrying: :liquid, as: "#{engine}: no route for water to the boiler" },
           { from: n.(:boiler), to: n.(:cylinder), carrying: :gas, as: "#{engine}: no route for steam to the cylinder" } ]
+          .map { |route| needs ? route.merge(needs: needs) : route }
       end
 
       # **The driver's post**, built once the engine is fitted, because what he reads the water and
@@ -119,20 +135,32 @@ module ReactorSim
       # together because a train is weighed and braked as one — and its brake. It runs the host's
       # `track:` (a `Track`), is loaded by the shovel it `serves:` at the loading mark, and is tipped
       # into the host's `dump:` at the dump mark. `place:` is its footplate.
-      def locomotive_slots(loco, place:, track:, serves:, dump:)
-        engine = slots(loco, place: place, track: track, serves: serves.to_sym, dump: dump.to_sym)
+      #
+      # `serves:` is optional: a train at a hand face has no shovel to wreck. `loaded_from:` is the
+      # muck its hand loaders fill it from, and `beside:` who works where it is loaded, at peril of
+      # it. `upgrade:` makes the whole dinky optional, as a shovel's is.
+      def locomotive_slots(loco, place:, track:, dump:, serves: nil, loaded_from: nil, beside: [], upgrade: nil)
+        host = { track: track, serves: serves&.to_sym, dump: dump.to_sym, loaded_from: loaded_from&.to_sym,
+                 beside: Array(beside).map(&:to_sym) }.compact
+        principal = names(loco, place: place).(:train)
+        needs = upgrade && principal
+        engine = slots(loco, place: place, needs: needs, **host)
         spec = engine.first.spec
-        slot = ->(role, **opts) { Slot.new(id: spec.fetch(:names).(role), spec: spec, group: :engine, **opts) }
+        slot = ->(role, **opts) { Slot.new(id: spec.fetch(:names).(role), spec: spec, group: engine.first.group, **opts) }
 
         engine + [
-          slot.(:train, accepts: :locomotive_train, label: "Train", required: true, default: :dinkey_train),
-          slot.(:brake, accepts: :locomotive_brake, label: "Brake", required: true, default: :hand_brake)
+          upgrade ? slot.(:train, accepts: :locomotive_train, label: upgrade, default: nil)
+                  : slot.(:train, accepts: :locomotive_train, label: "Train", required: true, default: :dinkey_train),
+          slot.(:brake, accepts: :locomotive_brake, label: "Brake", required: true, default: :hand_brake, needs: needs)
         ]
       end
 
-      def locomotive_routes(loco, place:, dump:, **)
+      def locomotive_routes(loco, place:, dump:, upgrade: nil, **)
         n = names(loco, place: place)
-        routes(loco, place: place) + [ { from: n.(:cars), to: dump, carrying: :solid, as: "#{loco}: nothing tips the cars" } ]
+        needs = upgrade && n.(:train)
+        (routes(loco, place: place, needs: needs) +
+          [ { from: n.(:cars), to: dump, carrying: :solid, as: "#{loco}: nothing tips the cars" } ])
+          .map { |route| needs ? route.merge(needs: needs) : route }
       end
 
       # **The train's board** (`Train::SIGNALS`), as the shovel's is the dipper's.
@@ -195,34 +223,60 @@ module ReactorSim
             lever.(:reverse_gear, "Reverse Gear", names.(:train), names.place),
             # Tipping the cars and digging out what sticks.
             ControlPoint.new(id: names.(:dumpmen), label: "Dumpmen", node: names.(:tipping), place: dump_place,
-                             capacity: DUMPMEN, effort: { force: 0.6, swing: 0.4 }, exertion: 5.0e-4,
-                             default: 100.0, internal: true)
+                             capacity: DUMPMEN, effort: { force: 0.6, swing: 0.4 }, gated_by: %i[darkvision],
+                             exertion: 5.0e-4, default: 100.0, internal: true)
           ],
           places: [ Place.new(id: names.place, label: "Footplate", carried_by: names.(:train), shares: FOOTPLATE_SHARES,
                               open_air: true, nodes: [ names.(:train), names.(:cars) ]),
                     Place.new(id: loading_place, nodes: [ names.(:loading) ]),
                     Place.new(id: dump_place, nodes: [ names.(:tipping) ]) ]
-        )
+        ).merge(host[:loaded_from] ? hand_loading(names, host.fetch(:loaded_from), track, loading_place) : Fragment.empty)
       end
 
       # Two at the dump, tipping a train in about two minutes.
       DUMPMEN = 2
       TIPPING_KG_PER_S = 70.0
 
+      # **Loaders shovelling the muck at the face into a standing train**, four to a train, each
+      # about a navvy's loose-earth rate brought into play — far slower than a shovel, far quicker
+      # than barrows up a ramp.
+      LOADERS = 4
+      LOADING_KG_PER_S = 1.2
+
+      def hand_loading(names, muck, track, loading_place)
+        Fragment.new(
+          nodes: [ Nodes::Landing.new(id: names.(:hand_loading), label: "Hand Loading", accepts: [ :solid ],
+                                      carrier: names.(:train), mark_m: track.mark(:loading), max_kg_per_s: LOADING_KG_PER_S,
+                                      heat_capacity: 1.0e3, control_id: names.(:loaders), worked: true, crew: LOADERS) ],
+          links: [ Link.new(from: [ muck, :out ], to: [ names.(:hand_loading), :inlet ]),
+                   Link.new(from: [ names.(:hand_loading), :outlet ], to: [ names.(:cars), :in ]) ],
+          places: [ Place.new(id: loading_place, nodes: [ names.(:hand_loading) ]) ],
+          control_points: [
+            ControlPoint.new(id: names.(:loaders), label: "Loaders", node: names.(:hand_loading), place: loading_place,
+                             capacity: LOADERS, effort: { force: 0.6, swing: 0.4 }, gated_by: %i[darkvision],
+                             exertion: 8.0e-4, default: 100.0)
+          ]
+        )
+      end
+
       # An open footplate: half of what happens on it reaches where it stands, and back.
       FOOTPLATE_SHARES = 0.5
 
+      # Who is at peril of it where it is loaded: the shovel's pitmen if it serves one, whoever the
+      # host says works there, and its own loaders. A crash wrecks the shovel it serves.
       def train(names, host, figures, loading_place, dump_place)
-        shovel = MobileEngine.names(host.fetch(:serves), place: loading_place)
+        shovel = host[:serves] && MobileEngine.names(host.fetch(:serves), place: loading_place)
+        beside = (shovel ? [ shovel.(:pitmen) ] : []) + host.fetch(:beside, []) +
+                 (host[:loaded_from] ? [ names.(:loaders) ] : [])
         Train.new(
           id: names.(:train), label: "Train", track: host.fetch(:track), cars: names.(:cars), brake: names.(:brake),
           loader: names.(:loading), tipper: names.(:tipping), demand_control: names.(:driving),
           engine: { boiler: names.(:boiler), supply: names.(:supply), firebox: names.(:firebox), relief: names.(:relief),
                     working_pa: VERTICAL.dig(:boiler, :working_pressure_pa) },
-          perils: [ struck_by_train(:pit, [ shovel.(:pitmen) ], loading_place),
-                    struck_by_train(:dump, [ names.(:dumpmen) ], dump_place) ],
+          perils: [ struck_by_train(loading_place, beside, loading_place),
+                    struck_by_train(dump_place, [ names.(:dumpmen) ], dump_place) ],
           endangers: runaways(names, loading_place, dump_place),
-          damages: { crashed: { shovel.(:boom) => 1.0, shovel.(:dipper) => 1.0 } },
+          damages: shovel ? { crashed: { shovel.(:boom) => 1.0, shovel.(:dipper) => 1.0 } } : {},
           **figures.slice(:tare_kg, :load_kg, :radius_m, :rated_m_s)
         )
       end
@@ -296,41 +350,48 @@ module ReactorSim
           ports: [ Port.new(id: :in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: 200.0),
                    Port.new(id: :out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: 200.0) ]
         )
-        moving_up = Nodes::Conduit.new(id: names.(:moving_up), label: "Moving Up", accepts: [ :solid ],
-                                       max_kg_per_s: figures.fetch(:moving_up_kg_per_s), heat_capacity: 1.0e3,
-                                       control_id: names.(:pitmen), worked: true, crew: figures.fetch(:pitmen))
+        moving_up = MovingUp.new(id: names.(:moving_up), label: "Moving Up", accepts: [ :solid ], face: host.fetch(:bench),
+                                 max_kg_per_s: figures.fetch(:moving_up_kg_per_s), heat_capacity: 1.0e3,
+                                 control_id: names.(:pitmen), worked: true, crew: figures.fetch(:pitmen))
         hose = Nodes::Conduit.new(id: names.(:hose), label: "Hose", accepts: [ :liquid ], max_kg_per_s: 2.0,
                                   heat_capacity: 2.0e2, ambient_conductance: 0.0, control_id: names.(:hose_open))
         Fragment.new(
-          nodes: [ reach, moving_up, dipper(names, figures), hose ],
+          nodes: [ reach, moving_up, dipper(names, host, figures), hose ],
           links: [
             Link.new(from: [ host.fetch(:bench), :out ], to: [ names.(:moving_up), :inlet ]),
             Link.new(from: [ names.(:moving_up), :outlet ], to: [ names.(:reach), :in ]),
             Link.new(from: [ names.(:reach), :out ], to: [ names.(:dipper), :in ]),
             Link.new(from: [ names.(:dipper), :out ], to: host.fetch(:dumps_into) { [ host.fetch(:car), :in ] }),
+            *([ Link.new(from: [ names.(:dipper), :cast ], to: host.fetch(:cast_to)) ] if host[:cast_to]),
             Link.new(from: [ host.fetch(:standpipe), :out ], to: [ names.(:hose), :inlet ]),
             Link.new(from: [ names.(:hose), :outlet ], to: [ names.(:supply), :in ])
           ],
           control_points: [
             # Bringing the face to the dipper: shifting the track, blocking the jacks, clearing spill —
-            # and splicing a parted chain.
+            # and splicing a parted chain. Work out of doors, so by the light there is.
             ControlPoint.new(id: names.(:pitmen), label: "Pitmen", node: names.(:moving_up), place: names.place,
-                             capacity: figures.fetch(:pitmen), effort: { force: 0.6, swing: 0.4 },
+                             capacity: figures.fetch(:pitmen), effort: { force: 0.6, swing: 0.4 }, gated_by: %i[darkvision],
                              exertion: 6.0e-4, **held.(100.0)),
             # Setting the depth of cut and tripping the door over the car.
             ControlPoint.new(id: names.(:craneman), label: "Craneman", node: names.(:dipper), place: names.place,
-                             effort: { dexterity: 0.6, intelligence: 0.4 }, exertion: 3.0e-4, **held.(100.0)),
+                             effort: { dexterity: 0.6, intelligence: 0.4 }, gated_by: %i[darkvision], exertion: 3.0e-4,
+                             **held.(100.0)),
             ControlPoint.new(id: names.(:hose_open), label: "Hose", node: names.(:hose), place: names.place,
-                             **held.(0.0))
+                             **held.(0.0)),
+            # **How much the shovel is left to itself**: with no train standing, cast what it digs
+            # onto the muck, or wait for one. The player's.
+            *([ ControlPoint.new(id: names.(:casting), label: "Cast While No Train", node: names.(:dipper),
+                                 place: names.place, default: 100.0) ] if host[:cast_to])
           ]
         )
       end
 
-      def dipper(names, figures)
+      def dipper(names, host, figures)
         Dipper.new(
           id: names.(:dipper), label: "Dipper", driven_by: names.(:flywheel), crane_control: names.(:craneman),
           demand_control: names.(:driving), chain: names.(:chain), boom: names.(:boom),
-          reach: names.(:reach),
+          reach: names.(:reach), face: host.fetch(:bench),
+          cast: host[:cast_to] && host.fetch(:cars).merge(control: names.(:casting)),
           engine: { boiler: names.(:boiler), supply: names.(:supply), firebox: names.(:firebox), relief: names.(:relief),
                     working_pa: VERTICAL.dig(:boiler, :working_pressure_pa) },
           perils: [ struck_by_dipper(names) ],

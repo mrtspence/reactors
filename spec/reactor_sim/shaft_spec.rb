@@ -129,7 +129,7 @@ RSpec.describe "the shaft" do
                                       cage_brake_release: { target: 100.0, actual: 100.0 } })
       run!(op, 8)
 
-      expect(op.nodes.fetch(:cage_drive).cage_m(drum(op))).to eq(25.0)
+      expect(op.nodes.fetch(:cage_drive).conveyance_m(drum(op))).to eq(25.0)
       expect(drum(op)[:slack_m]).to be > 2.0
       expect(op.project.gauges.fetch(:slack_rope)).not_to eq("taut")
     end

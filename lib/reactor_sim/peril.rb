@@ -4,8 +4,8 @@ module ReactorSim
   # **A way a place can hurt the person standing in it**, as opposed to a way a machine can.
   #
   # `failure_hazards` answers "a part broke, who was near it". A peril answers the other half:
-  # nothing broke, the haulage road is simply a place where tubs go past and sooner or later one
-  # of them catches somebody. Declared on the node that embodies the danger, keyed by `places:`,
+  # nothing broke, a road is simply a place where traffic goes past and sooner or later some of it
+  # catches somebody. Declared on the node that embodies the danger, keyed by `places:`,
   # `stations:` or `riders:` exactly as `failure_hazards` is, so the two resolve through one
   # mechanism.
   #
@@ -20,20 +20,20 @@ module ReactorSim
   #
   # **A peril may hurt the person, the machine, or both.** A positive `severity` is a Danger
   # Check; a `mishap:` — `{ node:, kind:, share: }` — is something the person does to a part, which
-  # that part suffers on the next tick (`Concerns::Wearing#suffer`). The clumsy banksman letting a
-  # tub into the shaft is unhurt; the shaft is not.
+  # that part suffers on the next tick (`Concerns::Wearing#suffer`). Somebody clumsy who lets a load
+  # loose into the machinery may be unhurt; the machinery is not.
   #
   # **`judged:` splits one event between the hand who reads it rightly and the one who does not.**
   # `:rightly` takes `1 − m` of the rate and `:wrongly` takes `m`, where `m` is
   # `Minion#misjudges` — so the pair happens as often as one peril would, and who is posted decides
-  # which it is. A misfire is the case: recognised, it is dug out; taken for a spent shot, it is
-  # left live in the face.
+  # which it is. A misfire is the case (`Nodes::ShotHole`): recognised, it is dug out; taken for a
+  # spent shot, it is left live.
   #
   # **`underfoot:` is what the ground does to it**: `{ wet: 1.0, icy: 8.0 }` makes a slip twice as
   # likely on a wet deck and nine times on an icy one, read from what the room offers
   # (`Tick#under_the_sky`), so it bites as far as the place is open to the weather.
   #
-  # **`opportunity: true` is somewhere a person can be pushed** — off the deck, in front of a tub —
+  # **`opportunity: true` is somewhere a person can be pushed** — off an edge, in front of traffic —
   # by somebody who hates them enough (`Animosity`).
   #
   # **`wounds:` is what it does to a body**, as shares of its severity (`Wounds.shares!`), and
@@ -87,20 +87,21 @@ module ReactorSim
     end
 
     # **A tag can select a kind of accident rather than only making one likelier.** A hulking
-    # minion gets wedged in a narrow roadway where nobody else could; a small one is missed by
-    # a driver and struck, which cannot happen to the ogre. Race and kit then matter in both
-    # directions at a post rather than ranking on one scale.
+    # minion gets wedged in a narrow way where nobody else could; a small one is missed by
+    # whoever is driving and struck, which cannot happen to the ogre. Race and kit then matter in
+    # both directions at a post rather than ranking on one scale.
     def applies_to?(minion) = weight_for(minion).positive?
 
     # **The gating tag's VALUE scales the accident, not merely its presence.** An ogre at
-    # `hulking: 0.5` is half-way to filling the roadway, so he is wedged half as readily as
-    # something that fills it completely — and still struck by tubs half as often as a kobold,
-    # because he is only half as hard to miss. Presence-only gating made every large thing
-    # identically large: a hob and a giant wedged at the same rate, and anything with a trace of
-    # the tag became wholly immune to the peril on the other side of it.
+    # `hulking: 0.5` is half-way to filling the way, so he is wedged half as readily as something
+    # that fills it completely — and still struck half as often as a kobold, because he is only
+    # half as hard to miss. Presence-only gating made every large thing identically large: a hob
+    # and a giant wedged at the same rate, and anything with a trace of the tag became wholly
+    # immune to the peril on the other side of it.
     #
-    # So the two road perils are **complementary rather than exclusive**, and only the extremes
-    # are a clean either/or. `severity` is therefore the figure for a *fully* tagged creature.
+    # So a `when_tagged:` and an `unless_tagged:` pair is **complementary rather than exclusive**,
+    # and only the extremes are a clean either/or. `severity` is therefore the figure for a *fully*
+    # tagged creature.
     #
     # With `state`, a `judged:` peril also takes its share of the judgement; without it — asking
     # only whether a peril can reach this person at all — it does not.
@@ -118,7 +119,7 @@ module ReactorSim
       judged == :wrongly ? wrong : 1.0 - wrong
     end
 
-    # `riders:` names what carries somebody through a shaft — a cage's drum, a man engine's rods —
+    # `riders:` names what carries somebody along a ridden way — a hoist's drum, a ridden load —
     # and reaches whoever it is carrying, wherever they are.
     def reaches?(station, place, carried = nil)
       return true if carried && riders.include?(carried)
@@ -133,7 +134,7 @@ module ReactorSim
   #
   # **`Concerns::Wearing` for people a second time, and this half is renewable.** A part's
   # durability only ever goes down; a person's margin comes back. That is the whole difference
-  # and it is what makes a bad hour on the haulage road a reason to move somebody rather than a
+  # and it is what makes a bad hour at a dangerous post a reason to move somebody rather than a
   # sentence passed on them.
   #
   # Shaped like `Breath`, `Scorch` and `Fatigue`: pure, over a state hash it does not own, and
@@ -144,27 +145,26 @@ module ReactorSim
   module Blunder
     # **Wide on purpose, and the opposite of `RESILIENCE_SPREAD`.** That one is narrow because
     # it modifies a threshold the player is meant to reason about. This one's entire job is to
-    # stop them ever being *sure*: without a wide spread they learn that eight minutes on the
-    # haulage road is safe, and then farm it — unsuited workers doing a metered amount of
+    # stop them ever being *sure*: without a wide spread they learn that eight minutes at a
+    # dangerous post is safe, and then farm it — unsuited workers doing a metered amount of
     # dangerous work at no real risk. The variance is what keeps a risk a risk.
     SPREAD = (0.35..2.6)
 
     # Margin spent per second by a peril of severity 1.0 running flat out, on a fit,
     # unremarkable worker.
     #
-    # **Calibrated at the duty a working pit actually reaches, not at `activity` 1.0.** A road
-    # rated for the whole mine runs at about a seventh of its rating with one hewer on the
-    # face, so a figure chosen against flat-out traffic is seven times weaker than it reads and
-    # the road quietly stops hurting anybody. Against the haulage road's two perils at that
-    # duty and a middling margin of 1.5: an unremarkable hand has most of an hour, a clumsy
-    # green one is in trouble inside a quarter of one, and a practised hand with pit sense is
-    # good for the better part of two. Running more hewers loads the road and moves all three
-    # figures down together, which is the point.
+    # **Calibrated at the duty a working operation actually reaches, not at `activity` 1.0.** A
+    # road rated for a whole operation runs at a fraction of its rating with a small crew on it,
+    # so a figure chosen against flat-out traffic is that many times weaker than it reads and the
+    # road quietly stops hurting anybody. Against a busy road's two perils at a working duty and a
+    # middling margin of 1.5: an unremarkable hand has most of an hour, a clumsy green one is in
+    # trouble inside a quarter of one, and a practised hand with a sense for danger is good for
+    # the better part of two. Working the road harder moves all three figures down together,
+    # which is the point.
     #
-    # Those are per *person*, and the two-shaft pit has six of them underground — three posted
-    # and the three the advance shift already sent down. **What the player sees is therefore
-    # six times as often**: an unremarkable crew meets something every few minutes and is worn
-    # through in well under an hour. Read the shift figure, not the man's.
+    # Those are per *person*. **What the player sees is as many times as often as there are people
+    # exposed**: a crew of six meets something every few minutes and is worn through in well under
+    # an hour. Read the shift's figure, not one person's.
     SPEND_PER_S = 1.23e-3
 
     # And what comes back per second somewhere nothing is trying to hurt you — a full margin in
@@ -237,8 +237,8 @@ module ReactorSim
     MIN_AVOID = 0.1
 
     # How much of a peril actually reaches this person. Everything here already existed and was
-    # pointed at severity; `hazard_sense` in particular belongs mostly here — pit sense is about
-    # not being there, not about absorbing it better.
+    # pointed at severity; `hazard_sense` in particular belongs mostly here — a sense for danger is
+    # about not being there, not about absorbing it better.
     #
     # **`avoid` divides it**, being able to see a thing coming and get clear of it, and
     # distraction adds to the carelessness as well as dulling the wits behind `avoid`. A
@@ -264,8 +264,8 @@ module ReactorSim
     # **Filling up is a rising edge, and the margin is clamped so that it stays one.** Written
     # as a bare `margin >= margin_full` it is also true of somebody who has never spent
     # anything, so every tick at a quiet moment re-rolled the margin back to full and no
-    # exposure ever accumulated: the whole mechanic was a clock that reset itself. It showed up
-    # as a haulage road nobody could be hurt on, with no failing assertion anywhere.
+    # exposure ever accumulated: the whole mechanic was a clock that reset itself, and a road
+    # nobody could be hurt on, with no failing assertion anywhere.
     #
     # `which` is this tick's `peril:` fate, used only if the margin crosses here.
     # `ambient:` is the light of the room they are in, which their judgement reads.
@@ -283,10 +283,10 @@ module ReactorSim
     end
 
     # **Recovery belongs to being somewhere safe, not to a quiet moment somewhere dangerous.**
-    # Traffic is bursty, so a lull between tubs is most of the ticks on a working road; mending
-    # through those hands back six times what the road takes and the haulage becomes a corridor
-    # nobody can be hurt on. A man stood in the road while nothing is coming has not recovered
-    # anything — he is still in the road.
+    # Traffic is bursty, so a lull in it is most of the ticks on a working road; mending through
+    # those hands back several times what the road takes and the road becomes a corridor nobody can
+    # be hurt on. Somebody stood in the road while nothing is coming has not recovered anything —
+    # they are still in the road.
     def endangered?(reaching, minion) = reaching.any? { |peril, _| peril.applies_to?(minion) }
 
     # **The ceiling on what any safety equipment is worth.** Guarding is no use whatever to

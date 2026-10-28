@@ -7,3 +7,20 @@ overburden:
   tags: [solid]
   specific_heat_j_per_kg_k: 900
   density_kg_per_m3: 1800
+
+# **Wash ore** is these two together, as dug: lumps of brown iron ore through a body of clay,
+# about a quarter ore by mass. Washing is what parts them — by tag: a washer's clean outlet takes
+# `ore`, its slurry outlet `gangue` and the water.
+#
+# **Limonite** — brown hematite, hydrated iron oxide, in lumps and gravel. Broken, about 2.6 t/m³.
+limonite:
+  tags: [solid, ore]
+  specific_heat_j_per_kg_k: 800
+  density_kg_per_m3: 2600
+
+# **Clay** — the gangue the limonite lies in, sticky when wet, and what a washer floats off to the
+# mud dam. Broken, about 1.7 t/m³.
+clay:
+  tags: [solid, gangue]
+  specific_heat_j_per_kg_k: 920
+  density_kg_per_m3: 1700

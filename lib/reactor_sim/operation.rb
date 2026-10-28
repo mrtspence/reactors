@@ -89,7 +89,7 @@ module ReactorSim
     # nothing sane to clamp a station to: unlike a number out of range, a mistyped lever has no
     # nearest valid neighbour.
     # **An unreachable station is refused, not attempted.** Where there is geometry a posting can
-    # be impossible for *this* minion — a narrow crawl they cannot fit through, a ladderway they
+    # be impossible for *this* minion — a narrow crawl they cannot fit through, a ladder they
     # cannot climb — and walking them into a wall for the rest of the match is worse than saying
     # no. Reachability is per-minion because the gates are.
     # **A posting may name a lever or a person.** Sending somebody to a person is a *fetch
@@ -153,7 +153,7 @@ module ReactorSim
 
     # **Counted over `posting`, not `station`.** Two people sent to a one-man hole must be
     # refused when the order is given, not discovered on arrival minutes later — and the second
-    # of them would otherwise walk the length of the district to stand in somebody's lap.
+    # of them would otherwise walk the length of the place to stand in somebody's lap.
     #
     # The minion being posted is excluded, so re-sending somebody to the station they already
     # hold stays the no-op an at-least-once log needs it to be.
@@ -366,8 +366,8 @@ module ReactorSim
           { id: c.id, label: c.label, capacity: c.capacity }
         },
         # **Empty for an operation with no geometry**, which is what makes the panel's "where
-        # are they" line nil-accepting rather than a mine-only feature: the steam engine ships
-        # no places and the client renders nothing.
+        # are they" line nil-accepting: an operation that declares no places gets nothing
+        # rendered.
         places: @layout.places.filter_map { |id|
           place = @layout.place(id)
           { id: id, label: place.label } if place
@@ -465,10 +465,8 @@ module ReactorSim
       # Nodes, levers, instruments and crew share one flat id namespace, because they share
       # one rng table — `build_rngs` keys every stream by component id. A collision hands two
       # components the same stream, which is silent, survives a snapshot, and quietly destroys
-      # the order-independence the per-name streams exist to provide.
-      #
-      # Not hypothetical: the obvious name for a steam engine's fireman is `stoker`, and
-      # `:stoker` is already the node that carries fuel to the firebox.
+      # the order-independence the per-name streams exist to provide. The obvious name for a post
+      # is often the obvious name for the node it works.
       ids = @nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys
       duplicates = ids.tally.select { |_, count| count > 1 }.keys
       raise Error, "duplicate component ids: #{duplicates.join(', ')}" if duplicates.any?
@@ -480,11 +478,9 @@ module ReactorSim
         raise Error, "minion #{minion.id}: no control point #{station}"
       end
 
-      # **An `observer:` names a station, and the station has to exist.** While the seam was
-      # inert this went unchecked and five of the steam engine's gauges named posts that were
-      # never control points — `:fireman`, `:yardhand` — which read as intent and did nothing.
-      # The moment the seam went live they became gauges that could never be manned and so
-      # were permanently offline. A decorative observer is worse than none.
+      # **An `observer:` names a station, and the station has to exist.** A gauge naming a post
+      # that is not a control point can never be manned, and so is permanently offline. A
+      # decorative observer is worse than none.
       @diagnostics.each_value do |diagnostic|
         station = diagnostic.observer
         next if station.nil? || @control_points.key?(station)
@@ -555,7 +551,7 @@ module ReactorSim
     #
     # Streams are derived from the NAME, never from position, which is why adding a crew to an
     # existing operation perturbs no stream that was already there — and therefore changes no
-    # physics. That property is what made it safe to give the steam engine a crew without
+    # physics. That property is what makes it safe to give an operation a crew without
     # re-tuning it.
     # Scoped by operation, except for a node that names a **match-wide** stream — the sky — so
     # that every operation in a match draws the same one.

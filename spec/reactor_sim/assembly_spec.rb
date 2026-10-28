@@ -44,12 +44,14 @@ RSpec.describe ReactorSim::Assembly do
     reg.register(:plain_sink, kind: :sink, provides: %i[sink]) do |_spec|
       Fragment.new(nodes: [ vessel(:sink, []) ])
     end
-    reg.register(:straight_pipe, kind: :pipe, provides: %i[pipe]) do |_spec|
-      Fragment.new(
-        nodes: [ Nodes::Conduit.new(id: :pipe, accepts: [ :liquid ], max_kg_per_s: 1.0) ],
-        links: [ Link.new(from: [ :tank, :out ], to: [ :pipe, :inlet ]),
-                 Link.new(from: [ :pipe, :outlet ], to: [ :sink, :in ]) ]
-      )
+    { straight_pipe: 1, wide_pipe: 2 }.each do |id, bore|
+      reg.register(id, kind: :pipe, provides: %i[pipe], stats: { bore: bore }) do |_spec|
+        Fragment.new(
+          nodes: [ Nodes::Conduit.new(id: :pipe, accepts: [ :liquid ], max_kg_per_s: 1.0) ],
+          links: [ Link.new(from: [ :tank, :out ], to: [ :pipe, :inlet ]),
+                   Link.new(from: [ :pipe, :outlet ], to: [ :sink, :in ]) ]
+        )
+      end
     end
     # A gas-only pipe, so the route check has something to refuse that is structurally fine.
     reg.register(:gas_pipe, kind: :pipe, provides: %i[pipe]) do |_spec|
@@ -114,6 +116,58 @@ RSpec.describe ReactorSim::Assembly do
     it "reads :none as empty, for a form that cannot send nil" do
       expect(assemble(loadout: { pipe: :none }, pipe_required: false).loadout.fetch(:pipe))
         .to be_nil
+    end
+  end
+
+  # **A slot that `needs:` another is built only while that one is fitted**: here the sink belongs
+  # to the pipe, as a shovel's boiler belongs to its dipper.
+  describe "a slot that needs another" do
+    def dependent(loadout = {}, routes: [])
+      described_class.new(
+        slots: [ Slot.new(id: :tank, accepts: :tank, required: true, default: :plain_tank),
+                 Slot.new(id: :pipe, accepts: :pipe, default: nil),
+                 Slot.new(id: :sink, accepts: :sink, required: true, default: :plain_sink, needs: :pipe) ],
+        loadout: loadout, registry: registry, routes: routes
+      )
+    end
+
+    def route = { from: :tank, to: :sink, carrying: :liquid, needs: :pipe }
+
+    it "builds nothing and asks for nothing while what it needs is empty" do
+      empty = dependent(routes: [ route ])
+
+      expect(empty.verdict).to be_ok
+      expect(empty.fragment.nodes.map(&:id)).to eq([ :tank ])
+      expect(empty.part(:sink)).to be_nil
+    end
+
+    it "builds on its default once what it needs is fitted, and is required then" do
+      fitted = dependent({ pipe: :straight_pipe }, routes: [ route ])
+      emptied = dependent({ pipe: :straight_pipe, sink: nil })
+
+      expect(fitted.verdict).to be_ok
+      expect(fitted.fragment.nodes.map(&:id)).to contain_exactly(:tank, :pipe, :sink)
+      expect(emptied.verdict.errors.join).to match(/Sink is required/)
+    end
+
+    it "keeps its choice in the loadout while what it needs is away" do
+      expect(dependent({ sink: :plain_sink }).loadout.fetch(:sink)).to be(:plain_sink)
+    end
+
+    # As a washhouse's fourth bay is built only in a washhouse with room for four.
+    it "is built only once what it needs reaches the figure it names" do
+      gated = ->(pipe) {
+        described_class.new(
+          slots: [ Slot.new(id: :tank, accepts: :tank, required: true, default: :plain_tank),
+                   Slot.new(id: :pipe, accepts: :pipe, default: pipe),
+                   Slot.new(id: :sink, accepts: :sink, default: :plain_sink, needs: :pipe, needs_at_least: { bore: 2 }) ],
+          registry: registry
+        )
+      }
+
+      expect(gated.(:straight_pipe).part(:sink)).to be_nil
+      expect(gated.(:wide_pipe).part(:sink)).not_to be_nil
+      expect { Slot.new(id: :s, accepts: :k, needs_at_least: { bore: 2 }) }.to raise_error(ReactorSim::Error, /names none/)
     end
   end
 
@@ -340,7 +394,7 @@ RSpec.describe ReactorSim::Assembly do
         # The shipped machines, and this list grows deliberately — a rig appearing in it is the
         # bug being guarded against, not a new operation.
         expect(ReactorSim::Operations.known - rigs)
-          .to contain_exactly(:steam_engine, :mine),
+          .to contain_exactly(:steam_engine, :mine, :open_pit),
               "an operation registered by a spec is being counted as a machine — pass " \
               "`harness: true` when registering it"
       end

@@ -2,9 +2,9 @@
 
 module ReactorSim
   # **What a machine built more than once calls its pieces, and where they stand.** Ids are one
-  # flat namespace per operation, so the second shovel in a pit must name everything it builds
-  # differently from the first: `names.(:boiler)` is `:boiler` on the steam engine and
-  # `:shovel_1_boiler` on the first shovel. `place` is the room its levers stand in.
+  # flat namespace per operation, so the second engine in an operation must name everything it
+  # builds differently from the first: `names.(:boiler)` is `:boiler` with no prefix and
+  # `:engine_1_boiler` under the prefix `engine_1`. `place` is the room its levers stand in.
   #
   # Build-time only, like the assembly that hands it out.
   class Names

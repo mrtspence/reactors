@@ -47,12 +47,12 @@ module ReactorSim
     # > is a derivative; capability is the rate itself.
     #
     # `stiffness` is for a lever that genuinely takes time to travel, in percent of its range per
-    # second, scaled by whoever is stood there. The mine's valves ship finite figures; infinite
+    # second, scaled by whoever is stood there. A heavy valve ships a finite figure; infinite
     # means frictionless, and `actual` snaps to `target`.
     # **`exertion:` is what this job costs, and it belongs here for the same reason `effort:`
     # does** — the machine is what knows that shovelling is not watching a gauge. It is fatigue
     # per second for a competent, unaided human with the lever hard over, so its reciprocal reads
-    # as "flat out, spent in": the stoker's `8.3e-4` is twenty minutes.
+    # as "flat out, spent in": `8.3e-4` is twenty minutes.
     #
     # `recovery:` is the other direction and is a property of *where somebody is standing* rather
     # than what they are doing. An effort station recovers nothing, because you are still at the
@@ -66,7 +66,7 @@ module ReactorSim
     # with nothing to work — the crew quarters — defaults to no limit, since the quarters' own
     # `crew_capacity` already bounds it. The number is a part's stat rather than a rule, and
     # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can walk
-    # to. **A governor post holds one**: two people do not drive one winding engine.
+    # to. **A governor post holds one**: two people do not drive one machine.
     # `complexity:` is **how tricky this lever is to work correctly**, and is the exact parallel
     # to `effort:` — deliberately orthogonal to it. `effort:` says how *fast* a job happens and
     # therefore depends on who does it; `complexity:` says whether it happens *correctly*. A
@@ -92,7 +92,7 @@ module ReactorSim
       # post that works it, and `set_control` refuses it; it is not on the player's panel.
       @internal = internal
       # **A post whose occupant drives other levers**, from this lever's value and the machine's
-      # last-tick state — an engineman winding to a destination. With nobody posted, it does
+      # last-tick state — somebody working a hoist to a destination. With nobody posted, it does
       # nothing and those levers hold where they were left.
       @governor = governor
       @label = label || @id.to_s.tr("_", " ").capitalize

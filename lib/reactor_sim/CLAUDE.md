@@ -22,6 +22,11 @@ how many people happened to be watching would change the match.
 **Nothing here is autoloaded.** Add new files to the `require_relative` chain in
 `lib/reactor_sim.rb`, in dependency order. That chain is the dependency graph, on purpose.
 
+**Everything here outside `operations/<name>/` is shared, and names nothing from one operation**
+(the root `CLAUDE.md`, "Shared code speaks no operation's language"). Generic words in identifiers,
+state keys, config keys and comments — room, post, conveyance, carrier, way, traffic — and an
+operation's own words only in its own folder.
+
 ## Layout, in dependency order
 
 ```
@@ -146,7 +151,8 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > station**: everybody starts in the quarters and is *sent* somewhere, so deploying the shift is
 > the opening move of a match. Jobs are derived, never declared: they are exactly the control
 > points with `effort:`. When there are more of those than seats, something is always
-> unattended, which is the point.
+> unattended, which is the point. `Crew.minions` turns the roster into people, dealing an
+> advance shift's seats out to where it starts.
 >
 > **A post takes as many as its `capacity` and their work sums** (`Tick#crews`). A lever defaults
 > to one; a gang's part raises it. An effort post reaches its node in **worker-equivalents** —
@@ -210,6 +216,10 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > **Only the gas phase is breathed.** Water on the floor and coal in the tubs take up none of a
 > lungful. A room whose air node answers `submerged?` — the pit bottom, water to the roof — has
 > nothing to breathe at all, so drowning is the same dwell, collapse and rescue race as afterdamp.
+> **In open water nobody drowns until they are spent**: a place whose `water:` is `deep?` has
+> them treading it — exertion with no post (`Fatigue.advance(exerting:)`, as a brawl) — and only
+> spent do they go under, the place's air then none for them, the wound `drowned`. `drowning`
+> is a cause, so `drowning_resistance` keeps somebody afloat.
 >
 > **Apparatus runs out, and a set with no air left is no protection at all** — no taper, because
 > there is no half a breath. `respirator:` is how well it filters, `respirator_air:` is how many
@@ -271,7 +281,10 @@ Plus the assembly layer — `names.rb` (what a machine built more than once call
 are build-time only.** They resolve a chassis and a
 loadout into the flat lists `Operation` has always taken, and nothing in them is reachable from
 `Tick`, `Arbiter` or any node. Keep it that way: a `Context` method taking a slot id would put
-assembly structure on the hot path for a lookup that could have been decided at build.
+assembly structure on the hot path for a lookup that could have been decided at build. **A slot may
+`needs:` another** and is then built only while that one is fitted — a machine's dozen fittings under
+the one slot that says whether it is there at all — and with `needs_at_least:`, only while the part
+there reaches a stat, as a washhouse's bays are.
 
 A `Fragment` carries nodes, links, thermal and drive links, control points — and `diagnostics`,
 for the parts that **are** instruments. Everything else names its gauges by id and the

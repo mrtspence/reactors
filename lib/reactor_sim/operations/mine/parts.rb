@@ -599,10 +599,10 @@ module ReactorSim
                              moment_of_inertia: 4_000.0, radius_m: CAGE_DRUM_RADIUS_M,
                              depth_m: SHAFT_DEPTH_M, friction: 20.0,
                              detaching_hook: hook, endangers: CAGE_HAZARDS,
-                             damages: { overwound: wreckage }, rope: :winding_rope, shaft: :shaft,
+                             damages: { overwound: wreckage }, rope: :winding_rope, obstructed_by: :shaft,
                              deck: :cage_deck, boarding_hazard: CAUGHT_BOARDING,
                              rated_speed_m_s: speed_m_s, perils: kibble ? [ RIDING_THE_KIBBLE ] : [],
-                             cage_kg: tier.fetch(:cage_kg), catches: hook),
+                             conveyance_kg: tier.fetch(:cage_kg), catches: hook),
             Nodes::Brake.new(id: :cage_brake, label: "Winding Brake", supports: :cage_drive,
                              capacity_nm: tier.fetch(:brake_nm), heat_capacity: 5.0e4,
                              control_id: :cage_brake_release,
@@ -1203,7 +1203,7 @@ module ReactorSim
       # **Who is already down when the match starts**, posted to nothing, so there is work to do
       # before anybody has walked anywhere. A part in a slot rather than a property of the frame,
       # because it is what a player buys: `advance_seats:` hands at `advance_place:`, dealt from
-      # the end of the roster (`Mine.crew_for`). It contributes nothing to the graph.
+      # the end of the roster (`Crew.minions`). It contributes nothing to the graph.
       SHIFTS = {
         advance_shift: { kind: :face_shift, label: "Advance Shift", seats: 5, place: :district,
                          description: "Five hands at the face before the first cage comes down." },

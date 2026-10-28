@@ -180,6 +180,14 @@ RSpec.describe ReactorSim::Place do
       }.to raise_error(ReactorSim::Error, /footplate: carried by :drum, which cannot say where it is/)
     end
 
+    # Water somebody could be out of their depth in, that cannot say whether it is deep, would
+    # drown nobody.
+    it "refuses a place whose water cannot say whether it is deep" do
+      expect {
+        rig(endangers: {}, places: ROOMS + [ described_class.new(id: :pond, water: :drum, open_air: true) ])
+      }.to raise_error(ReactorSim::Error, /pond: water :drum, which cannot say whether it is deep/)
+    end
+
     # And a station's place, which is the same rule reached the other way.
     it "refuses a station standing in a place nobody declared" do
       expect {

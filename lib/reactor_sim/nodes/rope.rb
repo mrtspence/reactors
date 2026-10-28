@@ -2,36 +2,37 @@
 
 module ReactorSim
   module Nodes
-    # **The winding rope**, hung from a hoist's drum over a sheave. It holds nothing and turns with
+    # **A hoisting rope**, hung from a hoist's drum over a sheave. It holds nothing and turns with
     # nothing; it wears, and one day it parts.
     #
     # What wears it, every second, from conditions rather than dice:
     #
     #   bending     every metre it runs over the sheave, harder the more it is carrying
-    #   corrosion   all the time, faster in a wet shaft — `wet_by:` names a node with a `ground`
+    #   corrosion   all the time, faster where it is wet — `wet_by:` names a node with a `ground`
     #   heat        a sheave running hot drags the rope over itself; past `HOT_SHEAVE_K` it scores
-    #   kinks       a snatch, per metre of slack the cage fell
+    #   kinks       a snatch, per metre of slack the conveyance fell
     #
-    # It parts on **overload**: the tension — the cage, its load and its acceleration, or the
-    # snatch when a hung cage falls its slack — past what is left of its breaking strain. A worn
-    # rope parts under a load a new one would have carried.
+    # It parts on **overload**: the tension — the conveyance, its load and its acceleration, or the
+    # snatch when a hung conveyance falls its slack — past what is left of its breaking strain. A
+    # worn rope parts under a load a new one would have carried.
     #
-    # ## What the shaft can do about it
+    # ## What can be done about it
     #
-    # **Recapping** (`recap_control:`) cuts off the worn end and makes it good again, while the cage
-    # is stopped at bank; the rope is shorter every time, and with `spare_m` gone it does nothing.
-    # **Re-roping** (`renew_control:`) puts a new rope on from the spare (`spare:`), once enough work
-    # has gone into it — a fresh rope at full length, even in place of one that has parted.
+    # **Recapping** (`recap_control:`) cuts off the worn end and makes it good again, while the
+    # conveyance is stopped at the top landing; the rope is shorter every time, and with `spare_m`
+    # gone it does nothing. **Re-roping** (`renew_control:`) puts a new rope on from the spare
+    # (`spare:`), once enough work has gone into it — a fresh rope at full length, even in place of
+    # one that has parted.
     #
     # **What it is made of is its own config** — `breaking_kn`, `kg_per_m`, `stiffness_n_per_m` and
     # its wear rates — so a hemp rope and a steel one are the same node. **What hangs on it is the
-    # drum's**: the cage's mass and whether the cage carries safety catches, read off `hoist:`.
-    # Parted, it fails `parted` with the cage falling, or `parted_held` where the catches grip the
-    # guides; hazards and wreckage per mode are the machine's to declare.
+    # drum's**: the conveyance's mass and whether it carries safety catches, read off `hoist:`.
+    # Parted, it fails `parted` with the conveyance falling, or `parted_held` where the catches grip
+    # the guides; hazards and wreckage per mode are the machine's to declare.
     #
-    # **Its own weight is load.** The rope hanging below the sheave pulls on it as the cage does,
-    # so a heavy rope in a deep shaft strains itself with the cage empty, and what the sheave
-    # carries is both sides of the drum (`bearing_load_n`).
+    # **Its own weight is load.** The rope hanging below the sheave pulls on it as the conveyance
+    # does, so a heavy rope on a long run strains itself with the conveyance empty, and what the
+    # sheave carries is both sides of the drum (`bearing_load_n`).
     #
     #   config: hoist, breaking_kn, kg_per_m, sheave, wet_by, recap_control, renew_control, spare,
     #           bend_per_m, corrode_per_s, stiffness_n_per_m, endangers, damages
@@ -40,10 +41,10 @@ module ReactorSim
       include Concerns::Wearing
 
       # Durability per metre run over the sheave at the tension `breaking_kn` is rated against
-      # carrying a working load — about four hundred full winds of this shaft.
+      # carrying a working load — about forty kilometres of running.
       BEND_PER_M = 0.025
 
-      # Durability per second in an ordinary shaft. A wet one is worse by its `ground`.
+      # Durability per second in ordinary conditions. A wet run is worse by its `ground`.
       CORRODE_PER_S = 0.02
 
       # Past this the sheave is scoring the rope, per kelvin per second.
@@ -62,10 +63,10 @@ module ReactorSim
       # Seconds of somebody fully at it to put a new rope on.
       RENEW_S = 240.0
 
-      # Durability a snatch takes, per metre of slack the cage fell.
+      # Durability a snatch takes, per metre of slack the conveyance fell.
       KINK_PER_M = 30.0
 
-      # N/m: steel winding rope, ninety metres of it.
+      # N/m: steel hoisting rope, ninety metres of it.
       STIFFNESS_N_PER_M = 8.0e5
 
       attr_reader :hoist, :breaking_kn, :kg_per_m, :sheave, :wet_by, :recap_control, :renew_control,
@@ -100,7 +101,7 @@ module ReactorSim
 
       # --- what it is carrying ---------------------------------------------------------------
 
-      # Newtons in the rope at the cage, read off the drum as of last tick: nothing while the cage
+      # Newtons in the rope at the conveyance, read off the drum as of last tick: nothing while it
       # hangs; its weight, what is in it and the rope below the sheave, plus what it takes to
       # accelerate them, while it rides; and the snatch on the tick it falls its slack.
       def tension_n(ctx)
@@ -108,23 +109,23 @@ module ReactorSim
         drum_state = ctx.states.fetch(@hoist)
         return 0.0 if drum.hung?(drum_state)
 
-        mass = drum.cage_kg + drum.cargo_kg(ctx) + hanging_kg(drum.cage_m(drum_state))
+        mass = drum.conveyance_kg + drum.cargo_kg(ctx) + hanging_kg(drum.conveyance_m(drum_state))
         fallen = drum.snatch_m(drum_state)
         return Rope.snatch_n(mass, fallen, @stiffness_n_per_m) if fallen.positive?
 
         mass * (Units::GRAVITY_M_PER_S2 + drum.acceleration_m_s2(drum_state).abs)
       end
 
-      # The rope below the sheave on a side that reaches `depth_m` down the shaft.
+      # The rope below the sheave on a side that reaches `depth_m` down the run.
       def hanging_kg(depth_m) = @kg_per_m * [ depth_m, 0.0 ].max
 
-      # **What the sheave carries**: both sides of the drum — cage A on this rope, the empty cage B
-      # and its rope on the other — each pressing the journal with √2 of its pull over a quarter
+      # **What the sheave carries**: both sides of the drum — conveyance A on this rope, the empty
+      # conveyance B and its rope on the other — each pressing the journal with √2 of its pull over a quarter
       # turn of wrap. Read by a `Bearing` that names this rope as `loaded_by:`.
       def bearing_load_n(ctx)
         drum = ctx.nodes.fetch(@hoist)
         drum_state = ctx.states.fetch(@hoist)
-        other = (drum.cage_kg + hanging_kg(drum.depth_m - drum.cage_m(drum_state))) *
+        other = (drum.conveyance_kg + hanging_kg(drum.depth_m - drum.conveyance_m(drum_state))) *
                 Units::GRAVITY_M_PER_S2
 
         Math.sqrt(2.0) * (tension_n(ctx) + other)
@@ -179,7 +180,7 @@ module ReactorSim
       def failure_detail(_state, ctx)
         drum = ctx.nodes.fetch(@hoist)
         { tension_kn: (tension_n(ctx) / 1_000.0).round(1),
-          depth_m: drum.cage_m(ctx.states.fetch(@hoist)).round(1) }
+          depth_m: drum.conveyance_m(ctx.states.fetch(@hoist)).round(1) }
       end
 
       # --- recapping and re-roping ----------------------------------------------------------
@@ -189,15 +190,15 @@ module ReactorSim
         renew(state, ctx)
       end
 
-      # Only with the cage stopped at the top landing: you cannot cut a rope that is carrying it.
-      def at_bank?(ctx) = ctx.nodes.fetch(@hoist).cage_stopped_at?(ctx.states.fetch(@hoist), 0.0)
+      # Only with the conveyance stopped at the top landing: you cannot cut a rope that is carrying it.
+      def at_top?(ctx) = ctx.nodes.fetch(@hoist).conveyance_stopped_at?(ctx.states.fetch(@hoist), 0.0)
 
       # In worker-equivalents: a gang at the rope gets through it faster than one man.
       def worked(ctx, control) = control ? [ ctx.controls.fetch(control, 0.0) / 100.0, 0.0 ].max : 0.0
 
       def recap(state, ctx)
         effort = worked(ctx, @recap_control)
-        return state unless effort.positive? && !broken?(state) && at_bank?(ctx)
+        return state unless effort.positive? && !broken?(state) && at_top?(ctx)
         return state unless state.fetch(:spare_m).positive?
 
         restored = [ state.fetch(:durability) + (RECAP_PER_S * effort * ctx.dt),

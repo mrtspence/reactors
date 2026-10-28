@@ -48,8 +48,8 @@ module ReactorSim
     # same rate, because "nowhere" is somewhere to stand down to until the Crew Quarters exists —
     # see `docs/design_sketches/crew_capacity.md`.
     #
-    # **Calibrated against the game's clock, not a real shift.** The steam engine runs at
-    # `time_scale` 1.0, so `dt` is 0.25 s and a whole cold start is about seven simulated minutes.
+    # **Calibrated against the game's clock, not a real shift.** An operation at `time_scale` 1.0
+    # ticks every 0.25 s of simulated time, and a match is minutes of it, not hours.
     #
     # Recovery has no runaway — it is a flat rate — so this reciprocal is the literal figure:
     # spent to fresh in 455 s, against roughly 300 s to spend somebody at a heavy station. Rather
@@ -60,7 +60,7 @@ module ReactorSim
     # What a burden equal to your own body mass costs per second, before `endurance`. Pitched
     # against `BASE_RECOVERY`: at 3.0e-3 a fireman's carry out-accrues a standing rest by a
     # little, so somebody hauling a body their own weight tires over minutes rather than being
-    # written off in seconds — slow enough that a rescue across a district is possible and fast
+    # written off in seconds — slow enough that a rescue across a room is possible and fast
     # enough that it is a race. **Ordinary gear is a small fraction of this** (a 6.5 kg kit on a
     # 70 kg human is a burden of 0.09), which is the intent: kit should be felt over a shift
     # rather than noticed in a minute.
@@ -90,12 +90,13 @@ module ReactorSim
     # casualty, so a minion in an asbestos suit is paying for it while standing still.
     # **`strain:` multiplies the work alone**: heat makes shovelling cost more, not standing still,
     # so it scales `accrual` and nothing else. 1.0 in comfort, which is nearly always.
-    # **`fighting:` is hard work and no rest** — a brawl, at what `Animosity.exertion` says it costs
-    # this body with this weapon; zero for somebody not in one.
+    # **`exerting:` is hard work and no rest, at no post** — a brawl, at what `Animosity.exertion`
+    # says it costs this body with this weapon, or treading water (`Breath::TREADING`); zero for
+    # somebody doing neither.
     def advance(minion, state, control:, dt:, demand: 0.0, suffocation: 0.0, burden: 0.0, strain: 1.0,
-                fighting: 0.0)
+                exerting: 0.0)
       rate = (accrual(minion, state, control, demand) * strain) + suffocation + hauling(minion, burden)
-      rate += fighting.positive? ? fighting * strain / endurance(minion) : -recovery(control, state)
+      rate += exerting.positive? ? exerting * strain / endurance(minion) : -recovery(control, state)
       next_fatigue = (state.fetch(:fatigue, 0.0) + (rate * dt)).clamp(RANGE.begin, RANGE.end)
 
       state.merge(fatigue: next_fatigue)

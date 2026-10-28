@@ -38,11 +38,12 @@ module ReactorSim
           out_of_water: "out of water",
           short_of_water: "short of water",
           short_of_steam: "short of steam",
-          blowing_off: "blowing off",
           chain_worn: "chain worn",
           moving_up: "moving up",
+          muck_full: "the muck is full — waiting",
           waiting_on_cars: "waiting on cars",
           standing_by: "standing by",
+          blowing_off: "standing by — blowing off",
           digging: "digging"
         }.freeze
 
@@ -51,14 +52,24 @@ module ReactorSim
                     :rated_omega, :crane_control, :demand_control, :chain, :boom, :engine, :perils
 
         # `engine:` is the names of the pieces the board reads — `{ boiler:, supply:, firebox:, relief: }`
-        # — with the boiler's `working_pa:`; `reach:` the holder it digs from.
+        # — with the boiler's `working_pa:`; `reach:` the holder it digs from. `face:` is the bench
+        # it digs, whose `hardness` the cut costs more by, where the bench reports one.
+        #
+        # **`cast:` gives it a second outlet**, `:cast` — the muck at the face — and names the train
+        # it loads, `{ carrier:, mark_m:, control: }`: with that train standing at its mark it dumps
+        # into `:out`, the cars; with none, it casts if the player's `control` says so, and waits on
+        # cars if not. Without `cast:` it always waits on cars.
         def initialize(id:, capacity_kg:, fill_kg_per_s:, swing_s:, lift_m:, work_j_per_kg:, swing_w:, driven_by:,
-                       rated_omega:, crane_control:, demand_control:, chain:, boom:, engine:, reach:,
-                       perils: [], label: "Dipper", heat_capacity: 6.0e5, ambient_conductance: 20.0)
+                       rated_omega:, crane_control:, demand_control:, chain:, boom:, engine:, reach:, face: nil,
+                       cast: nil, perils: [], label: "Dipper", heat_capacity: 6.0e5, ambient_conductance: 20.0)
           super(id: id, label: label, ports: [
             Port.new(id: :in, direction: :inlet, accepts: [ :solid ], max_kg_per_s: fill_kg_per_s * 2.0),
-            Port.new(id: :out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: capacity_kg)
+            Port.new(id: :out, direction: :outlet, accepts: [ :solid ], max_kg_per_s: capacity_kg),
+            *([ Port.new(id: :cast, direction: :outlet, accepts: [ :solid ], max_kg_per_s: capacity_kg) ] if cast)
           ])
+          @face = face&.to_sym
+          @cast = cast && { carrier: cast.fetch(:carrier).to_sym, mark_m: cast.fetch(:mark_m).to_f,
+                            control: cast.fetch(:control).to_sym }.freeze
           @capacity_kg = capacity_kg.to_f
           @fill_kg_per_s = fill_kg_per_s.to_f
           @swing_s = swing_s.to_f
@@ -105,8 +116,27 @@ module ReactorSim
           dumping = working && phase(state) == :dumping
           crane = (ctx.controls.fetch(@crane_control, 0.0) / 100.0).clamp(0.0, 1.0)
           want = [ @fill_kg_per_s * speed(ctx) * crane * ctx.dt, @capacity_kg - contents_kg(state) ].min
-          Intent.new(draws: { in: digging ? [ want, 0.0 ].max : 0.0 }, pushes: { out: dumping ? contents_kg(state) : 0.0 })
+          held = dumping ? contents_kg(state) : 0.0
+          Intent.new(draws: { in: digging ? [ want, 0.0 ].max : 0.0 }, pushes: dumps(held, ctx))
         end
+
+        # Into the cars, or onto the muck, or nowhere yet.
+        def dumps(held, ctx)
+          return { out: held } unless @cast
+
+          train = train_standing?(ctx)
+          { out: train ? held : 0.0, cast: !train && casting?(ctx) ? held : 0.0 }
+        end
+
+        def train_standing?(ctx)
+          carrier = ctx.node_state(@cast.fetch(:carrier)) or return false
+          ctx.nodes[@cast.fetch(:carrier)].standing_at?(carrier, @cast.fetch(:mark_m))
+        end
+
+        def casting?(ctx) = ctx.controls.fetch(@cast.fetch(:control), 0.0) >= 50.0
+
+        # How much harder than ordinary the face is, by its own report.
+        def hardness(ctx) = (@face && ctx.node_state(@face)&.fetch(:hardness, nil)) || 1.0
 
         def apply(state, ctx, grant)
           dug = grant.received_kg(:in)
@@ -126,7 +156,7 @@ module ReactorSim
 
           rate = state.fetch(:dug_kg) / ctx.dt
           lift_w = rate * Units::GRAVITY_M_PER_S2 * @lift_m
-          loss_w = (rate * @work_j_per_kg) + (swinging?(state) ? @swing_w * speed(ctx) : 0.0)
+          loss_w = (rate * @work_j_per_kg * hardness(ctx)) + (swinging?(state) ? @swing_w * speed(ctx) : 0.0)
           { work: lift_w / (omega**2), friction: loss_w / (omega**2) }.select { |_, c| c.positive? }
         end
 
@@ -155,7 +185,7 @@ module ReactorSim
         # the cut's power over the hoisting speed, so a slowing engine in hard ground pulls hardest.
         def tension_n(held, dug, ctx)
           hoist = HOIST_M_PER_S * [ speed(ctx), 0.1 ].max
-          cut_n = ctx.dt.positive? ? (dug / ctx.dt) * @work_j_per_kg / hoist : 0.0
+          cut_n = ctx.dt.positive? ? (dug / ctx.dt) * @work_j_per_kg * hardness(ctx) / hoist : 0.0
           ((DIPPER_KG + held) * Units::GRAVITY_M_PER_S2) + cut_n
         end
 
@@ -165,16 +195,42 @@ module ReactorSim
           return :boom_down if boom[:failure]
           return (chain.fetch(:splicing, 0.0).positive? ? :splicing : :chain_parted) if chain[:failure]
 
-          engine_signal(ctx) || work_signal(state, ctx, chain)
+          # Lifting her valve is no reason she is not digging, so it shows only while she stands by.
+          engine = engine_signal(ctx)
+          return engine if engine && engine != :blowing_off
+
+          work = work_signal(state, ctx, chain)
+          work == :standing_by && engine ? engine : work
         end
 
         def work_signal(state, ctx, chain)
           return :chain_worn if chain[:worn]
           return :standing_by unless ctx.controls.fetch(@demand_control, 0.0).positive?
           return :moving_up if phase(state) == :digging && Parcel.total_kg((ctx.node_state(@reach) || {}).fetch(:parcels, [])) <= Parcel::EPSILON
-          return :waiting_on_cars if phase(state) == :dumping && contents_kg(state).positive?
+          if phase(state) == :dumping && contents_kg(state).positive?
+            return :muck_full if @cast && !train_standing?(ctx) && casting?(ctx)
+
+            return :waiting_on_cars
+          end
 
           :digging
+        end
+      end
+
+      # **Moving up**: the pitmen bringing the face into the dipper's reach — and never more of it
+      # than the face says is uncovered (`uncovered_kg`, where the bench it digs reports one), so a
+      # shovel on the ore stops where the stripping stops, as the getters do.
+      class MovingUp < Nodes::Conduit
+        def initialize(face:, **opts)
+          @face = face.to_sym
+          super(**opts)
+        end
+
+        attr_reader :face
+
+        def throughput_kg(state, ctx)
+          uncovered = ctx.node_state(@face)&.fetch(:uncovered_kg, nil)
+          uncovered ? [ super, uncovered ].min : super
         end
       end
 

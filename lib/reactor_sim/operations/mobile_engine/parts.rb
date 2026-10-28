@@ -50,7 +50,9 @@ module ReactorSim
                      provides: %i[firebox stoker damper ash_pan boiler_tubes flue boiler boiler_breach feed_pump
                                   injector injector_steam throttle steam_pipe_breach steam_chest steam_chest_breach
                                   cylinder piston_rings cylinder_breach drain_cocks flywheel],
-                     stats: { working_pressure_pa: VERTICAL.dig(:boiler, :working_pressure_pa), governed_omega: GOVERNED_OMEGA,
+                     # Her fireman and driver raised her steam, so they start at their posts.
+                     stats: { advance_posts: %i[stoking driving],
+                              working_pressure_pa: VERTICAL.dig(:boiler, :working_pressure_pa), governed_omega: GOVERNED_OMEGA,
                               bore_m: 0.25, stroke_m: 0.3, material: :wrought_iron }) do |spec|
         MobileEngine.engine_fragment(spec.fetch(:names), VERTICAL)
       end

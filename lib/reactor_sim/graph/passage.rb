@@ -4,31 +4,31 @@ module ReactorSim
   # A way between two places that **people** use.
   #
   # The fourth kind of edge, beside `Link` (material), `ThermalLink` (heat) and `DriveLink`
-  # (momentum), and declared the same way. It is separate from all three on purpose: a roadway
-  # carries air *and* men, but what limits the air is a conductance and what limits the men is
+  # (momentum), and declared the same way. It is separate from all three on purpose: a road can
+  # carry air *and* people, but what limits the air is a conductance and what limits the people is
   # how far it is and who is walking it.
   #
-  #   metres       how far. The whole cost of a journey, and why a far district is expensive
+  #   metres       how far. The whole cost of a journey, and why a far place is expensive
   #   speed_m_s    the pace a competent, unaided human manages HERE — a road is not a ladder
   #   requires     a minion tag without which this way cannot be taken at all
-  #   control_id   a lever that scales it: a cage nobody has called does not move
+  #   control_id   a lever that scales it: a conveyance nobody has called does not move
   #   driven_by    a shaft that scales it, against `rated_omega`. **A way that costs power.**
-  #   hoist        a drum whose cage you **ride**: you board at your landing when the cage is
-  #                there and stopped, you are wherever the cage is, and you get off at the far
-  #                landing. `staffed_by` is the post that winds it, and with nobody there it is
+  #   hoist        a drum whose conveyance you **ride**: you board at your landing when it is
+  #                there and stopped, you are wherever it is, and you get off at the far
+  #                landing. `staffed_by` is the post that works it, and with nobody there it is
   #                not running at all. `a` is the landing at the top of the drum's travel.
-  #   through      the nodes this way runs through — a shaft, a pit bottom. Any one of them
-  #                blocking closes the way, and routing finds another if there is one.
-  #   rated_kg     what a ridden way's cage is rated to carry. Only a marshal enforces it.
+  #   through      the nodes this way runs through. Any one of them blocking closes the way,
+  #                and routing finds another if there is one.
+  #   rated_kg     what a ridden way's conveyance is rated to carry. Only a marshal enforces it.
   #   marshals     `{ landing => station }`: who stands at each landing and stops boarding at the
   #                rating. With nobody there, everybody waiting gets on.
   #
   # Two-way. A passage that is genuinely one-way is a different thing (a chute, a fall) and can
   # have its own declaration when something needs one.
   #
-  # **A powered way is the point of the whole spatial release.** Ladders are free and slow; a
-  # cage is quick and costs a shaft. That is the trade a man engine was built to make, and a
-  # passage that can be driven is what lets a player buy their way out of it.
+  # **A powered way is the point of the whole spatial release.** Walking is free and slow; a
+  # ridden or driven way is quick and costs power. A passage that can be driven is what lets a
+  # player buy their way out of the walk.
   Passage = Struct.new(:a, :b, :metres, :speed_m_s, :requires, :control_id, :driven_by,
                        :rated_omega, :label, :hoist, :staffed_by, :through, :rated_kg, :marshals,
                        keyword_init: true) do
@@ -53,12 +53,12 @@ module ReactorSim
     # Where on the drum's travel a landing is: `a` at the top, `b` at the bottom.
     def landing_m(place) = place == a ? 0.0 : metres
 
-    # What this way is good for **right now**. A cage with no lever pulled and no shaft turning
-    # is not a slow way down, it is not a way down at all — and a shift underground when the
-    # winder stops is exactly the situation the ladderway exists for.
+    # What this way is good for **right now**. A powered way with no lever pulled and no shaft
+    # turning is not a slow way, it is not a way at all — and a crew beyond it when it stops is
+    # exactly the situation a way on foot beside it exists for.
     #
-    # A ridden way runs at its rated speed whenever it is in service; whether its cage is here is
-    # the rider's business, not the route's.
+    # A ridden way runs at its rated speed whenever it is in service; whether its conveyance is
+    # here is the rider's business, not the route's.
     def speed_in(ctx)
       return speed_m_s if ridden?
 
@@ -92,7 +92,7 @@ module ReactorSim
   # Build-time only, like `Assembly` — nothing here is reachable from a node, and the routing
   # tables are computed once rather than searched per tick. **An operation that declares no
   # passages has no geometry at all** and every minion is always already wherever they are sent,
-  # which is what keeps the steam engine bit-identical to before this existed.
+  # which is what leaves an operation without geometry exactly as it would be with none of this.
   class Layout
     attr_reader :passages, :places
 
@@ -120,8 +120,8 @@ module ReactorSim
     # spatial operation means it can be worked from anywhere.
     def place_of(station_id) = @stations[station_id&.to_sym]
 
-    # Which place a node sits in, or nil for the things that are not in a room at all. A seam is
-    # rock and a strata is water behind rock; neither is anywhere a person can stand.
+    # Which place a node sits in, or nil for the things that are not in a room at all — rock, or
+    # water behind rock, is nowhere a person can stand.
     def place_of_node(node_id) = @node_places[node_id&.to_sym]
 
     def place(place_id) = @declared[place_id&.to_sym]
@@ -139,12 +139,15 @@ module ReactorSim
     # Places something carries about, sorted by id so whatever walks them sums in one order.
     def carried_places = @declared.values.select(&:carried?).sort_by(&:id)
 
+    # Places with water somebody can be out of their depth in, sorted by id.
+    def watered_places = @declared.values.select(&:water).sort_by(&:id)
+
     # **Every node the weather reaches, and how much**: those in exposed places. Configuration,
     # so the tick reads it rather than walking the places.
     attr_reader :node_exposure
 
     # **Every** way between two places, not the first one. Two places can be joined more than
-    # once — a shaft has a ladderway *and* a cage — and which of them somebody takes depends on
+    # once — a way on foot *and* a ridden one beside it — and which of them somebody takes depends on
     # what is running, which is a question only the tick can answer. `Tick#step` picks the
     # fastest; returning one here would silently pin everybody to whichever was declared first.
     def passages_between(from, to)
@@ -152,7 +155,7 @@ module ReactorSim
     end
 
     # The first step from `from` toward `to`, for somebody carrying `capabilities`, avoiding every
-    # passage that runs `through:` a node in `closed` — a shaft choked with wreckage.
+    # passage that runs `through:` a node in `closed` — a way choked with wreckage.
     #
     # Computed per distinct (capability set, closed set) and memoised, never searched per tick:
     # most of a shift shares one capability set, and the closed set changes only when something
@@ -165,8 +168,8 @@ module ReactorSim
     # How far it is, following the route `next_hop` actually takes. Nil when there is no way
     # through, and zero for somewhere you are already standing.
     #
-    # **Geometry, not duration** — a cage and a ladderway are the same ninety metres and only one
-    # of them is quick, so what a walk *costs* is this divided by what is running. Precomputed
+    # **Geometry, not duration** — a ridden way and the way on foot beside it are the same distance
+    # and only one of them is quick, so what a walk *costs* is this divided by what is running. Precomputed
     # with the routing table, so asking is a lookup.
     def route_metres(from, to, capabilities, closed = [])
       return 0.0 if from == to
@@ -238,7 +241,7 @@ module ReactorSim
     end
 
     # **A room is named once and furnished by whoever brings the furniture.** The chassis
-    # declares the pit bank; fitting a cage puts its drive there. Same id, node lists unioned,
+    # declares the room; a fitting puts its gear there. Same id, node lists unioned,
     # first label and first declared air win — the same concatenate-don't-replace rule
     # `Fragment#merge` follows, and the reason a fitting need not know what else is in the room
     # it is installed in.
@@ -251,7 +254,8 @@ module ReactorSim
                                                        exposure: known.exposure || place.exposure,
                                                        open_air: known.open_air || place.open_air,
                                                        carried_by: known.carried_by || place.carried_by,
-                                                       shares: known.shares || place.shares)
+                                                       shares: known.shares || place.shares,
+                                                       water: known.water || place.water)
       end
     end
 
@@ -313,6 +317,17 @@ module ReactorSim
       validate_marshals!
       validate_air!(nodes)
       validate_carried!(nodes)
+      validate_water!(nodes)
+    end
+
+    # Water that cannot say whether it is deep would drown nobody.
+    def validate_water!(nodes)
+      return if nodes.empty?
+
+      watered_places.each do |place|
+        raise Error, "place #{place.id}: water #{place.water.inspect}, which cannot say whether it is deep" unless
+          nodes[place.water].respond_to?(:deep?)
+      end
     end
 
     # A carried place whose carrier cannot say where it is would share its hazards with nowhere.

@@ -478,7 +478,59 @@ built in five units, designed one at a time:
      cools with steam in its cylinder.
    - **The pitmen are spent in about ten minutes** at full effort on plain hands (exertion 6e-4), and
      the shovel then stands moving up. For the shovel's tuning, with the pit's shifts.
-5. The open pit itself. Owed to it from unit 4 ([`locomotive.md`](design_sketches/locomotive.md) §12):
+5. The open pit itself, in nine sub-units ([`design_sketches/open-pit.md`](design_sketches/open-pit.md)
+   §2). **5a, the pit by hand, is built**: `OpenPit`, a sunk limonite pit of two benches as
+   geometry — the stripping over the wash ore, the ore worked a berm behind the stripping face — got
+   by pick and shovel into muck piles, barrowed up the ramp road to the tip (spread by the dumpmen)
+   and the bin; the ground drawn per match, thicknesses and hard stretches along the stripping cut;
+   quarters, a hut at each bench and a shelter at the dump that deal advance seats and rest people; a
+   pit boss; the faces' boards and the ore gang's word on uncovered ore; in the dev match,
+   uncoupled. Every job is gated on light, which only the sky gives: **lighting for night work is
+   owed**, as blueprints. **5b, washing and water, is built**: the pit's one line shaft, a log washer
+   on it (single-shaft, or the Thomas washer above it) parting wash ore by tag into washed ore — the
+   goal's count for now — and slurry to the mud dam, a tier's efficiency the one number for its
+   losses; the washer hands raking it in; a reservoir full in nearly every match and nearly dry in a
+   very few, pumped off the shaft. In the dev match the pit's shaft is roped to a developer's engine
+   of its own with `REACTOR_DEV_ENGINE=1`, and nothing turns it without. **Owed**: the virtual
+   shaft (several consumers and generators on one, fiated by the match-maker — sketch §16); larger
+   reservoirs and the mud dam bursting, as mechanics with counterplay. **5c, machines in the pit, is
+   built**: a steam shovel and a dinky at each face, both upgrades (`Slot#needs`, one pick a
+   machine), the face wired for what is fitted — the shovel casting onto the muck, or loading a
+   standing train and casting while it is away as its lever says; hand loaders filling a train
+   from the muck; the shovel reading its face's hardness and uncovered ore; tracks from the median
+   depths; engines starting at work (`MobileEngine.raised`) with their crews at their posts.
+   **5d, washing at scale, is built** (sketch §18): a washhouse whose tiers have room for three to
+   six bays (`Slot#needs_at_least`), each bay a washer of its own on the one bin, pump and dam; the
+   double Thomas and series washers; the pump as a tier; a rock crusher whose hopper the bays rake
+   three times as fast as the bin, and without which the logs wear four times as fast; a feed belt
+   to the jaws (`Nodes::Belt`, the colliery's belt lifted into the library); barracks for forty. A
+   full floor of series washers washes about 20 kg/s of wash ore for about 250 kW. **5e, drainage
+   and rain, is built** (sketch §19): seepage by the pit's depth and a drawn wetness, springs met
+   along the ore cut and hidden until then, rain on the pit and on the reservoir; a sump whose
+   water hardens the ore face and floods it at the mark; drowning on the asphyxia pathway — out of
+   their depth people tread water, and spent, go under (`Place#water:`, `drowning` a cause); a
+   bailing gang to start and three sump pumps as upgrades, lifting to the reservoir, which spills
+   over its crest to drainage. **5f, benches and slides, is built** (sketch §20): digging undercuts a
+   face, the barmen (a gang at each face) bar it down, and left hanging past a hidden threshold —
+   drawn afresh for every slide, less for a taller bench and in the wet — it slides onto its pile,
+   burying the face until the muck is cleared, hurting whoever is on the bench and wrecking a share
+   of a shovel's boom; the dump's edge loads with tipping, more in the wet, settles with time, and
+   breaks back past its own thresholds. **5g, the mud dam and the reservoir's bank, is built** (sketch
+   §21): the dams stand above the pit; each wall an `Embankment` that wears held above its safe fill,
+   is puddled by the dam hands (or a larger reservoir's bankmen), weeps and slumps before it goes and
+   breaches at once over its crest, its pond running into the sump; rebuilt in the match. The dam
+   starts part full of settled clay; the decant gives its free water back; bigger dams and larger
+   reservoirs, the latter with a scour valve. **5h, blasting and hard ground, is built** (sketch §22):
+   `ShotHole` lifted into the library (`Nodes::ShotHole`, the colliery's configured onto it,
+   bit-identical); a blasting slot of jumper holes, gopher holes or dynamite, a powder gang at each
+   face that works unticketed at far more risk; a shot breaking the ground ahead, which the face digs
+   loose; firing on a lever, flyrock across the pit; misfires as the colliery's; frost in the cold; dynamite
+   freezing in its magazine, and a thawing house too warm is a bomb. **Next, 5i: finishing.** **Owed**: proper
+   spillways and relief on the larger reservoirs if needed. **Owed**: the centrifugal pump
+   gated with the series washer; `drowning_resistance` on something — a cork jacket, a race at home
+   in the water. **Owed**: the series washer and the gyratory crusher gated on a pit
+   achievement once the pit has one; belts at the rest of the dump end (the spoil tip, the
+   load-out); posts that scale further up in people (gangs much larger) and the UI to manage them. Owed to it from unit 4 ([`locomotive.md`](design_sketches/locomotive.md) §12):
    a second train per shovel and the passing track, the track as the pit's geometry, boarding a train
    at a stand, the coaling stage and the water column; and wheel slip on a wet or icy rail
    (`DriveLink#max_torque` is declared and read by nothing).
@@ -723,7 +775,7 @@ set against this pass, not against today's single hewer.
 - [x] 20 Shotfiring — the `blasting` slot (black powder, permitted explosives), a magazine at bank,
   a ticketed shotfirer at the shot holes; a tonne and a half a shot, its fumes and dust. Blown-out
   shots flash in the room; a misfire is judged — dug out all or nothing, or left live in the face
-  for the hewer to strike. **Tune**: the shot's 900 s and the clearing's 1,200 s, the peril rates
+  for the hewer to strike. **Tune**: the shot's 450 s and the clearing's 1,200 s, the peril rates
   (blow-out 0.6 / 0.05, misfire 0.4, premature 0.12, set off 0.6, struck 1.2), the misjudgement's
   0.1 and 0.8, the blow-out flame (0.4 kg/s, 4 MW for a tick), a charge of 0.5 kg
 - [x] Furnace ventilation — a `furnace` slot beside the fan (fire basket, brick furnace, double

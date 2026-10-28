@@ -14,6 +14,13 @@ black_powder_firing:
   enthalpy_j_per_unit: -2800000
   rate_per_s: 200.0
 
+# The nitroglycerin to gas and steam, and the kieselguhr it was soaked in left as residue.
+dynamite_firing:
+  consumes: { dynamite: 1.0 }
+  produces: { flue_gas: 0.53, steam: 0.2, whitedamp: 0.02, ash: 0.25 }
+  enthalpy_j_per_unit: -4400000
+  rate_per_s: 200.0
+
 # Mostly to gas and steam, with little monoxide and little residue.
 permitted_firing:
   consumes: { permitted_explosive: 1.0 }

@@ -15,8 +15,8 @@ module ReactorSim
     # **A front does not stop at the walls.** A node whose front burnt anything records `front:`,
     # and next tick it arrives in every node sharing a gas path with it (`arriving:`, from
     # `Tick#react`): it goes off there if that node's own mixture is in range, and travels on. So a
-    # furnace firing its return fires the workings that fed it, and a district's explosion reaches
-    # gas at the pit bottom. A burnt-out room the front comes back to has nothing left in range.
+    # fire at one end of a gas path fires the rooms that fed it, and an explosion in one room
+    # reaches gas in the next. A burnt-out room the front comes back to has nothing left in range.
     module PromptReaction
       # What an `:explosion` reports in its `detail:`, which a hazard keyed on it may scale with.
       EXPLOSION_DETAIL = %i[reactions fuel_kg joules].freeze

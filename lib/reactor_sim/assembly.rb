@@ -29,6 +29,7 @@ module ReactorSim
     def initialize(slots:, loadout: {}, spec: {}, fixtures: Fragment.empty,
                    instruments: {}, order: nil, routes: [], advisories: [], registry: Parts)
       @slots = slots.freeze
+      @by_id = @slots.to_h { |slot| [ slot.id, slot ] }.freeze
       @spec = spec
       @fixtures = fixtures
       # The gauges the panel defines, for parts that name one. Selecting from this rather than
@@ -45,11 +46,23 @@ module ReactorSim
       @spec = spec.merge(informed).freeze
     end
 
-    # The `Part` fitted in a slot, or nil. `#loadout` is the same thing by id — every slot,
-    # defaults filled in, empty ones present as nil.
+    # The `Part` fitted in a slot, or nil — nil too for a slot whose `needs:` is not fitted, which
+    # builds nothing. `#loadout` is the choice by id — every slot, defaults filled in, empty ones
+    # present as nil — and keeps a dependent's choice while its machine is away.
     def part(slot_id)
+      return nil unless active?(@by_id[slot_id.to_sym])
+
       id = @loadout[slot_id.to_sym]
       id && @registry.key?(id) ? @registry.fetch(id) : nil
+    end
+
+    # A slot that belongs to nothing, or to a slot that is fitted — with a part reaching what it
+    # `needs_at_least:`.
+    def active?(slot)
+      return true if slot.nil? || slot.needs.nil?
+
+      host = part(slot.needs) or return false
+      slot.needs_at_least.all? { |stat, figure| host.stats.fetch(stat, 0) >= figure }
     end
 
     def fragment
@@ -70,8 +83,8 @@ module ReactorSim
     # --- crew -------------------------------------------------------------------------------
     #
     # **Found by what the slot ACCEPTS, not by a slot id.** Any operation that declares a slot
-    # taking `:crew_quarters` gets capacity and an origin for free, which is what keeps a mine
-    # from having to reimplement either — and `crew_capacity` is read off the fitted part, so
+    # taking `:crew_quarters` gets capacity and an origin for free, which is what keeps an
+    # operation from having to reimplement either — and `crew_capacity` is read off the fitted part, so
     # hands are something a player buys rather than something the machine decides.
     CREW_QUARTERS = :crew_quarters
 
@@ -84,14 +97,22 @@ module ReactorSim
     end
 
     # **Who starts somewhere other than the quarters**: every fitted part declaring
-    # `advance_seats:` and `advance_place:`, as `[{ seats:, place: }]` in slot order — the order the
-    # operation deals seats in.
+    # `advance_seats:`, as `[{ seats:, place: }]` in slot order — the order the operation deals
+    # seats in. The place is the part's `advance_place:`, or, for a part fitted in more than one
+    # slot — a hut at either bench — the place its slot's names give it.
+    #
+    # **And who starts at work**: a part declaring `advance_posts:` — the roles of a machine's crew,
+    # an engine that was running when the match began — deals a seat to each of those posts, named
+    # as its slot names them, `{ seats: 1, place:, station: }`.
     def advance_shifts
-      @slots.filter_map do |slot|
-        stats = part(slot.id)&.stats or next
-        next unless stats[:advance_seats].to_i.positive?
+      @slots.flat_map do |slot|
+        stats = part(slot.id)&.stats or next []
+        names = slot.spec[:names] || @spec[:names]
+        at_work = Array(stats[:advance_posts]).map { |role| { seats: 1, place: names.place, station: names.(role) }.freeze }
+        next at_work unless stats[:advance_seats].to_i.positive?
 
-        { seats: stats.fetch(:advance_seats).to_i, place: stats.fetch(:advance_place).to_sym }.freeze
+        place = stats[:advance_place] || slot.spec.fetch(:names).place
+        at_work + [ { seats: stats.fetch(:advance_seats).to_i, place: place.to_sym }.freeze ]
       end.freeze
     end
 
@@ -126,7 +147,7 @@ module ReactorSim
       @verdict ||= begin
         errors = slot_errors
         # Everything below reads the assembled graph, which cannot be assembled at all while
-        # the slots are wrong. Reporting "no route for fuel" on top of "no stoker fitted"
+        # the slots are wrong. Reporting "no route for fuel" on top of "nothing fitted to feed it"
         # buries the one error that matters.
         errors.concat(graph_errors) if errors.empty?
         Verdict.new(errors.freeze, advisory_warnings.freeze).freeze
@@ -152,10 +173,10 @@ module ReactorSim
     #
     # The VALUES are symbolised here and it is the other reason this method exists: `options:`
     # round-trips through JSON, `deep_symbolize` converts keys ONLY, and a part id that came
-    # back as `"locomotive"` misses every `Parts.fetch`. That is not a nil — it is a different
+    # back as a string misses every `Parts.fetch`. That is not a nil — it is a different
     # machine. Fourth instance of this trap after parcel resource ids, instrument flags and a
     # minion's station, and **the digest cannot catch any of them**: `canonical` runs through
-    # `JSON.generate`, where `:locomotive` and `"locomotive"` are the same string. Only an
+    # `JSON.generate`, where a symbol and its string are the same. Only an
     # identity assertion finds it.
     def resolve_loadout
       @slots.to_h do |slot|
@@ -214,6 +235,8 @@ module ReactorSim
         fitted_part = part(slot.id)
         if fitted_part
           fitted_part.build(slot.spec.empty? ? @spec : @spec.merge(slot.spec))
+        elsif !active?(slot)
+          Fragment.empty
         else
           link = slot.bypass_link
           link ? Fragment.new(links: [ link ]) : Fragment.empty
@@ -234,6 +257,8 @@ module ReactorSim
       end
 
       @slots.each do |slot|
+        next unless active?(slot)
+
         part_id = @loadout[slot.id]
 
         if part_id.nil?
@@ -286,7 +311,8 @@ module ReactorSim
           end
         end
 
-        # A role is named as the slot names it, so the first shovel's boiler is `shovel_1_boiler`.
+        # A role is named as the slot names it, so the boiler of an engine named `engine_1` is
+        # `engine_1_boiler`.
         names = slot.spec[:names] || @spec[:names]
         missing = fitted.provides.map { |role| names ? names.(role) : role } - pieces.nodes.map(&:id)
         next if missing.empty?
@@ -334,7 +360,9 @@ module ReactorSim
       paths = resolved_paths(nodes)
       return [ @resolve_error ] if paths.nil?
 
+      # A route that `needs:` a slot is the reach of a machine that may not be there.
       @routes.filter_map do |route|
+        next if route[:needs] && part(route[:needs]).nil?
         next if reachable?(paths, nodes, route.fetch(:from), route.fetch(:to), route.fetch(:carrying))
 
         route.fetch(:as, "#{route.fetch(:carrying)} cannot get from " \

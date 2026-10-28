@@ -43,13 +43,14 @@ RSpec.describe DevMatch do
       allow(ENV).to receive(:[]).with("REACTOR_DEV_ENGINE").and_return(value)
     end
 
-    it "ropes itself to the pit's line shaft in place of the steam engine" do
+    it "ropes itself to the pit's line shaft in place of the steam engine, and another to the open pit's" do
       flag("1")
 
       match = described_class.build
 
       expect(match.operation(:dev_engine)).not_to be_nil
-      expect(match.couplings.map { |c| [ c.from, c.to ] }).to eq([ [ %i[dev_engine drive], %i[pit line_shaft] ] ])
+      expect(match.couplings.map { |c| [ c.from, c.to ] })
+        .to eq([ [ %i[dev_engine drive], %i[pit line_shaft] ], [ %i[open_pit_dev_engine drive], %i[open_pit line_shaft] ] ])
     end
 
     it "is not in the match without the flag" do

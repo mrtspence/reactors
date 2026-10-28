@@ -50,14 +50,14 @@ grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n'
 ```
 
 In use at the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`,
-`exhaust`, `explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`,
-`moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+`exhaust`, `explosive`, `fuel`, `fusible`, `gangue`, `gas`, `inert`, `liquid`, `lubricant`, `metal`,
+`moderator`, `ore`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 **A tag does one of three jobs and the word does not say which**, so say it when you add one:
 
 | Job | Examples | Read by |
 |---|---|---|
-| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust`, `explosive` | `Port#accepts?` |
+| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust`, `explosive`, `ore`, `gangue` | `Port#accepts?` — a washer's two outlets part wash ore by `ore` and `gangue` |
 | Reaction — what a substance can do in one | `fuel`, `oxidiser`, `inert` | reactions, ignition, a node's `reaction_throttle` |
 | Physiology — what it does to a person | `breathable` | `Breath` |
 
@@ -401,7 +401,9 @@ Rules worth knowing before you add one:
 - **Gear resists a kind of wound or a cause by name.** A harm dealing `{ crush: 0.6, impact: 0.4 }`
   is resisted kind by kind, by `crush_resistance` and `impact_resistance`, and one with
   `causes: %i[rockfall]` by `rockfall_resistance` too (`Injury.resisted`). Kinds are
-  `Wounds::KINDS` and causes `Wounds::CAUSES`; **a kind nothing resists is simply unresistable**,
+  `Wounds::KINDS` and causes `Wounds::CAUSES`. **`drowning_resistance`** keeps somebody afloat in
+  deep water — less treading, and at 1.0 they never go under (`Breath.treading`); a respirator
+  already masks going under as it masks bad air. **A kind nothing resists is simply unresistable**,
   so grep before you rely on one.
 - **`clumsy` and `boneheaded` are the same family at opposite ends.** Clumsy makes the *bite*
   worse once something has gone wrong; boneheaded makes the *mistake* likelier in the first

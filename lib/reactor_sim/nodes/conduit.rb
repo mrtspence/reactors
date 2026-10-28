@@ -86,9 +86,9 @@ module ReactorSim
         # **A fan at rest is a hole; a pump at rest is a closed valve.** `driven_by:` alone is a
         # BILL — it charges a shaft for work the stream already did — and for a fan that is the
         # whole story, because air goes through a stopped fan perfectly well and only the head
-        # is lost. A bucket pump, a winding drum or a screw conveyor moves material *because* it
-        # is turning, and at rest moves none: without this a mine pump lifted its water 120 m
-        # for nothing with the line shaft stationary.
+        # is lost. A bucket pump, a hoisting drum or a screw conveyor moves material *because* it
+        # is turning, and at rest moves none: without this a pump lifts its water for nothing
+        # with its shaft stationary.
         #
         # Opt-in, so every fitting that does not ask for it is bit-identical — the engine's
         # donkey blower included.
@@ -115,7 +115,7 @@ module ReactorSim
       attr_reader :crew
 
       # What the whole crew passes flat out, which is what busy-ness is measured against: one
-      # putter on a three-man road is a third of a busy road.
+      # worker on a road with room for three is a third of a busy road.
       def full_crew_kg_per_s = @rated_kg_per_s * @crew
 
       # A check valve. Pipes are bidirectional by default, because reverse flow is real physics
@@ -198,8 +198,8 @@ module ReactorSim
         ((omega / @rated_omega)**2).clamp(0.0, 1.0)
       end
 
-      # The blastpipe: exhaust discharged up the chimney drags flue gas with it, which is how a
-      # locomotive breathes. Buoyancy is temperature-limited and so weakest exactly when a cold
+      # The blastpipe: exhaust discharged up the chimney drags flue gas with it, which is how an
+      # engine with a short stack breathes. Buoyancy is temperature-limited and so weakest exactly when a cold
       # engine needs it most; sending the exhaust up the stack makes draught scale with **how
       # hard the engine is working** — more steam used, more blast, more air, more steam.
       #
@@ -252,7 +252,7 @@ module ReactorSim
       # **1.0 means linear**, so a conduit that does not declare this is unaffected.
       #
       # **A worked conduit is not a valve**: its lever is a crew in worker-equivalents, unclamped
-      # above, so five putters move five putters' worth.
+      # above, so five workers move five workers' worth.
       def open_fraction(ctx)
         return 1.0 unless @control_id
 
@@ -322,7 +322,7 @@ module ReactorSim
       #
       # `delivers_to:` defaults to the fitting itself, which is right for a **fan**: the air it
       # blows stays in the operation and the pressure it put there dissipates into the stream,
-      # warming what passes. A **sump pump** says `delivers_to: :work`, because the water it
+      # warming what passes. A **lifting pump** says `delivers_to: :work`, because the water it
       # lifted genuinely leaves and takes that energy with it.
       def drag_conductances(state, ctx)
         return {} if @driven_by.nil?

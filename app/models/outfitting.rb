@@ -63,7 +63,19 @@ class Outfitting
                                     loadout: resolve(parts))
   end
 
-  delegate :slots, :part, :loadout, to: :assembly
+  delegate :slots, :part, :loadout, :active?, to: :assembly
+
+  # The slot a machine's fitting comes with — its dipper, its train — for a slot that `needs:` one.
+  def needed(slot) = slot.needs && slots.find { |s| s.id == slot.needs }
+
+  # What a greyed slot is waiting on: "with the Stripping Shovel", or "with a washhouse of 4 bays"
+  # for a slot that needs its host to reach a figure.
+  def waiting_on(slot)
+    host = needed(slot)
+    return "with the #{host.label}" if slot.needs_at_least.empty?
+
+    "with a #{host.label.downcase} of #{slot.needs_at_least.map { |stat, figure| "#{figure} #{stat}" }.join(', ')}"
+  end
 
   # **Parts fitted that the owner does not own.** Refuses the build, and is reported apart from
   # the structural verdict because it is a different failure with a different fix: one is "this

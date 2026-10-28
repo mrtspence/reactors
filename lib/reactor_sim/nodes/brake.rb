@@ -32,8 +32,8 @@ module ReactorSim
       include Concerns::Thermal
       include Concerns::Wearing
 
-      # What "locked" costs, as a multiple of the shaft's own `I/dt`. A held cage creeps at the
-      # load torque divided by this, so it is large: half a millimetre an hour under a laden deck.
+      # What "locked" costs, as a multiple of the shaft's own `I/dt`. A held load creeps at the
+      # load torque divided by this, so it is large: half a millimetre an hour under a laden hoist.
       LOCK_MULTIPLE = 1.0e6
 
       # Below this the shaft counts as stopped, and the brake may grip rather than slide.
@@ -117,7 +117,7 @@ module ReactorSim
 
         # **Sliding, it is only capped where it cannot hold the load.** At `I/dt` a brake against
         # a steady load settles at `load ÷ (I/dt)`, which past ~800 N·m on a drum is above the stick
-        # speed — so a brake holding nine times a cage's weight let it creep for ever. The implicit
+        # speed — so a brake holding nine times its load would let it creep for ever. The implicit
         # solve cannot reverse the shaft, so uncapped it simply brings it under the stick speed.
         cap = applied >= holding ? limit * LOCK_MULTIPLE : limit
         { id => [ applied / [ speed, STICK_OMEGA ].max, cap ].min }

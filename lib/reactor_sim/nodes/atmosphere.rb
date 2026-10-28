@@ -128,9 +128,8 @@ module ReactorSim
           # outlet, but a link is two-way and gas reverses whenever the gradient does — so an
           # operation whose draught falls away pushes air back up the way it came. That arrives
           # here, at a port nothing was counting, and this node resets to baseline every tick:
-          # the mass was destroyed unledgered. Measured on a mine with its fan stopped, **24 kg
-          # over 3000 ticks**, drifting steadily and invisible to every existing spec because
-          # nothing else in the game ever reverses its intake.
+          # the mass was destroyed unledgered — drifting steadily, and invisible to anything that
+          # does not reverse its intake.
           #
           # Counted as vented rather than netted against `mass_injected`, because gross
           # crossings are the rule: air that came back out of the workings did leave them.

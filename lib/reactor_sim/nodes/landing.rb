@@ -3,7 +3,7 @@
 module ReactorSim
   module Nodes
     # **A landing: material goes on or off something that comes and goes, but only while it stands
-    # there.** `carrier:` names the node it serves — a cage, a train — which answers
+    # there.** `carrier:` names the node it serves — a hoist, cars on a track — which answers
     # `standing_at?(state, mark_m)`; away or moving, the landing passes nothing and what was sent
     # waits upstream. Whoever works it is the lever (`control_id:`, often an effort station), so with
     # nobody at the landing nothing moves however long the carrier stands.

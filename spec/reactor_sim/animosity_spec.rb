@@ -342,7 +342,7 @@ RSpec.describe "animosity" do
     it "makes a fight hard work with no rest in it" do
       brawling = state.merge(fight: { melee: :m, clock_s: 0.0, owed: {} })
       worked = ReactorSim::Fatigue.advance(person(:a), state, control: nil, dt: 1.0,
-                                                              fighting: animosity.exertion(person(:a), brawling))
+                                                              exerting: animosity.exertion(person(:a), brawling))
       rested = ReactorSim::Fatigue.advance(person(:a), state.merge(fatigue: 0.5), control: nil, dt: 1.0)
 
       expect(worked.fetch(:fatigue)).to be > state.fetch(:fatigue)

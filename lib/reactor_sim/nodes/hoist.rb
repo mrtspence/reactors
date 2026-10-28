@@ -2,75 +2,76 @@
 
 module ReactorSim
   module Nodes
-    # A winding drum and the two cages hanging off it, **in balance**: as cage A goes down cage B
-    # comes up, so the cages' own weight cancels and only what is *in* cage A costs anything to
-    # lift. Positive `ω` lowers cage A.
+    # A drum and the two conveyances hanging off it, **in balance**: as conveyance A goes down,
+    # conveyance B comes up, so their own weight cancels and only what is *in* A costs anything to
+    # lift. Positive `ω` lowers A.
     #
     # **Gravity is a torque source in the drive solve** (`drive_torque`), not an impulse applied
     # after it, so a brake or a clutch reaches equilibrium with the load in the same step — applied
-    # afterwards, no brake could ever hold a cage. Its work is booked as it is done, by
+    # afterwards, no brake could ever hold a load. Its work is booked as it is done, by
     # `Tick#book_drive`: into the operation while the load falls, out while it is raised. Nothing
-    # here stores potential energy, so a man stepping into the cage changes nothing on the books.
+    # here stores potential energy, so somebody stepping aboard changes nothing on the books.
     #
     # The drum knows how much rope it has paid out: `position_m`, integrated off its own speed, is
-    # what a depth indicator geared to it reads. Cage A is that far down **unless it has hung**.
+    # what a depth indicator geared to it reads. Conveyance A is that far down **unless it has hung**.
     #
     # ## Hanging up
     #
-    # A cage running down onto something lodged in the shaft (`shaft:` names the node that says
-    # where, as `jam_m`) stops there while the drum goes on paying out, and the difference piles up
-    # as `slack_m`. Hung, the cage is off the rope: the drum feels nothing of it, and its weight
-    # rests on the jam (`resting_n`) instead. When the jam gives, the cage falls the slack, and the
-    # tick it does is recorded as `snatch_m` for the rope to feel. Raised, the drum takes the slack
-    # back in before the cage moves.
+    # A conveyance running down onto something lodged in its way (`obstructed_by:` names the node
+    # that says where, as `jam_m`) stops there while the drum goes on paying out, and the difference
+    # piles up as `slack_m`. Hung, it is off the rope: the drum feels nothing of it, and its weight
+    # rests on the jam (`resting_n`) instead. When the jam gives, it falls the slack, and the tick it
+    # does is recorded as `snatch_m` for the rope to feel. Raised, the drum takes the slack back in
+    # before the conveyance moves.
     #
-    # ## The ends of the shaft
+    # ## The ends of the run
     #
-    # Above the bank landing is the headframe, `clearance_m` of it; below the bottom landing is the
-    # sump. **Reaching either is a failure, decided by speed and position, not by a die**:
+    # Above the top landing is `clearance_m`; below the bottom landing, `overrun_m`. **Reaching
+    # either is a failure, decided by speed and position, not by a die**:
     #
-    #   caught      into the headframe with a detaching hook fitted — the rope lets go and the
-    #               cage hangs in the catch plate
-    #   crashed     into the baulks at the bottom of the sump
-    #   overwound   into the headframe with no hook — through the sheaves, the rope parts and the
-    #               cage falls back down the open shaft
+    #   caught      over the top with a detaching hook fitted — the rope lets go and the
+    #               conveyance hangs in the catch plate
+    #   crashed     into the stops below the bottom landing
+    #   overwound   over the top with no hook — through the sheaves, the rope parts and the
+    #               conveyance falls back down its run
     #
     # Failed, the drum stops (`Tick#stress` takes its momentum) and the way it serves is out of
     # service. Who is hurt, and what it wrecks, is the machine's declaration.
     #
-    #   config: moment_of_inertia, radius_m, depth_m, clearance_m, sump_m, detaching_hook,
-    #           endangers, damages, rope, shaft, deck, boarding_hazard, rated_speed_m_s, perils
+    #   config: moment_of_inertia, radius_m, depth_m, clearance_m, overrun_m, detaching_hook,
+    #           endangers, damages, rope, obstructed_by, deck, boarding_hazard, rated_speed_m_s,
+    #           perils, conveyance_kg, catches
     #   state:  angular_momentum, position_m, slack_m, snatch_m, resting_n, load_torque,
     #           accel_m_s2, durability, failure
     class Hoist < Node
       include Concerns::Rotating
       include Concerns::Wearing
 
-      # Close enough to a mark, and slow enough, to call the cage stopped there.
+      # Close enough to a mark, and slow enough, to call the conveyance stopped there.
       LANDING_M = 0.5
       STOPPED_M_S = 0.2
 
-      # How long somebody takes to get into the cage, and so how long winding away hurts them.
+      # How long somebody takes to get aboard, and so how long sending it away hurts them.
       BOARDING_S = 3.0
 
-      attr_reader :moment_of_inertia, :radius_m, :friction, :depth_m, :clearance_m, :sump_m, :rope,
-                  :shaft, :deck, :boarding_hazard, :rated_speed_m_s, :perils, :cage_kg
+      attr_reader :moment_of_inertia, :radius_m, :friction, :depth_m, :clearance_m, :overrun_m, :rope,
+                  :obstructed_by, :deck, :boarding_hazard, :rated_speed_m_s, :perils, :conveyance_kg
 
-      # `rope:` names the rope the cage hangs on. Parted, the cage is no longer the drum's load.
-      # `cage_kg:` is each cage's own mass, and `catches:` whether they grip the guides when the
-      # rope parts — properties of the cage, which the rope reads.
-      # `deck:` names a holder riding in cage A, whose contents are load like anybody aboard.
-      # `boarding_hazard:` is what winding away does to somebody still getting in.
+      # `rope:` names the rope the conveyance hangs on. Parted, it is no longer the drum's load.
+      # `conveyance_kg:` is each conveyance's own mass, and `catches:` whether they grip their
+      # guides when the rope parts — properties of the conveyance, which the rope reads.
+      # `deck:` names a holder riding in conveyance A, whose contents are load like anybody aboard.
+      # `boarding_hazard:` is what sending it away does to somebody still getting aboard.
       def initialize(id:, moment_of_inertia:, radius_m:, depth_m:, label: nil, friction: 0.0,
-                     position_m: 0.0, clearance_m: 6.0, sump_m: 4.0, detaching_hook: false,
-                     endangers: {}, damages: {}, rope: nil, shaft: nil, deck: nil,
-                     boarding_hazard: nil, rated_speed_m_s: nil, perils: [], cage_kg: 0.0,
+                     position_m: 0.0, clearance_m: 6.0, overrun_m: 4.0, detaching_hook: false,
+                     endangers: {}, damages: {}, rope: nil, obstructed_by: nil, deck: nil,
+                     boarding_hazard: nil, rated_speed_m_s: nil, perils: [], conveyance_kg: 0.0,
                      catches: false)
         super(id: id, label: label)
-        @cage_kg = cage_kg.to_f
+        @conveyance_kg = conveyance_kg.to_f
         @catches = catches
         @rope = rope&.to_sym
-        @shaft = shaft&.to_sym
+        @obstructed_by = obstructed_by&.to_sym
         @deck = deck&.to_sym
         @boarding_hazard = boarding_hazard&.freeze
         @rated_speed_m_s = rated_speed_m_s&.to_f
@@ -81,7 +82,7 @@ module ReactorSim
         @friction = friction.to_f
         @position_m = position_m.to_f
         @clearance_m = clearance_m.to_f
-        @sump_m = sump_m.to_f
+        @overrun_m = overrun_m.to_f
         @detaching_hook = detaching_hook
         @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
         @failure_damages = damages.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
@@ -97,43 +98,44 @@ module ReactorSim
                     load_torque: 0.0, accel_m_s2: 0.0)
       end
 
-      # How hard the cage was accelerating last tick, which is what a rope feels beyond its weight.
+      # How hard the conveyance was accelerating last tick, which is what a rope feels beyond its
+      # weight.
       def acceleration_m_s2(state) = state.fetch(:accel_m_s2, 0.0)
 
       def rope_parted?(ctx) = !@rope.nil? && !ctx.node_state(@rope)&.fetch(:failure, nil).nil?
 
-      # Rope paid out below the bank landing.
+      # Rope paid out below the top landing.
       def position_m(state, _content = nil) = state.fetch(:position_m)
 
       def slack_m(state, _content = nil) = state.fetch(:slack_m, 0.0)
 
-      # Slack the cage fell last tick, which is the snatch the rope takes.
+      # Slack the conveyance fell last tick, which is the snatch the rope takes.
       def snatch_m(state) = state.fetch(:snatch_m, 0.0)
 
       def hung?(state) = slack_m(state).positive?
 
-      # Where cage A actually is.
-      def cage_m(state) = position_m(state) - slack_m(state)
+      # Where conveyance A actually is.
+      def conveyance_m(state) = position_m(state) - slack_m(state)
 
-      # The drum's rim speed, m/s: cage A's speed down the shaft while it hangs on the rope.
+      # The drum's rim speed, m/s: conveyance A's speed along its run while it hangs on the rope.
       def speed_m_s(state) = omega(state) * @radius_m
 
-      def cage_speed_m_s(state) = hung?(state) ? 0.0 : speed_m_s(state)
+      def conveyance_speed_m_s(state) = hung?(state) ? 0.0 : speed_m_s(state)
 
       # The drum at a mark on its indicator, and not turning.
       def stopped_at?(state, mark_m)
         (position_m(state) - mark_m).abs < LANDING_M && speed_m_s(state).abs < STOPPED_M_S
       end
 
-      def cage_stopped_at?(state, mark_m)
-        (cage_m(state) - mark_m).abs < LANDING_M && cage_speed_m_s(state).abs < STOPPED_M_S
+      def conveyance_stopped_at?(state, mark_m)
+        (conveyance_m(state) - mark_m).abs < LANDING_M && conveyance_speed_m_s(state).abs < STOPPED_M_S
       end
 
       # What a landing asks of its carrier.
-      def standing_at?(state, mark_m) = cage_stopped_at?(state, mark_m)
+      def standing_at?(state, mark_m) = conveyance_stopped_at?(state, mark_m)
 
-      # What is in cage A, as the tick sees it — every rider committed to this drum, and whatever
-      # is on its deck as of last tick.
+      # What is in conveyance A, as the tick sees it — every rider committed to this drum, and
+      # whatever is on its deck as of last tick.
       def cargo_kg(ctx)
         riders = ctx.respond_to?(:cargo_kg) ? ctx.cargo_kg(id) : 0.0
         riders + deck_kg(ctx)
@@ -145,17 +147,17 @@ module ReactorSim
         Parcel.total_kg(ctx.node_state(@deck)&.fetch(:parcels, []) || [])
       end
 
-      # How hard the cage is being wound against its rated speed, for a peril that `scales_with:
-      # :swing` — an unguided kibble swings worse the faster it goes.
+      # How hard the conveyance is being run against its rated speed, for a peril that `scales_with:
+      # :swing` — one with no guides swings worse the faster it goes.
       def activity(state, quantity, _dt)
         return nil unless quantity == :swing && @rated_speed_m_s&.positive?
 
-        cage_speed_m_s(state).abs / @rated_speed_m_s
+        conveyance_speed_m_s(state).abs / @rated_speed_m_s
       end
 
-      # The imbalance, at the drum. Cage B rides empty, so it is cage A's load — and the ropes', the
-      # longer side outweighing the shorter, so a heavy rope is most to lift with cage A at the
-      # bottom — until the rope parts or the cage hangs, when cage A is no longer on the drum at all.
+      # The imbalance, at the drum. B rides empty, so it is A's load — and the ropes', the longer side
+      # outweighing the shorter, so a heavy rope is most to lift with A at the bottom — until the rope
+      # parts or A hangs, when it is no longer on the drum at all.
       def drive_torque(state, ctx)
         return 0.0 if rope_parted?(ctx) || hung?(state)
 
@@ -166,7 +168,7 @@ module ReactorSim
         rope = @rope && ctx.nodes&.[](@rope)
         return 0.0 unless rope.respond_to?(:kg_per_m)
 
-        rope.kg_per_m * ((2.0 * cage_m(state)) - @depth_m)
+        rope.kg_per_m * ((2.0 * conveyance_m(state)) - @depth_m)
       end
 
       # What a brake on this drum has to hold, as of last tick — read through `supports:`.
@@ -185,32 +187,32 @@ module ReactorSim
         settled.merge(load_torque: drive_torque(settled, ctx), resting_n: resting_n(settled, ctx))
       end
 
-      # The depth of a jam cage A is at or above, as of last tick; nil if there is none in its way.
+      # The depth of a jam conveyance A is at or above, as of last tick; nil if there is none in its way.
       def jam_below(state, ctx)
-        jam = @shaft && ctx.node_state(@shaft)&.fetch(:jam_m, nil)
-        jam if jam && cage_m(state) <= jam + LANDING_M
+        jam = @obstructed_by && ctx.node_state(@obstructed_by)&.fetch(:jam_m, nil)
+        jam if jam && conveyance_m(state) <= jam + LANDING_M
       end
 
-      # What a hung cage puts on the ledge it hangs from: itself and everybody in it.
+      # What a hung conveyance puts on what it hangs from: itself and everybody in it.
       def resting_n(state, ctx)
         return 0.0 unless hung?(state)
 
-        (@cage_kg + cargo_kg(ctx)) * Units::GRAVITY_M_PER_S2
+        (@conveyance_kg + cargo_kg(ctx)) * Units::GRAVITY_M_PER_S2
       end
 
       # --- the ends -------------------------------------------------------------
 
-      def into_headframe?(state) = cage_m(state) < -@clearance_m
+      def into_top?(state) = conveyance_m(state) < -@clearance_m
 
-      def into_sump?(state) = cage_m(state) > @depth_m + @sump_m
+      def into_bottom?(state) = conveyance_m(state) > @depth_m + @overrun_m
 
-      def overload?(state, _ctx, _integrity) = into_headframe?(state) || into_sump?(state)
+      def overload?(state, _ctx, _integrity) = into_top?(state) || into_bottom?(state)
 
-      # Ascending severity: a cage hung in the catch plate is the least of the three.
+      # Ascending severity: a conveyance hung in the catch plate is the least of the three.
       def failure_modes = { caught: {}, crashed: {}, overwound: {} }
 
       def failure_mode(state, _ctx, _cause)
-        return :crashed if into_sump?(state)
+        return :crashed if into_bottom?(state)
 
         @detaching_hook ? :caught : :overwound
       end

@@ -230,7 +230,7 @@ RSpec.describe "the mine" do
       end.sum
 
       expect(raised).to eq(0.0)
-      expect(op.nodes.fetch(:cage_drive).cage_m(op.state.dig(:nodes, :cage_drive))).to be > 80.0
+      expect(op.nodes.fetch(:cage_drive).conveyance_m(op.state.dig(:nodes, :cage_drive))).to be > 80.0
     end
 
     # The same deck and posts with the shaft paid for, constructed just short of bank: it comes the

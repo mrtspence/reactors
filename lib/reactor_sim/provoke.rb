@@ -49,7 +49,7 @@ module ReactorSim
 
       def dt = @ctx.dt
 
-      # Somebody who can quarrel: here, on their feet, nobody's cargo, not in a cage.
+      # Somebody who can quarrel: here, on their feet, nobody's cargo, not aboard a hoist.
       def able?(id, state = @entry[id])
         !state.nil? && @minions.key?(id) && !Animosity.stood_down?(state) && !@carried.key?(id) &&
           state[:via].nil? && state[:riding].nil?

@@ -118,7 +118,8 @@ pressure gauge's full-scale reading. That is why both processes read it through
 
 **`REACTOR_DEV_ENGINE=1` is the same kind of switch**, read only through `DevMatch.dev_engine?`
 and ignored outside development and test. It adds the developer's engine to the match and ropes
-the pit to it instead of to the steam engine. The runner provisions the match's `Operation` rows
+the pit to it instead of to the steam engine, and a second to the open pit's line shaft, which
+nothing else turns yet. The runner provisions the match's `Operation` rows
 at boot, so the console appears and disappears with the flag. **A machine with no assembler has
 no outfitting or crew screen** (`Operation#fittable?`): the console hides both links, the
 fitting screens 404 through `require_fittable!`, and their switcher leaves it out.
@@ -185,6 +186,13 @@ GET   …/operations/:id/loadout/edit    the screen
 PATCH …/operations/:id/loadout         fit it, and rebuild the engine from cold
 POST  …/operations/:id/loadout_draft   evaluate a build without storing it
 ```
+
+**A machine's fittings are grouped under it and greyed while it is not fitted.** A slot that
+`needs:` another (a shovel's boiler needs its dipper) is shown with "with the …" in place of
+required or optional — "with a washhouse of 4 bays" where it needs its host to reach a figure
+(`Outfitting#waiting_on`) — and its dropdown keeps the stored choice selected — a required one that
+selected its first option would overwrite the choice on the next save. A slot group with no entry
+of its own in `SLOT_GROUPS` is headed by its own name.
 
 **The chassis is a choice on this screen, and it decides what slots exist** — the atmospheric
 frame has a condenser and the high-pressure one does not. Two rules follow, and both were bugs

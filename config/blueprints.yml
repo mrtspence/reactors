@@ -44,6 +44,12 @@ operation:
     materials:
       wrought_iron: 3200
       cast_iron: 1800
+  # An open pit is a field somebody has the right to dig. Cheaper to start than a colliery: the
+  # cost is in the hands, not the hole.
+  open_pit:
+    materials:
+      wrought_iron: 600
+      wood: 1500
 
 chassis:
   # The frame itself: bedplate, framing, the housing everything else bolts to. Watt's is the
@@ -67,6 +73,11 @@ chassis:
     materials:
       wrought_iron: 5400
       steel: 900
+  # The sunk pit: the ramp road and its planking, and the fence round the edge.
+  open_pit/sunk_pit:
+    materials:
+      wood: 2200
+      wrought_iron: 300
 
 # **You unlock the person.** This said the opposite for a release — "you unlock the template,
 # never the person" — and it was wrong along with everything else that enumerated `fireman` and
@@ -661,6 +672,174 @@ part:
   # A man and a wage, not a thing built — free until wages are a cost.
   overman:
     materials: {}
+  # --- the open pit ------------------------------------------------------------------------
+  pick_and_shovel:
+    materials:
+      wrought_iron: 60
+      wood: 30
+  barrows:
+    materials:
+      wood: 240            # the barrows and the plank ramp
+      wrought_iron: 40
+  site_hut:
+    materials:
+      wood: 300
+  changing_house:
+    materials:
+      wood: 700
+      wrought_iron: 200
+  bench_hut:
+    materials:
+      wood: 90
+  bench_cabin:
+    materials:
+      wood: 260
+      wrought_iron: 30
+  dump_shelter:
+    materials:
+      wood: 50
+  dump_cabin:
+    materials:
+      wood: 200
+  pit_boss:
+    materials: {}
+  single_log_washer:
+    materials:
+      wood: 600             # the trough and its trestles
+      wrought_iron: 400     # the log's teeth and the gearing
+  thomas_washer:
+    materials:
+      wood: 900
+      wrought_iron: 900
+      cast_iron: 500        # the second log's gearing
+      coal: 1500
+  double_thomas_washer:
+    materials:
+      wood: 1400
+      wrought_iron: 1800
+      cast_iron: 1000
+      coal: 3000
+  # TODO: gated on a pit achievement, once the pit has one — its first caller.
+  series_washer:
+    materials:
+      steel: 2500           # the trommel's screen and the attrition cell's paddles
+      cast_iron: 1500
+      wrought_iron: 1200
+      wood: 800
+  barracks:
+    materials:
+      wood: 1600
+      wrought_iron: 300
+  washhouse:
+    materials:
+      wood: 500
+  extended_washhouse:
+    materials:
+      wood: 900
+      wrought_iron: 100
+  long_washhouse:
+    materials:
+      wood: 1300
+      wrought_iron: 200
+  double_washhouse:
+    materials:
+      wood: 1800
+      wrought_iron: 350
+  single_pump:
+    materials:
+      cast_iron: 200
+      wrought_iron: 100
+  duplex_pump:
+    materials:
+      cast_iron: 700
+      wrought_iron: 300
+      bronze: 40            # the valves
+  compound_pump:
+    materials:
+      cast_iron: 1800
+      wrought_iron: 600
+      bronze: 120
+  blake_jaw_crusher:
+    materials:
+      cast_iron: 1500       # the frame and the swing jaw
+      wrought_iron: 300
+  large_jaw_crusher:
+    materials:
+      cast_iron: 3200
+      wrought_iron: 600
+      steel: 400            # the jaw plates
+  # TODO: gated on a pit achievement, once the pit has one — with the series washer.
+  gyratory_crusher:
+    materials:
+      cast_iron: 5000
+      steel: 1500
+      wrought_iron: 800
+  jumper_holes:
+    materials:
+      wrought_iron: 120     # the jumpers and the tamping bars
+      black_powder: 60
+  gopher_holes:
+    materials:
+      wrought_iron: 150
+      wood: 200             # props for the hole
+      black_powder: 240
+  dynamite_shots:
+    materials:
+      steel: 150            # the drill steels
+      dynamite: 60
+  powder_house:
+    materials:
+      wood: 150
+      wrought_iron: 40
+  thawing_house:
+    materials:
+      wood: 300
+      cast_iron: 250        # the stove and its pipe
+  mud_dam:
+    materials:
+      wood: 400             # the trestles and the decant gate
+  raised_dam:
+    materials:
+      wood: 900
+      wrought_iron: 100
+  settling_ponds:
+    materials:
+      wood: 1800
+      wrought_iron: 250
+      cast_iron: 200        # the pipe between the ponds
+  reservoir:
+    materials:
+      wood: 200
+  large_reservoir:
+    materials:
+      wood: 800
+      cast_iron: 400        # the scour valve and its pipe
+  great_reservoir:
+    materials:
+      wood: 2000
+      cast_iron: 900
+      wrought_iron: 300
+  lift_pump:
+    materials:
+      cast_iron: 300
+      wrought_iron: 150
+      wood: 100            # the staging over the sump
+  plunger_pump:
+    materials:
+      cast_iron: 800
+      wrought_iron: 300
+      bronze: 60
+  # TODO: gated on a pit achievement, once the pit has one — with the series washer.
+  centrifugal_pump:
+    materials:
+      cast_iron: 1400
+      steel: 400
+      bronze: 100
+  pit_feed_belt:
+    materials:
+      steel: 1200
+      cast_iron: 500
+      belting: 2500
   # --- mobile engines ----------------------------------------------------------------------
   # The shovel's and the locomotive's own engine, and what is tiered around it. A bigger bunker or
   # tank is paid for partly in the coal the pit has raised.

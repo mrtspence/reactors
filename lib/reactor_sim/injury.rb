@@ -147,11 +147,15 @@ module ReactorSim
     # a chill held past it. The kind's standing wound is taken at least as deep as `mode` begins,
     # and the escalation rule is still the shared one, which is what keeps a minion from being
     # announced as collapsed twice, or as severely hurt after being mortally so.
-    def succumb(state, mode, kind:, catalogue:, die:)
+    #
+    # `variant:` names the wound it is, where the cause decides it rather than the die — drowning is
+    # `drowned` — and the wound takes that variant's place in whichever tier it reaches.
+    def succumb(state, mode, kind:, catalogue:, die:, cause: nil, variant: nil)
       needed = Wounds::BANDS.fetch(mode) - dose(state, kind)
       return [ state, nil, [] ] unless needed.positive?
 
-      deepen(state, state.fetch(:injury), kind, needed, catalogue, die, nil)
+      deepen(state, state.fetch(:injury), kind, needed, catalogue, die, cause,
+             index: variant && catalogue.place_of(kind, variant))
     end
 
     # **Wounds from earlier matches**, as the delivery tier keeps them — `[{ kind:, depth:, variant:,
@@ -237,14 +241,14 @@ module ReactorSim
     # so a little heat for a long time adds up.
     def dose(state, kind) = state.fetch(:doses, {}).fetch(kind, 0.0)
 
-    def deepen(state, before, kind, bite, catalogue, die, cause)
+    def deepen(state, before, kind, bite, catalogue, die, cause, index: nil)
       held = standing(state, kind)
       depth = dose(state, kind) + bite
       state = state.merge(doses: state.fetch(:doses, {}).merge(kind => depth).freeze)
       tier = Wounds.tier(depth)
       return settle(state, before, []) if tier.nil?
 
-      index = held ? held.fetch(:variant) : catalogue.pick(kind, tier, die_for(state, die))
+      index = held ? held.fetch(:variant) : index || catalogue.pick(kind, tier, die_for(state, die))
       wound = resolved(kind, depth, tier, index, held ? held[:cause] : cause, catalogue)
       wound = wound.merge(held.slice(:ref)).freeze if held&.key?(:ref)
       # In its own place, so the delivery tier can tell a wound deepening from a new one.

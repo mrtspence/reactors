@@ -7,9 +7,9 @@ module ReactorSim
   # no entropy, so a suffocating minion replays exactly and survives a snapshot.
   #
   # **`air` is the only thing tagged `breathable`, and every other gas asphyxiates by taking up
-  # the room it was in.** That is the entire model, and it is why afterdamp needed no content at
-  # all: firedamp combustion consumes 17.2 kg of air per kilogram of gas and hands back
-  # `flue_gas`, so a district that has just exploded is a district nobody can breathe in.
+  # the room it was in.** That is the entire model, and it is why a burnt room needs no content of
+  # its own: a fuel gas burning consumes many times its weight of air and hands back `flue_gas`,
+  # so a room that has just exploded is a room nobody can breathe in.
   #
   # Two things make air unbreathable and they are not the same mechanism:
   #
@@ -58,12 +58,25 @@ module ReactorSim
     # ventilation the revival rather than a separate mechanic.
     RANGE = (0.0..1.0)
 
+    # **Treading water**, fatigue per second at a human's endurance: about five minutes from fresh
+    # to spent, in clothes and boots. Spent in deep water, they go under, and are not breathing.
+    TREADING = 3.3e-3
+
     module_function
+
+    # What keeping afloat costs this person. `drowning_resistance` — the cause's own resistance,
+    # as a helmet's is `rockfall`'s — takes it off, and at 1.0 they never tire of it.
+    def treading(minion) = TREADING * (1.0 - drowning_resistance(minion))
+
+    # Spent in deep water, they go under — unless the water is home to them.
+    def under?(minion, state) = state.fetch(:fatigue, 0.0) >= Fatigue::RANGE.end && drowning_resistance(minion) < 1.0
+
+    def drowning_resistance(minion) = Injury.numeric(minion.tag(:drowning_resistance)).clamp(0.0, 1.0)
 
     # The fraction of this volume that a person can breathe, 0 to 1.
     #
     # An empty volume reads 0.0 rather than 1.0: nothing to breathe is not clean air, and a
-    # vacuum should not be the safest place in the mine.
+    # vacuum should not be the safest place there is.
     def breathable_fraction(parcels, content)
       total = 0.0
       breathable = 0.0

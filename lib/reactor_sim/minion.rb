@@ -18,18 +18,18 @@ module ReactorSim
   # **`posting` is where they have been SENT; `station` is what they are actually working.** In an
   # operation with no geometry the two are always equal and the distinction costs nothing. Where
   # there is geometry they differ for as long as the walk takes, and that gap is the point: a
-  # shift ordered to the far district is a shift that is not at the face yet.
+  # shift ordered somewhere far is a shift that is not at work yet.
   #
-  # **`id` is the JOB and `minion` is the person.** `:fireman` is what the steam engine asks for;
-  # Jim is who turned up.
+  # **`id` is the JOB and `minion` is the person.** The job is what an operation asks for; Jim is
+  # who turned up.
   class Minion
     attr_reader :id, :name, :minion, :archetype, :stats, :tags, :default_station, :default_place,
                 :mass_kg, :worn_kg, :weapons, :grudges, :resented_by
 
     # What a journey draws on. Blended for the same reason every `effort:` is, and it runs
-    # through `capability`, so fatigue and injury slow a walk exactly as they slow a shovel — a
-    # spent minion stops where they stand until they have rested. `agility` is half of moving your
-    # own body, so an elf crosses a district quicker than an ogre.
+    # through `capability`, so fatigue and injury slow a walk exactly as they slow work — a spent
+    # minion stops where they stand until they have rested. `agility` is half of moving your own
+    # body, so an elf crosses a room quicker than an ogre.
     #
     # > **Deliberately NOT `endurance`, however obviously walking is an endurance job.**
     # > `endurance` is a *divisor* in `Fatigue.accrual` and enters no capability blend, which is
@@ -112,7 +112,7 @@ module ReactorSim
     # **A naked light carried by a person** — a candle in the hat, an oil lamp on the belt — and
     # what it offers the air of the room they are standing in: a seed for a mixture that will
     # carry it, and a little heat. In gas too lean to carry it the seed is what it burns, so it is
-    # a flame cap's worth — tens of watts of firedamp.
+    # a flame cap's worth — tens of watts of a fuel gas.
     HAND_FLAME = { kg_per_s: 1.0e-6, watts: 200.0, cause: :open_flame }.freeze
 
     def open_flame? = tag?(:open_flame) && Injury.numeric(tag(:open_flame)).positive?
@@ -295,22 +295,21 @@ module ReactorSim
     # to 1.0 (`ControlPoint` refuses otherwise), which keeps that baseline true at every station.
     #
     # `blend × (1 + aid)` rather than `blend + aid`, so a specialised tool is worth more in
-    # capable hands. Condition and injury multiply in too, which makes a hurt fireman a worse
-    # fireman rather than merely a slower one.
+    # capable hands. Condition and injury multiply in too, which makes somebody hurt worse at their
+    # post rather than merely slower at it.
     #
     # **`condition` is also what makes fatigue a runaway.** `Fatigue` accrues on
     # `intent ÷ capability`, so a tiring worker's falling capability raises their own load and
     # tires them faster still — true of people, and why `Fatigue::LOAD_CEILING` has to exist.
     # `gated_by:` is the other kind of help entirely, and the difference matters. `aided_by:`
-    # **adds**: a shovel makes shovelling better and its absence makes it merely unaided.
+    # **adds**: a good tool makes the work better and its absence makes it merely unaided.
     # `gated_by:` **multiplies**, and a missing tag is therefore a zero — which is the honest
     # model of a job that cannot be done at all without the thing.
     #
-    # Hewing is gated on `mining_effectiveness` and `darkvision`: an ogre with no pick gets no
-    # coal out of a seam however strong they are, and nobody gets any in the dark. A crude kit
-    # and a tallow candle is a punishing 0.25 × 0.45; a proper pick and a Davy lamp is 0.8 × 1.0.
-    # That spread is the whole reason equipment is worth buying.
-    # `ambient:` is what the ROOM supplies toward the same gates — light on the roadway against
+    # A post gated on a tool and on light gets nothing from somebody with neither, however strong
+    # they are. A crude tool and a poor light is a punishing 0.25 × 0.45; a proper tool and a good
+    # light is 0.8 × 1.0. That spread is the whole reason equipment is worth buying.
+    # `ambient:` is what the ROOM supplies toward the same gates — daylight or a lit room against
     # a lamp on your belt. See `Tick#ambient_tags`.
     def capability(state, effort:, aided_by: nil, gated_by: nil, ambient: nil)
       blended = effort.sum { |stat, weight| effective(stat, state) * weight }
@@ -324,8 +323,8 @@ module ReactorSim
     # One for a job that needs nothing, so a station declaring no gates is unchanged.
     #
     # **The better of what you carry and what the room gives, never the sum.** Two lamps do not
-    # let you see twice, and adding them would make a well-lit district turn a blind minion into
-    # a better hewer than a sighted one somewhere dark.
+    # let you see twice, and adding them would make a well-lit room turn a blind minion into a
+    # better worker than a sighted one somewhere dark.
     def gate(tags, ambient = nil)
       return 1.0 if tags.nil? || tags.empty?
 

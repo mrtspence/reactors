@@ -131,7 +131,7 @@ module ReactorSim
           deck_kg = contents_kg(states, @deck)
           return 0.0 if deck_kg <= EMPTY_KG && contents_kg(states, @coal_from, :coal) <= EMPTY_KG
           return 100.0 if deck_kg <= EMPTY_KG
-          return 0.0 unless drum.cage_stopped_at?(drum_state, drum.depth_m)
+          return 0.0 unless drum.conveyance_stopped_at?(drum_state, drum.depth_m)
 
           deck_kg >= @deck_full_kg || contents_kg(states, @coal_from, :coal) <= EMPTY_KG ? 0.0 : 100.0
         end

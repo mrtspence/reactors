@@ -38,7 +38,7 @@ module ReactorSim
                      emissivity: 0.0, radiating_area_m2: 0.0, hot_spot: nil)
         super(id: id, label: label, ports: ports)
         # **The nodes this one's contents touch**, whose temperature is what the fuel against them
-        # reaches — a timber headframe's bearers on the sheave, a district's gas on its rock. A
+        # reaches — timber bearers on a hot sheave, a room's gas on its rock. A
         # lumped body has no local hot spot of its own, so a fuel that lights itself
         # (`autoignition_k`) reads the hottest of them and itself. Empty for nearly everything.
         @hot_spot = Array(hot_spot).map(&:to_sym).freeze
@@ -149,7 +149,7 @@ module ReactorSim
         (over_p + over_t) * @stress_rate
       end
 
-      # The generic holder splits and stops there. A vessel that can fail two ways — a seam
+      # The generic holder splits and stops there. A vessel that can fail two ways — a joint
       # that weeps against a shell that lets go — says so itself; `Nodes::Boiler` does.
       def failure_modes = { rupture: {} }
 
@@ -206,7 +206,7 @@ module ReactorSim
         events = []
         # **Alight means a fire the room is having, not a flame standing at the igniter.** A
         # naked light burns a trickle of gas continuously in a mixture far too lean to carry
-        # it; counting that as the district catching fire means the transition is spent on the
+        # it; counting that as the room catching fire means the transition is spent on the
         # lamp, and the explosion an hour later — the thing that actually matters — raises no
         # event at all, because `alight` was already true.
         alight = ignited_kg(state) > Parcel::EPSILON && carrying?(state, ctx)
@@ -240,7 +240,7 @@ module ReactorSim
       # as infinite; anything carrying a real rating was not meant to hold a fire, so one
       # lighting in it is an incident rather than a line of telemetry. `Operation#incidents`
       # reports `warning` and `critical` only, so an `:info` ignition reaches the durable log
-      # and never the player — which is a district emptying itself with nothing on the panel.
+      # and never the player — which is a room burning out with nothing on the panel.
       #
       # Keyed on the **rating** rather than on the temperature reached, because ignition settles
       # in phase 5 and the transition is seen a tick before the heat arrives: a temperature test
@@ -264,7 +264,7 @@ module ReactorSim
 
       # **What lit it, named for the feed.** The console renders a missing `cause:` as the
       # literal word "unknown", so a critical event owes one. A lever the player pulled is the
-      # most useful answer there is — "the district caught, naked flame" tells them what to
+      # most useful answer there is — "caught, naked flame" tells them what to
       # stop doing — so the vessel's own heater names its lever and a source in the room names
       # whatever it reports. A fire that caught with neither did so off the heat already in the
       # vessel.
@@ -277,7 +277,7 @@ module ReactorSim
       def heater_fraction(ctx)
         return 0.0 if @heater_control_id.nil?
 
-        # Unclamped above, because a heater worked by people — a furnaceman's shovel — arrives in
+        # Unclamped above, because a heater worked by people — somebody stoking it — arrives in
         # worker-equivalents; a heater on a valve never reads past 100%.
         [ ctx.controls.fetch(@heater_control_id, 0.0) / 100.0, 0.0 ].max
       end

@@ -102,9 +102,9 @@ module ReactorSim
           places: fragment.places,
           control_points: fragment.control_points,
           diagnostics: assembly.diagnostics,
-          minions: crew_for(roster, content || Content.default,
-                            station: assembly.crew_origin, place: :bank,
-                            advance: assembly.advance_shifts)
+          minions: Crew.minions(roster, content: content || Content.default,
+                                station: assembly.crew_origin, place: :bank,
+                                advance: assembly.advance_shifts)
         )
       end
 
@@ -215,7 +215,7 @@ module ReactorSim
 
         def cage_below?(ctx)
           drum = @hoist && ctx.nodes[@hoist]
-          drum.respond_to?(:cage_m) && drum.cage_m(ctx.node_state(@hoist)) > LODGE_M
+          drum.respond_to?(:conveyance_m) && drum.conveyance_m(ctx.node_state(@hoist)) > LODGE_M
         end
 
         def apply(state, ctx, _grant)
@@ -326,10 +326,10 @@ module ReactorSim
         def apply(state, ctx, _grant)
           drum = ctx.nodes[@hoist]
           drum_state = ctx.node_state(@hoist)
-          return state.merge(ringing: false) unless drum.respond_to?(:cage_m) && drum_state
+          return state.merge(ringing: false) unless drum.respond_to?(:conveyance_m) && drum_state
 
-          near = (drum.cage_m(drum_state) - @landing_m).abs < RINGS_WITHIN_M
-          state.merge(ringing: near && drum.cage_speed_m_s(drum_state).abs >= Nodes::Hoist::STOPPED_M_S)
+          near = (drum.conveyance_m(drum_state) - @landing_m).abs < RINGS_WITHIN_M
+          state.merge(ringing: near && drum.conveyance_speed_m_s(drum_state).abs >= Nodes::Hoist::STOPPED_M_S)
         end
       end
 
@@ -1530,25 +1530,14 @@ module ReactorSim
                            max_kg_per_s: 2.0, heat_capacity: 500.0)
       end
 
-      # **The shot hole: drilled, charged and fired by the shotfirer**, a tonne and a half of coal at
-      # a time (`design_sketches/mine-accidents-unit4.md` §3). The conduit is the charge line from
-      # the magazine: it passes one charge on the tick after the hole is ready, and the charge reacts
-      # in the district's air the tick it lands, leaving its fumes. The coal and dust it brings down
-      # follow through `ShotYield`, off the running total in `brought_down_kg`.
-      #
-      # **Its accidents are mishaps of the shotfirer's post**, so a poor hand has more of them: a
-      # shot that blows out of its hole is, for a tick, a flame in the room; a charge that misfires
-      # stays in the hole. **What then happens to a misfire is the shotfirer's judgement**:
-      #
-      # - recognised, it is a known misfire he digs out, **all or nothing** — its hazard is at full
-      #   weight while any of it remains, and the clearing completes in one tick;
-      # - taken for a spent shot, it is a **live charge left in the face** nobody knows of, which a
-      #   hewer working the face can strike and set off on himself.
-      #
-      # Either going off is a blast to whoever set it off and a flame in the room for a tick.
-      class ShotHole < Nodes::Conduit
-        # Seconds of a sound shotfirer's work to drill, charge and fire one hole.
-        SHOT_S = 900.0
+      # **The colliery's shot hole** (`Nodes::ShotHole`), a tonne and a half of coal at a time
+      # (`design_sketches/mine-accidents-unit4.md` §3): worked by the shotfirer, the charge reacting in
+      # the district's air the tick it lands, the coal and dust it brings down following through
+      # `ShotYield`. A live charge left in the face is struck by the hewers, each by the face's crew.
+      class ShotHole < Nodes::ShotHole
+        # Seconds of a sound shotfirer's work to drill, charge and fire one hole: short enough that a
+        # match fires several, so what hangs on a shot is worth having.
+        SHOT_S = 450.0
 
         # And to dig out a charge that did not go off. Slower than drilling a fresh hole, because
         # it is done with a wooden scraper and nobody hurries it.
@@ -1558,120 +1547,9 @@ module ReactorSim
         SHOT_COAL_KG = 1_500.0
         BLOWN_OUT_YIELD = 0.25
 
-        # How long a shot reads as just fired, s.
-        FIRED_S = 30.0
-
-        STATUSES = %i[idle charging fired misfire clearing].freeze
-
-        attr_reader :charge_kg, :blowout, :perils
-
-        # `blowout:` is the flame a blown-out shot offers the room for its one tick.
-        def initialize(charge_kg:, blowout:, perils:, **opts)
-          @charge_kg = charge_kg.to_f
-          @blowout = blowout.freeze
-          @perils = perils.freeze
-          super(**opts)
-        end
-
-        def base_initial_state(rng, content)
-          super.merge(progress: 0.0, firing: false, misfires: 0, live: 0, clearing: 0.0,
-                      brought_down_kg: 0.0, blew_out: false, blowout_pending: false,
-                      misfire_pending: false, misjudged_pending: false, work: 0.0, hewing: 0.0,
-                      since_fired_s: FIRED_S, status: 0)
-        end
-
-        # One charge, on the tick the hole is ready; nothing otherwise.
-        def throughput_kg(state, _ctx) = state.fetch(:firing) ? @charge_kg : 0.0
-
-        def ignition(state, _levers) = state.fetch(:blew_out) ? @blowout : nil
-
-        # `:misfired` is a known misfire, at full weight until it is dug out; `:live` a charge left in
-        # the face, struck by working it — so it scales with the hewing as well.
-        def activity(state, quantity, _dt)
-          case quantity
-          when :firing then state.fetch(:work).clamp(0.0, 1.0)
-          when :misfired then state.fetch(:misfires).positive? ? 1.0 : 0.0
-          when :live then state.fetch(:live).positive? ? state.fetch(:hewing).clamp(0.0, 1.0) : 0.0
-          end
-        end
-
-        MISHAPS = %i[blowout misfire misjudged set_off struck].freeze
-
-        def suffers?(kind) = MISHAPS.include?(kind) || super
-
-        # `misfire` and `misjudged` mark the charge being made; `set_off` and `struck` fire a known
-        # misfire and a live charge, which is a flame in the room for a tick and a little coal.
-        def suffer(state, mishap, ctx)
-          case mishap.fetch(:kind)
-          when :blowout then [ state.merge(blowout_pending: true), [] ]
-          when :misfire then [ state.merge(misfire_pending: true), [] ]
-          when :misjudged then [ state.merge(misjudged_pending: true), [] ]
-          when :set_off then [ went_off(state, :misfires), [] ]
-          when :struck then [ went_off(state, :live), [] ]
-          else super
-          end
-        end
-
-        # `hewing` is the face's busy-ness against a full crew, which is what a live charge in it
-        # scales with: every hewer on it is somebody who might strike it.
-        def apply(state, ctx, grant)
-          work = [ ctx.controls.fetch(:shotfiring, 0.0) / 100.0, 0.0 ].max
-          face_crew = ctx.nodes[:pick_line]&.crew || 1
-          hewing = [ ctx.controls.fetch(:hewing, 0.0) / 100.0 / face_crew, 0.0 ].max
-          shot = fired(super, ctx).merge(work: work, hewing: hewing)
-          shot = shot.fetch(:misfires).positive? ? dig_out(shot, work, ctx) : charge(shot, work, ctx)
-          shot.merge(status: STATUSES.index(status(shot)))
-        end
-
-        private
-
-        # What last tick's firing did, now the charge line has passed what the magazine had.
-        def fired(state, ctx)
-          since = state.fetch(:since_fired_s) + ctx.dt
-          return state.merge(blew_out: false, since_fired_s: since) unless state.fetch(:firing)
-
-          share = (state.fetch(:carried_kg, 0.0) / @charge_kg).clamp(0.0, 1.0)
-          blew = state.fetch(:blowout_pending) && share.positive?
-          coal = SHOT_COAL_KG * share * (blew ? BLOWN_OUT_YIELD : 1.0)
-          state.merge(firing: false, blew_out: blew, blowout_pending: false, since_fired_s: 0.0,
-                      brought_down_kg: state.fetch(:brought_down_kg) + coal)
-        end
-
-        # A charge that misfires stays where it is: known, it waits to be dug out; misjudged, it is
-        # left live in the face and the shotfirer goes on to the next hole.
-        def charge(state, work, ctx)
-          progress = state.fetch(:progress) + (work * ctx.dt / SHOT_S)
-          return state.merge(progress: progress) if progress < 1.0
-
-          done = state.merge(progress: 0.0, misfire_pending: false, misjudged_pending: false)
-          return done.merge(live: state.fetch(:live) + 1) if state.fetch(:misjudged_pending)
-          return done.merge(misfires: state.fetch(:misfires) + 1) if state.fetch(:misfire_pending)
-
-          done.merge(firing: true)
-        end
-
-        def went_off(state, which)
-          return state unless state.fetch(which).positive?
-
-          state.merge(which => state.fetch(which) - 1, blew_out: true, clearing: which == :misfires ? 0.0 : state.fetch(:clearing),
-                      brought_down_kg: state.fetch(:brought_down_kg) + (SHOT_COAL_KG * BLOWN_OUT_YIELD))
-        end
-
-        def dig_out(state, work, ctx)
-          clearing = state.fetch(:clearing) + (work * ctx.dt / CLEAR_S)
-          return state.merge(clearing: clearing) if clearing < 1.0
-
-          state.merge(clearing: 0.0, misfires: state.fetch(:misfires) - 1)
-        end
-
-        def status(state)
-          if state.fetch(:misfires).positive?
-            state.fetch(:work).positive? ? :clearing : :misfire
-          elsif state.fetch(:since_fired_s) < FIRED_S
-            :fired
-          else
-            state.fetch(:work).positive? ? :charging : :idle
-          end
+        def initialize(**opts)
+          super(fired_by: :shotfiring, struck_by: { hewing: :pick_line }, shot_s: SHOT_S, clear_s: CLEAR_S,
+                yield_kg: SHOT_COAL_KG, blown_out_yield: BLOWN_OUT_YIELD, **opts)
         end
       end
 
@@ -2014,62 +1892,13 @@ module ReactorSim
         )
       end
 
-      # **A belt conveyor on the road**, off the line shaft, carrying with no hand on it. The drive
-      # drum pulls the belt by friction, `grip_kg_per_s` of coal's worth; a loading point pushing more
-      # onto it than that **stalls** it, and a slipping belt does not recover, because a belt sliding
-      # on its drum grips less than one standing on it. Stalled, it carries nothing and the drum turns
-      # on under it, its friction the drive's heat (`bearing_load_n`, the drum's `loaded_by:`). Water
-      # on the pit bottom wets the drum and takes grip away.
+      # **A belt conveyor on the road**, off the line shaft, carrying with no hand on it: a roadway
+      # whose tubs are a belt (`Nodes::Belting`). Water on the pit bottom wets the drum and takes
+      # grip away.
       class Conveyor < Roadway
+        include Nodes::Belting
+
         TRAFFIC = :belt
-
-        # The pull at which the belt slips, and slipping it drags at about that: a 4.4 kN slack side
-        # round 210° of drum at rubber-on-steel μ 0.35 holds 11.5 kN by the capstan law, which is a
-        # five-ply 30-inch cotton belt at its working tension.
-        SLIP_FORCE_N = 11_500.0
-        BELT_MU = 0.35
-
-        # Wet rubber on steel grips at about 0.2, which takes most of the capstan's margin.
-        WET_GRIP_LOSS = 0.6
-
-        def initialize(grip_kg_per_s:, fed_from:, wetted_by:, **opts)
-          @grip_kg_per_s = grip_kg_per_s.to_f
-          @fed_from = fed_from.to_sym
-          @wetted_by = wetted_by.to_sym
-          super(**opts)
-        end
-
-        attr_reader :grip_kg_per_s, :fed_from, :wetted_by
-
-        def throughput_kg(state, ctx) = stalled?(ctx) ? 0.0 : super
-
-        # **What the loading point pushes on, against what the drum can pull.** Both at the belt's
-        # speed, since a slower belt carries its load deeper for the same pull.
-        def stalled?(ctx)
-          share = displacement_fraction(ctx)
-          return false unless share.positive?
-
-          pushed = full_crew_kg_per_s * ctx.dt * open_fraction(ctx) * share
-          [ pushed, waiting_kg(ctx) ].min > grip_kg_per_s_now(ctx) * share * ctx.dt
-        end
-
-        def grip_kg_per_s_now(ctx) = @grip_kg_per_s * (1.0 - (WET_GRIP_LOSS * wetness(ctx)))
-
-        # Slipping at `BELT_MU`, the drum drags at `SLIP_FORCE_N`; gripping, it does not rub at all.
-        def bearing_load_n(ctx) = stalled?(ctx) ? SLIP_FORCE_N / BELT_MU : 0.0
-
-        private
-
-        def waiting_kg(ctx)
-          parcels = ctx.node_state(@fed_from)&.fetch(:parcels, nil) || []
-          Parcel.total_kg(Parcel.matching(parcels, port(:inlet).accepts, ctx.content))
-        end
-
-        def wetness(ctx)
-          node = ctx.nodes&.[](@wetted_by)
-          state = ctx.node_state(@wetted_by)
-          node.respond_to?(:flooding) && state ? node.flooding(state, ctx.content) : 0.0
-        end
       end
 
       # The belt's speed at the line shaft's working speed.
@@ -2764,38 +2593,6 @@ module ReactorSim
         end
 
         def failure_modes = { main_burst: { derates: { throughput: 0.0 } } }
-      end
-
-      def crew_for(roster, content, station:, place:, advance: [])
-        below = advance_seats(roster, advance)
-
-        roster.map do |seat, posting|
-          sheet = Crew.resolve(posting, content: content)
-          # **Already down, and posted to nothing.** Standing there is the head start; which post
-          # they take is still the player's first decision, and giving them a station as well
-          # would put a gang on one lever before anybody had asked for it.
-          underground = below[seat]
-
-          Minion.new(id: seat, station: underground ? nil : station,
-                     place: underground || place,
-                     name: sheet.fetch(:name),
-                     minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
-                     stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
-                     mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg),
-                     weapons: sheet.fetch(:weapons), grudges: sheet.fetch(:grudges),
-                     resented_by: sheet.fetch(:resented_by))
-        end
-      end
-
-      # `{ seat => place }`, **dealt from the end of the roster, the first shift first** — so seat
-      # one is still somebody at bank and a roster filled from the top has its named hands there.
-      # Never more than the roster holds: a small quarters seats the face before the pit bottom,
-      # and bank keeps whoever is left.
-      def advance_seats(roster, advance)
-        free = roster.keys.reverse
-        Array(advance).each_with_object({}) do |shift, dealt|
-          free.shift(shift.fetch(:seats)).each { |seat| dealt[seat] = shift.fetch(:place) }
-        end.freeze
       end
     end
   end

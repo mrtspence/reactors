@@ -12,7 +12,7 @@ module ReactorSim
   # > jobs got three bodies whether anybody had been hired or not, so nothing in the model could
   # > express scarcity of people and an operation with enough stations to be interesting ran
   # > itself. It also contradicted a noun correction this codebase had already made and written
-  # > down: what a player unlocks is Jim, not the fireman's post.
+  # > down: what a player unlocks is Jim, not the post he works.
   #
   # See docs/design_sketches/crew_capacity.md.
   module Crew
@@ -28,7 +28,7 @@ module ReactorSim
     module_function
 
     # `[:crew_1, :crew_2]` for a capacity of two. Ordinal rather than named: "the first person
-    # you brought" is a fact about the roster, where "the fireman" was a fact about the machine.
+    # you brought" is a fact about the roster, where a job's name is a fact about the machine.
     def seats(capacity) = Array.new([ capacity.to_i, 0 ].max) { |i| :"#{SEAT_PREFIX}#{i + 1}" }
 
     def seat?(id) = id.to_s.start_with?(SEAT_PREFIX)
@@ -67,6 +67,39 @@ module ReactorSim
         equipment: equipment_ids(posting).freeze }.freeze
     end
 
+    # **The roster as people, standing where the shift starts.** Everybody is at `place` and
+    # posted to `station` (the quarters), except the seats an advance shift deals elsewhere
+    # (`advance`, `[{ seats:, place:, station: }]` from `Assembly#advance_shifts`): **already
+    # there, and posted to nothing** — standing there is the head start, and which post they take is
+    # still the player's first decision — **unless the shift names a station**: the crew of a
+    # machine that was running when the match began, at their posts.
+    def minions(roster, content:, station:, place:, advance: [])
+      dealt = advance_seats(roster, advance)
+
+      roster.map do |seat, posting|
+        sheet = resolve(posting, content: content)
+        ahead = dealt[seat]
+
+        Minion.new(id: seat, station: ahead ? ahead[:station] : station, place: ahead ? ahead.fetch(:place) : place,
+                   name: sheet.fetch(:name), minion: sheet.fetch(:minion), archetype: sheet.fetch(:archetype),
+                   stats: sheet.fetch(:stats), tags: sheet.fetch(:tags),
+                   mass_kg: sheet.fetch(:mass_kg), worn_kg: sheet.fetch(:worn_kg),
+                   weapons: sheet.fetch(:weapons), grudges: sheet.fetch(:grudges),
+                   resented_by: sheet.fetch(:resented_by))
+      end
+    end
+
+    # `{ seat => { place:, station: } }`, **dealt from the end of the roster, the first shift
+    # first** — so seat one is still somebody at the quarters and a roster filled from the top has
+    # its named hands there. Never more than the roster holds: a small quarters seats the first
+    # shift before the next, and the quarters keep whoever is left.
+    def advance_seats(roster, advance)
+      free = roster.keys.reverse
+      Array(advance).each_with_object({}) do |shift, dealt|
+        free.shift(shift.fetch(:seats)).each { |seat| dealt[seat] = shift.slice(:place, :station).freeze }
+      end.freeze
+    end
+
     # **Everything fitted that can be swung, each on its own** — a pick and a knife do not add up,
     # because a hand swings one; `Minion#wielding` picks the one that suits it, in slot order.
     def weapons(posting) = equipment_ids(posting).filter_map { |slot, id| fitted(slot, id).weapon }.freeze
@@ -84,7 +117,7 @@ module ReactorSim
       available = seats(capacity)
 
       # **Every unrecognised key raises, not just seat-shaped ones.** A roster that named a job
-      # (`fireman`) rather than a seat would otherwise resolve to a full complement of standins
+      # rather than a seat would otherwise resolve to a full complement of standins
       # and look like a machine nobody had crewed — which is precisely the silent substitution
       # this release exists to remove. The delivery tier decides what to do about a stale stored
       # roster; the library's answer is to say so.

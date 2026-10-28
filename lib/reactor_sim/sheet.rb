@@ -53,7 +53,7 @@ module ReactorSim
     # 1.0 for a reference human, so a station's declared throughput stays true and weights still sum
     # to 1.0 meaningfully.
     #
-    #   force      strength × mass ÷ reference. Pushing a tub, heaving rock, a heavy lever — work
+    #   force      strength × mass ÷ reference. Pushing a loaded cart, heaving rock, a heavy lever — work
     #              where friction and leverage decide, and where bulk pays linearly.
     #   swing      √force. A tool at the end of an arm: a pick can only be swung so fast and bites
     #              only so deep, so bulk stops paying in proportion. An ogre lands about twice a

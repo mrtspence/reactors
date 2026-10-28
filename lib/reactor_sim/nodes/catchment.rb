@@ -2,10 +2,9 @@
 
 module ReactorSim
   module Nodes
-    # **Ground the rain drains off**: a yard round a shaft collar, a pit's benches. What falls on
+    # **Ground the rain drains off**: a yard, an open working, a pond's surface. What falls on
     # `area_m2` — rain, and snow as it melts (`Outdoors#runoff`) — arrives here from the sky each
-    # tick, and drains out through `:out` to wherever it is linked, which for a mine is the shaft
-    # and so the sump.
+    # tick, and drains out through `:out` to wherever it is linked.
     #
     # **A boundary, so what arrives is booked as added** (`mass_injected`, `joules_injected`), the
     # way `Atmosphere` books the air it supplies. It holds whatever has not yet drained, which is

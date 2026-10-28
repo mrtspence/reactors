@@ -157,7 +157,8 @@ Passage.new(a:, b:, metres:, speed_m_s:, requires:, control_id:, driven_by:, rat
             through:, rated_kg:, marshals: { landing => station })
 Place.new(id:, label:, nodes: [node_id, ...],   # not an edge — the space they join
           air:, exposure:, open_air:,          # what is breathed there, the weather it gets
-          carried_by:, shares:)                # a footplate: where it is, and what it shares
+          carried_by:, shares:,                # a footplate: where it is, and what it shares
+          water:)                              # a holder answering deep?: out of your depth here
 ```
 
 - `accepts: []` means "anything".
@@ -214,8 +215,9 @@ Place.new(id:, label:, nodes: [node_id, ...],   # not an edge — the space they
 - **A place can be carried.** `carried_by:` names a node answering `place_at(state)` — a train
   carrying its footplate — and `shares:` is how much of a hazard on the carried place reaches the
   place it stands in, and of one there reaches it (`Tick#carried`, in phase 6b, from the carrier's
-  last tick). `Layout` refuses a carrier that cannot say where it is. Nothing else moves: the
-  footplate's nodes, air and weather are an ordinary place's.
+  last tick). A peril of the place it stands in reaches whoever is on it the same way, at its
+  `shares:` (`Tick#weigh`). `Layout` refuses a carrier that cannot say where it is. Nothing else
+  moves: the footplate's nodes, air and weather are an ordinary place's.
 
 ## `Node`
 

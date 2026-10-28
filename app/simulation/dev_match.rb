@@ -20,7 +20,8 @@ module DevMatch
   #
   # An engine and the mine it sells power to, which is the game's premise made concrete: the
   # first machine's only customer is the second, and the second cannot turn a wheel without it.
-  OPERATIONS = { engine: :steam_engine, pit: :mine }.freeze
+  # The open pit is worked by hand, and its washing floor hangs off a line shaft of its own.
+  OPERATIONS = { engine: :steam_engine, pit: :mine, open_pit: :open_pit }.freeze
 
   # **What makes the pair a chain rather than two machines in a window.** The engine's `:load`
   # is what it sells; the mine's `:line_shaft` is what every driven fitting in it hangs off, so
@@ -36,8 +37,14 @@ module DevMatch
   # its power from 1 kW to 1 GW and nobody has to raise steam. The steam engine stays in the
   # match, running its own mill. Never outside development and test. The rope is the line shaft's
   # own, so it passes no more than it would from the steam engine — about 30 kW at most.
-  DEV_ENGINE = { dev_engine: :dev_engine }.freeze
-  DEV_COUPLINGS = [ { from: [ :dev_engine, :drive ], to: [ :pit, :line_shaft ] } ].freeze
+  #
+  # **The open pit's line shaft has one of its own**, because a rope has two ends. Where a
+  # consumer's power comes from is the match-maker's business in the end — several consumers on
+  # one virtual shaft, several generators feeding it (`design_sketches/open-pit.md` §16) — and the
+  # pit knows only its one line shaft. Without the flag nothing turns it, and the hand work goes on.
+  DEV_ENGINE = { dev_engine: :dev_engine, open_pit_dev_engine: :dev_engine }.freeze
+  DEV_COUPLINGS = [ { from: [ :dev_engine, :drive ], to: [ :pit, :line_shaft ] },
+                    { from: [ :open_pit_dev_engine, :drive ], to: [ :open_pit, :line_shaft ] } ].freeze
 
   # Where `/` lands. The first machine, not the only one.
   PRIMARY = OPERATIONS.keys.first

@@ -27,14 +27,18 @@ grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n'
 ```
 
 At the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`, `exhaust`,
-`explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`,
-`oxidiser`, `solid`, `structural`, `waste`, `working_fluid`. (`inert` is descriptive — it marks
+`explosive`, `fuel`, `fusible`, `gangue`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`,
+`ore`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`. (`inert` is descriptive — it marks
 what cannot burn, and nothing reads it: a reaction names its reagents, so being left out of one is
 what makes a substance inert.)
 
+> **`ore` and `gangue` are transport tags, and they are what a washer is.** Wash ore is both at
+> once, as dug; the log washer's clean outlet accepts `ore` and its slurry outlet `gangue` and the
+> water, so the parting is the ports' own filtering — nothing in the engine knows about washing.
+
 > **`explosive` is a transport tag and nothing else**, the way `dust` is: only the charge line from
 > the magazine carries it, so a shot's charge never rides out on the tubs or up the return. Its
-> resources (`black_powder`, `permitted_explosive`) are not `fuel` — a charge is fired, it does not
+> resources (`black_powder`, `permitted_explosive`, `dynamite`) are not `fuel` — a charge is fired, it does not
 > catch — and each fires by a reaction with no ignition block and no temperature gate, so it reacts
 > the tick it lands and leaves its fumes.
 
@@ -284,7 +288,8 @@ the temperature. Every key is required and checked at boot. Guide:
 [`docs/guides/add-content.md`](../docs/guides/add-content.md#a-climate).
 
 - **`cold_resistance`** on kit is what stands against `Chill`, as `heat_resistance` does against
-  `Scorch`.
+  `Scorch`. **`drowning_resistance`** — a cause's resistance, as `rockfall_resistance` is — keeps
+  somebody afloat in deep water; nothing carries it yet.
 
 ## Validation and testing
 
