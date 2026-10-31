@@ -5,7 +5,8 @@ module ReactorSim
     # **A sunk limonite pit, worked by hand.** Wash ore — lumps of brown iron ore in clay — lies
     # under overburden; a stripping gang takes the overburden off, and an ore gang gets the ore it
     # uncovers. Each face is got into a muck pile and carried out up the ramp road by barrow: the
-    # spoil to the dump, where the dumpmen spread it, and the ore to the bin at bank.
+    # spoil to the dump, where the dumpmen spread it, and the ore to the bin at bank, to be washed and
+    # calcined into the finished ore the pit is judged by.
     #
     # **The two gangs are the game.** The ore face can be worked only behind the stripping face,
     # a berm back, so a stripping gang that falls behind stops the ore; and every face is three
@@ -36,7 +37,9 @@ module ReactorSim
       STARTING_PARTS = {
         stripping_getting: :pick_and_shovel, stripping_carrying: :barrows,
         ore_getting: :pick_and_shovel, ore_carrying: :barrows, washhouse: :washhouse, bay_1: :single_log_washer,
-        pump: :single_pump, mud_dam: :mud_dam, reservoir: :reservoir, magazine: :powder_house, quarters: :site_hut, stripping_hut: :bench_hut, ore_hut: :bench_hut, dump_shelter: :dump_shelter
+        pump: :single_pump, mud_dam: :mud_dam, reservoir: :reservoir, magazine: :powder_house, kiln: :open_clamp,
+        coal_stock: :coal_heap, quarters: :site_hut, stripping_hut: :bench_hut, ore_hut: :bench_hut,
+        dump_shelter: :dump_shelter
       }.freeze
 
       CHASSIS = { sunk_pit: { parts: STARTING_PARTS }.freeze }.freeze
@@ -141,7 +144,9 @@ module ReactorSim
         [ Passage.new(a: :bank, b: :stripping_bench, metres: 70.0, speed_m_s: 1.0, label: "Ramp Road"),
           Passage.new(a: :stripping_bench, b: :ore_bench, metres: 35.0, speed_m_s: 0.9, label: "Ramp Road"),
           Passage.new(a: :bank, b: :spoil_dump, metres: 80.0, speed_m_s: 1.2, label: "Dump Road"),
-          Passage.new(a: :bank, b: :dams, metres: 40.0, speed_m_s: 1.2, label: "Dam Path") ]
+          Passage.new(a: :bank, b: :dams, metres: 40.0, speed_m_s: 1.2, label: "Dam Path"),
+          Passage.new(a: :bank, b: :kiln_foot, metres: 20.0, speed_m_s: 1.2, label: "Kiln Road"),
+          Passage.new(a: :kiln_foot, b: :kiln_top, metres: 15.0, speed_m_s: 0.6, label: "Kiln Ramp") ]
       end
 
       # --- the ground ----------------------------------------------------------------------
@@ -1171,6 +1176,157 @@ module ReactorSim
 
           { wetness: Ground.wetness(rng), springs: Ground.springs(rng).map { |s| s.merge(at_m: @from_m + s.fetch(:at_m)) } }
         end
+      end
+
+      # **A kiln: washed ore and small coal burnt together**, a vessel hosting `coal_combustion` and
+      # `limonite_calcining`, so how much of its ore is finished is decided by nothing but its heat.
+      # Its air comes in at the eyes and its gas goes up its throat, drawn by its own heat; short of
+      # air its coal burns to monoxide, and it runs cooler for it. What is drawn from it is whatever
+      # lies at the bottom, calcined or not.
+      #
+      # **It starts at work** (`working:`, kilograms of each resource and `kelvin`): charged, at its
+      # working heat, its coal alight, and the air in it at the outside pressure.
+      #
+      # It writes **its board** (`signal`), in the burners' words.
+      #
+      #   state: parcels, joules, ignition, signal
+      class Kiln < Nodes::Vessel
+        SIGNALS = {
+          empty: "empty — waiting on the chargers",
+          cold: "cold — the fire out",
+          short_of_air: "burning short of air",
+          too_cool: "too cool to burn the ore",
+          no_coal: "no coal in the charge",
+          burning: "burning well"
+        }.freeze
+
+        CALCINING = :limonite_calcining
+
+        # Over this share of its gas by volume as monoxide, the burners call it short of air.
+        SHORT_OF_AIR = 0.01
+
+        def initialize(working:, **opts)
+          @working = working.freeze
+          super(**opts)
+        end
+
+        def initial_state(rng, content = nil)
+          state = super
+          kelvin = @working.fetch(:kelvin)
+          air_kg = Units::STANDARD_PRESSURE_PA * volume_m3 * content.resource(:air).fetch(:molar_mass_g_per_mol) /
+                   1_000.0 / (Units::GAS_CONSTANT * kelvin)
+          held = @working.except(:kelvin).merge(air: air_kg).map do |resource, kg|
+            Parcel.build(resource: resource, kg: kg, temperature_k: kelvin, content: content)
+          end
+          state.merge(parcels: Parcel.normalise(held), joules: heat_capacity * kelvin,
+                      ignition: state.fetch(:ignition).merge(coal_combustion: { kg: @working.fetch(:coal, 0.0),
+                                                                                oxidiser_kg: 0.0 }),
+                      signal: SIGNALS.keys.index(:burning))
+        end
+
+        def calcines_k(content) = content.reaction(CALCINING).fetch(:min_temperature_k).to_f
+
+        def apply(state, ctx, grant)
+          applied, events = super
+          [ applied.merge(signal: SIGNALS.keys.index(signal(applied, ctx.content, grant))), events ]
+        end
+
+        private
+
+        def signal(state, content, grant)
+          parcels = state.fetch(:parcels, [])
+          return :empty if Parcel.total_kg(Parcel.matching(parcels, [ :ore ], content)) <= Parcel::EPSILON
+
+          hot = temperature_k(state, content) >= calcines_k(content)
+          alight = state.dig(:ignition, :coal_combustion, :kg).to_f > Parcel::EPSILON
+          return :cold unless alight || hot
+          return :short_of_air if monoxide_share(parcels, content) > SHORT_OF_AIR
+          return :too_cool unless hot
+          return :no_coal if grant.received_kg(:ore_in) > Parcel::EPSILON && grant.received_kg(:coal_in) <= Parcel::EPSILON
+
+          :burning
+        end
+
+        def monoxide_share(parcels, content)
+          gases = Parcel.matching(parcels, [ :gas ], content)
+          total = Parcel.total_volume(gases, content)
+          return 0.0 unless total.positive?
+
+          Parcel.total_volume(gases.select { |p| p.fetch(:resource) == :whitedamp }, content) / total
+        end
+      end
+
+      # **Charging a kiln by hand**, a gang rated per man. Its perils scale with how hard it is at it
+      # (`:charging`).
+      class Charging < Nodes::Conduit
+        def initialize(perils: [], **opts)
+          @perils = perils.freeze
+          super(**opts)
+        end
+
+        attr_reader :perils
+
+        def activity(state, quantity, dt)
+          return nil unless quantity == :charging && dt.positive?
+
+          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
+        end
+      end
+
+      # **The coal laid in with the ore**: as much as the burners' lever says, up to `most_per_kg` a
+      # kilogram of what the chargers put in last tick (`with:`). No ore charged, no coal.
+      class CoalCharge < Nodes::Conduit
+        def initialize(with:, most_per_kg:, **opts)
+          @with = with.to_sym
+          @most_per_kg = most_per_kg.to_f
+          super(**opts)
+        end
+
+        attr_reader :with, :most_per_kg
+
+        def throughput_kg(state, ctx)
+          ore = (ctx.node_state(@with) || {}).fetch(:carried_kg, 0.0)
+          [ super, ore * @most_per_kg * open_fraction(ctx) ].min
+        end
+      end
+
+      # **Drawing a kiln**: a gang rated per man raking out what lies at the bottom, calcined or not,
+      # and the ash with it. Its perils scale with how hard it is at it (`:drawing`), and with how
+      # hot what it draws is as well (`:drawing_hot`, `HOT_K` over the outside air at full).
+      class Drawing < Nodes::Conduit
+        HOT_K = 600.0
+
+        def initialize(kiln:, perils: [], **opts)
+          @kiln = kiln.to_sym
+          @perils = perils.freeze
+          super(**opts)
+        end
+
+        attr_reader :kiln, :perils
+
+        def apply(state, ctx, grant)
+          node = ctx.nodes&.[](@kiln)
+          held = ctx.node_state(@kiln)
+          over = node && held ? node.temperature_k(held, ctx.content) - ambient_k : 0.0
+          busy = ctx.dt.positive? ? state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * ctx.dt) : 0.0
+          super.merge(working: busy.clamp(0.0, 1.0), hot: (over / HOT_K).clamp(0.0, 1.0))
+        end
+
+        def activity(state, quantity, _dt)
+          case quantity
+          when :drawing then state.fetch(:working, 0.0)
+          when :drawing_hot then state.fetch(:working, 0.0) * state.fetch(:hot, 0.0)
+          end
+        end
+      end
+
+      # **The open air over a kiln's top**, coming across it: a conduit from the outside with a head
+      # of its own (`head_pa`, never quite still), and more in a wind, as the wind's pressure on it.
+      class Breeze < Nodes::Conduit
+        # ½ρv² on air.
+        WIND_PA_PER_M2_S2 = 0.6
+
+        def head_pa(ctx) = super + (WIND_PA_PER_M2_S2 * (ctx.sky.fetch(:wind_m_s, 0.0)**2))
       end
     end
   end

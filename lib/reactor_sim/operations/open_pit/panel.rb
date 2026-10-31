@@ -7,7 +7,8 @@ module ReactorSim
       # an open pit is in plain sight, so most of it is the gang's own word rather than a dial.
       module_function
 
-      PANEL_ORDER = (%i[washed_tons] + (1..BAYS).map { |number| bay(number).(:board) } +
+      PANEL_ORDER = (%i[finished_tons kiln_board kiln_fire coal_stock_left washed_tons] +
+                     (1..BAYS).map { |number| bay(number).(:board) } +
                      %i[crusher_board belt_board shaft_speed water_supply the_dam dam_wall reservoir_bank
                         stripping_face ore_face stripping_shots ore_shots the_magazine uncovered_ore the_sump the_tip
                         the_edge ore_at_bank spoil_tipped] +
@@ -83,12 +84,26 @@ module ReactorSim
             display: Displays::Digital.new(unit: "t", precision: 1, convert: :kilo)
           ),
 
-          # **Washed ore, the goal's count** until the ore is finished: what the washer has put on the
-          # stockpile, weighed.
+          # **Finished ore, the goal's count**: the hematite drawn from the kiln, weighed. Ore drawn
+          # before it was burnt through is on the same heap and counts for nothing.
+          finished_tons: Diagnostic.new(
+            id: :finished_tons, label: "Finished Ore", source: Sources::Contents.new(:finished_ore, :hematite),
+            filters: [ Filters::Lag.new(2), Filters::Quantize.new(50.0) ],
+            display: Displays::Digital.new(unit: "t", precision: 2, convert: :kilo)
+          ),
+
+          # **Washed ore waiting for the kiln**: what the washers have put on the stockpile.
           washed_tons: Diagnostic.new(
             id: :washed_tons, label: "Washed Ore", source: Sources::Contents.new(:washed_ore, :limonite),
             filters: [ Filters::Lag.new(2), Filters::Quantize.new(50.0) ],
             display: Displays::Digital.new(unit: "t", precision: 2, convert: :kilo)
+          ),
+
+          # **The kiln's coal, as somebody's guess** at the heap.
+          coal_stock_left: Diagnostic.new(
+            id: :coal_stock_left, label: "Kiln Coal", source: Sources::Level.new(:coal_stock),
+            filters: [ Filters::Lag.new(6), Filters::Bands.new([ 15.0, 40.0 ]) ],
+            display: Displays::Prose.new([ "nearly out", "getting low", "plenty of coal" ])
           ),
 
           # **What the crusher and its belt are doing**, in words.
@@ -138,6 +153,21 @@ module ReactorSim
       def washer_board(names)
         Diagnostic.new(id: names.(:board), label: bay_label(names), source: Sources::Field.new(names.(:washer), :signal),
                        display: Displays::Prose.new(LogWasher::SIGNALS.values))
+      end
+
+      # **The kiln's board**, in the burners' words: built by the kiln fitted.
+      def kiln_board
+        Diagnostic.new(id: :kiln_board, label: "Kiln", source: Sources::Field.new(:kiln, :signal),
+                       display: Displays::Prose.new(Kiln::SIGNALS.values))
+      end
+
+      # **The kiln's heat, as whoever charges it judges it**: by the colour of the fire.
+      FIRE_BANDS = [ 750.0, 900.0, 1_050.0 ].freeze
+
+      def kiln_fire(observer)
+        Diagnostic.new(id: :kiln_fire, label: "Kiln Fire", observer: observer, source: Sources::Derived.new(:kiln, :temperature_k),
+                       filters: [ Filters::Lag.new(8), Filters::Bands.new(FIRE_BANDS) ],
+                       display: Displays::Prose.new([ "black", "dull red", "cherry red", "bright" ]))
       end
 
       SHOT_WORDS = {

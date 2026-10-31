@@ -1597,3 +1597,160 @@ colliery's, because it is the same trade:
 - **A train's crew at the face is under its flyrock**: a peril of a place reaches whoever is on a
   carried place standing there, at its `shares:` — the rule hazards already followed, now in
   `Tick#weigh`. The train's own perils are keyed by station, so its crew is not struck by it.
+
+## 23. 5i — finishing (for review)
+
+**What it adds**: the step from washed ore to **finished ore** — calcined brown ore, its combined
+water burnt off — and the goal's count moving there, as §1 always intended.
+
+**The period** (research §2.3, §2.10):
+- **Calcining drives the combined water out of limonite**: goethite to hematite, at about 250–400 °C,
+  endothermic. Brown ore loses 10–14% of its weight doing it.
+- **It was done for the freight.** Rosedale calcined because the railway charged by the tonne
+  carried.
+- **The method**: open **clamps** — ore heaped with small coal and fired, up to 30,000 t at a time —
+  then **shaft kilns**, charged at the top and drawn at the bottom.
+- **Drying** cut free moisture from about 18% to 8%. Calcining does that on the way.
+
+### What finishing is here
+
+**Calcining, and nothing else** (question 1):
+- **Crushing is already done**: 5d's jaw crusher sits ahead of the washers.
+- **Drying is what calcining does first**: free water boils off before the combined water goes.
+  The washed ore carries no surface moisture in the sim today, and modelling it only to have the
+  kiln drive it off again would add state for no decision.
+- **Grading** — iron and phosphorus — has no payout until an ironworks or a market exists.
+
+### Calcining is chemistry
+
+**A real reaction in a coal-fired vessel** (question 2), as the steam engine's firebox is:
+- **`limonite_calcining`** (content): limonite to `hematite` (new: `solid`, `ore`, `calcined`) and
+  steam, about 12% of the mass going as steam. **Endothermic**, and it runs only hot, above about
+  575 K.
+- **The heat is coal's**: `coal_combustion`, with its ignition and its air, burning in the same
+  vessel. A kiln short of air burns its coal to monoxide by the alternatives combustion already
+  has, and cools; a kiln over-drawn burns its coal fast and the ore passes half done.
+- **What comes out is weighed by what it is.** Hematite out is finished ore; limonite out is not.
+  So a kiln run too cold or too fast ships less, and nothing decides it but the heat.
+
+### The tiers
+
+**A calcining slot** (question 3):
+
+| Calcining | How it works | Its people |
+|---|---|---|
+| **Open clamp** (the bottom) | A heap of ore and small coal at the bank, fired and left. Slow, and greedy for coal: much of the heat goes to the sky | the clamp gang — barrowing ore and coal on, breaking the burnt heap out |
+| **Shaft kiln** | A brick shaft charged at the top with ore and coal in layers, drawn at the bottom, a natural draught through it | the chargers at the top, the drawers at the foot |
+| **Gas-fired kiln** (a later era) | Fired by producer gas, steadier and easier on coal | as the shaft kiln |
+
+- **Charging and drawing are worked conduits.** The chargers put ore and coal in, and the drawers
+  take out what is calcined (`calcined`). The ash goes down a grate of its own, or it chokes the
+  kiln (`Obstructs`, the firebox's pattern).
+- **The draught** is the kiln's stack and the weather: the arbiter's buoyancy head, so a still
+  hot day draws worse than a cold windy one.
+
+### Fuel
+
+**A coal stock at the kiln for the match** (question 5), stocked like the magazine: a heap of small
+coal the chargers and the clamp gang draw on. Running out is a decision about how much the pit
+bought. Bringing more in is 5j's.
+
+### What finishing can do to people
+
+- **The kiln top is a place breathing the kiln's own gas** (question 4): its `air:` is the kiln's
+  flue. The chargers stand in what comes up, so a kiln burning short of air gasses them with
+  monoxide through `Breath`, the colliery's whitedamp exactly. A hood or a taller stack is what
+  keeps them clear.
+- **It is hot**, and `Scorch` reads the gas they stand in.
+- **Breaking a clamp** that is still burning is the clamp gang's peril: burns, and a collapse.
+
+### The goal
+
+**Finished tons** (question 6): calcined ore on a finished stockpile, weighed. Washed ore stops
+counting toward the goal, and is shown as what is waiting to be finished.
+
+### The panel
+
+- **Finished ore**, in tonnes — the goal's count.
+- **The kiln's board**, in the burners' words: cold, firing, burning well, burning short of air,
+  choked with ash, out of coal.
+- **The kiln's heat**, as the burners judge it by the colour of the fire: dull, cherry, bright.
+- **The coal stock**, as somebody's guess.
+
+### Specs (relational)
+
+- **The reaction**: limonite becomes hematite and steam only hot, and the mass closes.
+- **A kiln**: it calcines with coal and air; short of air it makes monoxide and calcines less; the
+  drawers take hematite and not limonite.
+- **The ash** chokes a kiln with nothing clearing it.
+- **The kiln top**: the chargers are gassed by a kiln burning short of air, and not by one burning
+  well.
+- **The tiers**: a shaft kiln calcines more for its coal than a clamp.
+- **The goal**: finished tons count hematite and not washed ore.
+- **The books**: mass and energy close through a burning kiln; a snapshot replays.
+
+### Questions
+
+1. **Finishing as calcining alone** — crushing already ahead of the washers, drying done by the kiln
+   on the way, grading deferred until something pays for it?
+2. **Calcining as real chemistry in a coal-fired vessel**, as the firebox is, rather than a
+   throughput rated per tonne?
+3. **The tiers**: an open clamp to start, by hand; a shaft kiln; a gas-fired kiln later. And the
+   clamp gang, chargers and drawers as posts?
+4. **The kiln top breathing the kiln's gas**, so its monoxide goes through `Breath`?
+5. **A coal stock at the kiln for the match**, with bringing more in left to 5j?
+6. **The goal moving to finished tons** now?
+
+### Review decisions (5i)
+
+1. **Calcining alone.**
+2. **Real chemistry.** Its rates are tuned to a timescale a match can use.
+3. **The three tiers, and the three posts.**
+4. **The kiln top breathes the kiln's gas**, and is open to the air as well, so the chargers are not
+   choked outright: a kiln burning well dilutes into the sky before it reaches them.
+5. **A coal stock at the kiln for the match**, its bunker a sized upgrade.
+6. **The goal moves to finished tons now.**
+
+### Settled while building 5i
+
+- **`OpenPit::Kiln` is a vessel hosting both reactions**, ore, coal and gas at one temperature. Air
+  comes in at its eyes (a lever), its gas goes up its throat into the kiln top, drawn by the kiln's
+  own heat over the throat's stack height, as a chimney draws. Short of air, `coal_combustion`'s own
+  monoxide pathway takes the coal.
+- **`limonite_calcining` releases nothing of its own.** The steam it makes carries steam's formation
+  enthalpy, which comes to about 0.38 MJ a kilogram of ore at working heat, within a tenth of the
+  measured heat of the reaction. It is gated at 600 K, with a rate constant of 1.7×10⁻³ /s, a time
+  constant of about ten minutes.
+- **The draw takes whatever lies at the bottom**, calcined or not, and the ash with it. Its port
+  accepts `ore` and `waste`, so a kiln drawn faster than it calcines passes half-done ore onto the
+  finished heap. That ore counts for nothing, because the goal reads hematite only. So the ash never
+  needed a grate of its own: it leaves with the draw. Hematite needed no new tag either, because
+  nothing would read a `calcined`.
+- **The coal goes in with the ore**, as a share of what the chargers put in last tick
+  (`OpenPit::CoalCharge`). The share is set by a lever, "Coal in the Charge", up to the tier's most.
+  No ore charged means no coal.
+  - Too little coal and the kiln runs cool.
+  - Too much for the air and it burns short: monoxide, less heat, and a gassed kiln top.
+- **The kiln top is a place whose air is a vessel of its own (`kiln_top`).** The throat feeds it, and
+  the open air comes across it through an `OpenPit::Breeze`: a head of its own that is never quite
+  still (2 Pa), more in a wind (½ρv²). It leaves by the plume.
+  - Burning well, the kiln top is 96–98% air.
+  - Choked, it carries 0.25–0.35% monoxide, past whitedamp's poisoning line, and the chargers are
+    spent within a minute.
+  - Throttled almost shut, the fire is too small to gas anybody.
+- **The kiln starts at work** (`working:`): charged, at its working heat, its coal alight, and the air
+  in it at the outside pressure. Its coal is a steady fire's tenth of a kilogram. Started with a
+  larger heap alight, the first seconds burnt short and gassed the chargers before the match began.
+- **The figures, with the gangs flat out at their defaults:**
+
+  | Tier | Working heat | Hematite | Coal | Drawn calcined |
+  |---|---|---|---|---|
+  | Open clamp | 950 K | 0.31 kg/s | 0.063 kg/s | about 86% |
+  | Shaft kiln | 926 K | 1.54 kg/s | 0.126 kg/s | about 88% |
+
+  The shaft kiln is five times the clamp's throughput on a third of the clamp's coal a tonne.
+- **"No coal in the charge" is the board reading the charge:** ore came in this tick and no coal
+  came with it. Coal held in a kiln only tails off.
+- **The coal stock is a slot of its own**, a heap of 600 kg, a bunker of 2 t or a yard of 6 t. The
+  heap is a match for the clamp, or an hour for a shaft kiln.
+- **Later:** the gas-fired kiln, whose first caller is a producer-gas supply.

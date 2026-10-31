@@ -11,7 +11,7 @@ module ReactorSim
       #       op.layout.places.each { |p| puts "#{p}: #{op.nodes.keys.select { |n| op.layout.place_of_node(n) == p }}" }'
       PLACES = [
         Place.new(id: :bank, label: "Bank", exposure: 1.0, air: :atmosphere,
-                  nodes: %i[atmosphere outdoors ore_bin line_shaft head_tank washed_ore]),
+                  nodes: %i[atmosphere outdoors ore_bin line_shaft head_tank washed_ore finished_ore]),
         # **The mud dam and the reservoir**, on the ground above the pit: whatever lets go here runs
         # down into the sump.
         Place.new(id: :dams, label: "The Dams", exposure: 1.0, open_air: true),
@@ -23,7 +23,11 @@ module ReactorSim
         Place.new(id: :spoil_dump, label: "Spoil Dump", exposure: 1.0, open_air: true,
                   nodes: %i[tip_head spreading spoil_dump]),
         # Where the dinkies run between the faces and their dumps.
-        Place.new(id: :haul_road, label: "Haul Road", exposure: 1.0, open_air: true)
+        Place.new(id: :haul_road, label: "Haul Road", exposure: 1.0, open_air: true),
+        # **The kiln's top**, where it is charged: in what comes up its throat, with the open air
+        # coming across. Its foot is where a shaft kiln is drawn, in the open.
+        Place.new(id: :kiln_top, label: "Kiln Top", exposure: 1.0, air: :kiln_top, nodes: %i[kiln_top kiln_breeze kiln_plume]),
+        Place.new(id: :kiln_foot, label: "Kiln Foot", exposure: 1.0, open_air: true)
       ].freeze
 
       # A muck pile at the face: what has been got and not yet carried out. About two tonnes and a
@@ -495,6 +499,182 @@ module ReactorSim
         )
       end
 
+      # --- calcining ------------------------------------------------------------------------------
+
+      # **The kiln**, where washed ore is calcined with small coal (`OpenPit::Kiln`). Both tiers draw
+      # their air by the heat going up their throat, as a chimney does; what separates them is how
+      # much of the heat stays in the ore. **An open clamp** is a heap in the open, losing most of it
+      # to the sky and hungry for coal for it, built on and broken out by one gang. **A shaft kiln**
+      # is brick, taller for its draught, charged at the top and drawn at the foot by gangs of their
+      # own. Rates are a match's: a real clamp burnt for weeks.
+      #
+      # `most_coal` is the coal a kilogram of ore takes with the burners' lever right over; at its
+      # middle, a clamp takes about one part in seven and a kiln one in seventeen. `working` is what
+      # it holds at work, which it starts with.
+      KILNS = {
+        open_clamp: {
+          label: "Open Clamp", description: "Ore heaped on small coal and fired. Slow, and hungry for coal.",
+          volume_m3: 3.0, heat_capacity: 1.0e5, ambient_conductance: 1_400.0, stack_m: 2.0, eyes: 5.0, throat: 6.0,
+          most_coal: 0.3,
+          charging: { post: :clamp_gang, label: "Clamp Gang", crew: 3, kg_per_s: 0.14, place: :kiln_top,
+                      effort: { force: 0.6, swing: 0.4 } },
+          drawing: { post: :clamp_gang, crew: 3, kg_per_s: 0.12, place: :kiln_top },
+          working: { kelvin: 850.0, limonite: 160.0, hematite: 1_200.0, coal: 0.07 }
+        },
+        shaft_kiln: {
+          label: "Shaft Kiln", description: "A brick shaft, charged at the top and drawn at the foot. Five times " \
+                                            "the clamp, on a third of the coal a tonne.",
+          volume_m3: 6.0, heat_capacity: 1.0e6, ambient_conductance: 1_200.0, stack_m: 8.0, eyes: 3.0, throat: 4.0,
+          most_coal: 0.12,
+          charging: { post: :kiln_chargers, label: "Kiln Chargers", crew: 3, kg_per_s: 0.7, place: :kiln_top,
+                      effort: { force: 0.7, swing: 0.3 } },
+          drawing: { post: :kiln_drawers, label: "Kiln Drawers", crew: 3, kg_per_s: 0.6, place: :kiln_foot,
+                     # Raking out ore at the heat of the fire: endurance as much as arm.
+                     effort: { swing: 0.6, toughness: 0.4 } },
+          working: { kelvin: 950.0, limonite: 900.0, hematite: 6_300.0, coal: 0.15 }
+        }
+      }.freeze
+
+      KILNS.each do |id, kiln|
+        Parts.register(id, kind: :pit_kiln, label: kiln.fetch(:label), description: kiln.fetch(:description),
+                           provides: %i[kiln kiln_charging coal_charging kiln_eyes kiln_throat kiln_drawing],
+                           stats: { crew: kiln.dig(:charging, :crew) }) do |_spec|
+          OpenPit.kiln_fragment(kiln)
+        end
+      end
+
+      def kiln_fragment(kiln)
+        charging = kiln.fetch(:charging)
+        drawing = kiln.fetch(:drawing)
+        gang = charging.fetch(:post)
+        drawers = drawing.fetch(:post)
+        Fragment.new(
+          nodes: [
+            Kiln.new(id: :kiln, label: kiln.fetch(:label), volume_m3: kiln.fetch(:volume_m3),
+                     heat_capacity: kiln.fetch(:heat_capacity), ambient_conductance: kiln.fetch(:ambient_conductance),
+                     reactions: %i[coal_combustion limonite_calcining], working: kiln.fetch(:working),
+                     heater_control_id: :kindling, heater_watts: 3.0e4, igniter_kg_per_s: 0.02,
+                     ports: [ Port.new(id: :ore_in, direction: :inlet, accepts: [ :ore ], max_kg_per_s: 20.0),
+                              Port.new(id: :coal_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 5.0),
+                              Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 20.0),
+                              Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 20.0),
+                              Port.new(id: :draw, direction: :outlet, accepts: %i[ore waste], max_kg_per_s: 20.0) ]),
+            Charging.new(id: :kiln_charging, label: "Charging", accepts: [ :ore ], max_kg_per_s: charging.fetch(:kg_per_s),
+                         heat_capacity: 2.0e3, control_id: gang, worked: true, crew: charging.fetch(:crew),
+                         perils: gang == drawers ? [] : [ into_the_kiln(gang) ]),
+            CoalCharge.new(id: :coal_charging, label: "Coal in the Charge", accepts: [ :fuel ], max_kg_per_s: 5.0,
+                           heat_capacity: 1.0e3, control_id: :coal_in_charge, with: :kiln_charging,
+                           most_per_kg: kiln.fetch(:most_coal)),
+            Nodes::Conduit.new(id: :kiln_eyes, label: "Eyes", accepts: [ :gas ], max_kg_per_s: 20.0,
+                               conductance: kiln.fetch(:eyes), heat_capacity: 1.0e3, control_id: :eyes_open),
+            Nodes::Conduit.new(id: :kiln_throat, label: "Throat", accepts: [ :gas ], max_kg_per_s: 20.0,
+                               conductance: kiln.fetch(:throat), stack_height_m: kiln.fetch(:stack_m), heat_capacity: 2.0e3,
+                               ambient_conductance: 20.0),
+            Drawing.new(id: :kiln_drawing, label: "Drawing", accepts: %i[ore waste], max_kg_per_s: drawing.fetch(:kg_per_s),
+                        heat_capacity: 2.0e3, control_id: drawers, worked: true, crew: drawing.fetch(:crew), kiln: :kiln,
+                        perils: drawn_hot(drawers, clamp: gang == drawers))
+          ],
+          links: [ Link.new(from: [ :washed_ore, :out ], to: [ :kiln_charging, :inlet ]),
+                   Link.new(from: [ :kiln_charging, :outlet ], to: [ :kiln, :ore_in ]),
+                   Link.new(from: [ :coal_stock, :out ], to: [ :coal_charging, :inlet ]),
+                   Link.new(from: [ :coal_charging, :outlet ], to: [ :kiln, :coal_in ]),
+                   Link.new(from: [ :atmosphere, :intake ], to: [ :kiln_eyes, :inlet ]),
+                   Link.new(from: [ :kiln_eyes, :outlet ], to: [ :kiln, :air_in ]),
+                   Link.new(from: [ :kiln, :flue_out ], to: [ :kiln_throat, :inlet ]),
+                   Link.new(from: [ :kiln_throat, :outlet ], to: [ :kiln_top, :in ]),
+                   Link.new(from: [ :kiln, :draw ], to: [ :kiln_drawing, :inlet ]),
+                   Link.new(from: [ :kiln_drawing, :outlet ], to: [ :finished_ore, :in ]) ],
+          places: [ Place.new(id: :kiln_top, nodes: %i[kiln kiln_charging coal_charging kiln_throat]),
+                    Place.new(id: drawing.fetch(:place), nodes: %i[kiln_drawing kiln_eyes]) ],
+          control_points: kiln_posts(charging, drawing),
+          diagnostics: [ kiln_board, kiln_fire(gang) ]
+        )
+      end
+
+      # The gang that charges, and the one that draws if it is not the same; the burners' levers.
+      def kiln_posts(charging, drawing)
+        gang = charging.fetch(:post)
+        post = lambda { |id, label, node, crew, place, effort|
+          ControlPoint.new(id: id, label: label, node: node, default: 100.0, place: place, capacity: crew, effort: effort,
+                           gated_by: %i[darkvision], exertion: 8.0e-4)
+        }
+        [ post.(gang, charging.fetch(:label), :kiln_charging, charging.fetch(:crew), :kiln_top, charging.fetch(:effort)),
+          *(if drawing.fetch(:post) != gang
+              [ post.(drawing.fetch(:post), drawing.fetch(:label), :kiln_drawing, drawing.fetch(:crew),
+                      drawing.fetch(:place), drawing.fetch(:effort)) ]
+            end),
+          # How much coal goes in with the ore: too little and the ore comes out half done, too much
+          # and the kiln burns short of air.
+          ControlPoint.new(id: :coal_in_charge, label: "Coal in the Charge", node: :coal_charging, default: 50.0,
+                           place: :kiln_top),
+          ControlPoint.new(id: :eyes_open, label: "Kiln Eyes", node: :kiln_eyes, default: 50.0, place: drawing.fetch(:place)),
+          # Firewood, to light a kiln gone out.
+          ControlPoint.new(id: :kindling, label: "Kindling", node: :kiln, default: 0.0, place: :kiln_top) ]
+      end
+
+      # **Burnt drawing what is still burning** — a clamp broken out hot, or a kiln drawn at its eye —
+      # and a clamp **falling in** on its gang.
+      def drawn_hot(drawers, clamp:)
+        burnt = Peril.new(id: clamp ? :burnt_breaking_the_clamp : :burnt_at_the_eye, wounds: { burn: 1.0 },
+                          severity: 1.4, rate: 0.12, scales_with: :drawing_hot, stations: [ drawers ])
+        return [ burnt ] unless clamp
+
+        [ burnt, Peril.new(id: :clamp_fell_in, wounds: { crush: 0.5, burn: 0.5 }, severity: 2.6, rate: 0.03,
+                           scales_with: :drawing_hot, stations: [ drawers ]) ]
+      end
+
+      # **Into the kiln's throat** off the charging floor — or pushed.
+      def into_the_kiln(chargers)
+        Peril.new(id: :fell_into_the_kiln, wounds: { burn: 0.7, impact: 0.3 }, causes: %i[fall], severity: 6.0,
+                  rate: 0.02, scales_with: :charging, stations: [ chargers ], opportunity: true)
+      end
+
+      # **The coal for the kiln**, a stock at its foot for the match: a heap, or a bunker of a size.
+      COAL_STOCKS = {
+        coal_heap: { label: "Coal Heap", coal_kg: 600.0,
+                     description: "Small coal tipped by the kiln. A match for a clamp; an hour of a shaft kiln." },
+        coal_bunker: { label: "Coal Bunker", coal_kg: 2_000.0, description: "A timber bunker. A long match for a shaft kiln." },
+        coal_yard: { label: "Coal Yard", coal_kg: 6_000.0, description: "A walled yard, stocked deep." }
+      }.freeze
+
+      COAL_STOCKS.each do |id, stock|
+        Parts.register(id, kind: :pit_coal_stock, label: stock.fetch(:label), description: stock.fetch(:description),
+                           provides: %i[coal_stock], instruments: %i[coal_stock_left], stats: stock.slice(:coal_kg)) do |_spec|
+          OpenPit.coal_stock_fragment(stock.fetch(:coal_kg))
+        end
+      end
+
+      def coal_stock_fragment(coal_kg)
+        Fragment.new(
+          nodes: [ Nodes::Vessel.new(id: :coal_stock, label: "Kiln Coal", volume_m3: coal_kg * 1.2 / COAL_KG_M3,
+                                     heat_capacity: 1.0e4, ambient_conductance: 0.0,
+                                     initial_contents: [ { resource: :coal, kg: coal_kg } ],
+                                     ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 50.0) ]) ],
+          places: [ Place.new(id: :bank, nodes: %i[coal_stock]) ]
+        )
+      end
+
+      COAL_KG_M3 = 800.0
+
+      # **The air over the kiln's top**: what comes up its throat, and the open air across it, never
+      # quite still, which carries it off. A kiln burning well is a few parts in a hundred of it.
+      KILN_TOP_M3 = 40.0
+      STILL_PA = 2.0
+      BREEZE_CONDUCTANCE = 1_500.0
+      PLUME_CONDUCTANCE = 3_000.0
+
+      def kiln_top
+        [ Nodes::Vessel.new(id: :kiln_top, label: "Kiln Top", volume_m3: KILN_TOP_M3, heat_capacity: 1.0e3,
+                            ambient_conductance: 100.0, initial_contents: [ { resource: :air, kg: KILN_TOP_M3 * 1.2 } ],
+                            ports: [ Port.new(id: :in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 1.0e3),
+                                     Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 1.0e3),
+                                     Port.new(id: :out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 1.0e3) ]),
+          Breeze.new(id: :kiln_breeze, label: "Breeze", accepts: [ :gas ], max_kg_per_s: 1.0e3,
+                     conductance: BREEZE_CONDUCTANCE, head_pa: STILL_PA, heat_capacity: 1.0e2),
+          Nodes::Conduit.new(id: :kiln_plume, label: "Plume", accepts: [ :gas ], max_kg_per_s: 1.0e3,
+                             conductance: PLUME_CONDUCTANCE, heat_capacity: 1.0e2) ]
+      end
+
       # --- the crew ---------------------------------------------------------------------------
 
       # **The site hut at bank** is where the shift starts and where the far walk to rest leads.
@@ -592,6 +772,10 @@ module ReactorSim
           Slot.new(id: :magazine, accepts: :pit_magazine, label: "Magazine", group: :blasting, needs: :blasting,
                    default: fitted.fetch(:magazine)),
           *washing_slots(fitted, feed),
+          Slot.new(id: :kiln, accepts: :pit_kiln, label: "Calcining", group: :finishing, required: true,
+                   default: fitted.fetch(:kiln)),
+          Slot.new(id: :coal_stock, accepts: :pit_coal_stock, label: "Kiln Coal", group: :finishing, required: true,
+                   default: fitted.fetch(:coal_stock)),
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Quarters", group: :crew,
                    required: true, default: fitted.fetch(:quarters)),
           # Who starts out in the pit, the stripping bench first.
@@ -727,8 +911,8 @@ module ReactorSim
         ground = spec[:ground]
         Fragment.new(
           diagnostics: catalogue.values_at(:stripping_face, :ore_face, :uncovered_ore, :the_sump, :the_tip, :the_edge,
-                                           :ore_at_bank, :spoil_tipped, :washed_tons, :water_supply, :the_dam,
-                                           :dam_wall, :shaft_speed) +
+                                           :ore_at_bank, :spoil_tipped, :finished_tons, :washed_tons, :water_supply,
+                                           :the_dam, :dam_wall, :shaft_speed) +
                        WeatherGauges.guesses(observer: :dumpmen).values,
           passages: passages, places: PLACES,
           nodes: [
@@ -757,9 +941,16 @@ module ReactorSim
             Nodes::Delivery.new(id: :drainage, label: "Drainage", accepts: [ :liquid ]),
             # The tank over the washhouse the pump fills and every washer's gutter draws on.
             heap(:head_tank, "Head Tank", HEAD_TANK_M3, accepts: %i[liquid]),
-            heap(:washed_ore, "Washed Ore", 400.0, accepts: %i[ore])
+            heap(:washed_ore, "Washed Ore", 400.0, accepts: %i[ore]),
+            # What is drawn from the kiln, calcined or not, and its ash.
+            heap(:finished_ore, "Finished Ore", 400.0, accepts: %i[ore waste]),
+            *kiln_top
           ],
-          links: [ Link.new(from: [ :tip_head, :out ], to: [ :spreading, :inlet ]),
+          links: [ Link.new(from: [ :atmosphere, :intake ], to: [ :kiln_breeze, :inlet ]),
+                   Link.new(from: [ :kiln_breeze, :outlet ], to: [ :kiln_top, :air_in ]),
+                   Link.new(from: [ :kiln_top, :out ], to: [ :kiln_plume, :inlet ]),
+                   Link.new(from: [ :kiln_plume, :outlet ], to: [ :atmosphere, :exhaust ]),
+                   Link.new(from: [ :tip_head, :out ], to: [ :spreading, :inlet ]),
                    Link.new(from: [ :spreading, :outlet ], to: [ :spoil_dump, :in ]),
                    Link.new(from: [ :tip_head, :slump ], to: [ :slumping, :inlet ]),
                    Link.new(from: [ :slumping, :outlet ], to: [ :spoil_dump, :in ]),
@@ -1179,7 +1370,11 @@ module ReactorSim
       ROUTES = ([
         { from: :stripping_bench, to: :spoil_dump, carrying: :solid, as: "nothing takes the stripping to the dump" },
         { from: :ore_bench, to: :ore_bin, carrying: :solid, as: "nothing brings the ore to the bin" },
-        { from: :sump, to: :reservoir, carrying: :liquid, as: "nothing lifts the pit's water out — the ore bench will flood" }
+        { from: :sump, to: :reservoir, carrying: :liquid, as: "nothing lifts the pit's water out — the ore bench will flood" },
+        { from: :washed_ore, to: :kiln, carrying: :ore, as: "nothing charges the kiln" },
+        { from: :coal_stock, to: :kiln, carrying: :fuel, as: "no coal reaches the kiln" },
+        { from: :atmosphere, to: :kiln, carrying: :gas, as: "no air reaches the kiln's fire" },
+        { from: :kiln, to: :finished_ore, carrying: :ore, as: "nothing draws the kiln" }
       ] + washing_routes).freeze
     end
   end

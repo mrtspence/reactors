@@ -24,3 +24,11 @@ clay:
   tags: [solid, gangue]
   specific_heat_j_per_kg_k: 920
   density_kg_per_m3: 1700
+
+# **Hematite** — red iron oxide, what limonite leaves once a clamp or a kiln has burnt its combined
+# water off (`limonite_calcining`): about an eighth lighter for the freight, and what the pit ships.
+# Calcined and porous, about 2.8 t/m³ broken.
+hematite:
+  tags: [solid, ore]
+  specific_heat_j_per_kg_k: 650
+  density_kg_per_m3: 2800

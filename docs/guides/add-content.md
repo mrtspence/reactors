@@ -7,7 +7,7 @@ disk, and only once, never during a tick.
 ```
 content/
   resources/    substances, by family (water, combustion, damps, ground, materials, …)
-  reactions/    combustion.yml
+  reactions/    combustion, explosives, calcining
   archetypes/   races.yml     — kinds of person
   minions/      crew.yml      — the people themselves
   wounds/       the wound catalogue

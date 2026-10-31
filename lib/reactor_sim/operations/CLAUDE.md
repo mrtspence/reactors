@@ -255,6 +255,16 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   is fitted off the loadout first (`feed_for`) and wires the bays to the bin or the hopper. The
   crusher is fed by hand, or by **a feed belt** (`Nodes::Belt`, a slot that `needs: :crusher`) with
   nobody on it, which stalls fed past its grip.
+- **Finishing is calcining, as chemistry**: a `kiln` slot (an open clamp worked by one gang, or a
+  shaft kiln with chargers and drawers), `OpenPit::Kiln` a vessel hosting `coal_combustion` and
+  `limonite_calcining`, so what it finishes is decided by its heat. The coal goes in with the ore by
+  a lever (`OpenPit::CoalCharge`, a share of what was charged last tick), the air by its eyes, and
+  its own heat draws through its throat; short of air it burns to monoxide. **The draw takes what
+  lies at the bottom**, calcined or not, and the ash with it, onto the finished heap, and **the
+  goal counts its hematite only**. The kiln top is a place whose air is a vessel of its own, fed by
+  the throat and cleared by the open air across it (`OpenPit::Breeze`, more in a wind), so a choked
+  kiln gasses its chargers through `Breath`. Its coal is a stock in a sized slot. The kiln starts at
+  work (`working:`).
 
 ## Assembled from parts
 

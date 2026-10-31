@@ -1,0 +1,19 @@
+# **Calcining brown ore**: limonite's combined water driven off as steam, leaving hematite — about
+# an eighth of the weight, which is why a pit calcined at all: the freight was paid by the tonne.
+# Goethite gives its water up between about 250 and 400 °C; this runs above about 330 °C, in the
+# heat of the coal burnt with it.
+#
+# **Endothermic, and all of it the steam's.** The water leaves carrying the formation enthalpy steam
+# has, which comes out of the kiln's heat at about 0.38 MJ a kilogram of ore at working temperature —
+# within a tenth of the measured heat of the reaction — so the reaction adds nothing of its own.
+#
+# No `ignition:` block: ore does not catch, it is cooked. The bulk temperature is the gate.
+#
+# Its rate is a match's, not a kiln's: a time constant of about ten minutes, where a real clamp
+# burnt for weeks.
+limonite_calcining:
+  consumes: { limonite: 1.0 }
+  produces: { hematite: 0.88, steam: 0.12 }
+  enthalpy_j_per_unit: 0
+  rate_per_s: 0.0017
+  min_temperature_k: 600

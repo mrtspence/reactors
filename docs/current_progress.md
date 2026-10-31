@@ -525,7 +525,16 @@ built in five units, designed one at a time:
    bit-identical); a blasting slot of jumper holes, gopher holes or dynamite, a powder gang at each
    face that works unticketed at far more risk; a shot breaking the ground ahead, which the face digs
    loose; firing on a lever, flyrock across the pit; misfires as the colliery's; frost in the cold; dynamite
-   freezing in its magazine, and a thawing house too warm is a bomb. **Next, 5i: finishing.** **Owed**: proper
+   freezing in its magazine, and a thawing house too warm is a bomb. **5i, finishing, is built**
+   (sketch §23): washed ore calcined with small coal in a kiln slot — an open clamp worked by one
+   gang, or a shaft kiln with chargers and drawers — as real chemistry (`limonite_calcining`, gated
+   on the heat, beside `coal_combustion` in one vessel); the coal laid in with the ore by a lever,
+   the air by the kiln's eyes, monoxide when it burns short; a draw taking whatever lies at the
+   bottom, calcined or not; a kiln top whose air is what comes up the throat diluted by the open air
+   across it, so a choked kiln gasses its chargers; a coal stock in a sized slot. The goal is
+   finished tons, hematite only. **Next, 5j: pit logistics** — a second train, coaling and water,
+   boarding, and bringing coal to the kiln. **Owed**: the gas-fired kiln, with a producer-gas
+   supply. **Owed**: proper
    spillways and relief on the larger reservoirs if needed. **Owed**: the centrifugal pump
    gated with the series washer; `drowning_resistance` on something — a cork jacket, a race at home
    in the water. **Owed**: the series washer and the gyratory crusher gated on a pit

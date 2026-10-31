@@ -840,6 +840,28 @@ part:
       steel: 1200
       cast_iron: 500
       belting: 2500
+  # Kilns: the brickwork is the pit's own labour and no material in the catalogue; what is bought is
+  # the iron at the eyes and the draw, and the first firing's coal.
+  open_clamp:
+    materials:
+      coal: 200
+  shaft_kiln:
+    materials:
+      cast_iron: 1200       # the draw doors and the grate at the foot
+      wrought_iron: 600     # the bands round the shaft and the charging floor's rails
+      coal: 1500
+  coal_heap:
+    materials:
+      coal: 600
+  coal_bunker:
+    materials:
+      wood: 400
+      coal: 2000
+  coal_yard:
+    materials:
+      wood: 600
+      wrought_iron: 200
+      coal: 6000
   # --- mobile engines ----------------------------------------------------------------------
   # The shovel's and the locomotive's own engine, and what is tiered around it. A bigger bunker or
   # tank is paid for partly in the coal the pit has raised.
