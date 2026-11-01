@@ -51,14 +51,14 @@ module ReactorSim
                     :capacity_kg, :fill_kg_per_s, :swing_s, :lift_m, :work_j_per_kg, :swing_w, :driven_by,
                     :rated_omega, :crane_control, :demand_control, :chain, :boom, :engine, :perils
 
-        # `engine:` is the names of the pieces the board reads — `{ boiler:, supply:, firebox:, relief: }`
+        # `engine:` is the names of the pieces the board reads — `{ boiler:, supply:, fire:, relief:}`
         # — with the boiler's `working_pa:`; `reach:` the holder it digs from. `face:` is the bench
         # it digs, whose `hardness` the cut costs more by, where the bench reports one.
         #
-        # **`cast:` gives it a second outlet**, `:cast` — the muck at the face — and names the train
-        # it loads, `{ carrier:, mark_m:, control: }`: with that train standing at its mark it dumps
-        # into `:out`, the cars; with none, it casts if the player's `control` says so, and waits on
-        # cars if not. Without `cast:` it always waits on cars.
+        # **`cast:` gives it a second outlet**, `:cast` — the muck at the face — and names the trains
+        # it loads, `{ carriers:, mark_m:, control: }`: with one of them standing at the mark it
+        # dumps into `:out`, the cars; with none, it casts if the player's `control` says so, and
+        # waits on cars if not. Without `cast:` it always waits on cars.
         def initialize(id:, capacity_kg:, fill_kg_per_s:, swing_s:, lift_m:, work_j_per_kg:, swing_w:, driven_by:,
                        rated_omega:, crane_control:, demand_control:, chain:, boom:, engine:, reach:, face: nil,
                        cast: nil, perils: [], label: "Dipper", heat_capacity: 6.0e5, ambient_conductance: 20.0)
@@ -68,7 +68,7 @@ module ReactorSim
             *([ Port.new(id: :cast, direction: :outlet, accepts: [ :solid ], max_kg_per_s: capacity_kg) ] if cast)
           ])
           @face = face&.to_sym
-          @cast = cast && { carrier: cast.fetch(:carrier).to_sym, mark_m: cast.fetch(:mark_m).to_f,
+          @cast = cast && { carriers: Array(cast.fetch(:carriers)).map(&:to_sym).freeze, mark_m: cast.fetch(:mark_m).to_f,
                             control: cast.fetch(:control).to_sym }.freeze
           @capacity_kg = capacity_kg.to_f
           @fill_kg_per_s = fill_kg_per_s.to_f
@@ -129,8 +129,10 @@ module ReactorSim
         end
 
         def train_standing?(ctx)
-          carrier = ctx.node_state(@cast.fetch(:carrier)) or return false
-          ctx.nodes[@cast.fetch(:carrier)].standing_at?(carrier, @cast.fetch(:mark_m))
+          @cast.fetch(:carriers).any? do |carrier|
+            state = ctx.node_state(carrier)
+            state && ctx.nodes[carrier].standing_at?(state, @cast.fetch(:mark_m))
+          end
         end
 
         def casting?(ctx) = ctx.controls.fetch(@cast.fetch(:control), 0.0) >= 50.0

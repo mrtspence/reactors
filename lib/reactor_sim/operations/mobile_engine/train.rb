@@ -66,6 +66,7 @@ module ReactorSim
 
         # The first that holds, in order.
         SIGNALS = {
+          collided: "collided with the other train",
           crashed: "crashed into the shovel",
           over_the_tip: "over the tip",
           derailed: "off the road",
@@ -78,8 +79,12 @@ module ReactorSim
           blowing_off: "standing by — blowing off",
           loading: "loading",
           waiting_on_shovel: "at the shovel — nothing coming",
+          waiting_on_road: "loaded — waiting on the road",
+          in_the_loop: "in the loop — waiting on the shovel",
           tipping: "tipping",
           waiting_on_dumpmen: "at the dump — waiting on the dumpmen",
+          at_the_stand: "at the stand — taking coal and water",
+          stand_empty: "at the stand — nothing to take",
           tipped: "tipped",
           running_loaded: "running loaded",
           running_empty: "running empty",
@@ -91,10 +96,17 @@ module ReactorSim
 
         # `tare_kg` is the engine and the empty cars, `load_kg` what the cars carry full. `loader:` and
         # `tipper:` are the landings at the loading and dump marks, which the board reads; `engine:`
-        # the pieces `EngineBoard` reads; `demand_control:` the driver's post.
+        # the pieces `EngineBoard` reads; `demand_control:` the driver's post. `stand:` is the stand's
+        # landings at the dump, `{ landing => its valve }`, which the board reads. `road:` is the other
+        # train on its road and where the road begins (`{ other:, main_from_m:, signal: }`), which it
+        # can collide with and its driver looks out for.
         def initialize(id:, tare_kg:, load_kg:, radius_m:, rated_m_s:, track:, cars:, brake:, engine:, loader:, tipper:,
-                       demand_control:, position_m: nil, endangers: {}, damages: {}, perils: [], label: "Train")
+                       demand_control:, position_m: nil, endangers: {}, damages: {}, perils: [], stand: {}, road: nil,
+                       label: "Train")
           super(id: id, label: label)
+          @stand = stand.to_h { |landing, valve| [ landing.to_sym, valve.to_sym ] }.freeze
+          @road = road && { other: road.fetch(:other).to_sym, main_from_m: road.fetch(:main_from_m).to_f,
+                            signal: road[:signal]&.to_sym }.freeze
           @tare_kg = tare_kg.to_f
           @load_kg = load_kg.to_f
           @radius_m = radius_m.to_f
@@ -116,7 +128,26 @@ module ReactorSim
         end
 
         def base_initial_state(rng, content)
-          super.merge(position_m: @position_m, load_torque: 0.0, signal: 0)
+          super.merge(position_m: @position_m, load_torque: 0.0, signal: 0,
+                      **(@road ? { misjudged_s: 0.0, own_look: false } : {}))
+        end
+
+        # **Two trains closer than this on the road are touching**: past `BUFFER_M_S` closing, they
+        # have collided, and below it they buffer up. A fiat for now, and both trains go.
+        #
+        # TODO: derailment, the wreck lying across the road, and a gang to clear it — the first
+        # caller of a road that can be blocked by something other than a train.
+        TOUCHING_M = 8.0
+
+        # A driver who misjudges the road believes it clear this long.
+        MISJUDGED_S = 20.0
+
+        def suffers?(kind) = kind == :misjudged_road || super
+
+        def suffer(state, mishap, ctx)
+          return super unless mishap.fetch(:kind) == :misjudged_road
+
+          [ state.merge(misjudged_s: MISJUDGED_S), [] ]
         end
 
         def position_m(state, _content = nil) = state.fetch(:position_m)
@@ -151,7 +182,7 @@ module ReactorSim
         # The rolling, and a buffer stop at either end taking a train that comes onto it gently.
         def drag_conductances(state, ctx)
           drags = super
-          return drags unless onto_buffer?(state)
+          return drags unless onto_buffer?(state) || closing_m_s(state, ctx).positive?
 
           drags.merge(friction: drags.fetch(:friction, 0.0) + (moment_of_inertia / ctx.dt * Nodes::Brake::LOCK_MULTIPLE))
         end
@@ -159,12 +190,15 @@ module ReactorSim
         def apply(state, ctx, _grant)
           settled = state.merge(position_m: position_m(state) + (speed_m_s(state) * ctx.dt))
           settled = settled.merge(load_torque: drive_torque(settled, ctx))
+          settled = settled.merge(misjudged_s: [ settled.fetch(:misjudged_s) - ctx.dt, 0.0 ].max, own_look: own_look?(settled, ctx)) if @road
           settled.merge(signal: SIGNALS.keys.index(signal(settled, ctx)))
         end
 
         # How hard she is moving through `place`, for a peril of somebody working there: nothing
         # standing or elsewhere. A quantity that is not one of the track's places is not hers.
+        # `:own_look` is her driver looking up the road with nothing to tell him, loaded to go.
         def activity(state, quantity, _dt)
+          return (state.fetch(:own_look, false) ? 1.0 : 0.0) if quantity == :own_look
           return nil unless @track.places.include?(quantity)
           return 0.0 if standing?(state) || place_at(state) != quantity
 
@@ -173,12 +207,13 @@ module ReactorSim
 
         # --- the ends, and the rails ------------------------------------------------
 
-        def overload?(state, _ctx, _integrity) = derailing?(state) || into_the_end?(state)
+        def overload?(state, ctx, _integrity) = derailing?(state) || into_the_end?(state) || closing_m_s(state, ctx) > BUFFER_M_S
 
         # Ascending severity.
-        def failure_modes = { derailed: {}, crashed: {}, over_the_tip: {} }
+        def failure_modes = { derailed: {}, collided: {}, crashed: {}, over_the_tip: {} }
 
-        def failure_mode(state, _ctx, _cause)
+        def failure_mode(state, ctx, _cause)
+          return :collided if closing_m_s(state, ctx) > BUFFER_M_S
           return :crashed if position_m(state) <= 0.0 && into_the_end?(state)
           return :over_the_tip if position_m(state) >= @track.length_m && into_the_end?(state)
 
@@ -189,7 +224,31 @@ module ReactorSim
           { speed_m_s: speed_m_s(state).abs.round(2), position_m: position_m(state).round(1) }
         end
 
+        # **How fast she is closing on the other train**, both out on the road and touching, from
+        # the other's last tick; zero when they are not. Both read each other the same tick, so both
+        # see it.
+        def closing_m_s(state, ctx)
+          return 0.0 unless @road && position_m(state) >= @road.fetch(:main_from_m)
+
+          other = ctx.node_state(@road.fetch(:other)) or return 0.0
+          gap = ctx.nodes[@road.fetch(:other)].position_m(other) - position_m(state)
+          return 0.0 if gap.abs > TOUCHING_M || ctx.nodes[@road.fetch(:other)].position_m(other) < @road.fetch(:main_from_m)
+
+          closing = (speed_m_s(state) - ctx.nodes[@road.fetch(:other)].speed_m_s(other)) * (gap.negative? ? -1.0 : 1.0)
+          [ closing, 0.0 ].max
+        end
+
         private
+
+        # Loaded and standing in the loop to go out, the other train on the road, and nothing telling
+        # her driver whether it is clear.
+        def own_look?(state, ctx)
+          return false unless standing?(state) && loaded?(ctx) && position_m(state) < @road.fetch(:main_from_m)
+          return false if @road[:signal] && !(ctx.node_state(@road.fetch(:signal)) || {}).dig(:clear, id).nil?
+
+          other = ctx.node_state(@road.fetch(:other)) or return false
+          ctx.nodes[@road.fetch(:other)].position_m(other) >= @road.fetch(:main_from_m)
+        end
 
         def derailing?(state) = speed_m_s(state).abs > DERAIL_SHARE * @rated_m_s
 
@@ -222,11 +281,29 @@ module ReactorSim
           at = ->(mark) { (position_m(state) - @track.mark(mark)).abs < STANDING_M }
           carried = ->(landing) { (ctx.node_state(landing) || {}).fetch(:carried_kg, 0.0).positive? }
           # A dipperful lands in a tick, so a train with something in her is loading between them.
-          return (carried.(@loader) || loaded?(ctx) ? :loading : :waiting_on_shovel) if at.(:loading)
-          return :tipped if at.(:dump) && !loaded?(ctx)
+          return loading_signal(ctx, carried) if at.(:loading)
+          return :in_the_loop if @road && at.(:passing)
+          return stand_signal(ctx, carried) if at.(:dump) && !loaded?(ctx)
           return (carried.(@tipper) ? :tipping : :waiting_on_dumpmen) if at.(:dump)
 
           :stopped
+        end
+
+        def loading_signal(ctx, carried)
+          return :loading if carried.(@loader)
+          return :waiting_on_shovel unless loaded?(ctx)
+
+          other = @road && ctx.node_state(@road.fetch(:other))
+          on_road = other && ctx.nodes[@road.fetch(:other)].position_m(other) >= @road.fetch(:main_from_m)
+          on_road ? :waiting_on_road : :loading
+        end
+
+        # Tipped: being topped up, or waiting on a stand with nothing in it.
+        def stand_signal(ctx, carried)
+          calling = @stand.select { |_, valve| ctx.controls.fetch(valve, 0.0).positive? }
+          return :tipped if calling.empty?
+
+          calling.keys.any? { |landing| carried.(landing) } ? :at_the_stand : :stand_empty
         end
       end
     end

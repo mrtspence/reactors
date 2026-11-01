@@ -611,11 +611,11 @@ RSpec.describe ReactorSim::Assembly do
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           control_points: fragment.control_points, diagnostics: assembly.diagnostics
         )
-        op.paths.find { |p| p.to_node == :firebox && p.to_port == :air_in }
+        op.paths.find { |p| p.to_node == :fire_bed && p.to_port == :air_in }
       end
 
       it "sits in series with the damper on the air path when fitted" do
-        expect(air_path(real).conduits).to eq(%i[blower_fan damper])
+        expect(air_path(real).conduits).to eq(%i[blower_fan damper grate])
       end
 
       # `:bypass` and not `:omit`, because the air still has to get in. A naturally-drawn
@@ -623,7 +623,7 @@ RSpec.describe ReactorSim::Assembly do
       it "leaves the air path intact when it is not fitted" do
         path = air_path(real(loadout: { blower: nil }))
 
-        expect(path.conduits).to eq([ :damper ])
+        expect(path.conduits).to eq(%i[damper grate])
         expect(path.from_node).to eq(:atmosphere)
       end
 
@@ -672,8 +672,9 @@ RSpec.describe ReactorSim::Assembly do
     end
 
     # The second `:bypass` slot, and the one with the largest consequence. Without the bundle
-    # the flue gas goes straight from firebox to chimney and the only fire→water path left is
-    # the radiant one — a plain shell boiler, which is what tubes were invented to replace.
+    # the flue gas goes straight from firebox to chimney and the only fire→water paths left are the
+    # fire's radiance and the firebox's gas on the legs — a plain shell boiler, which is what tubes
+    # were invented to replace.
     describe "the boiler tubes" do
       it "routes the flue gas through the bundle when fitted" do
         links = real.fragment.links.map(&:id)
@@ -692,12 +693,12 @@ RSpec.describe ReactorSim::Assembly do
       # The convective heat path leaves with the part, because it lives in the part's fragment.
       # A thermal link left behind would point at a node that no longer exists, and
       # `validate_graph!` would refuse the whole operation.
-      it "takes its thermal link to the drum with it, leaving only the radiant path" do
+      it "takes its thermal link to the drum with it, leaving only the fire's and the firebox's" do
         fitted = real.fragment.thermal_links.map { |l| [ l.a, l.b ] }
         stripped = real(loadout: { boiler_tubes: nil }).fragment.thermal_links.map { |l| [ l.a, l.b ] }
 
-        expect(fitted).to contain_exactly([ :firebox, :boiler ], [ :boiler_tubes, :boiler ])
-        expect(stripped).to contain_exactly([ :firebox, :boiler ])
+        expect(fitted).to contain_exactly([ :fire_bed, :boiler ], [ :firebox, :boiler ], [ :boiler_tubes, :boiler ])
+        expect(stripped).to contain_exactly([ :fire_bed, :boiler ], [ :firebox, :boiler ])
       end
     end
   end

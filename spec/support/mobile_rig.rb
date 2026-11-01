@@ -112,7 +112,7 @@ module MobileRig
     ground = { bench: :"#{shovel}_bench", standpipe: :"#{shovel}_standpipe" }
     return ground.merge(car: :"#{shovel}_car") unless train
 
-    ground.merge(car: :"#{train}_cars", dumps_into: [ :"#{train}_loading", :inlet ])
+    ground.merge(car: :"#{train}_cars", dumps_into: [ [ :"#{train}_loading", :inlet ] ])
   end
 
   # **What a shovel stands on**: a bench of overburden, a standpipe, and — with no train to load — a
@@ -179,7 +179,7 @@ module MobileRig
   # --- at work ---------------------------------------------------------------------------
 
   # The test load as it was observed beside an engine at work (`MobileEngine::AT_WORK`).
-  LOAD_AT_WORK_L = 620.8
+  LOAD_AT_WORK_L = 625.9
 
   # `op` with `engine` at work, asked for `demand` — the library's own start
   # (`MobileEngine.raised`), and the rig's test load turning with it where there is one.

@@ -138,7 +138,7 @@ coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }    # 12.0 = 12.0
   enthalpy_j_per_unit: -30000000            # negative = exothermic
-  rate_per_s: 6.0
+  rate_per_s: 0.001
   min_temperature_k: 500
 ```
 
@@ -169,7 +169,7 @@ coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }
   enthalpy_j_per_unit: -30000000
-  rate_per_s: 1.5
+  rate_per_s: 0.001
   limited_by: air                 # whose supply picks the pathway
   alternatives:                   # ordered, most of it first
     - consumes: { coal: 1.0, air: 5.5 }
@@ -197,25 +197,20 @@ The rules, all enforced at boot:
 > you are the first to build on it, treat a surprise as a gap in
 > [`reaction-pathways.md`](../design_sketches/reaction-pathways.md), not a bug in your content.
 
-### `rate_per_s` must suit the timestep — and it means something different once a reaction ignites
+### `rate_per_s` means two things, by whether a reaction ignites
 
 `extent = limit × (1 − e^(−rate × dt))`.
 
 Without an `ignition:` block, `limit` is the available reagents, so this is "how much of what
 is present reacts per second" and it wants to be **high**: at `rate 0.8` and `dt 0.25` only 18%
-happens per tick, and a firebox set that slow starves in the middle of a full grate because
-draught blows past unreacted.
+happens per tick, and a vessel set that slow lets what passes through blow past unreacted.
 
-**With `ignition:`, `limit` is capped by the mass actually alight, so the same number becomes
-"how fast lit fuel is consumed" — and it wants to be far lower.** Coal was left at `6.0` across
-that change, which meant 78% of the fire vanished every tick; the lit mass could never
-accumulate, and `oxidiser_demand` (derived from the same rate) then asked for a kilogram of air
-per tick to sustain a 0.12 kg fire. The whole engine read as air-starved.
-
-It is also **sharply peaked rather than forgiving** — too slow and the fire cannot outpace the
-boiler draining it, too fast and the lit mass outruns `spread_per_s` and goes out. Coal's
-plateau is 1.5–2.0 and both edges are outright failures. Measurements are in
-[`content/reactions/combustion.yml`](../../content/reactions/combustion.yml).
+**With `ignition:`, the fuel term is capped by the mass actually alight, so the number is how
+fast lit fuel burns at full air — a physical figure.** Coal's is `0.001`: a lit lump lasts about a
+quarter of an hour, so a grate's bed builds until it burns what is stoked, minutes of burning, and
+its air then sets what it burns. A fuel bed is a body of its own (`Nodes::FuelBed`), so its heat
+holds while the gas over it cools. See
+[`physics.md`](../reference/physics.md#a-fuel-bed-is-a-body-of-its-own).
 
 **Re-measure it whenever you change `spread_per_s`, `quench_per_s`, or the firebox geometry.**
 

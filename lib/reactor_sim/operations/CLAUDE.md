@@ -149,10 +149,20 @@ because he reads by whatever was fitted.
 - **The gauges are the driver's**: a reading part builds nothing and sets how finely he reads.
 - **He keeps her from racing**: past her governed speed he eases the throttle, and shuts it a fifth
   over — a shovel's work comes and goes with every swing.
+- **Her fire is the stationary engine's two bodies**: a bed on the grate (`fire_bed`, about 30 kg on
+  the vertical engine and 60 on the heavy one) and the firebox over it.
 - **She starts at work**: `MobileEngine.raised` puts a freshly built operation's engines in the
-  state one was observed in (`AT_WORK`), and her fireman and driver start at their posts
-  (`advance_posts:` on the engine part). One set of figures for every hot engine, so a retune moves
-  them all.
+  state one was observed in — the fitted engine's own (`BY_ENGINE`: `AT_WORK` for the vertical
+  engine, `HEAVY_AT_WORK` for the heavy one) — and her fireman and driver start at their posts
+  (`advance_posts:` on the engine part). One set of figures an engine, so a retune moves them all.
+- **Two engines**: the vertical engine, and the heavy one at about twice the fire and the power.
+  The fireman fires at the blueprint's rate whatever the work, so the heavy engine burns twice the
+  coal and water standing or working.
+- **The starting bunker and tank hold about an hour's coal and half an hour's water**; the larger
+  tiers are a convenience. **The driver tops her up** through whatever is fitted (`Driver::TopUp`, a
+  valve, the holder it fills and its full figure): a shovel's hose from the standpipe and coal chute
+  from a drop beside it, a train's water column and coal stage at her stand. He calls under half and
+  stops at full; a train waits at the stand until topped.
 
 **A steam shovel is a mobile engine digging** (`MobileEngine.shovel_slots(shovel, place:, bench:, car:,
 standpipe:)`): the engine's slots plus the dipper, its chain and its boom. The host gives it the
@@ -175,7 +185,17 @@ moves while the train is away. **The driver runs the round** (`locomotive_driver
 the engine's `Driver`): he believes his brake does what it does on the steepest bank empty, and eases
 in and brakes late by his lateness. **`place:` is the footplate**, a place the train carries
 (`Place#carried_by`) that shares its hazards with wherever the train stands. Its board is
-`MobileEngine.train_board`.
+`MobileEngine.train_board`. **The footplate is boarded at the loading mark and the dump**, by a
+passage through each landing (`Nodes::Landing#boards?`), open only while she stands there.
+
+**Two trains may share a road** (`road:` on `locomotive_slots`): a loop by the shovel, the second
+starting at its `passing` mark, and past `main` a single road one train's at a time. Each driver
+waits in the loop while the other has the shovel and goes out only on a clear road, read from a
+`MobileEngine::RoadSignal` — a flagman, a train staff or block signals — or from his own look, which
+he can misjudge (a `judged: :wrongly` peril, a mishap on his train). A flagman out of his depth
+waves one on with the road taken; worn block signals stick at clear. **Two trains touching on the
+road and closing past a buffer's speed have collided**, both, as a fiat; slower, they buffer up.
+**A shovel dumps into whichever train stands under it** (`cars: { carriers: }`, `dumps_into:` a list).
 
 ## The open pit
 
@@ -263,8 +283,17 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   lies at the bottom**, calcined or not, and the ash with it, onto the finished heap, and **the
   goal counts its hematite only**. The kiln top is a place whose air is a vessel of its own, fed by
   the throat and cleared by the open air across it (`OpenPit::Breeze`, more in a wind), so a choked
-  kiln gasses its chargers through `Breath`. Its coal is a stock in a sized slot. The kiln starts at
-  work (`working:`).
+  kiln gasses its chargers through `Breath`. The coal in the charge is a bed of tens of kilograms
+  burning over minutes, and the eyes stopped up still breathe (`EYES_LEAK`), so a kiln shut down
+  smoulders. The kiln starts at work (`working:`).
+- **The pit's coal is a yard at bank** (a sized slot) that the kiln, the trains' stands and the
+  shovels draw on, and **a siding fills it** (`Nodes::Siding`, empty to start): wagons on a
+  timetable, shovelled out by the unloaders, or dropped over a staithe. **Coal reaches the machines
+  by their coalers**, a gang a line: each fitted shovel has a drop beside it, and the stripping
+  train a coal stage at the spoil dump, each kept from the yard; the ore train's stage is a chute off
+  the yard at bank. Water reaches a train at its stand from the reservoir.
+- **A passing track at a face** lets a second dinky share the face's road, and **road signals** at
+  the face (none, a flagman, a train staff, block signals) are what its drivers read it by.
 
 ## Assembled from parts
 
@@ -411,7 +440,8 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    **A ventilating furnace is a slot beside the fan** (`furnace`: fire basket, brick furnace,
    double furnace). The return comes up by way of the upcast foot in either frame, and the fan's
    conduit carries the shaft's depth of stack, so the furnace's flue warming the foot draws the
-   whole upcast with no power at all. A furnaceman stokes it. **Its air is the return's**, so
+   whole upcast with no power at all. A furnaceman stokes it. **The furnace is a `Nodes::FuelBed`**
+   drawn through a `Nodes::Grate`, the upcast foot the space over its fire. **Its air is the return's**, so
    return gas in its range fires at the furnace, and the front runs back into the district.
    **The dumb drift** (its own slot) feeds the fire from the intake through a regulator instead.
    It does it by `informs: { furnace_fed_from: :intake }`, the one way a fitting shapes another
@@ -471,9 +501,13 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
 
 The steam engine is deliberately two machines — Watt's atmospheric and Trevithick's
 high-pressure — differing only in what the cylinder exhausts into and a few sizes. `slots(spec)`
-and `fixtures(spec)` branch on the `CHASSIS` hash. (It was `VARIANTS`, and the keyword was
-`variant:`; the concept did not change when the engine became assembled from parts, only what
-it is now one axis of.)
+and `fixtures(spec)` branch on the `CHASSIS` hash.
+
+**Both start banked**, as the shift before left them: the fire a small core under green coal
+(`SteamEngine::BANKED_BED`, the fire bed's `laid:`) and the drum warm below its valve
+(`BANKED_DRUM_K`, by boiler). The bellows, with the regulator shut, bring the fire through in under
+a minute and working pressure in about two and a half. The fire is two bodies — a `Nodes::FuelBed`
+on a `Nodes::Grate`, and the firebox over it — and the damper leaks shut (`DAMPER_LEAK`).
 
 **A chassis owns what a slot cannot express.** Fitting the condenser does not add a branch, it
 *reroutes* the cylinder's exhaust — and "absent means rerouted" is a frame decision, not a

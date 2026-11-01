@@ -44,7 +44,7 @@ RSpec.describe ReactorSim::Operations::MobileEngine do
       expect(ids.count { |id| id.start_with?("shovel_1_") }).to eq(ids.count { |id| id.start_with?("shovel_2_") })
       expect(ids.reject { |id| id.start_with?("shovel_1_", "shovel_2_") }).to be_empty
       expect(op.nodes.fetch(:shovel_2_relief).senses).to be(:shovel_2_boiler)
-      expect(op.nodes.fetch(:shovel_2_boiler).fired_by).to be(:shovel_2_firebox)
+      expect(op.nodes.fetch(:shovel_2_boiler).fired_by).to be(:shovel_2_fire_bed)
     end
 
     it "leaves one engine's work untouched by what the other is asked" do
@@ -175,7 +175,7 @@ RSpec.describe ReactorSim::Operations::MobileEngine do
       op = rig(engines: %i[a b], loadout: { b_fusible_plug: :mobile_fusible_plug })
 
       expect(op.nodes.fetch(:b_fusible_plug).senses).to be(:b_boiler)
-      expect(op.links.map { |l| [ l.from_node, l.to_node ] }).to include([ :b_fusible_plug, :b_firebox ])
+      expect(op.links.map { |l| [ l.from_node, l.to_node ] }).to include([ :b_fusible_plug, :b_fire_bed ])
       expect(op.nodes).not_to have_key(:a_fusible_plug)
     end
   end

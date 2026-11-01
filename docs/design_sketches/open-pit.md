@@ -1754,3 +1754,399 @@ counting toward the goal, and is shown as what is waiting to be finished.
 - **The coal stock is a slot of its own**, a heap of 600 kg, a bunker of 2 t or a yard of 6 t. The
   heap is a match for the clamp, or an hour for a shaft kiln.
 - **Later:** the gas-fired kiln, whose first caller is a producer-gas supply.
+
+## 24. 5j — pit logistics (for review)
+
+**What it adds**: what keeps the machines and the kiln going past what they started with.
+- Coal coming into the pit, and a yard to hold it.
+- A stand on each road, where a train takes coal and water.
+- A second train for a shovel, and the passing track that lets two share a road.
+- Boarding a train at a stand, so its crew can be relieved.
+
+**The period** (research §2.7, §4; [`locomotive.md`](locomotive.md) §1, §12):
+- **Two locomotives per shovel**, passing at a loop by the shovel, each making 7–8 rounds in a shift.
+  With one train the shovel stands a little over a third of the time, waiting on cars (§12 there).
+- **A coaling stage and a water column** at the end of the run, where an engine stood to tip anyway.
+  A dinkey's tank lasted an hour or two of hard work.
+- **Coal came in by rail**, a siding of wagons tipped into the yard by hand, or by drop-bottom
+  wagons over a staithe.
+
+### What runs out, and when
+
+**Measured before designing, because it decides how much of this is worth building:**
+
+| Holds | Starts with | Burns, at work | Lasts |
+|---|---|---|---|
+| A shovel's bunker | 300 kg | about 0.03 kg/s firing flat out | about 3 h |
+| A train's bunker | 300 kg | a third of that, standing to load and tip | most of a day |
+| A train's tank | 1.5 t | about 0.27 kg/s flat out, a third of the time | 4–5 h |
+| A shovel's tank | 1.5 t | — | never: the hose from the reservoir |
+| The kiln's coal heap | 600 kg | 0.063 kg/s (clamp), 0.126 kg/s (shaft kiln) | 2.6 h, 80 min |
+
+**So in an hour's match nothing on wheels runs dry, and the kiln does.** The figures are a real
+dinkey's (a few hundred gallons and half a tonne of coal), so they are not wrong. The engines
+simply do not work hard enough for long enough to empty them. What runs out first is the shaft
+kiln's coal, and a second train is the upgrade that pays at once (question 1).
+
+### Coal into the pit: the yard and the siding
+
+**One coal yard at bank** (question 2):
+- **The kiln's coal stock becomes the pit's yard.** It is the same slot and the same tiers of heap,
+  bunker and yard, and it serves the kiln and the coaling stages.
+- **A coal siding, an upgrade, is how coal comes in.** Wagons arrive on a timetable the siding's tier
+  sets, a few tonnes every so often. They stand at the siding until **the coal unloaders**, a gang at
+  bank, shovel them out into the yard. Nobody unloading means wagons standing full and the yard
+  running down.
+- **What arrives is booked as mass added at the boundary**, as air drawn from the atmosphere and rain
+  through a catchment are. It needs a node that is a holder the outside fills on a timetable: a stock
+  node, named for what it is, not for coal.
+- **TODO, its first caller beyond this:** the colliery's raised coal, sent by rail. That is the chain of
+  operations `blueprints.md` §4 defers; the timetable is a seam for it.
+- **The tiers**: a siding of hand-tipped wagons; then a **staithe** of drop-bottom wagons, which needs
+  far fewer hands.
+
+**Alternatives:**
+- **(a) Carted in by a gang**: a post at the yard whose work brings coal from nowhere.
+  - *For*: no new node, and a post for agency.
+  - *Against*: mass appearing from a person's effort has no honest boundary. And the colliery could
+    never be the source.
+- **(b) Nothing comes in during a match**: the stock bought before the match is all there is, which is
+  5i as built.
+  - *For*: the cheapest option, and a decision about stock made at the outfitting screen.
+  - *Against*: the shaft kiln's 80 minutes on its heap is a wall a player can only buy past, not play
+    past.
+
+**Recommended: the siding.**
+- *Why*: it is the only option with an honest boundary and a seam for the colliery, and its gang is
+  the agency.
+- *What it costs*: a new stock node, and a timetable figure that is a guess until the colliery
+  supplies it.
+
+### The stand: coal and water for a train
+
+**At each road's dump end, where the train already stands to tip** (questions 3 and 6):
+- **The water column**: a landing off the reservoir's main into the tank, open while the train stands
+  at the dump. The driver works it, as he works a shovel's hose today: open when the tank is low,
+  shut at full.
+- **The coaling stage**: a landing from coal into the bunker, also the driver's, open while she
+  stands. On the ore road the dump is at bank, so the stage is a chute off the yard. On the stripping
+  road the dump is the spoil dump, 80 m away down the dump road, so its stage is a bin there, which
+  **the coalers** barrow full from the yard.
+- **He waits there until topped** when either the tank or the bunker is below a share, and otherwise
+  takes what he can while the dumpmen tip.
+
+**Alternatives:**
+- **(a) One stand at bank, on the ore road only.**
+  - *For*: no coalers and no second bin.
+  - *Against*: the stripping train has no coal or water at all.
+- **(b) Water only.**
+  - *For*: water was the more pressing of the two, and the reservoir is already there.
+  - *Against*: coal still never comes.
+
+**Recommended: a stand on each road.**
+- *Why*: one train cannot be served while the other is not.
+- *What it costs*: a gang and a bin that, in an hour's match, do almost nothing (the table above).
+
+**A shovel's coal** (question 5): its bunker lasts about three hours. Recommended: defer it. The
+alternative is the coalers carrying to it down the ramp, which is work that bites only in long
+matches.
+
+### A second train, and the passing track
+
+**A passing track at each face is an upgrade** (question 3), and it is what a second dinky needs
+(`needs:`):
+- **One road, one loop by the shovel.** The second train's track is the first's, with a `passing`
+  mark a train's length short of the loading mark.
+- **The drivers keep the road one train's at a time.** An empty train waits in the loop while the
+  other stands loading. A full train leaves the shovel only when the road is clear: the other train
+  is in the loop, or standing at the dump.
+  - So they never meet on the road and pass only at the loop, as the period did. Each driver reads the
+    other's train, a tick old.
+  - **Precedence** when both want the shovel at once is the first train's, so it is deterministic.
+- **The shovel dumps into whichever train stands under it.** The dipper's dump reaches both trains'
+  loading landings, and only one is ever open. It casts while neither stands there.
+- **A second dinky's slots** are the first's under its own names: engine, train, brake and the
+  engine's fittings.
+
+**Alternatives:**
+- **(a) Double track, each train its own road.**
+  - *For*: no rule at all; the trains share only the spot under the dipper.
+  - *Against*: it is not what a pit laid, and it buys away the one interaction worth having.
+- **(b) The road as occupancy, and trains that can meet.** A head-on is a failure, broken by a driver
+  who slips at his post.
+  - *For*: a real catastrophe, with real counterplay.
+  - *Against*: a collision between two moving nodes is new physics in the drive solve. It is a unit
+    of its own.
+
+**Recommended: one road and the drivers' rule.**
+- *Why*: it is the period's working and costs no new physics. The head-on is the natural next step,
+  as a deferral.
+- *What it costs*: two trains that physically could pass through each other on the road, prevented
+  by the rule alone. A frozen driver breaks the rule's premise, because his train runs on where he
+  left it.
+
+### Boarding at a stand
+
+**A footplate today is reachable only by starting on it**, so a train's crew can never be relieved,
+rest, or be fetched if hurt (question 4).
+- **A passage to each footplate from each place its train stands**: the loading place and the dump.
+  It runs **through that stand's landing**, which blocks it unless its train stood at its mark last
+  tick.
+- `Nodes::Landing` gains that. Opt-in (`boards:`), so the colliery's landings are untouched.
+- **The advance shift still starts them aboard.** A relief walks to the stand and waits for the train;
+  a driver sent off steps down only at a stand.
+- **With nobody on the footplate the levers hold**: the machine does not know it is unattended. A
+  driver who steps down at the dump leaves the train standing braked there.
+
+**Alternative: the cage's ridden passage** (`hoist:`). A rider waits for the conveyance and is
+carried, which is right for a cage between two landings. A footplate is a place, though, not a
+journey. Recommended: through the landing, because it is the smaller change and keeps the footplate
+a place.
+
+### The people
+
+| Post | Where | Kind | Does |
+|---|---|---|---|
+| **Coal unloaders**, a gang | bank | effort (`force`, `swing`) | shovel the siding's wagons into the yard |
+| **Coalers**, a gang | bank | effort (`force`, `toughness`) | barrow coal from the yard to the spoil dump's coaling stage |
+
+The water column and the chute are the driver's, as a shovel's hose is.
+
+### The panel
+
+- **The coal yard**, as somebody's guess (5i's gauge, renamed).
+- **The siding**: nothing in, wagons standing full, unloading.
+- **Each train's board gains** "taking water", "coaling", "in the loop — waiting on the road".
+
+### Specs (relational)
+
+- **The siding**: wagons arrive on the timetable and are booked as added; with nobody unloading they
+  stand full and the yard does not fill.
+- **The stand**: a train standing at the dump takes water and coal, and none while away. A low train
+  waits there until topped, and a full one does not.
+- **Two trains**: with the passing track fitted, a second dinky is built and without it none is. An
+  empty train waits in the loop while the other loads. A full one leaves only with the road clear.
+  The shovel waits on cars less with two trains than with one.
+- **Boarding**: the passage is open only while the train stands there. A relief boards, and a driver
+  sent off steps down only at a stand.
+- **The books**: mass and energy close with wagons arriving; a snapshot replays.
+
+### Questions
+
+1. **Given that nothing on wheels runs dry in an hour**, build the stand anyway as designed? Or build
+   it and make the starting bunker and tank smaller than a dinkey's, so it matters? Or defer the stand
+   and build the second train, the siding and boarding now?
+2. **Coal into the pit by a siding** on a timetable its tier sets, unloaded by a gang and booked at the
+   boundary, with the colliery as the seam? Or carted in, or nothing in?
+3. **One road, a loop by the shovel, and the drivers keeping the road one train's**? Or a double track,
+   or a road where trains can meet?
+4. **Boarding through the stand's landing**, opt-in on `Nodes::Landing`? Or the cage's ridden passage?
+5. **A shovel's coal deferred**, its bunker lasting about three hours?
+6. **A stand on each road**, with coalers barrowing to the spoil dump's? Or the ore road only, or water
+   only?
+
+### Review decisions (5j)
+
+1. **The starting coal bunker of every steam engine in the pit drops to a third.** The present sizes
+   become upgrades. Refilling becomes pressing, and a larger bunker becomes a convenience that buys
+   little throughput on its own. The stand is then worth building.
+2. **The siding, and generic.** The next operation, a cast-iron foundry, and most others will take
+   deliveries through it.
+3. **One road and a loop, with tiers of signalling.** The signals are what tell a driver where the
+   other train is. A poor tier relies on a fallible worker, a good one can malfunction, and with a
+   wrong reading a driver goes and the trains meet.
+   - **A collision is fiated for now:** at any real speed it wrecks both trains and closes the road.
+     TODO: derailment, and a gang to clear the wreck.
+4. **Boarding through the stand's landing.**
+5. **Shovels need coal too.** A starting bunker should last about half an hour, and there should be
+   enough power-hungry and power-generating upgrades to burn through it faster still. Coal reaches a
+   shovel by a gang from the train's drop-off, or by a drop point near the shovel that is kept
+   stocked.
+6. **A stand on each road.**
+
+### Measured after the review
+
+**A train burns as hard as a shovel**, because the fireman stokes at the blueprint's rate whether she
+runs or stands. At work, a stripping shovel and its dinky each burn **0.030 kg/s of coal**, and the
+dinky **0.27 kg/s of water**. §24's table above is wrong on the train for that reason.
+
+| At a third of today | Lasts, at work |
+|---|---|
+| A bunker of 100 kg | about 55 minutes |
+| A tank of 500 kg | about 30 minutes |
+
+### Revised after review
+
+**Bunkers and tanks**
+- **The starting bunker is a third of today's, 100 kg**, for every engine. Today's 300 kg and the large
+  800 kg become the tiers above it.
+- **The starting tank is a third too, 500 kg**, so the water column matters on the train as the coal
+  stage does. A shovel keeps its hose (question A).
+- **Half an hour on the starting bunker** is what the heavier engine burns (below). On the starting
+  engine, 100 kg is nearer an hour (question A).
+
+**Power to burn it** (question E):
+- **A heavier engine**, a tier above the vertical engine for both the shovel and the dinky: about
+  twice the fire and twice the power, so twice the coal and water. It is the period's step from a
+  contractor's machine to a railroad shovel (research §2.4: 25–135-t machines by 1917).
+- **A larger dipper** for the shovel, 2¼ yd³ to the yard dipper's smaller one. It does more work a swing,
+  which the heavier engine keeps up with.
+- **A longer train** of steel cars is already a tier.
+
+**The siding is a stock node, `Nodes::Siding`**:
+- A holder the outside fills on a timetable: what its config delivers, so much every so often, booked
+  as `mass_added`.
+- It names no resource, so the foundry can take iron or sand through the same node.
+- What empties it is the operation's own: in the pit, the coal unloaders.
+
+**The signals: tiers in a slot at each face's road**, read by both drivers when they decide whether the
+road is clear.
+
+| Signalling | How the road is known | How it goes wrong |
+|---|---|---|
+| **None** (the bottom, with the passing track) | each driver's own look up the road | he misjudges by his wits in the light — and at night or in fog, often |
+| **A flagman at the loop** | a post, watching the road and waving the trains on | absent, the drivers go on their own look; out of his depth he waves one on with the other on the road — a false clear, as the banksman's false ready |
+| **A train staff** | one staff for the road; a driver goes only holding it, handed over at the loop | it cannot be wrong, and it is slow: a train must come back for the other to go |
+| **Electric block signals** | track circuits, read off where the trains really are | they wear; worn through, a signal can stick at clear — the rare wrong-side failure |
+
+- **What a tier is**, in the code: a node writing `clear` for each train from the true state, filtered
+  the tier's way. A worker's error goes through the existing slip and misjudgement machinery, with its
+  dice in phase 0. A machine's error goes through `Wearing`.
+- **The staff is the slow, safe option, and the block signals the quick one that very rarely lies.**
+  Each tier has a different weakness rather than each being better than the last.
+
+**The collision, fiated**:
+- Two trains both on the main road, beyond the loop, within a few metres, closing faster than a buffer
+  takes, both fail `collided`.
+- That endangers both footplates and the place they are in. The road stays closed, because both trains
+  are on it, wrecked.
+- Slower than that they buffer up, as at the end of the track.
+- TODO: derailment and the wreck-clearing gang.
+
+**Coal to the shovel** (question D):
+- **A coal drop at each face**, a bin beside the shovel's work.
+- **The coalers keep it stocked**: a gang at bank barrowing from the yard down the ramp road.
+- The shovel's bunker is filled from it by the shovel's driver, as he works the hose: open when it is
+  low, shut at full.
+- **The stripping road's coal stage at the spoil dump is the same gang's work.** The coalers become one
+  gang a face, so a line each and no lever doing double duty:
+  - the stripping coalers keep the spoil dump's stage and the stripping face's drop;
+  - the ore coalers keep the ore face's drop, because the ore road's stage is a chute off the yard at
+    bank.
+- **Alternative: the train carries the face's coal**, a coal box filled at the stage and emptied at the
+  loading mark.
+  - *For*: no gang, and the round does the work.
+  - *Against*: a shovel with no train fitted has no coal at all, and the box is a third holder riding
+    the train.
+- Recommended: the coalers, because a shovel works with or without a train.
+
+**Open questions:**
+
+A. **The starting bunker:** a third for every engine (about 55 minutes at the starting engine, half an
+   hour at the heavier one)? Or a sixth, 50 kg, so the starting shovel itself lasts half an hour? And
+   the train's tank to a third as well?
+
+B. **The signal tiers:** none, a flagman, a staff, block signals? And the staff as slow but never
+   wrong?
+
+C. **The collision as above:** both on the main road, within a few metres, closing past a buffer's
+   speed?
+
+D. **Coal to the shovel by the coalers, to a drop at the face?** Or carried on the train?
+
+E. **A heavier engine and a larger dipper** as the power upgrades?
+
+### Review decisions (5j, second round)
+
+A. **A third for every engine**, the train's tank included.
+B. **The four signal tiers**, the staff slow and never wrong.
+C. **The collision as proposed**, rough and ready for now.
+D. **The coalers, to a drop at the face.**
+E. **A heavier engine and a larger dipper.** Later upgrades belong to a much later era's mine: electric
+   cable excavators, bucket-wheel excavators.
+
+### Settled while building 5j
+
+**Engines, bunkers and tanks**
+- **The bunker and tank tiers**: small, plain and large. The small bunker holds 100 kg and the small
+  tank 500 kg, and today's 300 kg and 1.5 t are the plain tiers.
+- **The heavy vertical engine** is the vertical engine's table at twice the fire, the drum and the
+  barrel's area. Its own working state was measured on the rig: 122 kW, the drum on its valve at
+  8 atm, 0.059 kg/s of coal and 0.67 kg/s of water.
+- **`MobileEngine.raised` starts each engine at its own figures** (`BY_ENGINE`).
+- **The railroad dipper** is 3 t a dipperful and wants seven pitmen. On the heavy engine it digs
+  39 kg/s, against the yard dipper's 27.6 on the vertical engine: 1.4 times the dig for twice the
+  coal.
+  - On the vertical engine it bogs her, takes her water over and blows a cylinder head inside five
+    minutes.
+  - On an iron chain it parts the chain.
+  - Its description says both, and they stay as hazards.
+
+**Topping up**
+- **The driver's hose became `Driver::TopUp`s**: a valve, the holder it fills, and what full is.
+  Each top-up is found from what is fitted: a shovel's hose and coal chute, a train's water column and
+  coal stage.
+- **A train waits at its stand until topped.** Its board says "at the stand — taking coal and water",
+  or "nothing to take" when the stage is empty.
+- **A fuel bunker has an inlet now.** The stationary engine leaves it unlinked.
+
+**The siding and the coal**
+- **`Nodes::Siding`** books what arrives as `mass_injected`, as `Catchment` does. A consignment due
+  with no room waits.
+  - The coal siding brings a tonne every twenty minutes, emptied by three unloaders.
+  - The staithe brings two tonnes and empties itself.
+- **The coalers are a gang to a line**:
+  - a face's coalers, carrying to the drop beside that face's shovel;
+  - the dump coalers, carrying to the spoil dump's coal stage.
+  
+  Each line is built only for a machine that is fitted, so nobody's work counts twice. The ore road's
+  coal stage is a chute off the yard.
+
+**Two trains on one road**
+- **The second train's track is the first's**, with `passing` and `main` marks. The loop is the face's
+  own stretch.
+- **The rules, from the other train's last tick:**
+  - The shovel belongs to whichever train off the road is nearer it, the first train on a tie.
+  - A loaded train goes out only when the road reads clear.
+  - A train coming back from the dump is already on the road.
+- **Measured, 30 minutes with slides held out of reach**: one train tipped 15.2 t, and two trains
+  30.3 t under every tier and under the drivers' own look.
+  - The rule kept them apart, so in daylight the tiers differ only in what can go wrong.
+  - The shovel barely waits on cars with two trains.
+- **The signals are a node, `MobileEngine::RoadSignal`, read by the drivers:**
+  - The flagman's misjudgement is a `judged: :wrongly` peril and a mishap on the node, as a misfire is
+    left live. It gives a false clear for 20 s.
+  - A driver's own look is the same kind of peril on his train. It is live only while he waits loaded
+    with the road taken and nothing tells him.
+  - A flagman is gated on light like every pit job, so at night there is no flagman, and the drivers
+    are on their own look.
+  - The staff changes hands in the loop after 30 s with both trains standing.
+  - Block signals wear only while a train is on the road, and worn through stick at clear.
+- **The collision is a fiat.** Two trains on the road within 8 m, closing past 1.5 m/s, both fail
+  `collided`. Slower than that, they lock against each other, as at a buffer. TODO in `Train`:
+  derailment and the wreck-clearing gang.
+
+**Boarding**
+- **`Nodes::Landing#boards?`**: a footplate is reached by a two-metre passage through its loading and
+  tipping landings, each open only while the train stood there last tick.
+- An order is checked against the open topology, so a relief can be sent at any time and waits at
+  the stand.
+
+**Found on the way**
+- **The shovel's pitmen and craneman, and a train's dumpmen, were `internal:`**, and `assign_minion`
+  refuses an internal post. Nobody could ever be posted to them in a match; only the specs, seeding
+  people straight onto them, ever worked them. They are ordinary posts now, each holding its
+  default lever.
+- **A shovel at a face slid it every few minutes.** It undercut about three times faster than two
+  barmen could bar down, and each slide took 30% of its boom. The barmen's post now takes up to
+  eight, so keeping up is the player's decision.
+- **A shovel's fire went out with its fireman in a quarrel.** Probed with three seeds each for a
+  licensed and an unlicensed crew, about 17 minutes a run:
+  - **The licence makes no difference.** Licensed runs have no slips, and the same fires go out on
+    the same seeds.
+  - **Every starved spell is a row**: 30 seconds with the fireman fighting (`Animosity`), so he mans
+    nothing. Two seeds in three had one inside 17 minutes, among eight to twelve quarrels.
+  - **A mobile engine's grate holds a few seconds of fuel**, about 0.04 kg lit at work, so 30
+    seconds unstoked puts it out. It lies cold for about two minutes before it catches again.
+  - **An unlicensed driver's slips are harmless here**: reversed, frozen, or onto a held lever (the
+    damper, the hose, the stoking) with no travel of his own to put there.

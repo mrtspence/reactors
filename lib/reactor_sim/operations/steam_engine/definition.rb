@@ -15,9 +15,10 @@ module ReactorSim
     #
     # ## The chain
     #
-    #   bunker ─stoker─➤ firebox ◄─damper─ atmosphere        (fuel meets air)
-    #   firebox ─tubes─➤ flue ─➤ atmosphere                  (the gas leaves, via the water)
-    #                    firebox ═radiant═➤ boiler           (the fire glows at the water legs)
+    #   bunker ─stoker─➤ fire_bed ◄─grate─damper─ atmosphere     (fuel meets air, on the grate)
+    #   fire_bed ─➤ firebox ─tubes─➤ flue ─➤ atmosphere         (the gas leaves, via the water)
+    #                    fire_bed ═radiant═➤ boiler          (the fire glows at the water legs)
+    #                     firebox ═convective═➤ boiler       (its gas on the legs)
     #               boiler_tubes ═convective═➤ boiler        (the gas scrubs through the tubes)
     #   supply ─feed──➤ injector ─➤ boiler ─throttle─➤ chest ─➤ cylinder   (water → steam → work)
     #                  boiler ─➤ injector                    (live steam does the pumping)
@@ -142,18 +143,12 @@ module ReactorSim
         }.freeze
       }.freeze
 
-      # Gas conductances (damper, flue, safety valve) are set so the firebox sits within about a
-      # kilopascal of ambient, the regime a real furnace runs in. Measured as a multiple of the
-      # shipped values at 60/60/80 after 3600 ticks:
-      #
-      #     ×10    firebox +35 kPa   10.8 MW    saturated — the flue empties the box every tick
-      #     ×3     firebox +1.1 kPa   6.0 MW
-      #     ×1     firebox +0.5 kPa   2.9 MW    <- here
-      #     ×0.5   firebox   ~0 Pa    0.1 MW    fire will not sustain
-      #
-      # Above ×1.5 the boiler simply pins on its safety valve, so opening the gas path further
-      # buys nothing. **Re-measure if the stack height, blastpipe rating or firebox volume
-      # changes** — all three move the head this is solved against.
+      # Gas conductances (damper, grate, flue, safety valve) are set so the firebox sits within about
+      # a kilopascal of ambient, the regime a real furnace runs in. At work on the usual levers the
+      # bed takes about 3 kg/s of air, some 80% over what it burns, and the boiler pins on its safety
+      # valve from damper 40 up, so opening the gas path further buys nothing. **Re-measure if the
+      # stack height, blastpipe rating or firebox volume changes** — all three move the head this
+      # is solved against.
       #
       # Each builder below makes one node. Wiring, levers and gauges live in `parts.rb`.
 
@@ -161,7 +156,8 @@ module ReactorSim
         Nodes::Vessel.new(
           id: names.(:bunker), label: "Fuel Bunker", volume_m3: volume_m3,
           initial_contents: [ { resource: :coal, kg: coal_kg } ],
-          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 2.0) ]
+          ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 2.0),
+                   Port.new(id: :in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 2.0) ]
         )
       end
 
@@ -233,17 +229,9 @@ module ReactorSim
       # An effort station, not a valve: `stoking` is somebody's exertion, and what reaches the
       # grate is that times their capability.
       #
-      # **0.25 kg/s is what a competent human manages**, not a mechanical limit. The fire needs
-      # ~0.12 kg/s to establish and can usefully burn ~0.12-0.15 kg/s, so this puts the optimum
-      # near lever 50 with a rising limb below and a real falloff above. Surplus coal banks up as
-      # cold thermal mass the fire then has to heat. Measured kW at damper 60 / 70:
-      #
-      #     lever      30     40      50      60      70      80     100
-      #     damper 60   0    27.2   116.4   110.8   105.1    99.4    88.7
-      #     damper 70   0    35.7   279.6   265.3   250.9   237.3   212.5
-      #
-      # The light/over-fuelled window is narrow (~0.12 → 0.15 kg/s), and above damper ~80 the
-      # boiler sits on its safety valve, so the falloff hides in power while the fire cools.
+      # **0.25 kg/s is what a competent human manages**, not a mechanical limit. The bed burns what
+      # it is fed over minutes, settling at about 150 kg on the usual 60; fed harder than its air it
+      # thickens, draws less and smokes, and fed less it thins and the fire sinks.
       def stoker(names: HOUSE, max_kg_per_s: 0.25)
         Nodes::Conduit.new(
           id: names.(:stoker), label: "Stoking Line", accepts: [ :fuel ],
@@ -273,6 +261,10 @@ module ReactorSim
         )
       end
 
+      # **A damper never quite shuts**: at zero it still passes `DAMPER_LEAK` of its bore, which is
+      # the air a banked fire lives on.
+      DAMPER_LEAK = 0.03
+
       def damper(conductance:, names: HOUSE)
         Nodes::Conduit.new(
           # `conductance:` is the only air control; `max_kg_per_s` is a structural port bound and
@@ -280,7 +272,7 @@ module ReactorSim
           # atmospheric engine runs a smaller fire because its conductance is 0.1 against 0.35.
           id: names.(:damper), label: "Damper", accepts: [ :gas ],
           max_kg_per_s: 12.0, heat_capacity: 2.0e3,
-          conductance: conductance,
+          conductance: conductance, leak_fraction: DAMPER_LEAK,
           control_id: names.(:damper_open)
         )
       end
@@ -348,7 +340,7 @@ module ReactorSim
       end
 
       # **Its own tank, deliberately, rather than a line off anything else.** `oil_combustion` is
-      # already in the firebox's reaction list, so a fuel-oil line routed to the fire would let a
+      # already in the fire bed's reaction list, so a fuel-oil line routed to the fire would let a
       # player burn the donkey's fuel in the main grate. A separate tank makes that
       # unexpressible rather than merely discouraged — and running dry is then something the
       # player can watch happen.
@@ -379,20 +371,28 @@ module ReactorSim
                            heat_capacity: 200.0, ambient_conductance: 20.0)
       end
 
-      # Where fuel and air meet. The igniter is a small, deliberate heat input — coal will
-      # not catch below 700 K, so an engine has to be lit before it can be run.
-      def firebox(names: HOUSE, volume_m3: 6.0, heat_capacity: 3.0e4, ambient_conductance: 60.0,
-                  heater_watts: 1.2e5, igniter_kg_per_s: 0.02)
-        Nodes::Vessel.new(
-          id: names.(:firebox), label: "Firebox", volume_m3: volume_m3,
-          heat_capacity: heat_capacity, ambient_conductance: ambient_conductance,
+      # **The engine as the shift before left it: banked.** The bed made up and the damper shut,
+      # twenty minutes on — the fire a small core under green coal, the drum warm below its valve.
+      # Read off a working fire banked that long, so it is a state the engine reaches; opened up, it
+      # is burning through in a few minutes.
+      BANKED_BED = { kelvin: 826.0, contents: { coal: 147.8, ash: 11.7 }, alight: { coal_combustion: 1.4 } }.freeze
+      BANKED_DRUM_K = { locomotive_boiler: 392.0, beam_boiler: 368.0 }.freeze
+
+      # **The fire: the bed of coal on the grate**, at its own temperature (`Nodes::FuelBed`). Fuel
+      # and air meet here; the gas goes on over the fire into the firebox. The igniter is a small,
+      # deliberate heat input, so a fire that has gone out has to be lit again.
+      #
+      # `laid:` is the bed it starts on, banked by the shift before (`BANKED`).
+      def fire_bed(names: HOUSE, volume_m3: 2.0, heat_capacity: 2.0e4, ambient_conductance: 20.0,
+                   grate_area_m2: 2.0, heater_watts: 1.2e5, igniter_kg_per_s: 0.02, laid: nil)
+        Nodes::FuelBed.new(
+          id: names.(:fire_bed), label: "The Fire", volume_m3: volume_m3, grate_area_m2: grate_area_m2,
+          heat_capacity: heat_capacity, ambient_conductance: ambient_conductance, laid: laid,
           reactions: %i[coal_combustion wood_combustion oil_combustion],
           # Ash measured against the **void** — the fire's own waste filling the gaps the air
-          # comes through, which is what banking a grate with ash does. 12% of the box is space
-          # between the fuel. `:waste` rather than `:solid` deliberately: coal is tagged
-          # `[solid, fuel]`, so `:solid` would also make the fuel bed choke itself, which is a
-          # separate mechanism with its own measurements.
-          obstruction_tags: [ :waste ], void_fraction: 0.12,
+          # comes through. `:waste` rather than `:solid` deliberately: coal is tagged
+          # `[solid, fuel]`, and a bed's depth choking its draught is the grate's mechanism.
+          obstruction_tags: [ :waste ], void_fraction: 0.36,
           # A match, not a furnace: it sets a little fuel alight and the fire's own combustion
           # does the rest, or it does not catch. Sized so leaving it on is not a way to keep a
           # fire alive.
@@ -408,6 +408,33 @@ module ReactorSim
             # has to be able to leave, or it piles up and swallows the fire's heat.
             Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 12.0),
             Port.new(id: :ash_out, direction: :outlet, accepts: [ :waste ], max_kg_per_s: 0.5)
+          ]
+        )
+      end
+
+      # The firebars, and the bed on them in the way of the air: a thick fire draws less.
+      def grate(names: HOUSE, conductance: 3.0, choke_depth_m: 0.15)
+        Nodes::Grate.new(id: names.(:grate), label: "Grate", accepts: [ :gas ], bed: names.(:fire_bed),
+                         max_kg_per_s: 12.0, conductance: conductance, choke_depth_m: choke_depth_m,
+                         heat_capacity: 2.0e3)
+      end
+
+      # **The flame off the bed into the box.** A conduit only because a path with none on it carries
+      # no gradient; far wider than the grate, so never the restriction.
+      def over_fire(names: HOUSE, conductance: 20.0)
+        Nodes::Conduit.new(id: names.(:over_fire), label: "Over the Fire", accepts: [ :gas ],
+                           max_kg_per_s: 12.0, conductance: conductance, heat_capacity: 1.0e3)
+      end
+
+      # **The firebox: the space over the fire**, its gas cooled by the water legs on its way to the
+      # tubes, and what the stack draws on.
+      def firebox(names: HOUSE, volume_m3: 4.0, heat_capacity: 3.0e4, ambient_conductance: 40.0)
+        Nodes::Vessel.new(
+          id: names.(:firebox), label: "Firebox", volume_m3: volume_m3,
+          heat_capacity: heat_capacity, ambient_conductance: ambient_conductance,
+          ports: [
+            Port.new(id: :gas_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 12.0),
+            Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 12.0)
           ]
         )
       end
@@ -523,9 +550,10 @@ module ReactorSim
       # `endangers:` is who the drum hurts when it goes; nil is this engine's own, by the stations at
       # its fire.
       def boiler(shell_radius_m:, wall_thickness_m:, working_pressure_pa:, names: HOUSE, volume_m3: 5.0,
-                 water_kg: 2_000.0, heat_capacity: 6.0e5, ambient_conductance: 90.0, endangers: nil)
+                 water_kg: 2_000.0, heat_capacity: 6.0e5, ambient_conductance: 90.0, endangers: nil,
+                 initial_temperature_k: nil)
         Nodes::Boiler.new(
-          id: names.(:boiler), label: "Boiler", volume_m3: volume_m3,
+          id: names.(:boiler), label: "Boiler", volume_m3: volume_m3, initial_temperature_k: initial_temperature_k,
           # The mark at which this drum has a full head of steam, and it is neither the shell's
           # rating nor the safety valve's setting. The shell is ~2.4x too high to mean anything
           # operationally; the valve lives in a **different slot**, so a drum cannot read it and
@@ -573,7 +601,7 @@ module ReactorSim
           # sustained neglect, not a moment's inattention. What shortens it is **swell** — the
           # glass shows the bubbles and the plate is cooled by water, so pulling hard reads
           # comfortable while the level falls past the plate. See `Nodes::Boiler`.
-          material: :wrought_iron, crown_fill: 0.25, fired_by: names.(:firebox),
+          material: :wrought_iron, crown_fill: 0.25, fired_by: names.(:fire_bed),
           # **Priming.** Overfill and water comes over with the steam, past the throttle and on
           # to the cylinder, which is the road to hydraulic lock. Below 55% full the boiler is
           # 99.5% dry and this is invisible.
@@ -1032,17 +1060,11 @@ module ReactorSim
       # link that is no fitting's — where the cylinder exhausts to — is the chassis's own, in
       # `SteamEngine.fixtures`.
       #
-      # Two paths carry fire to water: **radiant**, the firebox glowing at the water legs, and
-      # **convective**, flue gas scrubbing through the tube bundle. The split matters more than
-      # either number — with only the radiant path the firebox is pinned at `T_boiler + Q/k`, so
-      # a hot fire and a well-fed boiler are mutually exclusive. Measured at 60/60/80, heat
-      # reaching the water and shaft power out:
-      #
-      #     radiant only, k=9000    firebox  676 K   2300 kW   41.0 kW
-      #     radiant 2000 + tubes    firebox 1036 K   2191 kW   24.2 kW
-      #     radiant 3500 + tubes    firebox  895 K   2332 kW   47.3 kW   <- here
-      #
-      # A boiler fitted without its tubes is the first row.
+      # Three paths carry fire to water: **radiant**, the bed glowing at the water legs by its lit
+      # share; the **firebox's gas** on the legs; and the **tube bundle**, the gas scrubbing through
+      # it on the way to the chimney. With only one path the fire is pinned at `T_boiler + Q/k`, so a
+      # hot fire and a well-fed boiler are mutually exclusive. A boiler fitted without its tubes has
+      # the first two.
 
       # --- controls ------------------------------------------------------------
       #

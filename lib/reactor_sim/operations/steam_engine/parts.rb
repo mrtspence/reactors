@@ -29,7 +29,7 @@ module ReactorSim
       def damper_fragment(conductance:, names: HOUSE, default: 50.0, internal: false)
         Fragment.new(
           nodes: [ SteamEngine.damper(conductance: conductance, names: names) ],
-          links: [ Link.new(from: [ names.(:damper), :outlet ], to: [ names.(:firebox), :air_in ]) ],
+          links: [ Link.new(from: [ names.(:damper), :outlet ], to: [ names.(:grate), :inlet ]) ],
           control_points: [
             SteamEngine.lever(names, id: names.(:damper_open), label: "Damper", node: names.(:damper), default: default,
                                  internal: internal)
@@ -44,10 +44,10 @@ module ReactorSim
         )
       end
 
-      # `sizes:` are the drum's own figures (`SteamEngine.boiler`); the radiant path is the
-      # firebox's, scaled with it.
+      # `sizes:` are the drum's own figures (`SteamEngine.boiler`); the radiant path is the fire's,
+      # and `convective:` the firebox's, both scaled with it.
       def boiler_fragment(shell_radius_m:, wall_thickness_m:, working_pressure_pa:, names: HOUSE,
-                          radiant: { conductance: 1_100.0, radiating_area_m2: 24.0 }, **sizes)
+                          radiant: { conductance: 50.0, radiating_area_m2: 24.0 }, convective: 300.0, **sizes)
         Fragment.new(
           # **The drum ships its own hole.** A boiler you can fit is a boiler that can burst, so
           # the breach belongs to this fragment rather than to the chassis — fit a different
@@ -64,27 +64,17 @@ module ReactorSim
             # lie. See `Nodes::Atmosphere`.
             Link.new(from: [ names.(:boiler_breach), :outlet ], to: [ :atmosphere, :spill ])
           ],
-          # **The firebox glowing straight at the water legs, and it genuinely glows now.** This
-          # was a flat 3500 W/K, which could not say the thing every fireman knows: a *bright*
-          # fire is worth far more than a merely hot one. The radiant term goes as T⁴, so the
-          # draught and the damper now change how much heat reaches the water rather than only
-          # how much fuel is burnt.
+          # **The fire glowing straight at the water legs**, the T⁴ term carried by the share of the
+          # bed alight (`Nodes::FuelBed#radiant_share`): a *bright* fire is worth far more than a
+          # merely hot one, and a banked bed under green coal hardly radiates at all, which is what
+          # keeps its core hot. At work — the bed near 1,050 K, the water 430 K — 24 m² at ε 0.9 is
+          # about 2.4 kW/K, the larger part of the heat to the water.
           #
-          # **The split is calibrated against the total, not chosen freely.** At the working
-          # point — fire ~1020 K, water ~430 K — 24 m² at ε 0.9 gives about 2180 W/K of
-          # radiation, and the 1100 W/K left over is convection: flue gas does touch the legs on
-          # its way to the tubes, and that part is linear. The sum is ~3280 W/K, which is where
-          # the flat figure sat, so the release changes the *shape* of the path rather than its
-          # size. Radiation is two thirds of it, which is a firebox.
-          #
-          # Get that sum wrong and nothing announces it: an under-strength path makes the fire
-          # run HOTTER, because the heat cannot leave it, and the reading that looks like a
-          # better fire is the bottleneck.
-          #
-          # The other half of the fire→water path is the tube bundle, which arrives with
-          # `:stock_boiler_tubes` — the split matters more than either number.
-          thermal_links: [ ThermalLink.new(a: names.(:firebox), b: names.(:boiler), conductance: radiant.fetch(:conductance),
-                                           emissivity: 0.9, radiating_area_m2: radiant.fetch(:radiating_area_m2)) ]
+          # **The firebox's gas touches the legs on its way to the tubes**, linearly. The rest of the
+          # fire→water path is the tube bundle, which arrives with `:stock_boiler_tubes`.
+          thermal_links: [ ThermalLink.new(a: names.(:fire_bed), b: names.(:boiler), conductance: radiant.fetch(:conductance),
+                                           emissivity: 0.9, radiating_area_m2: radiant.fetch(:radiating_area_m2)),
+                           ThermalLink.new(a: names.(:firebox), b: names.(:boiler), conductance: convective) ]
         )
       end
 
@@ -200,11 +190,22 @@ module ReactorSim
         )
       end
 
-      # `igniter: false` is a firebox nobody lights, because it was lit before the match.
-      def firebox_fragment(names: HOUSE, igniter: true, **sizes)
+      # **The fire is two bodies**: the bed on its grate, and the firebox over it.
+      #
+      #   damper ─➤ grate ─➤ fire bed ─➤ over the fire ─➤ firebox ─➤ tubes
+      #
+      # `bed:`, `grate:` and `box:` are each one's own figures. `igniter: false` is a fire nobody
+      # lights, because it was lit before the match.
+      def firebox_fragment(names: HOUSE, igniter: true, bed: {}, grate: {}, box: {})
         Fragment.new(
-          nodes: [ SteamEngine.firebox(names: names, **sizes) ],
-          control_points: igniter ? [ SteamEngine.lever(names, id: names.(:igniter), label: "Igniter", node: names.(:firebox)) ] : []
+          nodes: [ SteamEngine.fire_bed(names: names, **bed), SteamEngine.grate(names: names, **grate),
+                   SteamEngine.over_fire(names: names), SteamEngine.firebox(names: names, **box) ],
+          links: [
+            Link.new(from: [ names.(:grate), :outlet ],     to: [ names.(:fire_bed), :air_in ]),
+            Link.new(from: [ names.(:fire_bed), :flue_out ], to: [ names.(:over_fire), :inlet ]),
+            Link.new(from: [ names.(:over_fire), :outlet ], to: [ names.(:firebox), :gas_in ])
+          ],
+          control_points: igniter ? [ SteamEngine.lever(names, id: names.(:igniter), label: "Igniter", node: names.(:fire_bed)) ] : []
         )
       end
 
@@ -217,7 +218,7 @@ module ReactorSim
           nodes: [ SteamEngine.stoker(names: names, **sizes) ],
           links: [
             Link.new(from: [ names.(:bunker), :out ],    to: [ names.(:stoker), :inlet ]),
-            Link.new(from: [ names.(:stoker), :outlet ], to: [ names.(:firebox), :fuel_in ])
+            Link.new(from: [ names.(:stoker), :outlet ], to: [ names.(:fire_bed), :fuel_in ])
           ],
           # **Effort, not a valve**, and the lever here is an instruction rather than a setting:
           # "fire her as hard as you can" gets you whatever the person at the firehole can
@@ -245,7 +246,7 @@ module ReactorSim
         Fragment.new(
           nodes: [ SteamEngine.ash_pan(names: names, worked: worked) ],
           links: [
-            Link.new(from: [ names.(:firebox), :ash_out ], to: [ names.(:ash_pan), :inlet ]),
+            Link.new(from: [ names.(:fire_bed), :ash_out ], to: [ names.(:ash_pan), :inlet ]),
             Link.new(from: [ names.(:ash_pan), :outlet ], to: [ :atmosphere, :exhaust ])
           ],
           control_points: [
@@ -302,7 +303,7 @@ module ReactorSim
           nodes: [ SteamEngine.fusible_plug(names: names) ],
           links: [
             Link.new(from: [ names.(:boiler), :plug_out ],     to: [ names.(:fusible_plug), :inlet ]),
-            Link.new(from: [ names.(:fusible_plug), :outlet ], to: [ names.(:firebox), :plug_in ])
+            Link.new(from: [ names.(:fusible_plug), :outlet ], to: [ names.(:fire_bed), :plug_in ])
           ]
         )
       end
@@ -355,10 +356,12 @@ module ReactorSim
 
       # --- fire ----------------------------------------------------------------
 
+      # Banked by the shift before (`SteamEngine::BANKED_BED`), so a match opens on a fire to bring up
+      # rather than one to light.
       Parts.register(:stock_firebox, kind: :firebox, label: "Firebox",
-                     provides: %i[firebox], instruments: %i[firebox_temp fire_state],
-                     stats: { volume_m3: 6.0, igniter_kw: 120 }) do |_spec|
-        SteamEngine.firebox_fragment
+                     provides: %i[fire_bed grate over_fire firebox], instruments: %i[firebox_temp fire_state],
+                     stats: { volume_m3: 6.0, grate_area_m2: 2.0, igniter_kw: 120 }) do |_spec|
+        SteamEngine.firebox_fragment(bed: { laid: SteamEngine::BANKED_BED })
       end
 
       Parts.register(:stock_bunker, kind: :bunker, label: "Fuel Bunker",
@@ -779,7 +782,8 @@ module ReactorSim
                               material: :wrought_iron, rated_pressure: "14.39 atm",
                               working_pressure: "5 atm" }) do |_spec|
         SteamEngine.boiler_fragment(shell_radius_m: 0.6, wall_thickness_m: 0.014,
-                                    working_pressure_pa: 5.0 * Units::STANDARD_PRESSURE_PA)
+                                    working_pressure_pa: 5.0 * Units::STANDARD_PRESSURE_PA,
+                                    initial_temperature_k: SteamEngine::BANKED_DRUM_K.fetch(:locomotive_boiler))
       end
 
       # A wide, thin drum: a beam engine's boiler is a big low-pressure thing, and 6 mm of
@@ -798,7 +802,8 @@ module ReactorSim
                               material: :wrought_iron, rated_pressure: "4.93 atm",
                               working_pressure: "1.2 atm" }) do |_spec|
         SteamEngine.boiler_fragment(shell_radius_m: 0.75, wall_thickness_m: 0.006,
-                                    working_pressure_pa: 1.2 * Units::STANDARD_PRESSURE_PA)
+                                    working_pressure_pa: 1.2 * Units::STANDARD_PRESSURE_PA,
+                                    initial_temperature_k: SteamEngine::BANKED_DRUM_K.fetch(:beam_boiler))
       end
 
       # --- steam ---------------------------------------------------------------
@@ -929,7 +934,7 @@ module ReactorSim
                                           max_relief_pa: 2.2 * Units::STANDARD_PRESSURE_PA)
       end
 
-      # **Into the firebox, not to the sky**, and that is the whole point of the part. A plug
+      # **Onto the fire, not to the sky**, and that is the whole point of the part. A plug
       # that vented outside would be a leak; venting onto the grate is what kills the fire and
       # forces the driver to stop, which is the safety function.
       Parts.register(:stock_fusible_plug, kind: :fusible_plug, label: "Fusible Plug",
@@ -1138,10 +1143,8 @@ module ReactorSim
           Slot.new(id: :bunker, accepts: :bunker, label: "Fuel Bunker", group: :fire,
                    required: true, default: :stock_bunker),
           # **The biggest single upgrade on the engine.** Without the bundle the flue gas goes
-          # straight from firebox to chimney and the only fire→water path is the radiant one,
-          # which is a plain shell boiler. Radiant only puts the firebox at 676 K and sends 90%
-          # of the fuel up the chimney for 41 kW of shaft work, against 895 K and 47.3 kW with
-          # tubes — and that comparison uses a radiant conductance tuned *for* the tubeless case.
+          # straight from firebox to chimney, and the only fire→water paths are the fire's radiance
+          # and the firebox's gas on the legs, which is a plain shell boiler.
           #
           # The thermal link to the drum leaves with it, because it is in the part's fragment.
           Slot.new(id: :boiler_tubes, accepts: :boiler_tubes, label: "Boiler Tubes", group: :water,
@@ -1293,11 +1296,11 @@ module ReactorSim
       # Note these are about *reachability*, not about wisdom. A build with no safety valve
       # satisfies every one of them and is a perfectly legal thing to take out onto a shift.
       ROUTES = [
-        { from: :bunker, to: :firebox, carrying: :fuel,
+        { from: :bunker, to: :fire_bed, carrying: :fuel,
           as: "no route for coal to reach the grate" },
-        { from: :atmosphere, to: :firebox, carrying: :gas,
+        { from: :atmosphere, to: :fire_bed, carrying: :gas,
           as: "no route for air to reach the fire" },
-        { from: :firebox, to: :atmosphere, carrying: :gas,
+        { from: :fire_bed, to: :atmosphere, carrying: :gas,
           as: "the fire has no way to breathe out — nothing carries the flue gas away" },
         { from: :supply, to: :boiler, carrying: :liquid,
           as: "no route for feedwater to reach the boiler" },

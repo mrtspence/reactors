@@ -200,7 +200,7 @@ RSpec.describe ReactorSim::Operations::MobileEngine::Dipper do
     def states = { b: {}, tank: {}, wheel: {} }
 
     it "calls for water with the tank low, keeps the hose open until she is full, and shuts it full" do
-      hosed = driver(hose: :h, tank: :tank, tank_kg: 1_500.0)
+      hosed = driver(top_ups: [ me::Driver::TopUp.new(valve: :h, holder: :tank, full_kg: 1_500.0) ])
       govern = ->(kg, open) {
         hosed.govern(commanded: 60.0, nodes: nodes(tank_kg: kg), states: states, content: nil, dt: 1.0, frozen: false,
                      held: { t: 0.0, f: 50.0, h: open }).fetch(:h)

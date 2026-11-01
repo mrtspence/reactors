@@ -116,7 +116,7 @@ coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }   # 12.0 = 12.0
   enthalpy_j_per_unit: -30000000           # negative = exothermic
-  rate_per_s: 6.0
+  rate_per_s: 0.001
   min_temperature_k: 500
 ```
 
@@ -128,9 +128,12 @@ a data file where nobody would look when conservation started failing.
   whole `consumes` set. It must also **absorb any formation-enthalpy difference between the
   two sides** — the stoichiometry itself conserves enthalpy exactly, so this is the only place
   a reaction may change system energy.
-- **`rate_per_s` must suit the timestep.** `extent = limit × (1 − e^(−rate × dt))`. At rate 0.8
-  and dt 0.25 only 18% of the available reaction happens per tick, so a firebox starves in the
-  middle of a full grate. Combustion wants ~6–14.
+- **With an `ignition:` block, `rate_per_s` is how fast LIT fuel burns** at full air, a share of it
+  a second — a physical figure, not a timestep one. Coal's is 10⁻³, so a lit lump lasts a quarter of
+  an hour and a grate's bed builds to minutes of burning (`Nodes::FuelBed`). Without the block it
+  scales the reaction against its limiting reagent, `extent = limit × (1 − e^(−rate × dt))`, and wants
+  to be large enough for the timestep: at 0.8 and dt 0.25 only 18% of what is available reacts a
+  tick.
 - **`min_temperature_k` is not the ignition point.** A node is one lumped temperature, so there
   is no local hot spot to light. It means *"the bulk temperature at which this reaction
   sustains itself"*, well below the temperature a match applies to a corner. Set at coal's true

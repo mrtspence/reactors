@@ -103,9 +103,14 @@ supply → boiler loop is exactly the topology a topological sort could not have
 ### 3. Where does heat go, and torque?
 
 ```ruby
-ThermalLink.new(a: :firebox, b: :boiler, conductance: 9_000.0)   # W/K
+ThermalLink.new(a: :firebox, b: :boiler, conductance: 300.0)   # W/K
 DriveLink.new(a: :flywheel, b: :load, stiffness: 9_000.0)
 ```
+
+**A furnace is two bodies**: its fuel on a grate as a `Nodes::FuelBed`, fed its air through a
+`Nodes::Grate` and opening onto a holder for the space over the fire — the steam engine's
+`firebox_fragment` is the worked example. A fire lumped into one body with its gas cannot hold a
+banked core hot. Start it `laid:` where the shift before would have left it burning.
 
 Every `Thermal` node also needs an `ambient_conductance` or the operation becomes a perfect
 heat accumulator. Waste heat is not optional — it is what makes conservation cheap *and*
@@ -119,12 +124,16 @@ operation supplies the `Atmosphere`, the place the engine stands in — which br
 as its `air:` or as an `open_air:` place — and a drive link from `names.(:flywheel)` to whatever it
 drives. Its routes are `MobileEngine.routes(engine, place:)`. A **steam shovel** is
 `MobileEngine.shovel_slots` instead, and its host also gives it, by id, the bench it digs (a holder of
-what is dug), the car it fills and the standpipe its tank is hosed from; `MobileEngine.board` is its
+what is dug), the car it fills, the standpipe its tank is hosed from and, with `coal_from:`, the drop
+of coal its bunker is topped from; `MobileEngine.board` is its
 status in words for the panel. A **locomotive** is `MobileEngine.locomotive_slots(loco, place:,
 track:, serves:, dump:)`: the host gives it a `Track` (sections with their places and grades, a
 `loading` and a `dump` mark), the shovel it serves — whose `shovel_slots` then takes the train's cars
-as its `car:` and its loading landing as `dumps_into:` — and the holder it is tipped into. Its driver
-post is `MobileEngine.locomotive_driver(assembly, loco, place:, track:)` and its board
+as its `car:` and its loading landing in `dumps_into:` (a list, one landing a train) — and the holder
+it is tipped into. `stand: { water:, coal: }` gives it a water column and a coal stage at its dump;
+`road:` and `starts_at:` put a second train on the same road (a `passing` and a `main` mark on the
+track, and a `MobileEngine::RoadSignal` if the host fits one). Its driver post is
+`MobileEngine.locomotive_driver(assembly, loco, place:, track:, road:)` and its board
 `MobileEngine.train_board`. `place:` is its footplate: the host puts the engine's nodes there, and the
 train carries it. See `spec/support/mobile_rig.rb` for the smallest host of all three.
 
@@ -139,8 +148,8 @@ there, and the host builds the driver's post and the board only for what is fitt
 its faces for what is fitted**, read off the loadout before building the slots (`OpenPit.assembly_for`
 is the worked example): with a train, the shovel dumps through the train's loading landing and casts
 onto the muck (`cast_to:`) while none stands (`cars:`), as its casting lever says. **A fresh build
-starts its engines at work** with `MobileEngine.raised(op, engines)`, the observed figures in
-`MobileEngine::AT_WORK`; a restore carries its own state and is left alone.
+starts its engines at work** with `MobileEngine.raised(op, engines)`, the observed figures of the
+engine fitted (`MobileEngine::BY_ENGINE`); a restore carries its own state and is left alone.
 
 ### 4. What can the player touch?
 
@@ -226,7 +235,7 @@ Things to know:
 - **Ids are one flat namespace** with nodes, control points and diagnostics, because they key one
   RNG table. `validate_graph!` refuses a duplicate. Seats are `crew_1`, `crew_2` precisely so
   they cannot collide with machinery — the natural name for a steam engine's fireman is `stoker`,
-  which is already the conduit feeding the firebox.
+  which is already the conduit feeding the fire.
 - **An unmanned effort station delivers nothing**, and so does one manned by somebody spent —
   `capability` reaches exactly zero at `fatigue` 1.0. Neither is wired; both simply follow.
 - **The roster rides in `options:`**, like the loadout, or a restored snapshot rebuilds a

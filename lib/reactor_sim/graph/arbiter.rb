@@ -583,16 +583,20 @@ module ReactorSim
         capacities[id] = node.total_heat_capacity(states.fetch(id), content)
       end
 
-      Relaxation.settle(heat_couplings(thermal_links, temperatures), capacities, temperatures, dt)
+      Relaxation.settle(heat_couplings(thermal_links, temperatures, nodes, states, content),
+                        capacities, temperatures, dt)
     end
 
     # **A radiant link's conductance is recomputed every tick**, because it depends on both end
     # temperatures. `Coupling` is the same vehicle the gas solve uses for exactly this, so
     # `Relaxation` needs to know nothing about radiation — it is handed a conductance either way.
     #
+    # **Only what glows radiates**: an end answering `radiant_share` — a fuel bed, by how much of
+    # it is alight — scales the radiant term by it, and the smaller share of the two ends wins.
+    #
     # A link with no radiant surface is passed through untouched, which is what keeps the digest
     # bit-identical for everything that has not opted in.
-    def heat_couplings(thermal_links, temperatures)
+    def heat_couplings(thermal_links, temperatures, nodes, states, content)
       return thermal_links if thermal_links.none?(&:radiative?)
 
       thermal_links.map do |link|
@@ -600,9 +604,14 @@ module ReactorSim
 
         radiant = link.radiative_conductance(temperatures.fetch(link.a),
                                              temperatures.fetch(link.b))
+        share = [ link.a, link.b ].map { |id| radiant_share(nodes.fetch(id), states.fetch(id), content) }.min
         Coupling.new(id: link.id, a: link.a, b: link.b,
-                     conductance: link.conductance + radiant)
+                     conductance: link.conductance + (radiant * share))
       end
+    end
+
+    def radiant_share(node, state, content)
+      node.respond_to?(:radiant_share) ? node.radiant_share(state, content) : 1.0
     end
 
     # --- rotation -----------------------------------------------------------

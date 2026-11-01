@@ -532,16 +532,34 @@ built in five units, designed one at a time:
    the air by the kiln's eyes, monoxide when it burns short; a draw taking whatever lies at the
    bottom, calcined or not; a kiln top whose air is what comes up the throat diluted by the open air
    across it, so a choked kiln gasses its chargers; a coal stock in a sized slot. The goal is
-   finished tons, hematite only. **Next, 5j: pit logistics** — a second train, coaling and water,
-   boarding, and bringing coal to the kiln. **Owed**: the gas-fired kiln, with a producer-gas
-   supply. **Owed**: proper
+   finished tons, hematite only. **5j, pit logistics, is built** (sketch §24): the starting bunker
+   and tank a third of the next tier, so engines must be coaled and watered in a match; the heavy
+   vertical engine (twice the fire, power and coal) and the railroad dipper; the kiln's coal stock
+   become the pit's coal yard, filled by a siding (`Nodes::Siding`, a delivery on a timetable booked
+   at the boundary) and its unloaders, or a staithe; coalers carrying to a drop beside each shovel and
+   to the spoil dump's coal stage; a water column and coal stage at each road's dump, which the driver
+   tops her up from (`Driver::TopUp`); a passing track that lets a second dinky share a face's road,
+   the drivers waiting in the loop and going out only on a clear road, read by road signals (none, a
+   flagman, a train staff, block signals — `MobileEngine::RoadSignal`), and a fiated collision when
+   they read it wrong; boarding a footplate at a stand through its landing; the barmen's post taking
+   up to eight, enough to keep up with a shovel. **The coal bed** is built
+   ([`design_sketches/coal-bed.md`](design_sketches/coal-bed.md) §9–10): coal burns at a real 10⁻³ a
+   second a lit kilogram, so a grate holds minutes of burning; every fire is two bodies, a
+   `Nodes::FuelBed` on a `Nodes::Grate` whose draught falls with depth and the space over it, the bed
+   radiating by its lit share; a damper and a kiln's eyes leak shut. A banked bed keeps its core hot
+   for half an hour and more, and the stationary engines start banked, brought through on the bellows
+   to working pressure in about two and a half minutes. Mobile engines, the furnace, the kiln and the
+   waste re-measured. **Owed**: a kiln's burden choking its draught (a `TODO:` naming the gas-fired
+   kiln). **Owed**: derailment and
+   the wreck-clearing gang (the collision is a fiat); the colliery's coal sent to the pit through the
+   siding (its timetable is the seam); the gas-fired kiln, with a producer-gas supply; electric cable
+   and bucket-wheel excavators in a much later era. **Owed**: proper
    spillways and relief on the larger reservoirs if needed. **Owed**: the centrifugal pump
    gated with the series washer; `drowning_resistance` on something — a cork jacket, a race at home
    in the water. **Owed**: the series washer and the gyratory crusher gated on a pit
    achievement once the pit has one; belts at the rest of the dump end (the spoil tip, the
-   load-out); posts that scale further up in people (gangs much larger) and the UI to manage them. Owed to it from unit 4 ([`locomotive.md`](design_sketches/locomotive.md) §12):
-   a second train per shovel and the passing track, the track as the pit's geometry, boarding a train
-   at a stand, the coaling stage and the water column; and wheel slip on a wet or icy rail
+   load-out); posts that scale further up in people (gangs much larger) and the UI to manage them. Still owed from unit 4 ([`locomotive.md`](design_sketches/locomotive.md) §12): the track as the
+   pit's geometry, moved up behind the shovel by a track gang; and wheel slip on a wet or icy rail
    (`DriveLink#max_torque` is declared and read by nothing).
 
 ### Mine accidents — four units, designed one draft at a time
@@ -2286,6 +2304,15 @@ before the simulation rewrite but is unaffected by it.
 
 Each of these is a rule, and each is the kind a fresh reader breaks by accident. They are
 documented where they matter and collected here because the collection is worth reading once.
+
+- **A holder reacts with what it holds, not with what passes through it.** A fuel bed sized to the
+  gaps between its lumps holds a few grams of air and starves on any draught, however strong; its
+  volume has to hold a tick's air (`Nodes::FuelBed`). And **a path with no conduit on it is
+  rate-driven** (`Arbiter.gas_coupling`), so two gas holders joined directly carry no gradient and
+  no stack draws through them — give the join a conduit with a conductance.
+- **A sealed space seeded nearly empty is a vacuum, and a leak fills it.** Seed a waste, a vessel or
+  a room's gas at the pressure it would really stand at, in whatever gas it really holds; seeded with
+  a kilogram of air, a starved gob fire breathed in several kilograms a tick and burned clean.
 
 - **A stopped shaft never reaches zero, so never divide by its speed unguarded.** A drag halves a
   shaft per tick at most (`max_drag_conductance` is `I/dt`), so a shaft left standing decays

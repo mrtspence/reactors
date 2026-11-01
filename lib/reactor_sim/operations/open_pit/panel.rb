@@ -7,10 +7,11 @@ module ReactorSim
       # an open pit is in plain sight, so most of it is the gang's own word rather than a dial.
       module_function
 
-      PANEL_ORDER = (%i[finished_tons kiln_board kiln_fire coal_stock_left washed_tons] +
+      PANEL_ORDER = (%i[finished_tons kiln_board kiln_fire coal_left the_siding washed_tons] +
                      (1..BAYS).map { |number| bay(number).(:board) } +
                      %i[crusher_board belt_board shaft_speed water_supply the_dam dam_wall reservoir_bank
-                        stripping_face ore_face stripping_shots ore_shots the_magazine uncovered_ore the_sump the_tip
+                        stripping_face ore_face stripping_road_board ore_road_board stripping_shots ore_shots
+                        the_magazine uncovered_ore the_sump the_tip
                         the_edge ore_at_bank spoil_tipped] +
                      WeatherGauges::ORDER).freeze
 
@@ -99,11 +100,19 @@ module ReactorSim
             display: Displays::Digital.new(unit: "t", precision: 2, convert: :kilo)
           ),
 
-          # **The kiln's coal, as somebody's guess** at the heap.
-          coal_stock_left: Diagnostic.new(
-            id: :coal_stock_left, label: "Kiln Coal", source: Sources::Level.new(:coal_stock),
-            filters: [ Filters::Lag.new(6), Filters::Bands.new([ 15.0, 40.0 ]) ],
+          # **The pit's coal, as somebody's guess** at the yard.
+          coal_left: Diagnostic.new(
+            id: :coal_left, label: "Coal Yard", source: Sources::Level.new(:coal_yard),
+            filters: [ Filters::Lag.new(6), Filters::Bands.new([ 10.0, 30.0 ]) ],
             display: Displays::Prose.new([ "nearly out", "getting low", "plenty of coal" ])
+          ),
+
+          # **What stands at the siding**: wagons waiting on the unloaders, or a siding too full to
+          # take the next.
+          the_siding: Diagnostic.new(
+            id: :the_siding, label: "Siding", source: Sources::Level.new(:siding),
+            filters: [ Filters::Lag.new(2), Filters::Bands.new([ 1.0, 60.0 ]) ],
+            display: Displays::Prose.new([ "nothing in", "wagons standing", "full — nothing more can come in" ])
           ),
 
           # **What the crusher and its belt are doing**, in words.
@@ -168,6 +177,12 @@ module ReactorSim
         Diagnostic.new(id: :kiln_fire, label: "Kiln Fire", observer: observer, source: Sources::Derived.new(:kiln, :temperature_k),
                        filters: [ Filters::Lag.new(8), Filters::Bands.new(FIRE_BANDS) ],
                        display: Displays::Prose.new([ "black", "dull red", "cherry red", "bright" ]))
+      end
+
+      # **Each face's road, as its signals have it**: clear, a train on it, and what has gone wrong.
+      def road_board(names)
+        Diagnostic.new(id: names.(:road_board), label: "#{face_label(names)} Road", source: Sources::Field.new(names.(:road), :signal),
+                       display: Displays::Prose.new(MobileEngine::RoadSignal::SIGNALS.values))
       end
 
       SHOT_WORDS = {

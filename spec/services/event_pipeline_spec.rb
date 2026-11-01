@@ -32,7 +32,8 @@ RSpec.describe "the event pipeline" do
   # This used to light a cold engine and run it for 1,700 ticks, which was by far the most
   # expensive thing in the file — and it was buying transitions that an engine *at work* emits
   # just as truthfully. `fire_lit`, `steam_raised` and `heater_engaged` are edge-triggered, so a
-  # constructed engine announces them on the tick it first reads its own state.
+  # constructed engine announces them on the tick it first reads its own state — its fire seeded
+  # as not yet seen alight, since the engine as built is banked and says nothing of a fire it had.
   #
   # **One pulse of the igniter**, because `heater_engaged` is the pilot and a seeded engine's fire
   # is already alight — without the pulse that record never appears.
@@ -51,7 +52,10 @@ RSpec.describe "the event pipeline" do
         operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure,
                         loadout: ReferenceCrew.loadout }.merge(ReferenceCrew.options) ]
       )
-      seeded = seed_match(match, :eng, nodes: at_work_nodes(match.operation(:eng)))
+      # Its fire seeded as not yet seen alight, so it announces it as a freshly lit one does.
+      nodes = at_work_nodes(match.operation(:eng))
+      nodes[:fire_bed] = nodes.fetch(:fire_bed).merge(alight: false)
+      seeded = seed_match(match, :eng, nodes: nodes)
       op = seeded.operation(:eng)
       # The opening move of a match: crew start in the quarters, so an engine with nobody sent to
       # the shovel makes nothing whatever of its fire.

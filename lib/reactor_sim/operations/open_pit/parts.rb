@@ -510,7 +510,8 @@ module ReactorSim
       #
       # `most_coal` is the coal a kilogram of ore takes with the burners' lever right over; at its
       # middle, a clamp takes about one part in seven and a kiln one in seventeen. `working` is what
-      # it holds at work, which it starts with.
+      # it holds at work, which it starts with: read off an hour at work, the coal in the charge a bed
+      # of tens of kilograms burning what the chargers bring.
       KILNS = {
         open_clamp: {
           label: "Open Clamp", description: "Ore heaped on small coal and fired. Slow, and hungry for coal.",
@@ -519,7 +520,7 @@ module ReactorSim
           charging: { post: :clamp_gang, label: "Clamp Gang", crew: 3, kg_per_s: 0.14, place: :kiln_top,
                       effort: { force: 0.6, swing: 0.4 } },
           drawing: { post: :clamp_gang, crew: 3, kg_per_s: 0.12, place: :kiln_top },
-          working: { kelvin: 850.0, limonite: 160.0, hematite: 1_200.0, coal: 0.07 }
+          working: { kelvin: 940.0, limonite: 214.0, hematite: 1_220.0, coal: 62.0, ash: 12.0 }
         },
         shaft_kiln: {
           label: "Shaft Kiln", description: "A brick shaft, charged at the top and drawn at the foot. Five times " \
@@ -531,7 +532,7 @@ module ReactorSim
           drawing: { post: :kiln_drawers, label: "Kiln Drawers", crew: 3, kg_per_s: 0.6, place: :kiln_foot,
                      # Raking out ore at the heat of the fire: endurance as much as arm.
                      effort: { swing: 0.6, toughness: 0.4 } },
-          working: { kelvin: 950.0, limonite: 900.0, hematite: 6_300.0, coal: 0.15 }
+          working: { kelvin: 930.0, limonite: 1_082.0, hematite: 6_450.0, coal: 127.0, ash: 24.0 }
         }
       }.freeze
 
@@ -543,6 +544,11 @@ module ReactorSim
         end
       end
 
+      # **Eyes stopped up still breathe** through the burden, so a kiln shut down smoulders.
+      EYES_LEAK = 0.03
+
+      # TODO: a burden choking its own draught by its depth, as a `Nodes::Grate` does a fire's — the
+      # eyes do not read the charge yet. First caller is the gas-fired kiln, whose burden is deeper.
       def kiln_fragment(kiln)
         charging = kiln.fetch(:charging)
         drawing = kiln.fetch(:drawing)
@@ -566,7 +572,8 @@ module ReactorSim
                            heat_capacity: 1.0e3, control_id: :coal_in_charge, with: :kiln_charging,
                            most_per_kg: kiln.fetch(:most_coal)),
             Nodes::Conduit.new(id: :kiln_eyes, label: "Eyes", accepts: [ :gas ], max_kg_per_s: 20.0,
-                               conductance: kiln.fetch(:eyes), heat_capacity: 1.0e3, control_id: :eyes_open),
+                               conductance: kiln.fetch(:eyes), heat_capacity: 1.0e3, control_id: :eyes_open,
+                               leak_fraction: EYES_LEAK),
             Nodes::Conduit.new(id: :kiln_throat, label: "Throat", accepts: [ :gas ], max_kg_per_s: 20.0,
                                conductance: kiln.fetch(:throat), stack_height_m: kiln.fetch(:stack_m), heat_capacity: 2.0e3,
                                ambient_conductance: 20.0),
@@ -576,7 +583,7 @@ module ReactorSim
           ],
           links: [ Link.new(from: [ :washed_ore, :out ], to: [ :kiln_charging, :inlet ]),
                    Link.new(from: [ :kiln_charging, :outlet ], to: [ :kiln, :ore_in ]),
-                   Link.new(from: [ :coal_stock, :out ], to: [ :coal_charging, :inlet ]),
+                   Link.new(from: [ :coal_yard, :out ], to: [ :coal_charging, :inlet ]),
                    Link.new(from: [ :coal_charging, :outlet ], to: [ :kiln, :coal_in ]),
                    Link.new(from: [ :atmosphere, :intake ], to: [ :kiln_eyes, :inlet ]),
                    Link.new(from: [ :kiln_eyes, :outlet ], to: [ :kiln, :air_in ]),
@@ -629,32 +636,81 @@ module ReactorSim
                   rate: 0.02, scales_with: :charging, stations: [ chargers ], opportunity: true)
       end
 
-      # **The coal for the kiln**, a stock at its foot for the match: a heap, or a bunker of a size.
-      COAL_STOCKS = {
+      # **The pit's coal yard** at bank, which the kiln, the trains' stands and the shovels' coal all
+      # draw on, and the siding fills: a heap, or a bunker or a yard of a size, stocked for the start
+      # with room for half as much again.
+      COAL_YARDS = {
         coal_heap: { label: "Coal Heap", coal_kg: 600.0,
-                     description: "Small coal tipped by the kiln. A match for a clamp; an hour of a shaft kiln." },
+                     description: "Small coal tipped at bank. A match for a clamp; an hour of a shaft kiln." },
         coal_bunker: { label: "Coal Bunker", coal_kg: 2_000.0, description: "A timber bunker. A long match for a shaft kiln." },
-        coal_yard: { label: "Coal Yard", coal_kg: 6_000.0, description: "A walled yard, stocked deep." }
+        walled_yard: { label: "Walled Yard", coal_kg: 6_000.0, description: "A walled yard, stocked deep." }
       }.freeze
 
-      COAL_STOCKS.each do |id, stock|
-        Parts.register(id, kind: :pit_coal_stock, label: stock.fetch(:label), description: stock.fetch(:description),
-                           provides: %i[coal_stock], instruments: %i[coal_stock_left], stats: stock.slice(:coal_kg)) do |_spec|
-          OpenPit.coal_stock_fragment(stock.fetch(:coal_kg))
+      COAL_YARDS.each do |id, stock|
+        Parts.register(id, kind: :pit_coal_yard, label: stock.fetch(:label), description: stock.fetch(:description),
+                           provides: %i[coal_yard], instruments: %i[coal_left], stats: stock.slice(:coal_kg)) do |_spec|
+          OpenPit.coal_yard_fragment(stock.fetch(:coal_kg))
         end
       end
 
-      def coal_stock_fragment(coal_kg)
+      def coal_yard_fragment(coal_kg)
         Fragment.new(
-          nodes: [ Nodes::Vessel.new(id: :coal_stock, label: "Kiln Coal", volume_m3: coal_kg * 1.2 / COAL_KG_M3,
+          nodes: [ Nodes::Vessel.new(id: :coal_yard, label: "Coal Yard", volume_m3: coal_kg * 1.5 / COAL_KG_M3,
                                      heat_capacity: 1.0e4, ambient_conductance: 0.0,
                                      initial_contents: [ { resource: :coal, kg: coal_kg } ],
-                                     ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 50.0) ]) ],
-          places: [ Place.new(id: :bank, nodes: %i[coal_stock]) ]
+                                     ports: [ Port.new(id: :in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 50.0),
+                                              Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 50.0) ]) ],
+          places: [ Place.new(id: :bank, nodes: %i[coal_yard]) ]
         )
       end
 
       COAL_KG_M3 = 800.0
+
+      # **Coal into the pit by rail** (`Nodes::Siding`): a consignment every so often, as the siding's
+      # tier says. Wagons tipped by hand stand full until the unloaders have shovelled them into the
+      # yard; drop-bottom wagons over a staithe fall into it of themselves.
+      SIDINGS = {
+        coal_siding: { label: "Coal Siding", consignment_kg: 1_000.0, every_s: 1_200.0, unloaders: 3,
+                       description: "A wagon of coal every twenty minutes, shovelled out into the yard by hand." },
+        coal_staithe: { label: "Coal Staithe", consignment_kg: 2_000.0, every_s: 1_200.0, unloaders: 0,
+                        description: "Drop-bottom wagons over a staithe: twice the coal, and it falls into the yard." }
+      }.freeze
+
+      # An unloader shovels out about a navvy's rate brought into play; a staithe drops faster than
+      # any yard is drawn on.
+      UNLOADER_KG_PER_S = 0.4
+      STAITHE_KG_PER_S = 3.0
+
+      SIDINGS.each do |id, siding|
+        Parts.register(id, kind: :pit_siding, label: siding.fetch(:label), description: siding.fetch(:description),
+                           provides: %i[siding unloading], instruments: %i[the_siding],
+                           stats: siding.slice(:consignment_kg, :every_s, :unloaders)) do |_spec|
+          OpenPit.siding_fragment(siding)
+        end
+      end
+
+      def siding_fragment(siding)
+        crew = siding.fetch(:unloaders)
+        by_hand = crew.positive?
+        consignment = siding.fetch(:consignment_kg)
+        Fragment.new(
+          nodes: [
+            Nodes::Siding.new(id: :siding, label: siding.fetch(:label), resource: :coal, consignment_kg: consignment,
+                              every_s: siding.fetch(:every_s), first_s: siding.fetch(:every_s) / 2.0, accepts: [ :fuel ],
+                              volume_m3: consignment * 2.2 / COAL_KG_M3),
+            Nodes::Conduit.new(id: :unloading, label: "Unloading", accepts: [ :fuel ], heat_capacity: 1.0e3,
+                               max_kg_per_s: by_hand ? UNLOADER_KG_PER_S : STAITHE_KG_PER_S,
+                               **(by_hand ? { control_id: :unloaders, worked: true, crew: crew } : {}))
+          ],
+          links: [ Link.new(from: [ :siding, :out ], to: [ :unloading, :inlet ]),
+                   Link.new(from: [ :unloading, :outlet ], to: [ :coal_yard, :in ]) ],
+          places: [ Place.new(id: :bank, nodes: %i[siding unloading]) ],
+          control_points: by_hand ? [
+            ControlPoint.new(id: :unloaders, label: "Coal Unloaders", node: :unloading, default: 100.0, place: :bank,
+                             capacity: crew, effort: { force: 0.6, swing: 0.4 }, gated_by: %i[darkvision], exertion: 8.0e-4)
+          ] : []
+        )
+      end
 
       # **The air over the kiln's top**: what comes up its throat, and the open air across it, never
       # quite still, which carries it off. A kiln burning well is a few parts in a hundred of it.
@@ -774,8 +830,10 @@ module ReactorSim
           *washing_slots(fitted, feed),
           Slot.new(id: :kiln, accepts: :pit_kiln, label: "Calcining", group: :finishing, required: true,
                    default: fitted.fetch(:kiln)),
-          Slot.new(id: :coal_stock, accepts: :pit_coal_stock, label: "Kiln Coal", group: :finishing, required: true,
-                   default: fitted.fetch(:coal_stock)),
+          # The pit's coal, and how more of it comes in: empty to start, the yard is all there is.
+          Slot.new(id: :coal_yard, accepts: :pit_coal_yard, label: "Coal Yard", group: :coal, required: true,
+                   default: fitted.fetch(:coal_yard)),
+          Slot.new(id: :siding, accepts: :pit_siding, label: "Siding", group: :coal, default: fitted[:siding]),
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Quarters", group: :crew,
                    required: true, default: fitted.fetch(:quarters)),
           # Who starts out in the pit, the stripping bench first.
@@ -839,15 +897,27 @@ module ReactorSim
       # **A steam shovel and a dinky at each face, both upgrades** (`upgrade:`): a principal slot
       # each, empty to start, and every other slot of the machine built only while it is fitted.
 
-      NO_MACHINES = { shovel: false, train: false }.freeze
+      NO_MACHINES = { shovel: false, train: false, second: false, signals: false }.freeze
 
+      # **The passing track lets a second dinky share the face's road**, and the road signals tell the
+      # two drivers when it is clear; both are built only after the first dinky.
       def machine_slots(face_id, machines)
         fitted = machines.fetch(face_id, NO_MACHINES)
         label = face_label(face(face_id))
+        first = train(face_id)
+        second = second_train(face_id)
+        loop_slot = :"#{face_id}_passing_track"
         MobileEngine.shovel_slots(shovel(face_id).prefix, place: face(face_id).place, upgrade: "#{label} Shovel",
                                   **shovel_host(face_id, fitted)) +
-          MobileEngine.locomotive_slots(train(face_id).prefix, place: footplate(face_id), upgrade: "#{label} Dinky",
-                                        **train_host(face_id, fitted))
+          MobileEngine.locomotive_slots(first.prefix, place: first.place, upgrade: "#{label} Dinky",
+                                        **train_host(face_id, first, fitted)) +
+          [ Slot.new(id: loop_slot, accepts: :pit_passing_track, label: "#{label} Passing Track", group: first.prefix,
+                     needs: first.(:train), default: nil),
+            Slot.new(id: :"#{face_id}_road_signals", accepts: :pit_road_signals, label: "#{label} Road Signals",
+                     group: first.prefix, needs: loop_slot, default: nil,
+                     spec: { names: face(face_id), trains: [ first.(:train), second.(:train) ] }) ] +
+          MobileEngine.locomotive_slots(second.prefix, place: second.place, upgrade: "#{label} Second Dinky",
+                                        after: loop_slot, **train_host(face_id, second, fitted))
       end
 
       def machine_routes(machines)
@@ -855,47 +925,154 @@ module ReactorSim
           fitted = machines.fetch(face_id, NO_MACHINES)
           MobileEngine.shovel_routes(shovel(face_id).prefix, place: face(face_id).place, upgrade: true,
                                      **shovel_host(face_id, fitted)) +
-            MobileEngine.locomotive_routes(train(face_id).prefix, place: footplate(face_id), upgrade: true,
-                                           **train_host(face_id, fitted))
+            [ train(face_id), second_train(face_id) ].flat_map do |names|
+              MobileEngine.locomotive_routes(names.prefix, place: names.place, upgrade: true,
+                                             **train_host(face_id, names, fitted))
+            end
         end
       end
 
-      # **What a shovel digs into**: with a dinky at the face, the train's cars while one stands
-      # there and the muck while none does; without one, the muck. Its hose draws on the reservoir.
+      # **What a shovel digs into**: with a dinky at the face, whichever train stands there and the
+      # muck while none does; without one, the muck. Its hose draws on the reservoir, and its coal on
+      # the face's coal drop.
       def shovel_host(face_id, fitted)
         names = face(face_id)
-        host = { bench: names.(:bench), standpipe: :reservoir }
+        host = { bench: names.(:bench), standpipe: :reservoir, coal_from: names.(:coal_drop) }
         return host.merge(car: names.(:muck)) unless fitted.fetch(:train)
 
-        cars = train(face_id)
-        host.merge(car: cars.(:cars), dumps_into: [ cars.(:loading), :inlet ], cast_to: [ names.(:muck), :in ],
-                   cars: { carrier: cars.(:train), mark_m: TRACKS.fetch(face_id).mark(:loading) })
+        trains = trains_of(face_id, fitted)
+        host.merge(car: trains.first.(:cars), dumps_into: trains.map { |t| [ t.(:loading), :inlet ] },
+                   cast_to: [ names.(:muck), :in ],
+                   cars: { carriers: trains.map { |t| t.(:train) }, mark_m: TRACKS.fetch(face_id).mark(:loading) })
       end
 
       # **Where a dinky runs, and who is at peril of it**: its face's track, tipping where the face's
-      # barrows tip; loaded by hand from the muck, and by the shovel if there is one.
-      def train_host(face_id, fitted)
-        names = face(face_id)
+      # barrows tip; loaded by hand from the muck, and by the shovel if there is one; topped up at its
+      # stand; and with a second dinky, sharing the road with it, the second starting in the loop.
+      def train_host(face_id, names, fitted)
+        face_names = face(face_id)
+        second = names.prefix == second_train(face_id).prefix
         { track: TRACKS.fetch(face_id), dump: TRAIN_DUMPS.fetch(face_id),
-          serves: fitted.fetch(:shovel) ? shovel(face_id).prefix : nil, loaded_from: names.(:muck),
-          beside: [ names.(:getters), names.(:barrowmen) ] }
+          serves: fitted.fetch(:shovel) ? shovel(face_id).prefix : nil, loaded_from: face_names.(:muck),
+          beside: [ face_names.(:getters), face_names.(:barrowmen) ],
+          stand: { water: :reservoir, coal: TRAIN_STAGES.fetch(face_id) },
+          road: road_for(face_id, names, fitted), starts_at: (:passing if second) }.compact
+      end
+
+      # **The road a dinky shares**, with a second fitted: the other train, the signals if any, where
+      # the single road begins, and whether this one has the shovel on a tie.
+      def road_for(face_id, names, fitted)
+        return nil unless fitted.fetch(:second)
+
+        first = train(face_id)
+        others = [ first.(:train), second_train(face_id).(:train) ]
+        { other: (others - [ names.(:train) ]).first, signal: (:"#{face_id}_road" if fitted.fetch(:signals)),
+          main_from_m: TRACKS.fetch(face_id).mark(:main), first: names.prefix == first.prefix }
+      end
+
+      # **A passing track at the face**: a loop by the shovel, which is what lets a second dinky share
+      # the face's road. It builds nothing of its own; the second dinky's slots are built after it.
+      Parts.register(:passing_track, kind: :pit_passing_track, label: "Passing Track",
+                     description: "A loop by the shovel, so a second dinky can wait there while the first loads.") do |_spec|
+        Fragment.empty
+      end
+
+      # **What tells two drivers the road is clear** (`MobileEngine::RoadSignal`), a tier at each face.
+      # With none fitted, each driver goes on his own look.
+      ROAD_SIGNALS = {
+        flagman: { label: "Flagman", kind: :flagman,
+                   description: "A man at the loop waving them on. In the dark or the fog, he can be wrong." },
+        train_staff: { label: "Train Staff", kind: :staff,
+                       description: "One staff for the road, handed over in the loop. Never wrong, and slow." },
+        block_signals: { label: "Block Signals", kind: :block,
+                         description: "Track circuits and signals. Quick and true — until one wears and sticks at clear." }
+      }.freeze
+
+      # How often a flagman out of his depth waves a train on with the road taken.
+      WAVED_ON_RATE = 3.0
+
+      ROAD_SIGNALS.each do |id, tier|
+        Parts.register(id, kind: :pit_road_signals, label: tier.fetch(:label), description: tier.fetch(:description),
+                           provides: %i[road]) do |spec|
+          OpenPit.road_fragment(tier.fetch(:kind), spec.fetch(:names), spec.fetch(:trains))
+        end
+      end
+
+      def road_fragment(kind, names, trains)
+        road = names.(:road)
+        flagman = (names.(:flagman) if kind == :flagman)
+        Fragment.new(
+          nodes: [
+            MobileEngine::RoadSignal.new(
+              id: road, label: "#{face_label(names)} Road", kind: kind, trains: trains, flagman: flagman,
+              main_from_m: TRACKS.fetch(names.prefix).mark(:main),
+              perils: flagman ? [ Peril.new(id: :waved_on_wrongly, rate: WAVED_ON_RATE, judged: :wrongly, scales_with: :waving,
+                                            stations: [ flagman ], mishap: { node: road, kind: :false_clear }) ] : []
+            )
+          ],
+          places: [ Place.new(id: names.place, nodes: [ road ]) ],
+          control_points: flagman ? [
+            ControlPoint.new(id: flagman, label: "#{face_label(names)} Flagman", node: road, default: 100.0, place: names.place,
+                             effort: { intelligence: 0.6, agility: 0.4 }, gated_by: %i[darkvision], exertion: 2.0e-4)
+          ] : [],
+          diagnostics: [ road_board(names) ]
+        )
+      end
+
+      # **Where each road's train takes coal at its stand**: the ore road's dump is at bank, so a
+      # chute off the yard; the stripping road's is the spoil dump, so a stage the coalers keep there.
+      TRAIN_STAGES = { stripping: :dump_coal, ore: :coal_yard }.freeze
+
+      # **Coal to the machines that are fitted**: a drop beside each shovel and a stage at the spoil
+      # dump for the stripping train, each kept by coalers carrying from the yard — a line a gang, so
+      # nobody's work is counted twice.
+      COALERS = 2
+      COALER_KG_PER_S = 0.05
+      COAL_DROP_M3 = 0.4
+
+      def coaling(machines)
+        drops = FACES.select { |face_id| machines.dig(face_id, :shovel) }.map { |face_id| face(face_id) }
+                     .map { |names| coal_carry(names.(:coal_drop), "#{face_label(names)} Coal Drop", names.place,
+                                               names.(:coalers), "#{face_label(names)} Coalers") }
+        stage = machines.dig(:stripping, :train) ? [ coal_carry(:dump_coal, "Dump Coal Stage", :spoil_dump, :dump_coalers, "Dump Coalers") ] : []
+        (drops + stage).reduce(Fragment.empty, :merge)
+      end
+
+      def coal_carry(holder, label, place, post, post_label)
+        carrying = :"#{holder}_carrying"
+        Fragment.new(
+          nodes: [ heap(holder, label, COAL_DROP_M3, accepts: [ :fuel ]),
+                   Nodes::Conduit.new(id: carrying, label: "Carrying Coal", accepts: [ :fuel ], max_kg_per_s: COALER_KG_PER_S,
+                                      heat_capacity: 1.0e3, control_id: post, worked: true, crew: COALERS) ],
+          links: [ Link.new(from: [ :coal_yard, :out ], to: [ carrying, :inlet ]),
+                   Link.new(from: [ carrying, :outlet ], to: [ holder, :in ]) ],
+          places: [ Place.new(id: place, nodes: [ holder ]), Place.new(id: :bank, nodes: [ carrying ]) ],
+          control_points: [
+            ControlPoint.new(id: post, label: post_label, node: carrying, default: 100.0, place: :bank, capacity: COALERS,
+                             effort: { force: 0.6, toughness: 0.4 }, gated_by: %i[darkvision], exertion: 8.0e-4)
+          ]
+        )
       end
 
       # **Each face's track out of the pit**, built from the median depths at 2%: the stripping a
-      # bench down to the spoil dump, the ore two benches down to the bin at bank.
+      # bench down to the spoil dump, the ore two benches down to the bin at bank. The loop is the
+      # face's own stretch, a second train waiting at its `passing` mark; past `main` it is one road.
       def self.track(depth_m, loading_place, dump_place)
         road_m = depth_m / HAUL_GRADE
         MobileEngine::Track.new(
           sections: [ { to_m: TRACK_END_M * 2, place: loading_place },
                       { to_m: (TRACK_END_M * 2) + road_m, place: :haul_road, grade: HAUL_GRADE },
                       { to_m: (TRACK_END_M * 4) + road_m, place: dump_place } ],
-          marks: { loading: TRACK_END_M, dump: (TRACK_END_M * 3) + road_m }
+          marks: { loading: TRACK_END_M, passing: TRACK_END_M + PASSING_M, main: TRACK_END_M * 2,
+                   dump: (TRACK_END_M * 3) + road_m }
         )
       end
 
       HAUL_GRADE = 0.02
       # A mark this far from either end, so a buffer is behind it.
       TRACK_END_M = 20.0
+      # The loop's waiting place, this far past the loading mark.
+      PASSING_M = 12.0
 
       TRACKS = {
         stripping: track(4.0, :stripping_bench, :spoil_dump),
@@ -976,7 +1153,7 @@ module ReactorSim
                              place: :spoil_dump, capacity: 2, effort: { force: 0.6, swing: 0.4 }, gated_by: %i[darkvision],
                              exertion: 6.0e-4)
           ]
-        ).merge(FACES.map { |face_id| slopes(face_id, machines) }.reduce(:merge))
+        ).merge(FACES.map { |face_id| slopes(face_id, machines) }.reduce(:merge)).merge(coaling(machines))
       end
 
       def bench(face_id, machines, mix:, bulk_kg_m3:, median_thickness_m:, ground:, start_m: 0.0, beneath: nil,
@@ -1012,7 +1189,9 @@ module ReactorSim
       # The slip pile a slide leaves on the face: room for the largest a face holds.
       SLIP_M3 = 6.0
 
-      BARMEN = 2
+      # Room for a gang big enough to keep up with a shovel's undercutting, which two do not; how many
+      # to send is the player's.
+      BARMEN = 8
       BARMAN_KG_PER_S = 1.2
 
       # **A face's slip pile and its barmen.** The pile drains into the muck, and into a fitted
@@ -1372,7 +1551,7 @@ module ReactorSim
         { from: :ore_bench, to: :ore_bin, carrying: :solid, as: "nothing brings the ore to the bin" },
         { from: :sump, to: :reservoir, carrying: :liquid, as: "nothing lifts the pit's water out — the ore bench will flood" },
         { from: :washed_ore, to: :kiln, carrying: :ore, as: "nothing charges the kiln" },
-        { from: :coal_stock, to: :kiln, carrying: :fuel, as: "no coal reaches the kiln" },
+        { from: :coal_yard, to: :kiln, carrying: :fuel, as: "no coal reaches the kiln" },
         { from: :atmosphere, to: :kiln, carrying: :gas, as: "no air reaches the kiln's fire" },
         { from: :kiln, to: :finished_ore, carrying: :ore, as: "nothing draws the kiln" }
       ] + washing_routes).freeze

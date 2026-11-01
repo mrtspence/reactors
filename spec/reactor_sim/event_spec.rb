@@ -202,7 +202,7 @@ RSpec.describe "events" do
       op = ReactorSim::Match
            .create(id: "b", seed: 1, operations: [ { id: "eng", type: :steam_engine } ])
            .operation(:eng)
-      expect(op.nodes.fetch(:firebox).send(:fire_severity)).to be(:info)
+      expect(op.nodes.fetch(:fire_bed).send(:fire_severity)).to be(:info)
     end
   end
 end

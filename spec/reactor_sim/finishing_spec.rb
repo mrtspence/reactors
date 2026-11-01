@@ -38,6 +38,15 @@ RSpec.describe ReactorSim::Operations::OpenPit do
     op
   end
 
+  # The kiln with `coal_kg` of its charge's coal, all alight, at its own heat.
+  def bed_of(op, coal_kg)
+    kiln = state(op, :kiln)
+    kelvin = temperature(op)
+    parcels = kiln.fetch(:parcels).reject { |p| p.fetch(:resource) == :coal } +
+              OpenPitRig.parcels_at(kelvin, coal: coal_kg)
+    OpenPitRig.seed(op, nodes: { kiln: { parcels: parcels, ignition: { coal_combustion: { kg: coal_kg } } } })
+  end
+
   describe "calcining" do
     it "turns limonite to hematite and steam only hot, the mass whole, and the heat it takes the steam's" do
       content = pit.content
@@ -70,12 +79,15 @@ RSpec.describe ReactorSim::Operations::OpenPit do
       expect(signal(starved)).to be(:short_of_air)
     end
 
-    it "runs hotter for more coal in the charge" do
-      expect(temperature(tick(at_work(coal_in_charge: 100.0), 20))).to be > temperature(tick(at_work(coal_in_charge: 0.0), 20))
+    # **The coal in the charge is a bed**, burning over minutes: more of it coming builds the bed, and
+    # a deeper bed runs the kiln hotter.
+    it "builds its bed for more coal in the charge, and runs hotter on a deeper one" do
+      expect(kg(tick(at_work(coal_in_charge: 100.0), 20), :kiln, :coal)).to be > kg(tick(at_work(coal_in_charge: 0.0), 20), :kiln, :coal)
+      expect(temperature(tick(bed_of(at_work, 120.0), 20))).to be > temperature(tick(bed_of(at_work, 30.0), 20))
     end
 
     it "burns down with no coal coming, and says so" do
-      op = tick(OpenPitRig.seed(at_work, nodes: { coal_stock: { parcels: [] } }), 8)
+      op = tick(OpenPitRig.seed(at_work, nodes: { coal_yard: { parcels: [] } }), 8)
 
       expect(kg(op, :kiln, :coal)).to be < kg(tick(at_work, 8), :kiln, :coal)
       expect(signal(op)).to be(:no_coal)
@@ -127,9 +139,9 @@ RSpec.describe ReactorSim::Operations::OpenPit do
       made = lambda { |loadout|
         op = at_work(loadout)
         hematite = ->(o) { kg(o, :kiln, :hematite) + kg(o, :finished_ore, :hematite) }
-        before = [ hematite.(op), kg(op, :coal_stock, :coal) ]
+        before = [ hematite.(op), kg(op, :coal_yard, :coal) ]
         tick(op, 20)
-        (hematite.(op) - before.first) / (before.last - kg(op, :coal_stock, :coal))
+        (hematite.(op) - before.first) / (before.last - kg(op, :coal_yard, :coal))
       }
 
       expect(made.({ kiln: :shaft_kiln })).to be > made.({ kiln: :open_clamp })

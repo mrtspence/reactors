@@ -11,23 +11,42 @@ module ReactorSim
     # `traffic:` names the quantity its perils scale with: how busy the landing is against a full
     # crew's rate.
     #
-    #   config: carrier, mark_m, traffic, perils (plus Conduit's)
+    # **`boards: true` makes it the way aboard as well**: a passage running `through:` it is open
+    # only while its carrier stood at its mark last tick (`standing`), so people step on and off a
+    # carried place there and nowhere else.
+    #
+    #   config: carrier, mark_m, traffic, boards, perils (plus Conduit's)
+    #   state:  standing, with `boards:`
     class Landing < Conduit
-      def initialize(carrier:, mark_m:, traffic: nil, perils: [], **opts)
+      def initialize(carrier:, mark_m:, traffic: nil, boards: false, perils: [], **opts)
         @carrier = carrier.to_sym
         @mark_m = mark_m.to_f
         @traffic = traffic&.to_sym
+        @boards = boards
         @perils = perils.freeze
         super(**opts)
       end
 
       attr_reader :carrier, :mark_m, :traffic, :perils
 
+      def boards? = @boards
+
       def throughput_kg(state, ctx)
-        carrier_state = ctx.node_state(@carrier)
-        return 0.0 unless carrier_state && ctx.nodes[@carrier].standing_at?(carrier_state, @mark_m)
+        return 0.0 unless standing?(ctx)
 
         super
+      end
+
+      def apply(state, ctx, grant)
+        applied = super
+        @boards ? applied.merge(standing: standing?(ctx)) : applied
+      end
+
+      def blocks_passage?(state, _content = nil) = super || (@boards && !state.fetch(:standing, false))
+
+      def standing?(ctx)
+        carrier_state = ctx.node_state(@carrier)
+        !carrier_state.nil? && ctx.nodes[@carrier].standing_at?(carrier_state, @mark_m)
       end
 
       def activity(state, quantity, dt)

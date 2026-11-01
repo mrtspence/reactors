@@ -6,7 +6,7 @@ module ReactorSim
       # **What a mobile engine's board says about the engine itself**, before what it is doing: the
       # fire out, the tank empty, the glass low, the drum down, the valve lifting. Read from the
       # engine's last tick by whichever node writes the board — the dipper, the train — through
-      # `@engine`, the names of the pieces it reads: `{ boiler:, supply:, firebox:, relief: }` with
+      # `@engine`, the names of the pieces it reads: `{ boiler:, supply:, fire:, relief: }` with
       # the boiler's `working_pa:`.
       module EngineBoard
         # Under these shares of his working pressure and of the glass, the board says so.
@@ -14,7 +14,7 @@ module ReactorSim
         SHORT_OF_WATER = 0.35
 
         def engine_signal(ctx)
-          fire = (ctx.node_state(@engine.fetch(:firebox)) || {}).dig(:ignition, :coal_combustion, :kg).to_f
+          fire = (ctx.node_state(@engine.fetch(:fire)) || {}).dig(:ignition, :coal_combustion, :kg).to_f
           return :standing unless fire.positive?
 
           tank = Parcel.total_kg((ctx.node_state(@engine.fetch(:supply)) || {}).fetch(:parcels, []))

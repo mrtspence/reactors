@@ -13,7 +13,9 @@ module ReactorSim
       # barrel to a twelfth of the swept volume at a little more pressure — and the sweep on the rig,
       # not this table, is what sets them.
       VERTICAL = {
-        firebox: { volume_m3: 1.2, heat_capacity: 6.0e3, ambient_conductance: 15.0 },
+        fire_bed: { volume_m3: 0.4, heat_capacity: 4.0e3, ambient_conductance: 5.0, grate_area_m2: 0.4 },
+        grate: { conductance: 3.0 },
+        firebox: { volume_m3: 0.8, heat_capacity: 6.0e3, ambient_conductance: 10.0 },
         stoker: { max_kg_per_s: 0.25 },
         # The fireman's lever, held: a shovelful at a time, about a tenth of what he could shift.
         firing: 12.0,
@@ -27,7 +29,7 @@ module ReactorSim
         # its shell, as the stationary one does.
         boiler: { shell_radius_m: 0.5, wall_thickness_m: 0.012, working_pressure_pa: 7.0 * ATM,
                   volume_m3: 1.2, water_kg: 500.0, heat_capacity: 1.2e5, ambient_conductance: 30.0,
-                  radiant: { conductance: 220.0, radiating_area_m2: 5.0 } },
+                  radiant: { conductance: 10.0, radiating_area_m2: 5.0 }, convective: 60.0 },
         feedwater: { pump_kg_per_s: 0.4, steam_kg_per_s: 0.04 },
         throttle: 1.5e-4,
         steam_chest: { volume_m3: 0.15, heat_capacity: 3.0e3 },
@@ -47,9 +49,9 @@ module ReactorSim
 
       Parts.register(:vertical_engine, kind: :mobile_engine, label: "Vertical-Boiler Engine",
                      description: "An upright boiler and one small cylinder on a bedplate. Goes where the work is.",
-                     provides: %i[firebox stoker damper ash_pan boiler_tubes flue boiler boiler_breach feed_pump
-                                  injector injector_steam throttle steam_pipe_breach steam_chest steam_chest_breach
-                                  cylinder piston_rings cylinder_breach drain_cocks flywheel],
+                     provides: %i[fire_bed grate over_fire firebox stoker damper ash_pan boiler_tubes flue boiler
+                                  boiler_breach feed_pump injector injector_steam throttle steam_pipe_breach steam_chest
+                                  steam_chest_breach cylinder piston_rings cylinder_breach drain_cocks flywheel],
                      # Her fireman and driver raised her steam, so they start at their posts.
                      stats: { advance_posts: %i[stoking driving],
                               working_pressure_pa: VERTICAL.dig(:boiler, :working_pressure_pa), governed_omega: GOVERNED_OMEGA,
@@ -57,30 +59,76 @@ module ReactorSim
         MobileEngine.engine_fragment(spec.fetch(:names), VERTICAL)
       end
 
+      # **A heavier vertical engine**, a railroad shovel's: twice the fire, the drum, the barrel's
+      # area and the air, so about twice the power — and twice the coal and water, burnt whether the
+      # work wants it or not, because the fireman fires at the blueprint's rate. Governed at the same
+      # speed, so a locomotive's gearing is cut for either.
+      HEAVY = {
+        fire_bed: { volume_m3: 0.8, heat_capacity: 8.0e3, ambient_conductance: 8.0, grate_area_m2: 0.8 },
+        grate: { conductance: 6.0 },
+        firebox: { volume_m3: 1.6, heat_capacity: 1.2e4, ambient_conductance: 17.0 },
+        stoker: { max_kg_per_s: 0.25 },
+        firing: 24.0,
+        damper: 0.7,
+        damper_open: 70.0,
+        shaking: 20.0,
+        tubes: { conductance: 8.0, heat_capacity: 2.0e4, conductance_to_water: 8_000.0 },
+        chimney: { conductance: 0.8, stack_height_m: 7.0 },
+        boiler: { shell_radius_m: 0.65, wall_thickness_m: 0.015, working_pressure_pa: 7.0 * ATM,
+                  volume_m3: 2.4, water_kg: 1_000.0, heat_capacity: 2.4e5, ambient_conductance: 50.0,
+                  radiant: { conductance: 20.0, radiating_area_m2: 10.0 }, convective: 120.0 },
+        feedwater: { pump_kg_per_s: 0.8, steam_kg_per_s: 0.08 },
+        throttle: 3.0e-4,
+        steam_chest: { volume_m3: 0.3, heat_capacity: 6.0e3 },
+        cylinder: { bore_m: 0.35, stroke_m: 0.3, heat_capacity: 8.0e4, wall_thickness_m: 0.018,
+                    rings: { mass_kg: 14.0, static_load_n: 560.0, oil_charge_kg: 6.0, oil_loss_kg_per_m: 1.6e-4 } },
+        cutoff: 60.0,
+        flywheel: { mass_kg: 2_000.0, radius_m: 0.75, friction: 2.5, safety_factor: 0.45 }
+      }.freeze
+
+      Parts.register(:heavy_vertical_engine, kind: :mobile_engine, label: "Heavy Vertical Engine",
+                     description: "A bigger drum and a wider barrel: twice the power, and twice the coal and water.",
+                     provides: %i[fire_bed grate over_fire firebox stoker damper ash_pan boiler_tubes flue boiler
+                                  boiler_breach feed_pump injector injector_steam throttle steam_pipe_breach steam_chest
+                                  steam_chest_breach cylinder piston_rings cylinder_breach drain_cocks flywheel],
+                     stats: { advance_posts: %i[stoking driving],
+                              working_pressure_pa: HEAVY.dig(:boiler, :working_pressure_pa), governed_omega: GOVERNED_OMEGA,
+                              bore_m: 0.35, stroke_m: 0.3, material: :wrought_iron }) do |spec|
+        MobileEngine.engine_fragment(spec.fetch(:names), HEAVY)
+      end
+
       # --- the bunker and the tank ----------------------------------------------------------
 
-      Parts.register(:small_bunker, kind: :mobile_bunker, label: "Small Bunker",
-                     description: "A few hours' coal on the footplate.",
-                     provides: %i[bunker], stats: { coal_kg: 300.0 }) do |spec|
-        SteamEngine.bunker_fragment(names: spec.fetch(:names), volume_m3: 0.5, coal_kg: 300.0)
+      # **The starting bunker and tank hold about an hour's coal and half an hour's water at work**, so
+      # an engine has to be coaled and watered in a match; the larger ones are a convenience, buying
+      # fewer stops and little else.
+      BUNKERS = {
+        small_bunker: { label: "Small Bunker", coal_kg: 100.0, description: "About an hour's coal on the footplate." },
+        bunker: { label: "Bunker", coal_kg: 300.0, description: "A few hours' coal." },
+        large_bunker: { label: "Large Bunker", coal_kg: 800.0, description: "A shift's coal and then some." }
+      }.freeze
+
+      BUNKERS.each do |id, bunker|
+        coal = bunker.fetch(:coal_kg)
+        Parts.register(id, kind: :mobile_bunker, label: bunker.fetch(:label), description: bunker.fetch(:description),
+                           provides: %i[bunker], stats: { coal_kg: coal }) do |spec|
+          SteamEngine.bunker_fragment(names: spec.fetch(:names), volume_m3: coal / 600.0, coal_kg: coal)
+        end
       end
 
-      Parts.register(:large_bunker, kind: :mobile_bunker, label: "Large Bunker",
-                     description: "A shift's coal and then some.",
-                     provides: %i[bunker], stats: { coal_kg: 800.0 }) do |spec|
-        SteamEngine.bunker_fragment(names: spec.fetch(:names), volume_m3: 1.2, coal_kg: 800.0)
-      end
+      TANKS = {
+        small_tank: { label: "Small Tank", water_kg: 500.0, description: "Half an hour's water, then she wants the column." },
+        tank: { label: "Tank", water_kg: 1_500.0, description: "An hour or two of water." },
+        large_tank: { label: "Large Tank", water_kg: 4_000.0, description: "Enough water to see out most of a shift." }
+      }.freeze
 
-      Parts.register(:small_tank, kind: :mobile_tank, label: "Small Tank",
-                     description: "An hour or two of water, then she wants the standpipe.",
-                     provides: %i[supply], stats: { water_kg: 1_500.0 }) do |spec|
-        SteamEngine.water_supply_fragment(names: spec.fetch(:names), volume_m3: 1.8, water_kg: 1_500.0, label: "Tank")
-      end
-
-      Parts.register(:large_tank, kind: :mobile_tank, label: "Large Tank",
-                     description: "Enough water to see out most of a shift.",
-                     provides: %i[supply], stats: { water_kg: 4_000.0 }) do |spec|
-        SteamEngine.water_supply_fragment(names: spec.fetch(:names), volume_m3: 4.5, water_kg: 4_000.0, label: "Tank")
+      TANKS.each do |id, tank|
+        water = tank.fetch(:water_kg)
+        Parts.register(id, kind: :mobile_tank, label: tank.fetch(:label), description: tank.fetch(:description),
+                           provides: %i[supply], stats: { water_kg: water }) do |spec|
+          SteamEngine.water_supply_fragment(names: spec.fetch(:names), volume_m3: water * 1.2 / 1_000.0, water_kg: water,
+                                            label: "Tank")
+        end
       end
 
       # --- the safety tier ------------------------------------------------------------------
@@ -126,6 +174,24 @@ module ReactorSim
                      provides: %i[dipper reach moving_up hose],
                      stats: YARD.slice(:capacity_kg, :swing_s, :pitmen)) do |spec|
         MobileEngine.shovel_fragment(spec.fetch(:names), spec.fetch(:host), YARD)
+      end
+
+      # **A 2¼-yd³ railroad dipper**, the Mesabi's: about 3 t a dipperful, the round a little slower.
+      # On the heavy engine with seven pitmen it digs about 1.4 times the yard dipper on the vertical
+      # one. The vertical engine cannot keep up with it: she bogs, takes her water over, and blows a
+      # cylinder head inside minutes. And an iron chain parts under it.
+      RAILROAD = {
+        capacity_kg: 3_000.0, fill_kg_per_s: 180.0, swing_s: 14.0, lift_m: 7.0, work_j_per_kg: 1_500.0,
+        swing_w: 15_000.0, rated_omega: 37.0,
+        reach_m3: 6.0, moving_up_kg_per_s: 8.0, pitmen: 7
+      }.freeze
+
+      Parts.register(:railroad_dipper, kind: :shovel_dipper, label: "Railroad Dipper",
+                     description: "A two-and-a-quarter-yard dipper. Wants the heavy engine and a steel chain; on " \
+                                  "less she bogs, or parts her chain.",
+                     provides: %i[dipper reach moving_up hose],
+                     stats: RAILROAD.slice(:capacity_kg, :swing_s, :pitmen)) do |spec|
+        MobileEngine.shovel_fragment(spec.fetch(:names), spec.fetch(:host), RAILROAD)
       end
 
       # **What the chain brings down when it parts**: the dipper, on whoever is under the boom.

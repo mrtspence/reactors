@@ -365,9 +365,13 @@ module ReactorSim
       # it from the intake instead (`furnace_fed_from:`, informed by the dumb drift's slot). Return
       # firedamp in its range fires here: lit by the furnaceman's work, or by the furnace's own heat
       # past the gas's ignition point.
-      def furnace(volume_m3:, heat_capacity:)
-        Nodes::Vessel.new(
+      #
+      # **Its coal is a bed on its grate** (`Nodes::FuelBed`), and its volume the bed and the arch over
+      # it: the space over the fire is the upcast foot its flue opens into.
+      def furnace(volume_m3:, heat_capacity:, grate_area_m2:)
+        Nodes::FuelBed.new(
           id: :furnace, label: "Furnace", volume_m3: volume_m3, heat_capacity: heat_capacity,
+          grate_area_m2: grate_area_m2,
           ambient_conductance: 100.0, initial_contents: [ { resource: :air, kg: volume_m3 * 1.2 } ],
           reactions: %i[coal_combustion firedamp_combustion],
           # His shovel keeps it alight: whoever is stoking it is a light at the grate.
@@ -398,10 +402,10 @@ module ReactorSim
                            worked: true, crew: crew)
       end
 
-      # Through the furnace's grate and arch, which is what a bigger furnace widens.
+      # Through the furnace's grate and arch, which is what a bigger furnace widens; its bed in the way.
       def furnace_draught(conductance:)
-        Nodes::Conduit.new(id: :furnace_draught, label: "Furnace Drift", accepts: [ :gas ],
-                           max_kg_per_s: 40.0, conductance: conductance, heat_capacity: 2.0e3)
+        Nodes::Grate.new(id: :furnace_draught, label: "Furnace Drift", accepts: [ :gas ], bed: :furnace,
+                         choke_depth_m: 0.15, max_kg_per_s: 40.0, conductance: conductance, heat_capacity: 2.0e3)
       end
 
       def furnace_flue
@@ -411,14 +415,12 @@ module ReactorSim
 
       # **A leak from the intake straight to the return**: whatever it passes is air that never
       # reaches the face. Shut, it passes `leak_fraction` of its bore; `opening` is how far it
-      # stands open beyond that; failed, it is a hole and passes everything.
+      # stands open beyond that, a state rather than a lever; failed, it is a hole and passes
+      # everything.
       class Leak < Nodes::Conduit
         def initialize(leak_fraction:, **opts)
-          @leak_fraction = leak_fraction.to_f
-          super(**opts)
+          super(leak_fraction: leak_fraction, **opts)
         end
-
-        attr_reader :leak_fraction
 
         def opening(_state) = 0.0
 
@@ -426,7 +428,7 @@ module ReactorSim
           base = super or return nil
           return base if broken?(state)
 
-          base * (@leak_fraction + ((1.0 - @leak_fraction) * opening(state)))
+          base * leaky(opening(state))
         end
       end
 

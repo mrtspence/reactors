@@ -105,6 +105,8 @@ equilibrium of 19.6.
 `emissivity:` and `radiating_area_m2:` on top of its constant conductance; `settle_heat` then maps
 it to a `Coupling` — the same struct the gas solve uses to hand `Relaxation` a per-tick figure —
 so the solver knows nothing about radiation and a link with no surface passes through untouched.
+**An end answering `radiant_share` scales the radiant term**, the smaller share of the two ends
+winning — a fuel bed glows only where it is alight.
 The factoring that makes `T⁴` a conductance is in
 [`../../../docs/reference/physics.md`](../../../docs/reference/physics.md#radiation-is-a-conductance-because-t--t_amb-factors).
 

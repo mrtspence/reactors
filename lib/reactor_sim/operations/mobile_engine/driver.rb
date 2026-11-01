@@ -25,30 +25,32 @@ module ReactorSim
         KEEP_FILL = 0.55
         FEED_PER_S = 40.0
 
-        # **The hose**, where the engine has one: he calls for water under this share of a full
-        # tank and stops at full.
-        CALLS_FOR_WATER = 0.5
-        TANK_FULL = 0.98
+        # **Topping up**, where the engine can be — a hose from a standpipe, a chute, a water column:
+        # he calls for more under this share of full and stops at full.
+        CALLS_FOR_MORE = 0.5
+        TOPPED = 0.98
 
         # **He will not let her race**: past her governed speed he eases the throttle, and by this
         # much over it he has shut it — an engine whose work has stopped is not a flywheel to burst.
         RACING = 1.2
 
-        attr_reader :boiler, :levers
+        # One way of topping her up: the `valve:` he works, the `holder:` it fills and what it holds
+        # `full_kg`.
+        TopUp = Struct.new(:valve, :holder, :full_kg, keyword_init: true)
 
-        # `hose:` is the hose's valve, `tank:` the engine's tank and `tank_kg:` what it holds full —
-        # all three or none. `shaft:` and `governed_omega:` are the speed he holds her under.
-        def initialize(boiler:, throttle:, feed:, working_pa:, water_step:, pressure_step_pa:, hose: nil, tank: nil,
-                       tank_kg: nil, shaft: nil, governed_omega: nil)
+        attr_reader :boiler, :levers, :top_ups
+
+        # `top_ups:` are the ways she is topped up (`TopUp`). `shaft:` and `governed_omega:` are the
+        # speed he holds her under.
+        def initialize(boiler:, throttle:, feed:, working_pa:, water_step:, pressure_step_pa:, top_ups: [], shaft: nil,
+                       governed_omega: nil)
           @boiler = boiler.to_sym
           @throttle = throttle.to_sym
           @feed = feed.to_sym
-          @hose = hose&.to_sym
-          @tank = tank&.to_sym
-          @tank_kg = tank_kg&.to_f
+          @top_ups = top_ups.freeze
           @shaft = shaft&.to_sym
           @governed_omega = governed_omega&.to_f
-          @levers = [ @throttle, @feed, @hose ].compact.freeze
+          @levers = ([ @throttle, @feed ] + @top_ups.map(&:valve)).freeze
           @working_pa = working_pa.to_f
           @water_step = water_step.to_f
           @pressure_step_pa = pressure_step_pa.to_f
@@ -68,8 +70,14 @@ module ReactorSim
           easing = (((pressure / @working_pa) - SPENT_SHARE) / (EASE_SHARE - SPENT_SHARE)).clamp(0.0, 1.0)
           feed = held.fetch(@feed) + (FEED_PER_S * (KEEP_FILL - fill) * dt)
 
-          worked = { @throttle => commanded * easing * holding(nodes, states), @feed => feed.clamp(0.0, 100.0) }
-          @hose ? worked.merge(@hose => hose(nodes, states, held)) : worked
+          { @throttle => commanded * easing * holding(nodes, states), @feed => feed.clamp(0.0, 100.0) }
+            .merge(@top_ups.to_h { |top_up| [ top_up.valve, calling?(top_up, nodes, states, held) ? 100.0 : 0.0 ] })
+        end
+
+        # Under the call, and kept open until full.
+        def calling?(top_up, nodes, states, held)
+          share = nodes.fetch(top_up.holder).contents_kg(states.fetch(top_up.holder)) / top_up.full_kg
+          share < CALLS_FOR_MORE || (held.fetch(top_up.valve, 0.0).positive? && share < TOPPED)
         end
 
         private
@@ -82,13 +90,6 @@ module ReactorSim
 
           over = nodes.fetch(@shaft).omega(states.fetch(@shaft)) / @governed_omega
           ((RACING - over) / (RACING - 1.0)).clamp(0.0, 1.0)
-        end
-
-        # Open under the call, and kept open until she is full.
-        def hose(nodes, states, held)
-          share = nodes.fetch(@tank).contents_kg(states.fetch(@tank)) / @tank_kg
-          calling = share < CALLS_FOR_WATER || (held.fetch(@hose).positive? && share < TANK_FULL)
-          calling ? 100.0 : 0.0
         end
       end
     end

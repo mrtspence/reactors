@@ -16,6 +16,12 @@ module ReactorSim
       # stops shorter than he believes. Nothing here says when a train crashes. **Running down a
       # bank faster than he wants** he puts the brake on against it.
       #
+      # **At the dump he waits to be topped up** if her stand calls for it (`Driver#calling?`).
+      #
+      # **Sharing a road with another train** (`road:`), he waits at the loop's `passing` mark while
+      # the other has the shovel, and goes out onto the road past `main_from_m` only when it reads
+      # clear — by the signals, or by his own look, which he can misjudge (`RoadSignal`).
+      #
       # Asked for nothing he stands with the brake on. Frozen, he works nothing and the levers hold:
       # a train running when he froze runs on.
       class Round
@@ -32,9 +38,13 @@ module ReactorSim
         attr_reader :driver, :train, :levers
 
         # `full_kg` is cars he calls full; `believed_decel` what he believes a sound brake takes out of
-        # the train, m/s².
-        def initialize(driver:, train:, forward:, reverse:, brake_release:, full_kg:, believed_decel:)
+        # the train, m/s². `road:` is the other train he shares a road with, the signals that tell
+        # him it is clear and whether his train has the shovel on a tie (`{ other:, signal:,
+        # main_from_m:, first: }`, `signal` nil for his own look).
+        def initialize(driver:, train:, forward:, reverse:, brake_release:, full_kg:, believed_decel:, road: nil)
           @driver = driver
+          @road = road && { other: road.fetch(:other).to_sym, signal: road[:signal]&.to_sym,
+                            main_from_m: road.fetch(:main_from_m).to_f, first: road.fetch(:first) }.freeze
           @train = train.to_sym
           @forward = forward.to_sym
           @reverse = reverse.to_sym
@@ -53,12 +63,55 @@ module ReactorSim
           train = nodes.fetch(@train)
           train_state = states.fetch(@train)
           return engine.merge(stopped) unless commanded.positive? && !train.broken?(train_state)
+          return engine.merge(stopped) if topping_up?(train, train_state, nodes, states, held)
 
-          goal = train.track.mark(destination(train, train_state, states))
-          engine.merge(run(goal, train, train_state, held, lateness, train.rated_m_s * commanded / 100.0))
+          mark = destination(train, train_state, states)
+          mark = sharing(mark, train, train_state, nodes, states) if @road
+          return engine.merge(stopped) if mark.nil?
+
+          engine.merge(run(train.track.mark(mark), train, train_state, held, lateness, train.rated_m_s * commanded / 100.0))
+        end
+
+        # **Whether the road is clear for him**, as he has it: what the signals say, or with nothing
+        # telling him — no signals, or no flagman at his post — his own look, which is the truth
+        # unless he has misjudged it (his train's `misjudged_s`).
+        def road_clear?(train_state, nodes, states)
+          said = @road[:signal] && states.dig(@road.fetch(:signal), :clear, @train)
+          return said unless said.nil?
+
+          off_main?(nodes, states, @road.fetch(:other)) || train_state.fetch(:misjudged_s, 0.0).positive?
         end
 
         private
+
+        # **Sharing the road**: bound for the shovel, he takes the loading mark only if it is his —
+        # the other train out on the road, or nearer the shovel than him off it, the first train on a
+        # tie — and waits at the passing mark if not. Bound for the dump from the loop, he goes out
+        # only with the road clear, and otherwise stands. Nil is stand where you are.
+        def sharing(mark, train, train_state, nodes, states)
+          out = !off_main?(nodes, states, @train)
+          return mark if out && mark == :dump
+          return (shovel_mine?(train, train_state, nodes, states) ? :loading : :passing) if mark == :loading
+          road_clear?(train_state, nodes, states) ? mark : nil
+        end
+
+        def off_main?(nodes, states, train) = nodes.fetch(train).position_m(states.fetch(train)) < @road.fetch(:main_from_m)
+
+        def shovel_mine?(train, train_state, nodes, states)
+          other = @road.fetch(:other)
+          return true unless off_main?(nodes, states, other)
+
+          loading = train.track.mark(:loading)
+          mine = (train.position_m(train_state) - loading).abs
+          theirs = (nodes.fetch(other).position_m(states.fetch(other)) - loading).abs
+          mine < theirs || (mine == theirs && @road.fetch(:first))
+        end
+
+        # Standing at the dump with her stand calling for more: he waits there until she is topped.
+        def topping_up?(train, train_state, nodes, states, held)
+          train.standing_at?(train_state, train.track.mark(:dump)) &&
+            @driver.top_ups.any? { |top_up| @driver.calling?(top_up, nodes, states, held) }
+        end
 
         def destination(train, train_state, states)
           cars = Parcel.total_kg(states.dig(train.cars, :parcels) || [])

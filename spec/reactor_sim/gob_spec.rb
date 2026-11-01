@@ -106,10 +106,11 @@ RSpec.describe "the waste" do
   end
 
   # **Short of air, it smoulders to carbon monoxide**, and the leak carries it to the face. An
-  # established fire — five kilograms alight — in a waste with little air left in it.
+  # established fire — a tonne of the waste's coal alight — in a waste whose gas is blackdamp at the
+  # roads' pressure, with little air left in it.
   it "makes whitedamp alight and starved of air" do
-    op = waste_at(pit, kelvin: fire_k + 10.0, air_kg: 10.0,
-                       ignition: { coal_combustion: { kg: 5.0, oxidiser_kg: 0.0 } })
+    op = seed(pit, nodes: { gob: body(pit, :gob, fire_k + 10.0, coal: 3_000.0, air: 1.0, blackdamp: 200.0)
+                                   .merge(ignition: { coal_combustion: { kg: 1_000.0, oxidiser_kg: 0.0 } }) })
     run!(op, 4)
 
     expect(held(op, :gob, :whitedamp) + held(op, :district, :whitedamp)).to be > 0.0

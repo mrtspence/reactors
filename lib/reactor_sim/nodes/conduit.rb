@@ -39,7 +39,7 @@ module ReactorSim
                      delivers_to: nil, displacement: false,
                      heat_capacity: 1.0e4, ambient_conductance: 0.0,
                      ambient_k: Units::STANDARD_TEMPERATURE_K, control_id: nil,
-                     rangeability: 1.0, material: nil,
+                     rangeability: 1.0, leak_fraction: 0.0, material: nil,
                      max_temperature_k: Float::INFINITY, stress_rate: 0.0,
                      worked: false, crew: 1)
         # **Worked by people: `max_kg_per_s` is ONE worker's rate**, and the lever arrives in
@@ -100,6 +100,8 @@ module ReactorSim
         # Valve trim. 1.0 is linear — flow area proportional to lever — and is the default, so
         # every conduit that does not ask for this behaves exactly as it always did.
         @rangeability = rangeability.to_f
+        # **What it still passes shut**, as a share of its bore: a damper never quite seals.
+        @leak_fraction = leak_fraction.to_f
         @max_temperature_k = max_temperature_k.to_f
         # What the pipe is made of. Supplies a temperature rating only when one was not given
         # directly — see `Concerns::Thermal#rated_temperature_k`.
@@ -260,10 +262,15 @@ module ReactorSim
         return [ lever, 0.0 ].max if @worked
 
         lever = lever.clamp(0.0, 1.0)
-        return lever if @rangeability <= 1.0
+        return leaky(lever) if @rangeability <= 1.0
 
-        ((@rangeability**lever) - 1.0) / (@rangeability - 1.0)
+        leaky(((@rangeability**lever) - 1.0) / (@rangeability - 1.0))
       end
+
+      attr_reader :leak_fraction
+
+      # An opening with this conduit's leak under it.
+      def leaky(fraction) = @leak_fraction + ((1.0 - @leak_fraction) * fraction)
 
       # Over-temperature is the generic failure mode. A conduit with no rated temperature
       # never wears out, which is the right default for plumbing that is not interesting.

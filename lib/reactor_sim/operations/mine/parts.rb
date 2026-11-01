@@ -806,14 +806,14 @@ module ReactorSim
       # much of the return can reach it.
       FURNACES = {
         fire_basket: { label: "Fire Basket", stoke_kg_per_s: 0.015, crew: 1, conductance: 0.15, volume_m3: 8.0,
-                       heat_capacity: 3.0e4,
+                       heat_capacity: 3.0e4, grate_area_m2: 0.5,
                        description: "An iron basket of burning coal hung at the shaft foot." },
         brick_furnace: { label: "Ventilating Furnace", stoke_kg_per_s: 0.05, crew: 1, conductance: 0.4,
-                         volume_m3: 30.0, heat_capacity: 1.5e5,
+                         volume_m3: 30.0, heat_capacity: 1.5e5, grate_area_m2: 3.0,
                          description: "A brick-arched grate across the return. It draws the pit for coal." },
         # A furnaceman to each grate.
         double_furnace: { label: "Double Furnace", stoke_kg_per_s: 0.05, crew: 2, conductance: 0.8,
-                          volume_m3: 60.0, heat_capacity: 3.0e5,
+                          volume_m3: 60.0, heat_capacity: 3.0e5, grate_area_m2: 6.0,
                           description: "Two grates under one arch. Twice the fire, twice the risk." }
       }.freeze
 
@@ -839,7 +839,7 @@ module ReactorSim
       def self.furnace_fragment(tier:, fed_from:)
         bore = tier.fetch(:conductance) * (fed_from.to_sym == :intake ? DUMB_DRIFT_REGULATOR : 1.0)
         Fragment.new(
-          nodes: [ Mine.furnace(volume_m3: tier.fetch(:volume_m3), heat_capacity: tier.fetch(:heat_capacity)),
+          nodes: [ Mine.furnace(**tier.slice(:volume_m3, :heat_capacity, :grate_area_m2)),
                    Mine.furnace_bunker(kg: FURNACE_COAL_KG),
                    Mine.furnace_stoke(max_kg_per_s: tier.fetch(:stoke_kg_per_s), crew: tier.fetch(:crew)),
                    Mine.furnace_draught(conductance: bore), Mine.furnace_flue ],

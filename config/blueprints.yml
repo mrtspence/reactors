@@ -857,11 +857,21 @@ part:
     materials:
       wood: 400
       coal: 2000
-  coal_yard:
+  walled_yard:
     materials:
       wood: 600
       wrought_iron: 200
       coal: 6000
+  # The siding's rails and points; a staithe is a trestle the wagons run out over.
+  coal_siding:
+    materials:
+      wrought_iron: 1500
+      wood: 800
+  coal_staithe:
+    materials:
+      wrought_iron: 2500
+      wood: 2400
+      cast_iron: 600        # the drop doors' gear
   # --- mobile engines ----------------------------------------------------------------------
   # The shovel's and the locomotive's own engine, and what is tiered around it. A bigger bunker or
   # tank is paid for partly in the coal the pit has raised.
@@ -873,6 +883,9 @@ part:
       bronze: 30
   small_bunker:
     materials:
+      wrought_iron: 60
+  bunker:
+    materials:
       wrought_iron: 140
   large_bunker:
     materials:
@@ -880,10 +893,20 @@ part:
       coal: 2000
   small_tank:
     materials:
+      wrought_iron: 120
+  tank:
+    materials:
       wrought_iron: 260
   large_tank:
     materials:
       wrought_iron: 600
+      coal: 3000
+  heavy_vertical_engine:
+    materials:
+      wrought_iron: 4800    # the larger drum and firebox
+      cast_iron: 1700       # the wider barrel and the heavier flywheel
+      steel: 220
+      bronze: 50
       coal: 3000
   dead_weight_valve:
     materials:
@@ -902,6 +925,11 @@ part:
     materials:
       steel: 900           # the bucket, its teeth and door
       cast_iron: 400       # the swing gear
+  railroad_dipper:
+    materials:
+      steel: 2000
+      cast_iron: 800
+      coal: 1500
   iron_chain:
     materials:
       wrought_iron: 160
@@ -926,6 +954,21 @@ part:
       wrought_iron: 800
       steel: 4200          # six steel side-dump bodies
       coal: 2000
+  # The loop by the shovel: rails, sleepers and two sets of points.
+  passing_track:
+    materials:
+      wrought_iron: 1800
+      wood: 900
+  flagman:
+    materials: {}
+  train_staff:
+    materials:
+      bronze: 4             # the staff, and its pouch
+  block_signals:
+    materials:
+      cast_iron: 400        # the signal posts and their arms
+      wrought_iron: 300
+      steel: 200            # the relays and the track circuits' wire
   hand_brake:
     materials:
       wrought_iron: 120

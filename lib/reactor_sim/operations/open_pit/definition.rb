@@ -38,7 +38,7 @@ module ReactorSim
         stripping_getting: :pick_and_shovel, stripping_carrying: :barrows,
         ore_getting: :pick_and_shovel, ore_carrying: :barrows, washhouse: :washhouse, bay_1: :single_log_washer,
         pump: :single_pump, mud_dam: :mud_dam, reservoir: :reservoir, magazine: :powder_house, kiln: :open_clamp,
-        coal_stock: :coal_heap, quarters: :site_hut, stripping_hut: :bench_hut, ore_hut: :bench_hut,
+        coal_yard: :coal_heap, quarters: :site_hut, stripping_hut: :bench_hut, ore_hut: :bench_hut,
         dump_shelter: :dump_shelter
       }.freeze
 
@@ -86,11 +86,13 @@ module ReactorSim
                      advisories: [])
       end
 
-      # `{ face => { shovel:, train: } }`, whether each is fitted.
+      # `{ face => { shovel:, train:, second:, signals: } }`, whether each is fitted: the shovel, the
+      # dinky, a second dinky on the passing track, and signalling on the road they share.
       def fitted_machines(assembly)
         FACES.to_h do |face_id|
-          [ face_id, { shovel: !assembly.part(shovel(face_id).(:dipper)).nil?,
-                       train: !assembly.part(train(face_id).(:train)).nil? } ]
+          fitted = ->(slot) { !assembly.part(slot).nil? }
+          [ face_id, { shovel: fitted.(shovel(face_id).(:dipper)), train: fitted.(train(face_id).(:train)),
+                       second: fitted.(second_train(face_id).(:train)), signals: fitted.(:"#{face_id}_road_signals") } ]
         end
       end
 
@@ -110,19 +112,24 @@ module ReactorSim
                id = shovel(face_id).prefix
                [ MobileEngine.driver(assembly, id, place: names.place), MobileEngine.board(id, place: names.place) ]
              end),
-            (if machines.fetch(:train)
-               id = train(face_id).prefix
-               [ MobileEngine.locomotive_driver(assembly, id, place: footplate(face_id), track: TRACKS.fetch(face_id)),
-                 MobileEngine.train_board(id, place: footplate(face_id)) ]
-             end) ].compact
+            *trains_of(face_id, machines).map do |names|
+              [ MobileEngine.locomotive_driver(assembly, names.prefix, place: names.place, track: TRACKS.fetch(face_id),
+                                               road: road_for(face_id, names, machines)),
+                MobileEngine.train_board(names.prefix, place: names.place) ]
+            end ].compact
         end
         [ pieces.map(&:first), pieces.map(&:last) ]
+      end
+
+      # The dinkies fitted at a face, the first first.
+      def trains_of(face_id, machines)
+        [ (train(face_id) if machines.fetch(:train)), (second_train(face_id) if machines.fetch(:second)) ].compact
       end
 
       # The advance shift raised the machines' steam: they start at work.
       def raised(op, fitted)
         shovels = FACES.select { |f| fitted.dig(f, :shovel) }.map { |f| shovel(f).prefix }
-        trains = FACES.select { |f| fitted.dig(f, :train) }.map { |f| train(f).prefix }
+        trains = FACES.flat_map { |f| trains_of(f, fitted.fetch(f)).map(&:prefix) }
         op = MobileEngine.raised(op, shovels, demand: 60.0) unless shovels.empty?
         op = MobileEngine.raised(op, trains, demand: 100.0) unless trains.empty?
         op
@@ -135,6 +142,7 @@ module ReactorSim
       def shovel(id) = Names.new(:"#{id}_shovel", place: :"#{id}_bench")
       def train(id) = Names.new(:"#{id}_train", place: footplate(id))
       def footplate(id) = :"#{id}_train_footplate"
+      def second_train(id) = Names.new(:"#{id}_train_2", place: :"#{id}_train_2_footplate")
 
       FACES = %i[stripping ore].freeze
 
