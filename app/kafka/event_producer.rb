@@ -98,7 +98,7 @@ class EventProducer
     match.operations.each do |operation|
       produce(match.id,
               envelope(match, run_id).merge(kind: "meter", operation_id: operation.id,
-                                            tick: tick, ledger: operation.ledger))
+                                            operation_type: operation.type, tick: tick, ledger: operation.ledger))
     end
     nil
   rescue StandardError => e

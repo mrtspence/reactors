@@ -90,7 +90,8 @@ RSpec.describe "shotfiring" do
     def hand(boneheaded: 0.0)
       ReactorSim::Minion.new(id: :m, name: "Hand", tags: { boneheaded: boneheaded }, mass_kg: 70.0,
                              stats: { strength: 1.0, toughness: 1.0, endurance: 1.0,
-                                      intelligence: 1.0, dexterity: 1.0, charisma: 1.0 })
+                                      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0,
+                                      combat_prowess: 1.0 })
     end
 
     def fresh = { health: 1.0, fatigue: 0.0 }
@@ -129,8 +130,8 @@ RSpec.describe "shotfiring" do
       live = hole(op).merge(live: 1)
 
       expect(peril(op, :struck_live_charge).stations).to eq(%i[hewing])
-      expect(node.activity(live.merge(hewing: 1.0), :live, 0.25)).to eq(1.0)
-      expect(node.activity(live.merge(hewing: 0.0), :live, 0.25)).to eq(0.0)
+      expect(node.activity(live.merge(struck: 1.0), :live, 0.25)).to eq(1.0)
+      expect(node.activity(live.merge(struck: 0.0), :live, 0.25)).to eq(0.0)
     end
 
     it "struck, goes off: the charge is spent and the room has a flame in it for a tick" do

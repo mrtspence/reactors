@@ -5,7 +5,7 @@ module ReactorSim
     # A shaft turned by somebody else's engine.
     #
     # Where work **arrives** from another operation, and the only node whose energy does not come
-    # from this operation's own physics. A mine calls it a line shaft; a rope drive from a valley
+    # from this operation's own physics. A line shaft is one; a rope drive from a valley
     # engine house, a compressed-air main and an incoming feeder are all this node with a
     # different label.
     #
@@ -28,7 +28,7 @@ module ReactorSim
     # the fan winds down, the air falls, and the gas starts to build.
     #
     # **It is one end of a rope** (`Concerns::Roped`). Coupled, the reservoir it is pulled toward
-    # is the far end's speed and it brakes when it overruns it, so a mine that sheds its load is
+    # is the far end's speed and it brakes when it overruns it, so a consumer that sheds its load is
     # felt by the engine. Uncoupled — a rig fed by `receive_supply` — the far end is a steady
     # supply at `rated_omega`, and `rated_torque_nm / rated_omega` is the rope.
     #
@@ -45,10 +45,9 @@ module ReactorSim
 
       # `holds_seconds:` is how much bought work the shaft can have **in hand**, as a multiple of
       # its own rated output. It exists to absorb the one-tick lag between an exporter paying out
-      # and this shaft spending, not to let a mine stockpile power: without it a lightly-loaded
+      # and this shaft spending, not to let a consumer stockpile power: without it a lightly-loaded
       # operation banks everything it is sent and runs for hours on the reserve, which makes the
-      # supply a battery rather than a rope. Measured on a mine fed more than it could use,
-      # **355 MJ** of it after an hour.
+      # supply a battery rather than a rope — hundreds of megajoules of it in an hour.
       def initialize(id:, rated_torque_nm:, rated_omega:, label: nil, holds_seconds: 10.0,
                      moment_of_inertia: 50.0, radius_m: 1.0, friction: 0.0, control_id: nil,
                      trip: nil)

@@ -12,7 +12,7 @@ module ReactorSim
     #
     # There is no build-up at room scale. A flame is self-propagating at a kernel of centimetres,
     # and a lit fraction left to grow at its rate first burns the mixture it is in, diluting it —
-    # far enough, measured, to take a 9% district out of its range before it ever went off.
+    # far enough, measured, to take a 9% room out of its range before it ever went off.
     module Deflagration
       module_function
 

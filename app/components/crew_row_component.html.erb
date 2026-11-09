@@ -1,0 +1,59 @@
+<li class="flex items-center gap-2 text-sm" data-minion-id="<%= minion.id %>"
+    data-minion-name="<%= minion.name %>" data-minion-order="<%= order %>">
+  <span class="flex flex-col grow min-w-0">
+    <span class="text-slate-200 truncate"><%= minion.name %></span>
+    <%# Where they are, which is not where they were sent. Blank on a machine with no
+        geometry. %>
+    <span class="text-[10px] uppercase tracking-wide text-slate-500">
+      <%= minion.id.to_s.tr("_", " ") %><span data-minion-place></span>
+    </span>
+  </span>
+  <%# Filled in from the projection, which is the only thing that knows. Empty until the first
+      view arrives, rather than pre-rendering a guess that would be wrong. %>
+  <span class="flex flex-col items-end gap-1 shrink-0">
+    <span class="text-[10px] uppercase tracking-wide text-rose-400 hidden" data-minion-injury></span>
+    <%# Sent somewhere but not there yet: "ordered to the far face" and "working the far face"
+        are different facts, minutes apart, and a bar shows the gap closing. %>
+    <span class="text-[10px] uppercase tracking-wide text-amber-400 hidden" data-minion-travel></span>
+    <span class="h-1 w-10 rounded-full bg-slate-700 overflow-hidden hidden" data-minion-travel-bar>
+      <span class="block h-full w-0 bg-amber-400 transition-all duration-300" data-minion-progress></span>
+    </span>
+    <%# Fatigue is a number rather than prose: a worker flagging is not something a gauge
+        mediates — you can see it. %>
+    <span class="block h-1 w-10 rounded-full bg-slate-700 overflow-hidden" title="Fatigue">
+      <span class="block h-full w-0 bg-slate-400 transition-all duration-300" data-minion-fatigue></span>
+    </span>
+    <%# Somebody down in air they cannot breathe. Hidden until it starts, so an empty bar does
+        not read as a condition everyone has. %>
+    <span class="h-1 w-10 rounded-full bg-rose-950 overflow-hidden hidden"
+          data-minion-asphyxia-bar title="Suffocating">
+      <span class="block h-full w-0 bg-rose-500 transition-all duration-300" data-minion-asphyxia></span>
+    </span>
+    <span class="text-[10px] uppercase tracking-wide text-sky-400 hidden" data-minion-carrying></span>
+  </span>
+
+  <%# **Set down is on the CARRIED person's row**, so it is per person with no list to pick
+      from, and hidden unless somebody is holding them. %>
+  <button type="button" data-minion-drop data-action="crew#drop"
+          class="hidden shrink-0 text-[10px] uppercase tracking-wide rounded px-1.5 py-0.5
+                 bg-sky-900 text-sky-200 ring-1 ring-sky-700 hover:bg-sky-800">
+    Set down
+  </button>
+  <select class="bg-slate-900 text-slate-200 text-xs rounded px-1 py-0.5 ring-1 ring-slate-700"
+          data-minion-station data-action="change->crew#assign">
+    <option value="">— stood down —</option>
+    <%# A post's capacity rides on its option so the console can count the gang filling it. A
+        post with no limit carries none and is never full. %>
+    <% stations.each do |station| %>
+      <%= tag.option station.fetch(:label), value: station.fetch(:id),
+                     data: { station_label: station.fetch(:label), station_capacity: station[:capacity] } %>
+    <% end %>
+    <% if places_known? %>
+      <optgroup label="Go and carry">
+        <% rescuable.each do |other| %>
+          <option value="<%= other.id %>"><%= other.name %></option>
+        <% end %>
+      </optgroup>
+    <% end %>
+  </select>
+</li>

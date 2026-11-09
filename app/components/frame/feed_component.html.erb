@@ -1,0 +1,9 @@
+<section aria-label="Incidents" data-controller="feed"
+         class="h-full p-3 flex flex-col gap-2 lg:border-l border-slate-800">
+  <h2 class="text-[11px] uppercase tracking-wide text-slate-400">Incidents</h2>
+  <%# Each entry carries its own weight from the event's `severity` (`feed_controller#build`): a
+      fusible plug doing its job and the boiler letting go are a ruined day against a ruined engine. %>
+  <ul class="flex flex-col gap-1.5 text-xs overflow-y-auto" data-feed-target="list">
+    <li class="text-slate-500 italic" data-feed-empty>nothing has gone wrong yet</li>
+  </ul>
+</section>

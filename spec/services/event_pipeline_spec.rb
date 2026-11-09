@@ -32,7 +32,8 @@ RSpec.describe "the event pipeline" do
   # This used to light a cold engine and run it for 1,700 ticks, which was by far the most
   # expensive thing in the file — and it was buying transitions that an engine *at work* emits
   # just as truthfully. `fire_lit`, `steam_raised` and `heater_engaged` are edge-triggered, so a
-  # constructed engine announces them on the tick it first reads its own state.
+  # constructed engine announces them on the tick it first reads its own state — its fire seeded
+  # as not yet seen alight, since the engine as built is banked and says nothing of a fire it had.
   #
   # **One pulse of the igniter**, because `heater_engaged` is the pilot and a seeded engine's fire
   # is already alight — without the pulse that record never appears.
@@ -51,7 +52,10 @@ RSpec.describe "the event pipeline" do
         operations: [ { id: "eng", type: :steam_engine, chassis: :high_pressure,
                         loadout: ReferenceCrew.loadout }.merge(ReferenceCrew.options) ]
       )
-      seeded = seed_match(match, :eng, nodes: at_work_nodes(match.operation(:eng)))
+      # Its fire seeded as not yet seen alight, so it announces it as a freshly lit one does.
+      nodes = at_work_nodes(match.operation(:eng))
+      nodes[:fire_bed] = nodes.fetch(:fire_bed).merge(alight: false)
+      seeded = seed_match(match, :eng, nodes: nodes)
       op = seeded.operation(:eng)
       # The opening move of a match: crew start in the quarters, so an engine with nobody sent to
       # the shovel makes nothing whatever of its fire.
@@ -124,10 +128,10 @@ RSpec.describe "the event pipeline" do
     # having nothing to do with what it was checking.
     #
     # What does not move with balance is the shape: a real injury on a real machine has to carry
-    # the PERSON and whether the injury lasts, because `InjuryList` cannot write the record
-    # without them. `node:` is the SEAT — the post outlives whoever was standing in it — and a
-    # consumer given only that could not put anybody on the injury list at all.
-    it "carries the person and the verdict on a real injury, not just the seat" do
+    # the PERSON and every wound it left, each with its place, because `WoundList` cannot write
+    # them down without both. `node:` is the SEAT — the post outlives whoever was standing in it —
+    # and a consumer given only that could not keep anybody's wounds at all.
+    it "carries the person and the wounds on a real injury, not just the seat" do
       allow(ReactorSim::Content).to receive(:default).and_return(ReferenceCrew::CONTENT)
       match = ReactorSim::Match.create(
         id: "p", seed: 42,
@@ -169,6 +173,7 @@ RSpec.describe "the event pipeline" do
       expect(hurt["node"]).to eq("crew_1")
       expect(hurt.fetch("detail")).to include("minion" => "test_hand_a")
       expect(hurt.fetch("detail")).to have_key("lasting")
+      expect(hurt.dig("detail", "wounds")).to all(include("kind", "depth", "variant", "slot"))
     end
 
     # The feed a player reads, reconstructed from the durable rows rather than from whatever

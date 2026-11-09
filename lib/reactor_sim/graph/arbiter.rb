@@ -45,7 +45,7 @@ module ReactorSim
       Settlement.new(
         flows: settle_mass(nodes:, states:, paths:, intents:, content:, dt:, ctx:),
         heat: settle_heat(nodes:, states:, thermal_links:, content:, dt:),
-        ambient: settle_ambient(nodes:, states:, content:, dt:),
+        ambient: settle_ambient(nodes:, states:, content:, dt:, ctx:),
         drive: settle_drive(nodes:, states:, drive_links:, dt:, ctx:)
       ).freeze
     end
@@ -253,6 +253,10 @@ module ReactorSim
     #
     # Densities come from the ideal gas law at ambient pressure using the SOURCE's own mean
     # molar mass, so flue gas and air are compared on the same footing.
+    #
+    # **The cold column is the outside air**, so it moves with the weather in full: a chimney
+    # stands in it, and an intake is filled from it. So a winter's day draws a stack
+    # harder than a summer's, and a natural draught weakens as the day warms.
     def path_head(path, nodes, states, content, ctx)
       fixed = path.conduits.sum { |id| nodes.fetch(id).head_pa(ctx) }
       height = path.conduits.sum { |id| nodes.fetch(id).stack_height_m }
@@ -267,6 +271,7 @@ module ReactorSim
       molar = Parcel.total_kg(gases) / moles
       hot = source.temperature_k(state, content)
       ambient = source.respond_to?(:ambient_k) ? source.ambient_k : Units::STANDARD_TEMPERATURE_K
+      ambient += ctx.outdoor_shift_k if ctx.respond_to?(:outdoor_shift_k)
       return fixed if hot <= 0.0 || ambient <= 0.0
 
       density = ->(t) { Units::STANDARD_PRESSURE_PA * molar / (Units::GAS_CONSTANT * t) }
@@ -337,7 +342,7 @@ module ReactorSim
     # is not on a rate-driven path.** A rate limit is a mass throughput and an affinity may only
     # redistribute it; moles of gas crossing a conductance are unaffected by a droplet hitching a
     # lift, so the liquid rides on top and the gas figure is preserved exactly. Solids still take
-    # the rate term — a stoker really is rated in mass, and coal does not ride on steam.
+    # the rate term — a feed of solids really is rated in mass, and solids do not ride on steam.
     #
     # **Liquid is rated by the bore, gas by the conductance.** The entrainment term is capped by
     # `rate`, and uncapped it is unbounded: `scale = desired / gas_share` grows without limit as
@@ -578,16 +583,20 @@ module ReactorSim
         capacities[id] = node.total_heat_capacity(states.fetch(id), content)
       end
 
-      Relaxation.settle(heat_couplings(thermal_links, temperatures), capacities, temperatures, dt)
+      Relaxation.settle(heat_couplings(thermal_links, temperatures, nodes, states, content),
+                        capacities, temperatures, dt)
     end
 
     # **A radiant link's conductance is recomputed every tick**, because it depends on both end
     # temperatures. `Coupling` is the same vehicle the gas solve uses for exactly this, so
     # `Relaxation` needs to know nothing about radiation — it is handed a conductance either way.
     #
+    # **Only what glows radiates**: an end answering `radiant_share` — a fuel bed, by how much of
+    # it is alight — scales the radiant term by it, and the smaller share of the two ends wins.
+    #
     # A link with no radiant surface is passed through untouched, which is what keeps the digest
     # bit-identical for everything that has not opted in.
-    def heat_couplings(thermal_links, temperatures)
+    def heat_couplings(thermal_links, temperatures, nodes, states, content)
       return thermal_links if thermal_links.none?(&:radiative?)
 
       thermal_links.map do |link|
@@ -595,9 +604,14 @@ module ReactorSim
 
         radiant = link.radiative_conductance(temperatures.fetch(link.a),
                                              temperatures.fetch(link.b))
+        share = [ link.a, link.b ].map { |id| radiant_share(nodes.fetch(id), states.fetch(id), content) }.min
         Coupling.new(id: link.id, a: link.a, b: link.b,
-                     conductance: link.conductance + radiant)
+                     conductance: link.conductance + (radiant * share))
       end
+    end
+
+    def radiant_share(node, state, content)
+      node.respond_to?(:radiant_share) ? node.radiant_share(state, content) : 1.0
     end
 
     # --- rotation -----------------------------------------------------------
@@ -693,18 +707,22 @@ module ReactorSim
     # **The guard is on the total, not on conduction.** Skipping a node whose
     # `ambient_conductance` is zero would skip everything that radiates and barely conducts,
     # which is most hot things in a machine.
-    def settle_ambient(nodes:, states:, content:, dt:)
+    #
+    # **The environment is where the node stands**: its declared ambient, shifted by the weather as
+    # far as its place is open to it (`Context#ambient_k_of`). Without a context it is the
+    # declared figure.
+    def settle_ambient(nodes:, states:, content:, dt:, ctx: nil)
       nodes.each_value.filter_map do |node|
         next unless node.respond_to?(:ambient_conductance)
 
         state = states.fetch(node.id)
         temperature = node.temperature_k(state, content)
-        conductance = node.ambient_conductance +
-                      node.radiative_conductance(temperature, node.ambient_k)
+        ambient = ctx.respond_to?(:ambient_k_of) ? ctx.ambient_k_of(node) : node.ambient_k
+        conductance = node.ambient_conductance + node.radiative_conductance(temperature, ambient)
         next if conductance <= 0.0
 
         q = Relaxation.to_reservoir(node.total_heat_capacity(state, content),
-                                    temperature, node.ambient_k, conductance, dt)
+                                    temperature, ambient, conductance, dt)
         next if q.abs <= Parcel::EPSILON
 
         [ node.id, q ] # positive = node sheds to the environment

@@ -28,7 +28,7 @@ module ReactorSim
       @mass_kg = mass_kg.to_f
       @label = label || @id.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
       @description = description
-      @stats = stats.to_h { |k, v| [ k.to_sym, v.to_f ] }.freeze
+      @stats = Sheet.offsets("training #{@id}", stats)
       @tags = tags.to_h { |k, v| [ k.to_sym, v ] }.freeze
       freeze
     end

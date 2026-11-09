@@ -21,15 +21,20 @@ RSpec.describe ProgressionDigest do
   # under a Symbol key while the digest reads `record["node"]`, so the match silently misses and
   # the achievement silently never fires — the trap this helper exists to reproduce, reproduced
   # by accident in the helper itself.
-  def event(type, tick: 1, run_id: run, **rest)
-    { "kind" => "event", "match_id" => "dev", "run_id" => run_id, "operation_id" => "engine",
-      "tick" => tick, "seq" => 0, "type" => type, "severity" => "info" }
+  def event(type, tick: 1, run_id: run, operation_id: "engine", operation_type: "steam_engine", **rest)
+    { "kind" => "event", "match_id" => "dev", "run_id" => run_id, "operation_id" => operation_id,
+      "operation_type" => operation_type, "tick" => tick, "seq" => 0, "type" => type, "severity" => "info" }
       .merge(rest.stringify_keys)
   end
 
-  def meter(ledger, tick: 40, run_id: run)
-    { "kind" => "meter", "match_id" => "dev", "run_id" => run_id, "operation_id" => "engine",
-      "tick" => tick, "ledger" => ledger }
+  def meter(ledger, tick: 40, run_id: run, operation_id: "engine", operation_type: "steam_engine")
+    { "kind" => "meter", "match_id" => "dev", "run_id" => run_id, "operation_id" => operation_id,
+      "operation_type" => operation_type, "tick" => tick, "ledger" => ledger }
+  end
+
+  def run_row(metric, operation_id: "engine")
+    Progress.find_by(owner_id: owner, run_id: run, operation_id: operation_id, operation_type: "steam_engine",
+                     metric: metric)
   end
 
   describe "point facts" do
@@ -123,6 +128,31 @@ RSpec.describe ProgressionDigest do
       expect(digest.call(event("fire_out", tick: 20_000, run_id: "run-b")))
         .not_to include(:ran_an_hour_without_blowing_off)
     end
+
+    it "does not close an interval opened by another machine in the same run" do
+      digest.call(event("fire_lit", tick: 2, operation_id: "engine_2"))
+
+      expect(digest.call(event("steam_raised", tick: 900)))
+        .not_to include(:raised_steam_from_cold_alone)
+    end
+  end
+
+  describe "the machine an achievement is earned on" do
+    it "counts nothing another kind of machine reports" do
+      expect(digest.call(event("steam_raised", operation_id: "open_pit", operation_type: "open_pit"))).to be_empty
+    end
+
+    it "opens no window on another kind of machine's transition" do
+      digest.call(event("fire_lit", tick: 2, operation_id: "open_pit", operation_type: "open_pit"))
+
+      expect(digest.call(event("steam_raised", tick: 900)))
+        .not_to include(:raised_steam_from_cold_alone)
+    end
+
+    it "folds no other kind of machine's ledger toward a meter" do
+      expect(digest.call(meter({ "joules_to_work" => 2.0e9 }, operation_id: "open_pit", operation_type: "open_pit")))
+        .to be_empty
+    end
   end
 
   describe "meter readings" do
@@ -130,8 +160,7 @@ RSpec.describe ProgressionDigest do
       digest.call(meter({ "joules_to_work" => 1.0e8 }))
       digest.call(meter({ "joules_to_work" => 2.0e8 }, tick: 80))
 
-      expect(Progress.find_by(owner_id: owner, run_id: run, metric: "joules_to_work").value)
-        .to eq(2.0e8)
+      expect(run_row("joules_to_work").value).to eq(2.0e8)
     end
 
     # The whole reason readings are absolute: redelivery and reordering both have to be
@@ -140,8 +169,16 @@ RSpec.describe ProgressionDigest do
       digest.call(meter({ "joules_to_work" => 2.0e8 }, tick: 80))
       digest.call(meter({ "joules_to_work" => 1.0e8 }, tick: 40))
 
-      expect(Progress.find_by(owner_id: owner, run_id: run, metric: "joules_to_work").value)
-        .to eq(2.0e8)
+      expect(run_row("joules_to_work").value).to eq(2.0e8)
+    end
+
+    # Each machine's ledger is its own total, so two in one run are two rows, not a race.
+    it "keeps two machines' readings in one run apart, and sums them into the lifetime figure" do
+      digest.call(meter({ "joules_to_work" => 2.0e8 }))
+      digest.call(meter({ "joules_to_work" => 1.0e8 }, operation_id: "engine_2"))
+
+      expect(run_row("joules_to_work", operation_id: "engine_2").value).to eq(1.0e8)
+      expect(Progress.lifetime_totals(owner, :steam_engine)["joules_to_work"]).to be_within(1.0).of(3.0e8)
     end
 
     it "awards a threshold achievement from the lifetime total" do
@@ -153,7 +190,7 @@ RSpec.describe ProgressionDigest do
       digest.call(meter({ "joules_to_work" => 6.0e8 }, run_id: "run-a"))
       digest.call(meter({ "joules_to_work" => 6.0e8 }, run_id: "run-b"))
 
-      expect(Progress.lifetime_totals(owner)["joules_to_work"]).to be_within(1.0).of(1.2e9)
+      expect(Progress.lifetime_totals(owner, :steam_engine)["joules_to_work"]).to be_within(1.0).of(1.2e9)
     end
 
     # **Counting the rows, not just reading the total**, and the difference is a bug this file
@@ -167,7 +204,7 @@ RSpec.describe ProgressionDigest do
       4.times { |i| digest.call(meter({ "joules_to_work" => (i + 1) * 1.0e6 }, tick: (i + 1) * 40)) }
 
       expect(Progress.lifetime.where(metric: "joules_to_work").count).to eq(1)
-      expect(Progress.lifetime_totals(owner)["joules_to_work"]).to be_within(1.0).of(4.0e6)
+      expect(Progress.lifetime_totals(owner, :steam_engine)["joules_to_work"]).to be_within(1.0).of(4.0e6)
     end
   end
 

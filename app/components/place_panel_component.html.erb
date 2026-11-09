@@ -1,0 +1,39 @@
+<section class="flex flex-col gap-4 <%= "hidden" unless shown? %>" data-place-panel="<%= id %>"
+         aria-label="<%= place.label %>">
+  <header class="flex items-baseline gap-3">
+    <h1 class="text-sm font-semibold uppercase tracking-wide text-slate-200"><%= place.label %></h1>
+    <%# How many are here and how many on the way, from the projection. %>
+    <span class="text-xs text-slate-400" data-crew-count="<%= id %>"></span>
+  </header>
+
+  <%= render Frame::PlaceholderComponent.new(region: :schematic) %>
+
+  <div class="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-4">
+    <section aria-label="Instruments" data-controller="gauges"
+             class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 content-start">
+      <%= render InstrumentComponent.with_collection(instruments) %>
+    </section>
+
+    <aside class="flex flex-col gap-4">
+      <% if controls.any? %>
+        <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3 flex flex-col gap-3"
+                 aria-label="Controls" data-controller="levers">
+          <h2 class="text-[11px] uppercase tracking-wide text-slate-400">Controls</h2>
+          <%= render LeverComponent.with_collection(controls) %>
+        </section>
+      <% end %>
+
+      <section class="rounded-lg bg-slate-800/60 ring-1 ring-slate-700 p-3 flex flex-col gap-2" aria-label="Crew">
+        <h2 class="text-[11px] uppercase tracking-wide text-slate-400">Here</h2>
+        <ul class="flex flex-col gap-2" data-crew-here="<%= id %>">
+          <% here.each do |minion, order| %>
+            <%= render CrewRowComponent.new(minion:, order:, minions:, stations:, places_known: places_known?) %>
+          <% end %>
+        </ul>
+        <%# Somebody sent here and not here yet, one line each, written by the crew controller. %>
+        <h3 class="text-[10px] uppercase tracking-wide text-slate-500 hidden" data-crew-coming-heading="<%= id %>">On the way</h3>
+        <ul class="flex flex-col gap-1 text-xs text-amber-300" data-crew-coming="<%= id %>"></ul>
+      </section>
+    </aside>
+  </div>
+</section>

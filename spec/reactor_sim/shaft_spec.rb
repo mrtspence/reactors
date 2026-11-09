@@ -89,16 +89,28 @@ RSpec.describe "the shaft" do
       expect([ 0.2, 1.0, 3.0 ].map(&snatch)).to eq([ 0.2, 1.0, 3.0 ].map(&snatch).sort)
     end
 
-    def suffered(cage_at)
+    def suffering(cage_at)
       op = seed(cage_pit, nodes: { cage_drive: { position_m: cage_at } })
       ctx = ReactorSim::Tick::Context.new(controls: {}, dt: 0.25, nodes: op.nodes, states: op.state[:nodes])
       tub = { node: :shaft, kind: :obstruction, share: 1.0 }
-      op.nodes.fetch(:shaft).suffer(op.state.dig(:nodes, :shaft), tub, ctx).first
+      op.nodes.fetch(:shaft).suffer(op.state.dig(:nodes, :shaft), tub, ctx)
     end
+
+    def suffered(cage_at) = suffering(cage_at).first
 
     it "lodges a tub let in at bank, unless the cage is below where it would lodge" do
       expect(suffered(0.0)[:jam_m]).to eq(ReactorSim::Operations::Mine::Shaft::LODGE_M)
       expect(suffered(40.0)[:jam_m]).to be_nil
+    end
+
+    # Below the lodging point the tub lands on the cage, and on whoever is in it.
+    it "drops a tub onto a cage below, as a hazard to its riders" do
+      _, events = suffering(40.0)
+      shaft = cage_pit.nodes.fetch(:shaft)
+
+      expect(events.map { |e| e[:type] }).to eq([ :tub_fell ])
+      expect(shaft.failure_hazards.fetch(events.first[:mode])).to include(riders: include(:cage_drive))
+      expect(suffering(0.0).last).to be_empty
     end
 
     it "closes the ladderway while it is lodged" do
@@ -117,7 +129,7 @@ RSpec.describe "the shaft" do
                                       cage_brake_release: { target: 100.0, actual: 100.0 } })
       run!(op, 8)
 
-      expect(op.nodes.fetch(:cage_drive).cage_m(drum(op))).to eq(25.0)
+      expect(op.nodes.fetch(:cage_drive).conveyance_m(drum(op))).to eq(25.0)
       expect(drum(op)[:slack_m]).to be > 2.0
       expect(op.project.gauges.fetch(:slack_rope)).not_to eq("taut")
     end
@@ -152,11 +164,23 @@ RSpec.describe "the shaft" do
       [ op, run!(op, 3) ]
     end
 
-    it "is lodged by a banksman who lets a tub into the shaft" do
-      op, events = banksman_on_the_edge
+    # **Which accident a banksman has is the dice's**, now that the deck has more than one, so the
+    # two halves are asserted apart: his deck carries the tub, and a tub let in lodges the shaft.
+    it "puts a tub-into-the-shaft among the perils of the banksman's deck" do
+      op, = banksman_on_the_edge
+      deck = op.nodes.fetch(:deck_unloading).perils
 
-      expect(events.map { |e| e[:type] }).to include(:minion_mishap)
-      expect(op.state.dig(:nodes, :shaft, :jam_m)).to eq(ReactorSim::Operations::Mine::Shaft::LODGE_M)
+      expect(deck.filter_map(&:mishap)).to include(include(node: :shaft, kind: :obstruction))
+    end
+
+    it "is lodged by a tub let into the shaft" do
+      op, = banksman_on_the_edge
+      snapshot = ReactorSim.deep_symbolize(op.to_h)
+      snapshot[:state][:mishaps] = [ { node: :shaft, kind: :obstruction, share: 1.0 } ]
+      lodged = ReactorSim::Operation.from_h(snapshot)
+      run!(lodged, 1, from: 3)
+
+      expect(lodged.state.dig(:nodes, :shaft, :jam_m)).to eq(ReactorSim::Operations::Mine::Shaft::LODGE_M)
     end
 
     # Bought down rather than removed: whether a gate saves it is the bank's safety equipment,

@@ -64,7 +64,7 @@ RSpec.describe ReactorSim::Place do
   def hurt(events) = events.select { |e| e[:type] == :minion_hurt }.map { |e| e[:node] }
 
   describe "a hazard keyed by place" do
-    let(:by_place) { { rupture: { tags: [ :scald ], places: { engine_room: 9.0 } } } }
+    let(:by_place) { { rupture: { wounds: { burn: 1.0 }, places: { engine_room: 9.0 } } } }
 
     # The whole point: the passer-by holds no lever and is hurt anyway.
     it "reaches everybody in the room, posted or not" do
@@ -91,7 +91,7 @@ RSpec.describe ReactorSim::Place do
   # engine — behaving exactly as it did.
   describe "a hazard keyed by station" do
     it "reaches only the person posted there" do
-      op = rig(endangers: { rupture: { tags: [ :scald ], stations: { lever: 9.0 } } })
+      op = rig(endangers: { rupture: { wounds: { burn: 1.0 }, stations: { lever: 9.0 } } })
 
       expect(hurt(run!(op))).to contain_exactly(:driver)
     end
@@ -101,7 +101,7 @@ RSpec.describe ReactorSim::Place do
   # because the two arrived through different keys.
   describe "a hazard that names both" do
     it "adds the severities where both reach the same person" do
-      tags = { tags: [ :scald ] }
+      tags = { wounds: { burn: 1.0 } }
       both = rig(endangers: { rupture: tags.merge(places: { engine_room: 1.0 },
                                                   stations: { lever: 1.0 }) })
       place_only = rig(endangers: { rupture: tags.merge(places: { engine_room: 1.0 }) })
@@ -161,6 +161,31 @@ RSpec.describe ReactorSim::Place do
             places: [ described_class.new(id: :engine_room, nodes: %i[drum sky]),
                       described_class.new(id: :yard) ])
       }.to raise_error(ReactorSim::Error, /more than one node/)
+    end
+
+    # **One atmosphere, many places under the sky**: an open-air place breathes it without owning it.
+    it "lets an open-air place breathe the operation's atmosphere" do
+      op = rig(endangers: {}, places: ROOMS + [ described_class.new(id: :bench, open_air: true) ],
+               standing: :bench)
+
+      expect(op.layout.breathes(:bench)).to be(:sky)
+    end
+
+    # A carried place shares its hazards with where its carrier is; a carrier that cannot say
+    # where that is would share them with nowhere.
+    it "refuses a place carried by something that cannot say where it is" do
+      expect {
+        rig(endangers: {}, places: ROOMS + [ described_class.new(id: :footplate, carried_by: :drum, shares: 0.5,
+                                                                  open_air: true) ])
+      }.to raise_error(ReactorSim::Error, /footplate: carried by :drum, which cannot say where it is/)
+    end
+
+    # Water somebody could be out of their depth in, that cannot say whether it is deep, would
+    # drown nobody.
+    it "refuses a place whose water cannot say whether it is deep" do
+      expect {
+        rig(endangers: {}, places: ROOMS + [ described_class.new(id: :pond, water: :drum, open_air: true) ])
+      }.to raise_error(ReactorSim::Error, /pond: water :drum, which cannot say whether it is deep/)
     end
 
     # And a station's place, which is the same rule reached the other way.

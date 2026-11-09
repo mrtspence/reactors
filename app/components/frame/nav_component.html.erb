@@ -1,0 +1,58 @@
+<nav aria-label="App" class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b border-slate-800">
+  <%= link_to "Reactor", helpers.root_path, class: "text-sm font-semibold uppercase tracking-widest text-slate-200" %>
+
+  <div class="flex items-center gap-1" role="group" aria-label="Machine">
+    <% frame.machines.each do |machine| %>
+      <%= link_to machine.operation_id.titleize, machine_path(machine),
+                  class: pill(machine.operation_id == frame.operation_id) %>
+    <% end %>
+    <% if chassis %><span class="text-xs text-slate-500">/ <%= chassis %></span><% end %>
+  </div>
+
+  <div class="flex items-center gap-1" role="group" aria-label="This machine">
+    <% tabs.each do |label, path, current| %>
+      <%= link_to label, path, class: pill(current), aria: { current: (current ? "page" : nil) } %>
+    <% end %>
+  </div>
+
+  <%= link_to "Match setup", match_setup_path, class: pill(frame.screen == :match_setup),
+              aria: { current: (frame.screen == :match_setup ? "page" : nil) } %>
+
+  <div class="flex items-center gap-1" role="group" aria-label="Not built yet">
+    <% Frame::STUBS.each do |stub| %>
+      <span class="<%= Frame::NavComponent::PILL %> ring-slate-800 text-slate-600 cursor-default"
+            title="Not built yet"><%= stub %></span>
+    <% end %>
+  </div>
+
+  <div class="grow"></div>
+
+  <% if frame.borrowed? %>
+    <span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded
+                 bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40"
+          title="Operated through the development bypass — you do not own this machine.">
+      borrowed
+    </span>
+  <% end %>
+
+  <% if time_scale %><span class="text-xs text-amber-300">time ×<%= time_scale %></span><% end %>
+
+  <span class="text-xs text-slate-500 tabular-nums">tick <span data-stream-target="tick">—</span></span>
+
+  <%# A frozen panel and a disconnected one look identical otherwise, and the first is a physics
+      problem while the second is not. %>
+  <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400"
+        data-stream-target="status">connecting…</span>
+
+  <details class="relative">
+    <summary class="text-xs px-2 py-1 rounded bg-slate-800 ring-1 ring-slate-700 cursor-pointer
+                    list-none hover:bg-slate-700">dev ▾</summary>
+    <div class="absolute right-0 z-10 mt-1 flex flex-col gap-1 rounded bg-slate-800 p-2 ring-1 ring-slate-700">
+      <%# TODO: pause, step, speed and seeded states, the UI overhaul's U4. %>
+      <button type="button" data-action="stream#reset" data-stream-reset-url-param="<%= reset_path %>"
+              class="text-xs px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 ring-1 ring-rose-700 whitespace-nowrap">
+        Reset engine
+      </button>
+    </div>
+  </details>
+</nav>

@@ -44,12 +44,14 @@ RSpec.describe ReactorSim::Assembly do
     reg.register(:plain_sink, kind: :sink, provides: %i[sink]) do |_spec|
       Fragment.new(nodes: [ vessel(:sink, []) ])
     end
-    reg.register(:straight_pipe, kind: :pipe, provides: %i[pipe]) do |_spec|
-      Fragment.new(
-        nodes: [ Nodes::Conduit.new(id: :pipe, accepts: [ :liquid ], max_kg_per_s: 1.0) ],
-        links: [ Link.new(from: [ :tank, :out ], to: [ :pipe, :inlet ]),
-                 Link.new(from: [ :pipe, :outlet ], to: [ :sink, :in ]) ]
-      )
+    { straight_pipe: 1, wide_pipe: 2 }.each do |id, bore|
+      reg.register(id, kind: :pipe, provides: %i[pipe], stats: { bore: bore }) do |_spec|
+        Fragment.new(
+          nodes: [ Nodes::Conduit.new(id: :pipe, accepts: [ :liquid ], max_kg_per_s: 1.0) ],
+          links: [ Link.new(from: [ :tank, :out ], to: [ :pipe, :inlet ]),
+                   Link.new(from: [ :pipe, :outlet ], to: [ :sink, :in ]) ]
+        )
+      end
     end
     # A gas-only pipe, so the route check has something to refuse that is structurally fine.
     reg.register(:gas_pipe, kind: :pipe, provides: %i[pipe]) do |_spec|
@@ -114,6 +116,58 @@ RSpec.describe ReactorSim::Assembly do
     it "reads :none as empty, for a form that cannot send nil" do
       expect(assemble(loadout: { pipe: :none }, pipe_required: false).loadout.fetch(:pipe))
         .to be_nil
+    end
+  end
+
+  # **A slot that `needs:` another is built only while that one is fitted**: here the sink belongs
+  # to the pipe, as a shovel's boiler belongs to its dipper.
+  describe "a slot that needs another" do
+    def dependent(loadout = {}, routes: [])
+      described_class.new(
+        slots: [ Slot.new(id: :tank, accepts: :tank, required: true, default: :plain_tank),
+                 Slot.new(id: :pipe, accepts: :pipe, default: nil),
+                 Slot.new(id: :sink, accepts: :sink, required: true, default: :plain_sink, needs: :pipe) ],
+        loadout: loadout, registry: registry, routes: routes
+      )
+    end
+
+    def route = { from: :tank, to: :sink, carrying: :liquid, needs: :pipe }
+
+    it "builds nothing and asks for nothing while what it needs is empty" do
+      empty = dependent(routes: [ route ])
+
+      expect(empty.verdict).to be_ok
+      expect(empty.fragment.nodes.map(&:id)).to eq([ :tank ])
+      expect(empty.part(:sink)).to be_nil
+    end
+
+    it "builds on its default once what it needs is fitted, and is required then" do
+      fitted = dependent({ pipe: :straight_pipe }, routes: [ route ])
+      emptied = dependent({ pipe: :straight_pipe, sink: nil })
+
+      expect(fitted.verdict).to be_ok
+      expect(fitted.fragment.nodes.map(&:id)).to contain_exactly(:tank, :pipe, :sink)
+      expect(emptied.verdict.errors.join).to match(/Sink is required/)
+    end
+
+    it "keeps its choice in the loadout while what it needs is away" do
+      expect(dependent({ sink: :plain_sink }).loadout.fetch(:sink)).to be(:plain_sink)
+    end
+
+    # As a washhouse's fourth bay is built only in a washhouse with room for four.
+    it "is built only once what it needs reaches the figure it names" do
+      gated = ->(pipe) {
+        described_class.new(
+          slots: [ Slot.new(id: :tank, accepts: :tank, required: true, default: :plain_tank),
+                   Slot.new(id: :pipe, accepts: :pipe, default: pipe),
+                   Slot.new(id: :sink, accepts: :sink, default: :plain_sink, needs: :pipe, needs_at_least: { bore: 2 }) ],
+          registry: registry
+        )
+      }
+
+      expect(gated.(:straight_pipe).part(:sink)).to be_nil
+      expect(gated.(:wide_pipe).part(:sink)).not_to be_nil
+      expect { Slot.new(id: :s, accepts: :k, needs_at_least: { bore: 2 }) }.to raise_error(ReactorSim::Error, /names none/)
     end
   end
 
@@ -340,7 +394,7 @@ RSpec.describe ReactorSim::Assembly do
         # The shipped machines, and this list grows deliberately — a rig appearing in it is the
         # bug being guarded against, not a new operation.
         expect(ReactorSim::Operations.known - rigs)
-          .to contain_exactly(:steam_engine, :mine),
+          .to contain_exactly(:steam_engine, :mine, :open_pit),
               "an operation registered by a spec is being counted as a machine — pass " \
               "`harness: true` when registering it"
       end
@@ -410,9 +464,10 @@ RSpec.describe ReactorSim::Assembly do
     # The gauge list must not move when the slot list is reordered for some unrelated reason:
     # a player learns a panel by where things are. `PANEL_ORDER` decides, not the slots and not
     # the parts — including for a gauge an instrument part *supplied* rather than named.
+    # The weather instruments arrive only with a part this build does not fit.
     it "orders instruments by the panel's order, not by slot order" do
-      expect(real.diagnostics.map(&:id))
-        .to eq(SteamEngine::PANEL_ORDER - [ :condenser_vacuum ])
+      fitted_only = [ :condenser_vacuum ] + ReactorSim::Operations::WeatherGauges.instruments.keys
+      expect(real.diagnostics.map(&:id)).to eq(SteamEngine::PANEL_ORDER - fitted_only)
     end
 
     # **The pressure gauge arrives from a part and still lands first.** It is the most important
@@ -454,7 +509,9 @@ RSpec.describe ReactorSim::Assembly do
       expect(real.fragment.nodes.map(&:id)).to include(:boiler, :cylinder, :flywheel, :relief)
     end
 
-    # **Eight parts can be left out, and none of them may break the build.** This is the whole
+    # **These parts can be taken out of the stock engine, and none of them may break the build.**
+    # A slot that starts empty — the weather instruments — is an upgrade rather than something to
+    # take out, and is not on this list. This is the whole
     # of stage 2 asserted in one place: what is optional, that removing any one of them still
     # assembles and still passes every route check, and that each one says something before the
     # player finds out the hard way.
@@ -477,7 +534,7 @@ RSpec.describe ReactorSim::Assembly do
                    safety_valve: :omit, fusible_plug: :omit, cylinder_relief: :omit }.freeze
 
       it "is exactly these nine, with these behaviours" do
-        declared = SteamEngine.slots(spec).reject(&:required?)
+        declared = SteamEngine.slots(spec).reject(&:required?).select(&:default)
                               .to_h { |s| [ s.id, s.when_empty ] }
 
         expect(declared).to eq(OPTIONAL)
@@ -554,11 +611,11 @@ RSpec.describe ReactorSim::Assembly do
           thermal_links: fragment.thermal_links, drive_links: fragment.drive_links,
           control_points: fragment.control_points, diagnostics: assembly.diagnostics
         )
-        op.paths.find { |p| p.to_node == :firebox && p.to_port == :air_in }
+        op.paths.find { |p| p.to_node == :fire_bed && p.to_port == :air_in }
       end
 
       it "sits in series with the damper on the air path when fitted" do
-        expect(air_path(real).conduits).to eq(%i[blower_fan damper])
+        expect(air_path(real).conduits).to eq(%i[blower_fan damper grate])
       end
 
       # `:bypass` and not `:omit`, because the air still has to get in. A naturally-drawn
@@ -566,7 +623,7 @@ RSpec.describe ReactorSim::Assembly do
       it "leaves the air path intact when it is not fitted" do
         path = air_path(real(loadout: { blower: nil }))
 
-        expect(path.conduits).to eq([ :damper ])
+        expect(path.conduits).to eq(%i[damper grate])
         expect(path.from_node).to eq(:atmosphere)
       end
 
@@ -615,8 +672,9 @@ RSpec.describe ReactorSim::Assembly do
     end
 
     # The second `:bypass` slot, and the one with the largest consequence. Without the bundle
-    # the flue gas goes straight from firebox to chimney and the only fire→water path left is
-    # the radiant one — a plain shell boiler, which is what tubes were invented to replace.
+    # the flue gas goes straight from firebox to chimney and the only fire→water paths left are the
+    # fire's radiance and the firebox's gas on the legs — a plain shell boiler, which is what tubes
+    # were invented to replace.
     describe "the boiler tubes" do
       it "routes the flue gas through the bundle when fitted" do
         links = real.fragment.links.map(&:id)
@@ -635,12 +693,12 @@ RSpec.describe ReactorSim::Assembly do
       # The convective heat path leaves with the part, because it lives in the part's fragment.
       # A thermal link left behind would point at a node that no longer exists, and
       # `validate_graph!` would refuse the whole operation.
-      it "takes its thermal link to the drum with it, leaving only the radiant path" do
+      it "takes its thermal link to the drum with it, leaving only the fire's and the firebox's" do
         fitted = real.fragment.thermal_links.map { |l| [ l.a, l.b ] }
         stripped = real(loadout: { boiler_tubes: nil }).fragment.thermal_links.map { |l| [ l.a, l.b ] }
 
-        expect(fitted).to contain_exactly([ :firebox, :boiler ], [ :boiler_tubes, :boiler ])
-        expect(stripped).to contain_exactly([ :firebox, :boiler ])
+        expect(fitted).to contain_exactly([ :fire_bed, :boiler ], [ :firebox, :boiler ], [ :boiler_tubes, :boiler ])
+        expect(stripped).to contain_exactly([ :fire_bed, :boiler ], [ :firebox, :boiler ])
       end
     end
   end

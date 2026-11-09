@@ -17,7 +17,8 @@ module ReactorSim
       # slot list nor a fitted instrument may disturb: fitting a better pressure gauge must not
       # move the water glass. `Assembly` sorts by this and refuses a gauge it does not name, so
       # the list cannot drift by omission.
-      PANEL_ORDER = %i[
+      # The weather last: the sky is worth a glance, the boiler is worth watching.
+      PANEL_ORDER = (%i[
         boiler_pressure boiler_water safety_valve valve_setting_pa
         crown_sheet plug_blown
         firebox_temp fire_state
@@ -26,7 +27,7 @@ module ReactorSim
         bearing_temp bearing_condition
         coal_remaining water_remaining oil_remaining air_supply
         condenser_vacuum
-      ].freeze
+      ] + WeatherGauges::ORDER).freeze
 
       # **Every gauge this engine knows how to show, indexed by id — not the ones it is showing.**
       # Parts name the instruments that arrive with them and `Assembly` selects from this hash, so
@@ -49,7 +50,7 @@ module ReactorSim
           bearing_temp, bearing_condition,
           coal_remaining, water_remaining, oil_remaining, air_supply,
           condenser_vacuum
-        ].to_h { |d| [ d.id, d ] }.freeze
+        ].to_h { |d| [ d.id, d ] }.merge(WeatherGauges.instruments).freeze
       end
 
       # **The gauge that matters most, and a fitting in its own right.** The definition stays here
@@ -215,10 +216,11 @@ module ReactorSim
         )
       end
 
+      # The fire's heat, which is the bed's: what a pyrometer at the door sights on.
       def firebox_temp
         Diagnostic.new(
           id: :firebox_temp, label: "Firebox Temperature",
-          source: Sources::Derived.new(:firebox, :temperature_k),
+          source: Sources::Derived.new(:fire_bed, :temperature_k),
           filters: [ Filters::Lag.new(3), Filters::Noise.new(25.0),
                      Filters::Range.new(273.15, 1_673.15) ],
           display: Displays::Needle.new(unit: "°C", convert: :k_to_c, precision: 0,
@@ -230,7 +232,7 @@ module ReactorSim
       def fire_state
         Diagnostic.new(
           id: :fire_state, label: "The Fire",
-          source: Sources::Derived.new(:firebox, :temperature_k),
+          source: Sources::Derived.new(:fire_bed, :temperature_k),
           filters: [ Filters::Lag.new(2),
                      Filters::Bands.new([ 400.0, 700.0, 1_000.0, 1_300.0 ]) ],
           display: Displays::Prose.new([
@@ -278,7 +280,7 @@ module ReactorSim
 
       def engine_power
         Diagnostic.new(
-          id: :engine_power, label: "Indicated Power",
+          id: :engine_power, label: "Indicated Power", role: :output,
           # **The shaft figure, not the diagram's.** `indicated_power_w` is what the indicator
           # diagram claims from its two pressures; `shaft_power_w` is what the crank was
           # measurably given, after `Tick#transmit_torque` has held the cylinder to what its
@@ -407,14 +409,13 @@ module ReactorSim
         )
       end
 
-      # Air reaching the fire. Starve it and the fire dies with no other warning — the firebox
-      # quietly stops making heat.
+      # Air reaching the fire: what is left unburnt in the bed. Starve it and the fire smokes and
+      # sinks with no other warning.
       #
-      # **The bands have to sit inside what the firebox can physically hold.** A 6 m³ box
-      # entirely full of pure air at 900 K holds 2.35 kg, so a band above that is one the gauge is
-      # structurally incapable of reading. Measured across the damper: 0.0083 / 0.0269 / 0.0477 /
-      # 0.1744 / 0.3669 kg at 20 / 40 / 60 / 80 / 100, against a fire of 333 / 375 / 409 / 562 /
-      # 715 K — **44× and monotone**.
+      # **The bands have to sit inside what the bed can physically hold.** Its 2 m³ full of pure
+      # air at 1,000 K holds 0.7 kg, so a band above that is one the gauge cannot read. Measured on
+      # a working engine across the damper: 0 / 0 / 0.114 / 0.246 / 0.351 / 0.433 kg at 0 / 20 / 40
+      # / 60 / 80 / 100 — none left at 20, where the bed is already making monoxide.
       #
       # A *proxy*: draught is a flow and this is an inventory, and a hotter fire holds less air
       # mass at the same draught. The damper's effect dominates that, but the honest quantity is
@@ -422,7 +423,7 @@ module ReactorSim
       def air_supply
         Diagnostic.new(
           id: :air_supply, label: "Draught",
-          source: Sources::Contents.new(:firebox, :air),
+          source: Sources::Contents.new(:fire_bed, :air),
           filters: [ Filters::Lag.new(1), Filters::Bands.new([ 0.05, 0.15, 0.30 ]) ],
           display: Displays::Prose.new([ "choked", "thin", "adequate", "strong" ])
         )
@@ -457,8 +458,9 @@ module ReactorSim
              }) do |id:, seed:, time_scale: 1.0, state: nil,
                                                      rngs: nil, content: nil,
                                                      chassis: :high_pressure, loadout: {},
-                                                     crew: {}|
+                                                     crew: {}, conditions: nil, grudges: nil, wounds: nil|
       SteamEngine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
+                        conditions: conditions, grudges: grudges, wounds: wounds,
                         time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

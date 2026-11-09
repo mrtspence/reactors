@@ -358,6 +358,16 @@ Each thermal node relaxes toward a fixed reservoir via `Relaxation.to_reservoir`
 arbitrated — a fixed-potential sink cannot be overshot. This is what stops a long chain being
 a perfect heat accumulator.
 
+**The reservoir is where the node stands**: `Context#ambient_k_of` — its declared `ambient_k`,
+shifted by `exposure × (outdoor_k − standard)` for a node in a place open to the weather. A
+standard sky leaves every reservoir exactly as declared. Stack draught (`Arbiter.path_head`) takes
+the outdoor shift in full, because the cold column a stack is measured against is the outside air.
+
+**The sky's own change is booked as added.** `Atmosphere` rebuilds its baseline every tick at the
+sky's temperature, and the difference in its at-rest energy from one tick to the next — 10¹² J/K
+of structure — goes to `joules_added` through its `joules_injected`. Exactly zero under a steady
+sky. `Nodes::Catchment` books the rain it receives the same way, as `mass_added`.
+
 ---
 
 ## The ledger

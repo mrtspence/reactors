@@ -29,10 +29,11 @@ RSpec.describe MatchRun do
                                     created_at: 8.days.ago, updated_at: 8.days.ago)
       Incident.record!({ "run_id" => old.run_id, "operation_id" => "engine", "tick" => 1,
                          "seq" => 0, "type" => "part_failed", "severity" => "critical" })
-      AchievementAttempt.create!(owner_id: "t", run_id: old.run_id,
+      AchievementAttempt.create!(owner_id: "t", run_id: old.run_id, operation_id: "engine",
                                  achievement_id: "burst_a_flywheel", opened_at_tick: 1)
-      Progress.create!(owner_id: "t", run_id: old.run_id, metric: "joules_to_work", value: 5.0)
-      Progress.create!(owner_id: "t", run_id: nil, metric: "joules_to_work", value: 5.0)
+      Progress.create!(owner_id: "t", run_id: old.run_id, operation_id: "engine", operation_type: "steam_engine",
+                       metric: "joules_to_work", value: 5.0)
+      Progress.create!(owner_id: "t", run_id: nil, operation_type: "steam_engine", metric: "joules_to_work", value: 5.0)
       Award.grant(owner_id: "t", achievement_id: :burst_a_flywheel, run_id: old.run_id)
     end
 

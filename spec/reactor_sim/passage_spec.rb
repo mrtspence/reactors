@@ -24,15 +24,15 @@ module PassageRig
     # **All three weigh the same and carry nothing**, so `Burden` is identical across them and a
     # comparison is a comparison of the thing it names.
     walker: { label: "Walker", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: TIRELESS,
-              intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} },
+              intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0, tags: {} },
     # Same person, one tag different — so a spec comparing them is comparing the gate and
     # nothing else.
     wiry: { label: "Wiry", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: TIRELESS,
-            intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: { wiry: true } },
-    # Slower than the other two, and nothing else changed — `pace` blends strength and
-    # toughness, so halving both halves the walk.
+            intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0, tags: { wiry: true } },
+    # Slower than the other two, and nothing else changed — `pace` blends strength, agility and
+    # toughness, so halving all three halves the walk.
     plodder: { label: "Plodder", mass_kg: 70.0, strength: 0.5, toughness: 0.5, endurance: TIRELESS,
-               intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: {} }
+               intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 0.5, combat_prowess: 1.0, tags: {} }
   }.freeze
 
   MINIONS = { walker: { name: "Walker", archetype: :walker, hireable: false },
@@ -321,13 +321,21 @@ RSpec.describe "passages and minion travel" do
       expect(crew(op, :crew_8)[:posting]).to be(:rest)
     end
 
-    # Every other lever declares none, and must go on taking a crowd — `station_index` being
-    # last-writer-wins is a separate expedient and this must not quietly become its fix.
-    it "lets a station that declares no capacity take anybody" do
+    # A post with nothing to work and no room declared — a crew quarters — takes anybody.
+    it "lets a post with no lever and no declared room take anybody" do
       op = rig
 
       expect(op.assign_minion(:crew_1, :banking)).to be(true)
       expect(op.assign_minion(:crew_2, :banking)).to be(true)
+    end
+
+    # A lever is a job, and with no room declared it is a job for one.
+    it "gives a lever room for one unless its part says otherwise" do
+      lever = ReactorSim::ControlPoint.new(id: :valve, node: :pipe)
+      gang = ReactorSim::ControlPoint.new(id: :face, node: :seam, capacity: 3)
+
+      expect([ lever.room_for?(0), lever.room_for?(1) ]).to eq([ true, false ])
+      expect([ gang.room_for?(2), gang.room_for?(3) ]).to eq([ true, false ])
     end
   end
 

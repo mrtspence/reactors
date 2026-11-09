@@ -65,3 +65,67 @@
     pointer-events: none;
   }
 }
+
+/* **The frame**: where every region of the app sits (docs/reference/layout.md). Moving a region is
+ * an edit to `grid-template-areas` here and nowhere else. Below `lg` the regions stack in reading
+ * order; from `lg` up the frame fills the window, the top bar stays put and each column scrolls on
+ * its own. */
+@layer components {
+  .frame {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "top" "centre" "feed" "left";
+  }
+
+  @media (width >= 64rem) {
+    .frame {
+      height: 100vh;
+      grid-template-columns: 16rem minmax(0, 1fr) 20rem;
+      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-areas:
+        "top  top    top"
+        "left centre feed";
+    }
+
+    /* A page with no left column gives its room to the centre. */
+    .frame:not(:has(> .frame-left)) {
+      grid-template-areas:
+        "top    top    top"
+        "centre centre feed";
+    }
+
+    .frame-left, .frame-centre, .frame-feed {
+      overflow-y: auto;
+    }
+  }
+
+  .frame-top { grid-area: top; }
+  .frame-centre { grid-area: centre; }
+  .frame-feed { grid-area: feed; }
+
+  .frame-left {
+    grid-area: left;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-right: 1px solid var(--color-slate-800);
+  }
+
+  .frame-strip figure {
+    width: 9.5rem;
+  }
+
+  .frame-placeholder {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    border: 1px dashed var(--color-slate-700);
+    border-radius: 0.5rem;
+  }
+
+  .frame-places { flex: 1 1 auto; }
+  .frame-placeholder-minimap { aspect-ratio: 1 / 1; }
+  .frame-placeholder-schematic { min-height: 10rem; }
+}

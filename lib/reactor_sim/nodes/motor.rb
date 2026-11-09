@@ -20,8 +20,8 @@ module ReactorSim
     # exists to prevent.
     #
     # > **Its own charge, deliberately, rather than sharing the firebox.** `oil_combustion` is
-    # > already in the steam engine's firebox reaction list, so a fuel-oil line routed there
-    # > would let a player burn the donkey's fuel in the main fire. Holding its own tank makes
+    # > already in a firebox's reaction list, so a fuel-oil line routed there would let a player
+    # > burn the donkey's fuel in the main fire. Holding its own tank makes
     # > that unexpressible rather than merely discouraged.
     #
     # ## What makes it go

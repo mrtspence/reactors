@@ -142,9 +142,9 @@ Being built now, as a minimal end-to-end prototype. **Done:**
   cross-process: 25 messages written by the runner and read from Postgres by another process,
   1 full + 24 deltas, deltas carrying one changed gauge instead of twelve.
 - **The console page.** `ConsolesController` renders chrome only — 21 instruments, 14 levers,
-  2 crew — from `DevMatch.panel`. ViewComponents dispatch on chrome kind; `console_controller.js`
-  merges deltas, drives needles through a CSS custom property, and does optimistic levers with
-  a 2 s timeout.
+  2 crew — from `DevMatch.panel`. ViewComponents dispatch on chrome kind; `stream_controller.js`
+  merges deltas, `gauges_controller.js` drives needles through a CSS custom property, and
+  `levers_controller.js` does optimistic levers with a 2 s timeout.
 
 **Verified end to end**: browser-shaped HTTP with CSRF → 202 → Kafka → runner → sim → cable,
 raising steam from 2.9 kPa to 146.9 kPa with the firebox at 1078 K, while a malformed command
@@ -286,8 +286,7 @@ its head.
 > flat out to raise steam in 3800 ticks instead of 1600 is a decision with a cost rather than a
 > free slower button.
 
-**Deliberately not blockers**: snapshots + offset commits, match lifecycle, Turbo incidents and the
-`console_controller.js` split, auth, `ControlLink`, the `boiler.md` failure modes, Chemical Vats.
+**Deliberately not blockers**: snapshots + offset commits, match lifecycle, Turbo incidents, auth, `ControlLink`, the `boiler.md` failure modes, Chemical Vats.
 None of them is reached by building a second operation. **Probabilistic injury is Tim's to design**
 and is sequenced after, not before.
 
@@ -336,10 +335,250 @@ of feedback is folded in. What remains is sequenced in
 Still owed on the mine itself: a separate man-riding shaft, buoyancy inside a volume so firedamp
 collects in the roof, and the advance shift as a fitting rather than a chassis constant.
 
-**Next operation: an open-pit iron ore mine.** Research only, awaiting review:
-[`design_sketches/open-pit-iron-research.md`](design_sketches/open-pit-iron-research.md). Its §6.3
-lists the decisions a design sketch needs first (mobile steam against the line-shaft rule,
-weather, ore grade, chassis geography, ore choice, rail scope, contract stripping).
+**Next operation: an open-pit limonite mine**, researched in
+[`design_sketches/open-pit-iron-research.md`](design_sketches/open-pit-iron-research.md). It is
+built in five units, designed one at a time:
+
+1. **Crewed posts** (several workers at one post, retrofitted to both operations). **Built**:
+   [`design_sketches/crewed-posts.md`](design_sketches/crewed-posts.md) §7.
+   - Mechanism:
+     - A lever takes one by default and a gang's part raises it.
+     - Work arrives in worker-equivalents and the crew is the only cap.
+     - Activity is measured against a full crew.
+     - Hand picks, putting and the cutter are rated per worker from history.
+     - Seats: 13 in the lamp cabin, 5 at the face and 4 at the pit bottom.
+   - **Tuning owed, all first guesses:**
+     - The belt's overfeed stall can't be reached from a hand face (a full face cuts about
+       0.3 kg/s against 30 kg/s of grip), so belt fires want a new route into a stall.
+     - Dust per hewer (0.06 kg/s) is carried over so that a full face raises today's dust. It is
+       a fiat, half the hewer's coal.
+     - `Roadway::TIMBERED_KG_PER_S` (0.36, three hewers to a timberman) and the roof-fall
+       severity reference (0.2 kg/s) are unsourced.
+     - The cutter (0.8 kg/s a man) and putter (0.3) rates are general knowledge.
+     - These per-worker rates are unchanged, so a crew of two doubles them: landings, rope
+       hauling, belt clearing.
+     - The back shift (7), underground stable (6) and baths (18) were scaled by eye.
+   - **UI:** a refused posting is only signalled by the option being disabled. The command is
+     asynchronous and nothing reports the refusal back.
+2. A general conditions system, with weather and day and night as its first instance.
+   **Built**: [`design_sketches/conditions.md`](design_sketches/conditions.md) §6.
+   - What it does:
+     - One sky per match, drawn from a season chosen at **match setup** (a new screen).
+     - The sky moves every exposed node's ambient, the atmosphere and every stack's draught.
+     - The light at bank and in the engine house follows the hour.
+     - Rain and snowmelt drain off the pit yard into the sump.
+     - Cold grinds people (`Chill`), and a greatcoat helps. Heat makes work tire them faster.
+     - Wet and icy decks make the banksman's perils worse.
+     - Readings are the banksman's or fireman's guesses until a thermometer or barometer is
+       bought.
+   - **Freezing proper is deferred to its own unit** (§6.6 of that sketch): an ice phase,
+     frozen conduits, thickened oil, iced friction surfaces.
+   - **Tuning owed, all first guesses:**
+     - The climate's figures: means, ranges, spell mixes, severities.
+     - `Chill`'s tolerance and rate, and its strain per kelvin.
+     - The pit yard's 2,000 m².
+     - The deck's footing multipliers (wet ×2, icy ×9) and the new `slipped_on_the_deck`
+       peril's rate.
+     - The engine house's 0.3 exposure.
+   - **Barometric gas was left emergent**, as decided. Not yet measured whether a falling glass
+     draws anything off the goaf; the gob and goaf paths are where to look.
+   - **The engine house breathes the atmosphere node**, so its people feel the full outdoor
+     temperature beside a firebox. An existing simplification the cold now exposes.
+   - Not built: cold stiffening dexterity, which the sketch mentioned.
+3. **Animosity and distraction — built**
+   ([`design_sketches/animosity-and-distraction.md`](design_sketches/animosity-and-distraction.md)).
+   - Two new stats on every race, `agility` and `combat_prowess`, a human 1.0 at each. Agility is
+     half of walking.
+   - `Minion#avoid` (wits × agility) is every hazard's getting-out-of-the-way: safety saves,
+     refuges, runaways, the accident margin.
+   - `attack`/`defend` are the reusable combat contest. Weapons on the tools, a clasp knife,
+     blinkers.
+   - Grudges come from race, person, account and play, and persist and fade across matches
+     (`Grudge`). Patience runs out into a row, a brawl, a shove or sabotage. The colliery has four
+     openings and an overman.
+   - A succubus distracts everybody but herself. The shaft's falling tub now hurts the riders.
+   - New races: dwarf, orc, succubus, each with one individual.
+   - **Tuning owed, all first guesses:**
+     - `Animosity`'s spend, irritation, ceiling, tolerance, blow, release and fade figures.
+       The contest is `Combat`: a bell-curved landing roll (`CONTEST_SPREAD`) of `strike` (half
+       swing, half `precision`) against `defend`; damage by the weapon in hand, its `handling:`
+       blend read off the body plus its `edge` (bare hands a poor weapon of their own); and a
+       critical that passes the armour and meets `CRITICAL_TOUGHNESS` of the toughness. A fight
+       tires by the weapon's weight against `force`. The weapon profiles, `WIELD_EXERTION` and the
+       crit figures are first guesses. **Measure every further pass with
+       `ruby script/tuning/brawls.rb`** (any directory; `--set NAME=VALUE` tries a figure without
+       editing code, `--tag [ID.]TAG=VALUE` tries a temperament, `--armed` starts every brawl with
+       weapons out, `--tool` gives everybody one item): every character against every other, 100 brawls a pairing, written to
+       [`tuning/brawls.md`](tuning/brawls.md) and deterministic, so a pass is a diff. **Crowds
+       with `ruby script/tuning/crowds.rb`** (`--only crowds|bosses`, `--sizes`, `--minutes`,
+       `--seeds`, `--set`): a room of 2–32 for a shift, with and without annoying or calming hands
+       and five bosses, written to [`tuning/crowds.md`](tuning/crowds.md); the full run takes
+       over an hour, so try a change with `--sizes` first.
+       Measured once with an orc among elves and a dwarf at bank: his first brawl came at about
+       3½ minutes and one every few minutes after, and a clean blow from him puts an elf straight
+       into severe.
+     - The opening harms; the overman's reach and blend.
+     - The weapon attacks; blinkers' `focused`; the knife's `cutting`.
+   - **Moved by the new stats, not yet measured:** walking pace for every non-human race, and
+     `avoid` in the accident margin and runaway catch for kobolds, ogres and elves.
+   - **Seams left, by name:** `distracted` (no morning coffee) and a room's `distracting` (enchanted
+     weather) are read with nothing offering them; `defence` waits for combat gear; lever-shaped
+     openings wait for the shovel.
+   - **Later — a brawl report in the match.** A brawl is opaque once it starts: the feed has its
+     `quarrel` and any `minion_hurt`, but nothing says it is over or how it ended. Wanted: an event
+     when a brawl ends, saying how (sated, carried out, parted by the boss, exhausted), carrying the
+     blow-by-blow in its detail (each exchange's strike, guard, share, critical, armed, bite) so a
+     later UI pass can open it as an expanded report. Not built.
+   - **The melee is built**: brawls of any size, each fighter swinging at whoever they most want to
+     hit, a heckle from the sidelines for those who would only row, kicking the downed, and an end
+     when nobody left is willing. See
+     [§7 of the sketch](design_sketches/animosity-and-distraction.md#7-melee-a-design-pass).
+     `FOCUS`, `GANGED`, `WITNESSED`, `KICKING` and `RUMPUS` are first guesses.
+   - **Fights spread** ([§7.16](design_sketches/animosity-and-distraction.md#716-fights-that-spread-for-review)):
+     a fighter drags in somebody watching (`DRAG_IN`, a heckler first), and somebody standing by
+     piles in, spoiling for it (`SPOILING`) or near snapping (`EDGE`, `ON_EDGE`), unless a boss
+     stops them. Exchanges every ten seconds. First figures, being tuned on `crowds.rb --only melees`.
+   - **A boss puts somebody in line** ([§7.17](design_sketches/animosity-and-distraction.md#717-why-a-hard-boss-falls)):
+     patience back by style, a stare-down resented by what is left to hate, and a boss in a row
+     still oversees.
+   - **Next for bosses — kit and training, not rules**: the mace of discipline (charisma, and the
+     `intimidating` tag whose seam is in `Provoke#averted`), a hazard-awareness course (keen eyes,
+     so defence), and a course in keeping one's temper.
+   - **Wounds are built**: every harm deals the kinds it declares, each bitten separately, each
+     leaving a named wound out of `content/wounds/` (five variants a tier, examples to rewrite);
+     wounds stack, derate, outlive the match and heal between them, and somebody is out while a
+     wound would carry them out. See [`design_sketches/wounds.md`](design_sketches/wounds.md).
+   - **Acute harm collapses and only grave harm kills by attrition** (§12 of the wounds sketch):
+     the mortal band at 5.0, a deeper pool, a man on the ground at half a guard and kicked
+     bare-handed by anybody short of wanting him dead, anybody who does want him dead willing to
+     do him any harm, the industrial catastrophes ×4 on their near side, and one bite of
+     `OUTRIGHT` times toughness killing outright. Every figure is a first effort. Being
+     tuned on the short sweeps (the six-person brawl matrix, `crowds.rb --only melees`); the full
+     brawl matrix and crowds, and `docs/tuning/`, are rerun once it settles.
+   - **Next — a wound taking from a tag** (scalded skin on `focused`), named as a seam in
+     `Wounds::Catalogue`: needs a state-aware `Minion#tag`.
+4. Mobile engines: steam shovels and locomotives as their own crewed engines. In three units:
+   **4a, the engine itself, is built** ([`design_sketches/mobile-engines.md`](design_sketches/mobile-engines.md)):
+   `MobileEngine` — a vertical-boiler engine of about 80 kW from the stationary engine's own pieces
+   under its own names, a fireman and a driver who works the throttle and the feed by whatever reads
+   the water and the pressure, the tiered safety valve, readings, plug, bunker and tank. **4b, the
+   steam shovel, is built** ([`design_sketches/steam-shovel.md`](design_sketches/steam-shovel.md)):
+   a dipper going round dig, swing, dump on its engine's shaft, the craneman and the pitmen keeping
+   the face in reach, the hoisting chain (iron or steel) that parts and is spliced, the boom that comes
+   down, struck by the swing, water by hose, fittings per shovel, and the board in words. **4c, the
+   locomotive, is built** ([`design_sketches/locomotive.md`](design_sketches/locomotive.md)): a dinkey
+   on the vertical engine, its `Train` the hoist laid flat on a host's `Track`, geared through two
+   clutches, a hand or steam brake, loaded at the shovel and tipped by the dumpmen through
+   `Nodes::Landing` (the mine's, made stock), a driver who runs the round and brakes late by his
+   lateness, crashing into the shovel, over the tip or off the rails, and **a footplate the train
+   carries** (`Place#carried_by`) that shares its hazards with where it stands.
+   - **Next for mobile engines — automatic cylinder cocks**, so a standing engine drains its own
+     condensate without anybody working them. Undesigned; a standing locomotive asked for nothing
+     cools with steam in its cylinder.
+   - **The pitmen are spent in about ten minutes** at full effort on plain hands (exertion 6e-4), and
+     the shovel then stands moving up. For the shovel's tuning, with the pit's shifts.
+5. **The open pit is built**, all ten sub-units of [`design_sketches/open-pit.md`](design_sketches/open-pit.md)
+   §2 and the coal bed. Each sub-unit's detail is in its section of the sketch.
+   - **5a, the pit by hand** (§4–15): `OpenPit`, a sunk limonite pit of two benches as geometry,
+     the ore worked a berm behind the stripping face; pick and shovel into muck piles, barrowed up
+     the ramp road to the tip and the bin; the ground drawn per match (thicknesses, hard stretches);
+     huts at each bench and the dump; a pit boss; every job gated on light.
+   - **5b, washing and water** (§16): the pit's one line shaft; log washers parting wash ore by tag,
+     a tier's efficiency the one number for its losses; a reservoir pumped off the shaft. In the dev
+     match the shaft is roped to a developer's engine only with `REACTOR_DEV_ENGINE=1`.
+   - **5c, machines in the pit** (§17): a shovel and a dinky at each face, both upgrades
+     (`Slot#needs`), the face wired for what is fitted; engines starting at work.
+   - **5d, washing at scale** (§18): washhouse bays (`Slot#needs_at_least`), bigger washers, the
+     pump as a tier, a crusher and its feed belt (`Nodes::Belt`), barracks for forty.
+   - **5e, drainage and rain** (§19): seepage by depth and a drawn wetness, hidden springs, rain;
+     the sump hardening and flooding the ore face; drowning on the asphyxia pathway; bailers, then
+     sump pumps; the reservoir's spillway.
+   - **5f, benches and slides** (§20): undercutting, the barmen, slides past hidden thresholds
+     burying the face; the dump's edge breaking back.
+   - **5g, the mud dam and the reservoir's bank** (§21): `Embankment` walls that weep, slump and
+     breach into the pit, puddled and rebuilt; the decant; bigger dams and reservoirs, a scour valve.
+   - **5h, blasting and hard ground** (§22): `Nodes::ShotHole` lifted into the library; jumper
+     holes, gopher holes or dynamite, a powder gang at each face; firing on a lever, flyrock; frost;
+     dynamite freezing, and the thawing house.
+   - **5i, finishing** (§23): calcining as chemistry in an open clamp or a shaft kiln; the coal by a
+     lever, the air by the eyes; the kiln top gassed by a kiln burning short. The goal is finished
+     tons, hematite only.
+   - **5j, pit logistics** (§24): small starting bunkers and tanks; the heavy engine and the railroad
+     dipper; the coal yard, siding (`Nodes::Siding`) and coalers; stands where a train takes coal and
+     water (`Driver::TopUp`); a passing track, road signals (`MobileEngine::RoadSignal`) and a fiated
+     collision; boarding a footplate at a stand.
+   - **The coal bed** ([`coal-bed.md`](design_sketches/coal-bed.md) §9–10): coal at a real burn
+     rate; every solid-fuel fire a `Nodes::FuelBed` on a `Nodes::Grate`; leaky dampers and eyes; the
+     stationary engines start banked.
+   - **Settled in the lookover (2026-11-01):**
+     - **The kiln is a `FuelBed`**, laid at work, and **a machine started part-way through a story
+       seeds its latch** (a raised drum's `full_head`), so nothing announces its start. `event_spec`
+       holds every machine to it.
+     - **Achievements are earned on one kind of machine**: `operation_type:` on every definition,
+       windows per operation, meters per operation and lifetime per machine type. Every record
+       carries `operation_type`.
+     - **A conduit people stand beside declares `perils:` and `traffic:`**, its busy-ness
+       `Conduit#crew_share`; seven copies of that arithmetic are gone. The stock shapes are listed in
+       [`reference/nodes.md`](reference/nodes.md#a-shape-written-twice-is-a-stock-shape), and the
+       root `CLAUDE.md` points at them.
+     - The tip gauge reads as the dumpmen's; each machine's start-up note is its own
+       (`consoles/notes/_<kind>`).
+   - **Owed on the pit**, none of it blocking:
+     - **The pit's own achievements.** None exist, so the series washer, the gyratory crusher and the
+       centrifugal pump are priced but ungated (the `TODO`s in `blueprints.yml`), and the goal has no
+       target. Meters read the ledger and finished ore sits on a heap, not a `Delivery`, so a tonnage
+       achievement first needs a way to read it.
+     - **The virtual shaft** (sketch §16): without it nothing turns the pit's line shaft outside
+       `REACTOR_DEV_ENGINE=1`, so nothing is washed or finished.
+     - Derailment and the wreck-clearing gang (the collision is a fiat, `TODO` in `Train`).
+     - The track as the pit's geometry, moved up by a track gang; wheel slip on a wet or icy rail
+       (`DriveLink#max_torque` is read by nothing) — both from [`locomotive.md`](design_sketches/locomotive.md) §12.
+     - A kiln's burden choking its draught, and the gas-fired kiln with a producer-gas supply.
+     - The colliery's coal sent to the pit through the siding (its timetable is the seam).
+     - Proper spillways and relief on the larger reservoirs, if needed (`TODO` on `Spillway`).
+     - Rain on the feed belt: `Belting`'s `wetted_by:` names a holder, not the sky.
+     - Belts at the dump end (the spoil tip, the load-out).
+     - `drowning_resistance` on something: a cork jacket, a race at home in the water.
+     - Much larger gangs, and the UI to manage them (the UI overhaul, below).
+     - Electric cable and bucket-wheel excavators, in a much later era.
+     - **Prospecting** (finding hard stretches and springs before the face meets them) is left out
+       by decision.
+
+**Next, in order** (decided 2026-11-01):
+
+1. ~~**Lighting for night work**~~ — **built** ([`lighting.md`](design_sketches/lighting.md) §6–7):
+   `Nodes::Lighting` lifted from the colliery; the pit's two areas lit by fire baskets, Wells
+   lights (an `oil_store` slot) or arc lamps, a lever and a lamp man each; darkness underfoot on the
+   pit's and the colliery's footing perils. **Tuning owed**: every figure (the baskets' and lamps'
+   rates, the arcs' 10 kW, `FOOTING_LIGHT`, the `dark:` weight of 4.0) is a first guess. **Not
+   built**: a shovel's own headlight, and weather on the flares.
+2. ~~**The blast whistle**~~ — **built** ([`blast-whistle.md`](design_sketches/blast-whistle.md)
+   §6–7): a blast warning slot (a shout, a horn, a horn and sentries) the shot waits on; everybody in
+   reach who heeds it takes cover in place (`Cover`) and mans nothing until the all clear; blast
+   shelters (timber, steel) at each bench; every mobile engine's cab a slot (open, wooden, steel)
+   covering its crew at their posts; a powder gang's spite can fire unwarned. **Tuning owed**: the
+   intervals, the cover figures, the seats.
+3. **The UI overhaul**, six sub-units in [`design_sketches/ui-overhaul.md`](design_sketches/ui-overhaul.md);
+   the layout they build towards, and what is built of it, is [`reference/layout.md`](reference/layout.md).
+   - ~~**U1, the frame**~~ — **built** (§7–8): the nav row, the state strip (the hour, the light,
+     the weather, this machine's outputs, by an instrument's `role:`) and the feed, on every page
+     and permanent across one machine's screens; the places, minimap and schematic as labelled
+     placeholders; `console_controller.js` split into `stream`, `gauges`, `levers`, `crew` and
+     `feed`. Checked in a browser.
+   - ~~**U2, the console by place**~~ — **built** (§4, §7, §10): every instrument's `places:` and
+     every lever's `place:` derived in `Operation#panel`; a panel a place and The Works, one shown,
+     picked in the places box (its count, and its first board not saying a `calm:` phrase); a
+     machine with one place is that place's panel; people's rows move to where they are, with who
+     is on the way. **Request specs only — the JavaScript has not been run in a browser.**
+   - **Next: U3, gangs** — its own draft first.
+   - Then U4 the developer's bench, U5 the fitting screens, U6 the record (the event
+     dialog). **Owed, not scheduled**: looking in on an ally's machine read-only; the minimap's
+     and each place's schematic.
+4. **Later, a proper structural pass**: the operation files split by subsystem (the pit's and the
+   colliery's `definition.rb` and `parts.rb`), and `tick.rb`.
+5. **Later, retune the steam engine's flywheel**: it bursts at ordinary working speeds in play
+   (seen 2026-11-08, U1's browser check). Measure its stress against the speeds the governor and
+   the start-up procedure actually reach, and fix the model's figures rather than the threshold.
 
 ### Mine accidents — four units, designed one draft at a time
 
@@ -581,7 +820,7 @@ set against this pass, not against today's single hewer.
 - [x] 20 Shotfiring — the `blasting` slot (black powder, permitted explosives), a magazine at bank,
   a ticketed shotfirer at the shot holes; a tonne and a half a shot, its fumes and dust. Blown-out
   shots flash in the room; a misfire is judged — dug out all or nothing, or left live in the face
-  for the hewer to strike. **Tune**: the shot's 900 s and the clearing's 1,200 s, the peril rates
+  for the hewer to strike. **Tune**: the shot's 450 s and the clearing's 1,200 s, the peril rates
   (blow-out 0.6 / 0.05, misfire 0.4, premature 0.12, set off 0.6, struck 1.2), the misjudgement's
   0.1 and 0.8, the blow-out flame (0.4 kg/s, 4 MW for a tick), a charge of 0.5 kg
 - [x] Furnace ventilation — a `furnace` slot beside the fan (fire basket, brick furnace, double
@@ -1204,16 +1443,9 @@ What remains, in dependency order:
    than returning true for everything, so the `requires:` gates in `config/blueprints.yml` are
    live. Design and findings: [`design_sketches/event_system.md`](design_sketches/event_system.md).
 4. **Turbo incident broadcasts** — the first ViewComponent that earns its keep, replacing the
-   client-side incident list.
-
-   **Refactor `console_controller.js` while you are in there.** It has grown past the point where
-   one Stimulus controller should hold it: subscription and resync, delta merging, gauge painting,
-   lever painting and optimistic lever state, the incident feed, the backfill, and now the crew
-   panel. Several of those are independent concerns that happen to share a socket. The Turbo work
-   removes one of them outright (the incident feed), which makes this the natural moment — split
-   the rest by what they paint rather than letting the file keep accreting. **Cheaper than it was**: there is now an `incidents` table to
-   render from rather than a transient projection, and `Incident.backfill` already produces the
-   shape.
+   client-side incident list that `feed_controller.js` builds. **Cheaper than it was**: there is
+   now an `incidents` table to render from rather than a transient projection, and
+   `Incident.backfill` already produces the shape.
 5. **Match lifecycle** — real creation, `match.lifecycle`, and the end of `DevMatch`. This is
    also what retires the "web process rebuilds a Match to get the panel" shortcut. **No longer
    blocks progression**: `run_id` already carries the identity lifecycle will key on, and every
@@ -2083,6 +2315,22 @@ before the simulation rewrite but is unaffected by it.
 
 Each of these is a rule, and each is the kind a fresh reader breaks by accident. They are
 documented where they matter and collected here because the collection is worth reading once.
+
+- **A holder reacts with what it holds, not with what passes through it.** A fuel bed sized to the
+  gaps between its lumps holds a few grams of air and starves on any draught, however strong; its
+  volume has to hold a tick's air (`Nodes::FuelBed`). And **a path with no conduit on it is
+  rate-driven** (`Arbiter.gas_coupling`), so two gas holders joined directly carry no gradient and
+  no stack draws through them — give the join a conduit with a conductance.
+- **A sealed space seeded nearly empty is a vacuum, and a leak fills it.** Seed a waste, a vessel or
+  a room's gas at the pressure it would really stand at, in whatever gas it really holds; seeded with
+  a kilogram of air, a starved gob fire breathed in several kilograms a tick and burned clean.
+
+- **A stopped shaft never reaches zero, so never divide by its speed unguarded.** A drag halves a
+  shaft per tick at most (`max_drag_conductance` is `I/dt`), so a shaft left standing decays
+  geometrically into denormals. `Bearing#boundary_conductance` divides by `ω`; about five minutes
+  into a stopped mobile engine it overflowed, the wear went infinite and a full ring set wiped in a
+  tick at 293 K. The drag survived only because the stall cap clamps it. Floor the speed
+  (`Bearing::STILL_OMEGA`) wherever a law has `÷ ω` and is not capped.
 
 - **Check which clock a rate is against before calibrating it.** `dt` is `ReactorSim::DT × the
   operation's time_scale`, and `DT` is **0.25 s**. The steam engine sets `time_scale: 1.0`

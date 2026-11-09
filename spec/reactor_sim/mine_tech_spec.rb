@@ -36,7 +36,8 @@ module MineTech
 
   def self.archetype(tags)
     { label: "Hand", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: 1.0e6,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, tags: tags.merge(shovelling: 0.5) }
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
+      tags: tags.merge(shovelling: 0.5) }
   end
 
   CONTENT = ReactorSim::Content.default.merging(
@@ -46,9 +47,9 @@ module MineTech
     }
   )
 
-  # Old workings a hand's breadth ahead of the face — ten kilograms of coal — so driving it breaks
-  # through inside a few ticks instead of hours. Where the water lies is the ground's business.
-  WATER_AHEAD_M = 0.002
+  # Old workings a gram of coal ahead of the face, so any cutting at all breaks through at once and
+  # the claim does not depend on how fast a face cuts. Where the water lies is the ground's business.
+  WATER_AHEAD_M = 0.001 / ReactorSim::Operations::Mine::Ahead::FACE_KG_PER_M
 end
 
 RSpec.describe "the mine's tech tree" do

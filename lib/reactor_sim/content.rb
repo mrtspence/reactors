@@ -28,17 +28,24 @@ module ReactorSim
           resources: read_all(File.join(dir, "resources")),
           reactions: read_all(File.join(dir, "reactions")),
           archetypes: read_all(File.join(dir, "archetypes")),
-          minions: read_all(File.join(dir, "minions"))
+          minions: read_all(File.join(dir, "minions")),
+          climates: read_all(File.join(dir, "conditions")),
+          wounds: read_all(File.join(dir, "wounds"))
         ).freeze
       end
 
       # Test seam: build a registry from literals with no filesystem involved. Every keyword
       # defaults, so a spec asks for the one table it cares about and gets empty ones for the
-      # rest — which is what keeps an unrelated substance from boiling mid-test.
-      def build(resources: {}, reactions: {}, archetypes: {}, minions: {})
+      # rest — which is what keeps an unrelated substance from boiling mid-test. **Wounds are the
+      # exception**: anybody can be hurt in any operation, so the catalogue defaults to the one
+      # shipped, read once, and a spec passes its own only to test the catalogue.
+      def build(resources: {}, reactions: {}, archetypes: {}, minions: {}, climates: {}, wounds: nil)
         Registry.new(resources: deep_sym(resources), reactions: deep_sym(reactions),
-                     archetypes: deep_sym(archetypes), minions: deep_sym(minions)).freeze
+                     archetypes: deep_sym(archetypes), minions: deep_sym(minions),
+                     climates: deep_sym(climates), wounds: wounds ? deep_sym(wounds) : shipped_wounds).freeze
       end
+
+      def shipped_wounds = @shipped_wounds ||= read_all(File.join(ROOT, "wounds")).freeze
 
       # Public because `Registry#merging` needs it — a caller handing in literals should get the
       # same key treatment a YAML file gets, or a fixture written with string keys would be a
@@ -76,18 +83,31 @@ module ReactorSim
       # An individual is a name and a race. Everything else is an offset and may be omitted.
       REQUIRED_MINION_KEYS    = %i[name archetype].freeze
 
-      # An archetype declares all five, because it is the baseline every other layer offsets and
+      # An archetype declares every stat, because it is the baseline every other layer offsets and
       # a missing one would surface mid-match as a nil inside an arithmetic expression. The list
       # itself lives in `Sheet`, with the folding rules it belongs to.
       REQUIRED_ARCHETYPE_KEYS = ([ :label ] + Sheet::STATS).freeze
 
-      attr_reader :resources, :reactions, :archetypes, :minions
+      # **Every key either layer may hold, and nothing else is accepted.** The sheet is folded by
+      # picking out what it knows, so a misplaced or misspelt key is not an error there — it is
+      # simply never read, and the person is quietly somebody else.
+      ARCHETYPE_KEYS = (REQUIRED_ARCHETYPE_KEYS + %i[mass_kg tags grudges]).freeze
+      MINION_KEYS = (REQUIRED_MINION_KEYS + %i[mass_kg stats tags grudges resented_by hireable]).freeze
 
-      def initialize(resources:, reactions:, archetypes: {}, minions: {})
+      # A climate's season declares all of these; its spells each declare `SPELL_KEYS`.
+      REQUIRED_SEASON_KEYS = %i[day_of_year mean_k daily_range_k pressure_pa severity spells].freeze
+      REQUIRED_SPELL_KEYS = %i[weight minutes offset_k precipitation wind_m_s pressure_trend].freeze
+
+      attr_reader :resources, :reactions, :archetypes, :minions, :climates, :wounds
+
+      def initialize(resources:, reactions:, archetypes: {}, minions: {}, climates: {}, wounds: Content.shipped_wounds)
         @resources = resources.freeze
         @reactions = reactions.freeze
         @archetypes = archetypes.freeze
         @minions = minions.freeze
+        @climates = climates.freeze
+        @wounds_spec = wounds
+        @wounds = Wounds::Catalogue.new(wounds)
         @phase_pairs = index_phase_pairs.freeze
         @tags = @resources.to_h { |id, spec| [ id, spec.fetch(:tags, []).map(&:to_sym).freeze ] }.freeze
         validate!
@@ -111,6 +131,16 @@ module ReactorSim
 
       def minion(id)
         @minions.fetch(id.to_sym) { raise Error, "unknown minion: #{id.inspect}" }
+      end
+
+      def climate(id)
+        @climates.fetch(id.to_sym) { raise Error, "unknown climate: #{id.inspect}" }
+      end
+
+      def season(climate_id, season_id)
+        climate(climate_id).fetch(:seasons).fetch(season_id.to_sym) do
+          raise Error, "climate #{climate_id}: no season #{season_id.inspect}"
+        end
       end
 
       # Everybody a player could come to own. The last-resort standin exists and is excluded,
@@ -142,7 +172,8 @@ module ReactorSim
       def merging(archetypes: {}, minions: {})
         self.class.new(resources: @resources, reactions: @reactions,
                        archetypes: @archetypes.merge(Content.deep_symbolize(archetypes)),
-                       minions: @minions.merge(Content.deep_symbolize(minions))).freeze
+                       minions: @minions.merge(Content.deep_symbolize(minions)),
+                       climates: @climates, wounds: @wounds_spec).freeze
       end
 
       # Precomputed. This is called once per parcel per port per link per tick, and the
@@ -255,11 +286,20 @@ module ReactorSim
         @archetypes.each do |id, spec|
           missing = REQUIRED_ARCHETYPE_KEYS.reject { |k| spec.key?(k) }
           raise Error, "archetype #{id}: missing #{missing.join(', ')}" if missing.any?
+          raise Error, "archetype #{id}: resented_by belongs to a person" if spec.key?(:resented_by)
+
+          refuse_unknown!("archetype #{id}", spec.keys, ARCHETYPE_KEYS)
+          validate_grudges!("archetype #{id}", spec)
         end
 
         @minions.each do |id, spec|
           missing = REQUIRED_MINION_KEYS.reject { |k| spec.key?(k) }
           raise Error, "minion #{id}: missing #{missing.join(', ')}" if missing.any?
+
+          refuse_unknown!("minion #{id}", spec.keys, MINION_KEYS)
+          Sheet.offsets("minion #{id}", spec[:stats])
+
+          validate_grudges!("minion #{id}", spec)
 
           # An individual naming a race that does not exist is a person with no stats at all.
           # Caught here rather than at the moment somebody tries to work a lever with them.
@@ -267,6 +307,33 @@ module ReactorSim
           next if @archetypes.key?(archetype)
 
           raise Error, "minion #{id}: unknown archetype #{archetype.inspect}"
+        end
+
+        validate_climates!
+      end
+
+      def refuse_unknown!(owner, keys, known)
+        unknown = keys.map(&:to_sym) - known
+        return if unknown.empty?
+
+        raise Error, "#{owner}: unknown #{unknown.join(', ')} (known: #{known.join(', ')})"
+      end
+
+      # A season missing a figure would surface as a nil inside the weather's arithmetic, a minute
+      # into a match played in it.
+      def validate_climates!
+        @climates.each do |id, climate|
+          raise Error, "climate #{id}: missing latitude_deg" unless climate.key?(:latitude_deg)
+
+          climate.fetch(:seasons, {}).each do |season, spec|
+            missing = REQUIRED_SEASON_KEYS.reject { |k| spec.key?(k) }
+            raise Error, "climate #{id} #{season}: missing #{missing.join(', ')}" if missing.any?
+
+            spec.fetch(:spells).each do |spell, figures|
+              missing = REQUIRED_SPELL_KEYS.reject { |k| figures.key?(k) }
+              raise Error, "climate #{id} #{season} #{spell}: missing #{missing.join(', ')}" if missing.any?
+            end
+          end
         end
       end
 
@@ -369,7 +436,20 @@ module ReactorSim
           archetype: spec.fetch(:archetype).to_sym,
           mass_kg: mass + spec.fetch(:mass_kg, 0.0).to_f,
           stats: Sheet.add_stats(baseline, spec.fetch(:stats, {})).freeze,
-          tags: Sheet.add_tags(base.fetch(:tags, {}), spec.fetch(:tags, {})).freeze }.freeze
+          tags: Sheet.add_tags(base.fetch(:tags, {}), spec.fetch(:tags, {})).freeze,
+          # Keyed by race or by person. The race's and the individual's add, as tags do.
+          grudges: Sheet.add_tags(grudges_of(base), grudges_of(spec)).freeze,
+          resented_by: grudges_of(spec, :resented_by).freeze }.freeze
+      end
+
+      def grudges_of(spec, key = :grudges) = spec.fetch(key, {}).to_h { |k, v| [ k.to_sym, v.to_f ] }
+
+      # A grudge against a race or a person nobody has heard of is a feud that never starts.
+      def validate_grudges!(owner, spec)
+        %i[grudges resented_by].each do |key|
+          unknown = spec.fetch(key, {}).keys.map(&:to_sym) - @archetypes.keys - @minions.keys
+          raise Error, "#{owner}: #{key} names unknown #{unknown.join(', ')}" if unknown.any?
+        end
       end
 
       def missing_mass(spec)

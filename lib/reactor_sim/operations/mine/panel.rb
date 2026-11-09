@@ -16,7 +16,8 @@ module ReactorSim
       # it is at bank where you can see it.
       module_function
 
-      PANEL_ORDER = %i[
+      # The weather last: the sky is worth a glance, the flame cap is worth watching.
+      PANEL_ORDER = (%i[
         flame_cap lamp_flame canary
         shaft_speed shaft_supply
         air_quantity furnace_fire district_air
@@ -25,7 +26,7 @@ module ReactorSim
         roof_timber putting rope_on_the_road drum_heat
         winding_signals cage_depth slack_rope winding_brake brake_heat rope_condition sheave_heat rod_speed
         coal_raised seam_remaining
-      ].freeze
+      ] + WeatherGauges::ORDER).freeze
 
       def catalogue
         {
@@ -282,7 +283,7 @@ module ReactorSim
           # What has come off the deck at bank, averaged — coal arrives a deck at a time, so the
           # instantaneous figure is not a reading anybody could use.
           coal_raised: Diagnostic.new(
-            id: :coal_raised, label: "Coal Raised",
+            id: :coal_raised, label: "Coal Raised", role: :output,
             source: Sources::Field.new(:deck_unloading, :carried_kg),
             # A minute's average: a deck comes off in about a minute and a half at a time.
             filters: [ Filters::Average.new(240), Filters::Lag.new(2) ],
@@ -296,7 +297,7 @@ module ReactorSim
           winding_signals: Diagnostic.new(
             id: :winding_signals, label: "Winding",
             source: Sources::Field.new(:cage_drive, :signal),
-            display: Displays::Prose.new(Winding::SIGNALS.values)
+            display: Displays::Prose.signals(Winding::SIGNALS, calm: Winding::CALM)
           ),
 
           # **Where the cage is**, which is what an engineman winding to a mark actually watches:
@@ -442,7 +443,7 @@ module ReactorSim
             filters: [ Filters::Lag.new(6), Filters::Quantize.new(5_000.0) ],
             display: Displays::Digital.new(unit: "t", precision: 0, convert: :kilo)
           )
-        }
+        }.merge(WeatherGauges.instruments)
       end
     end
 
@@ -455,9 +456,10 @@ module ReactorSim
              }) do |id:, seed:, time_scale: Mine::DEFAULT_TIME_SCALE, state: nil,
                                                  rngs: nil, content: nil,
                                                  chassis: Mine::CHASSIS.keys.first, loadout: {},
-                                                 crew: {}, ground: nil|
+                                                 crew: {}, ground: nil, conditions: nil, grudges: nil,
+                                                 wounds: nil|
       Mine.build(id: id, seed: seed, chassis: chassis, loadout: loadout, crew: crew,
-                 ground: ground,
+                 ground: ground, conditions: conditions, grudges: grudges, wounds: wounds,
                  time_scale: time_scale, state: state, rngs: rngs, content: content)
     end
   end

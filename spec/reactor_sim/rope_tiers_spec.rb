@@ -33,7 +33,7 @@ RSpec.describe "rope tiers" do
   it "carries its own weight below the sheave, with the cage empty" do
     op = at(pit(:iron_wire_rope), 80.0)
     rope = op.nodes.fetch(:winding_rope)
-    cage_kg = op.nodes.fetch(:cage_drive).cage_kg
+    cage_kg = op.nodes.fetch(:cage_drive).conveyance_kg
 
     expect(rope.tension_n(ctx(op))).to be_within(1e-6).of((cage_kg + (5.5 * 80.0)) * g)
   end

@@ -104,6 +104,27 @@ Heat transfer between nodes is an implicit solve over the whole thermal network;
 ambient stays closed form, because a fixed-potential reservoir cannot be overshot. See
 [`settlement.md`](settlement.md#heat-and-rotation-settle_heat-settle_drive).
 
+### The weather moves the ambient
+
+**What the sky is doing is a reading, drawn once and recomputed from the clock**
+(`Conditions`, held by `Nodes::Outdoors`). It reaches the physics in three places, each a
+**shift from the standard day** a figure was declared against, so a standard sky changes nothing:
+
+| Where | How far |
+|---|---|
+| A node's ambient (`Context#ambient_k_of`) | Its place's `exposure`: a pit bank 1, an engine house 0.3, underground 0 |
+| `Atmosphere`'s temperature and pressure | In full — it is the outside air |
+| A stack's cold column (`Arbiter.path_head`) | In full, so a winter's day draws a chimney and a downcast harder, and natural draught weakens as the day warms |
+
+A falling barometer moves the pressure reference of everything vented to the sky. **Whether it
+draws gas out of a goaf is left to the gas paths that already exist**, rather than added.
+
+**People feel the air with the wind on it**: the Canadian wind-chill index
+(`Outdoors.feels_k`), taken as far as their place is open to the sky. Below a tolerance the cold
+grinds resilience (`Chill`, shaped like `Scorch`); above a comfort band the heat makes work cost
+more (`Chill.strain`, a multiplier on fatigue accrual), because outdoor heat is strain rather than
+a burn.
+
 ### Radiation is a conductance, because `T⁴ − T_amb⁴` factors
 
 ```
@@ -130,12 +151,17 @@ that has not been given a surface is bit-identical to one from before radiation 
 > Oxidised iron runs near 0.8 and polished steel near 0.1, and what separates them is a wire
 > brush rather than a different metal.
 
-> **This is what makes a bright fire worth more than a merely hot one.** Measured on the steam
-> engine's firebox→water-legs link: raising the firebox from 860 K to 1083 K multiplies the
-> convective transfer by **1.51** — exactly the ratio of the temperature differences, as a linear
-> term must — and the radiant transfer by **2.60**, which is exactly
-> `(1083⁴ − 432⁴)/(860⁴ − 428⁴)`. A flat conductance cannot say that, and the damper and blower
-> now change how much heat *reaches the water* rather than only how much fuel is burnt.
+> **This is what makes a bright fire worth more than a merely hot one.** Raising a fire from
+> 860 K to 1083 K over 430 K water multiplies a linear transfer by about 1.5 — the ratio of the
+> temperature differences — and a radiant one by about 2.6, `(1083⁴ − 432⁴)/(860⁴ − 428⁴)`. A flat
+> conductance cannot say that, and the damper and blower change how much heat *reaches the water*
+> rather than only how much fuel is burnt.
+
+**Only what glows radiates.** A node answering `radiant_share(state, content)` scales the T⁴ term
+of every radiant `ThermalLink` it is an end of, the smaller share of the two ends winning
+(`Arbiter.heat_couplings`). A `Nodes::FuelBed` answers the share of its fuel alight, so a fresh
+charge darkens a fire and a banked bed under green coal barely radiates — which is what keeps its
+core hot. A link between nodes that answer no share is unchanged.
 
 ---
 
@@ -395,6 +421,22 @@ that burns away takes its share of the fire with it.
 **This does not replace modelling genuinely distinct temperatures as distinct nodes.** A
 reactor's fuel pin really is hundreds of kelvin above its coolant, and no ignited fraction can
 express that. The two answer different questions and are meant to coexist.
+
+### A fuel bed is a body of its own
+
+**With ignition, `rate_per_s` is how fast lit fuel burns at full air**, a share of it a second.
+Coal's is 10⁻³ — a lit lump lasts about a quarter of an hour — so a grate's bed builds until it
+burns what is stoked: about 150 kg on the stationary engine, minutes of burning. What the fire
+burns is then set by its air. Short of air, the lit mass falls back to what the air can burn,
+because starvation scales spread down and quench up, and a fuel declaring `limited_by: air` makes
+monoxide on the way: a banked fire is the same rule at a damper's leak.
+
+**A furnace is two bodies**: the bed on its grate (`Nodes::FuelBed`), at its own temperature, and
+the space over it. A banked bed stays hot under its green coal while the gas over it cools, and one
+lumped body cannot say so: in one, the cooling gas takes the bed below coal's ignition point and
+puts the core out. The bed's volume holds a tick's air, because a holder reacts with what it holds;
+its grate (`Nodes::Grate`) draws less through a deeper bed; and it radiates by its lit share.
+See [`design_sketches/coal-bed.md`](../design_sketches/coal-bed.md).
 
 ### Prompt reactions: what happens faster than a tick is resolved
 

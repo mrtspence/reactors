@@ -9,11 +9,11 @@
 # resumes the interval instead of silently dropping it, and the row is the artifact somebody
 # reads when an achievement did not fire and nobody can say why.
 #
-# Scoped to `run_id`, so a reset abandons whatever was open rather than letting it close
-# against a transition from a machine that is not the same machine.
+# Scoped to `run_id` and `operation_id`, so a reset abandons whatever was open, and an interval
+# only ever closes against a transition of the machine that opened it.
 class AchievementAttempt < ApplicationRecord
-  validates :owner_id, :run_id, :achievement_id, presence: true
-  validates :achievement_id, uniqueness: { scope: %i[owner_id run_id] }
+  validates :owner_id, :run_id, :operation_id, :achievement_id, presence: true
+  validates :achievement_id, uniqueness: { scope: %i[owner_id run_id operation_id] }
 
   scope :open, -> { where(disqualified: false) }
 

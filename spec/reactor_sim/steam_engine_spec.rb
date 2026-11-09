@@ -2,6 +2,7 @@
 
 require "reactor_sim"
 require "support/reference_crew"
+require "support/engine_rig"
 
 # **What is left of the engine's spec once every claim has been put where it is decided.**
 #
@@ -10,10 +11,11 @@ require "support/reference_crew"
 # one is not a separate claim — it re-proves each slice in sequence at a hundred times the price.
 # What is genuinely only answerable here:
 #
-# - **That a cold machine can be brought to life at all.** A constructed state cannot catch a bug
-#   in the path that *reaches* it — if lighting up breaks, every example starting from a hot
-#   engine still passes. So the first link is run for real, from a 292 K firebox. It needs 100
-#   ticks: the fire is alight at tick 11 and self-sustaining well before the end.
+# - **That the engine as built can be brought to work.** It is built banked, and a constructed
+#   state cannot catch a bug in the path that *reaches* a working engine — so the banked fire is
+#   brought through for real, on the bellows.
+# - **That a cold machine can be lit at all**, from a bare grate, for an engine whose fire has
+#   gone out.
 # - **Conservation through lighting up**, the one trajectory the five constructed states in
 #   `engine_stages_spec` cannot visit, because all of them start hot.
 # - **The architectural thesis**: both engines from the same parts. All build-time.
@@ -44,33 +46,35 @@ RSpec.describe "the steam engine", crew: :reference do
       .operation(:eng)
   end
 
-  # **Light the fire, and nothing beyond that.** A cold engine cannot simply be switched on, so
-  # this is the real opening move: the igniter in, the blower on, a hand on the shovel. Opening
-  # the regulator afterwards is not here any more, because everything it would demonstrate is a
-  # stage claim measured on a constructed state.
-  #
-  # The **blower** is not optional. Draught is real: a cold stack has no buoyancy and the
-  # blastpipe cannot help until the engine is already turning, so nothing establishes a fire
-  # without forced draught — which is the one example below that takes the part off.
-  # The lever positions are `ReferenceCrew::LIGHT`, because `diagnostic_spec` lights the same
-  # engine.
+  # **Light the fire, and nothing beyond that**: the igniter in, the blower on, a hand on the
+  # shovel, the igniter out at `igniter_out`. The lever positions are `ReferenceCrew::LIGHT`,
+  # because `diagnostic_spec` lights the same engine.
   #
   # **The shift has to be DEPLOYED, and that is the opening move of a match.** Crew start in the
-  # quarters rather than at a lever, so a run that posts nobody produces a 322 K firebox —
-  # correct, and the whole point of `crew_capacity.md`. `firing:` is the hand on the shovel;
-  # without one there is no fire at all.
-  def light!(op, ticks: 100, igniter_out: 30, firing: :crew_1, blower: nil)
+  # quarters rather than at a lever, so a run that posts nobody gets no fire at all. `firing:` is
+  # the hand on the shovel and `blowing:` the hand on the bellows.
+  def light!(op, ticks: 100, igniter_out: 30, firing: :crew_1, blowing: :crew_2)
     ReferenceCrew::LIGHT.each { |id, value| op.set_control(id, value) }
-    op.set_control(:blower, blower) if blower
     op.assign_minion(firing, :stoking) if firing
+    op.assign_minion(blowing, :blower) if blowing && op.control_points.key?(:blower)
 
     (1..ticks).flat_map do |t|
-      # Out well before the run ends, so what is measured at the end is a fire sustaining itself
-      # rather than a heater somebody left on. Alight at tick 11, established by 30.
       op.set_control(:igniter, 0) if t == igniter_out
       op.step!(tick: t)
     end
   end
+
+  # **Bring the banked fire through**: the damper open and the bellows worked with the regulator
+  # shut, the way a fireman livens a fire banked overnight — the blastpipe has nothing to blow
+  # with until there is steam.
+  def bring_up!(op, ticks:, blowing: :crew_2, from: 0)
+    ReferenceCrew::LIGHT.merge(igniter: 0, stoking: 60).each { |id, value| op.set_control(id, value) }
+    op.assign_minion(:crew_1, :stoking)
+    op.assign_minion(blowing, :blower) if blowing && op.control_points.key?(:blower)
+    (1..ticks).flat_map { |t| op.step!(tick: from + t) }
+  end
+
+  def lit_share(op) = ignited_kg(op) / contents(op, :fire_bed, :coal)
 
   # **"Nothing went wrong" is not "no events".** These examples used to assert an empty event
   # list, which meant the right thing when the only events were failures. The engine reports
@@ -92,33 +96,52 @@ RSpec.describe "the steam engine", crew: :reference do
   def truth(op, gauge) = op.project(viewer: :spectator).gauges.fetch(gauge)
 
   def ignited_kg(op)
-    op.state.fetch(:nodes).fetch(:firebox).dig(:ignition, :coal_combustion, :kg).to_f
+    op.state.fetch(:nodes).fetch(:fire_bed).dig(:ignition, :coal_combustion, :kg).to_f
   end
 
-  # **The one that keeps the rest of the suite honest.** Run for real, from cold, by the
-  # procedure — never from a snapshot, because a fixture restored from a hot engine cannot fail
-  # when the path to a hot engine breaks.
-  describe "a cold start, by the book" do
-    # **The one thing no constructed state can stand in for: that a cold machine can be brought
-    # to life at all.** Every stage *after* the fire is established is a slice in
-    # `engine_stages_spec` — the heat crossing into the drum, the drum filling the chest, the
-    # chest turning the wheel — and the whole startup is the composition of those. What is left
-    # that only this can say is the first link: an igniter, a blower and a shovel take a 292 K
-    # firebox to an established fire that then sustains itself, and the drum begins to gain.
-    #
-    # **100 ticks, because that is where the claim is decided and not a tick further.** The fire is
-    # first alight at **tick 11** and at 1,013 K by tick 100, with the igniter out since 30 — so
-    # by the end of this run it is sustaining itself, which is the whole claim. Running on to
-    # 3,600 for a turning wheel re-proves three slices at thirty-six times the price.
-    it "takes a cold firebox to a fire that sustains itself" do
+  # **The one that keeps the rest of the suite honest.** Run for real, by the procedure — never from
+  # a snapshot, because a fixture restored from a hot engine cannot fail when the path to a hot
+  # engine breaks.
+  describe "a banked start, by the book" do
+    # **The match opens on a fire banked by the shift before**, a small core under green coal, and
+    # the bellows bring it through: the whole bed is alight inside forty seconds and the drum at
+    # working pressure in about two and a half minutes. 200 ticks decides it — the bed through and
+    # the drum gaining.
+    it "brings the banked fire through on the bellows" do
       op = engine
-      events = light!(op, ticks: 100)
+      expect(lit_share(op)).to be < 0.05
+      events = bring_up!(op, ticks: 20)
+      was = pressure_of(op, :boiler)
+      events += bring_up!(op, ticks: 180, from: 20)
 
+      expect(lit_share(op)).to be > 0.9
+      expect(pressure_of(op, :boiler)).to be > was
       expect(truth(op, :fire_state)).not_to eq("cold")
-      expect(truth(op, :firebox_temp)).to be > 300 # °C at the gauge, not K
+      expect(breakages(events)).to be_empty
+    end
+
+    # **A fire already burning does not announce that it caught**, or every match would open on a
+    # `fire_lit` and the delivery tier would read a cold start into it.
+    it "reports no fire catching when it was banked alight" do
+      events = bring_up!(engine, ticks: 20)
+
+      expect(events.map { |e| e[:type] }).not_to include(:fire_lit)
+    end
+  end
+
+  describe "a cold start, by the book" do
+    # **That a bare, cold grate can be lit at all**, for an engine whose fire has gone out: an
+    # igniter, the bellows and a shovel take a 293 K grate to a fire that goes on spreading with the
+    # igniter out. Measured: 0.23 kg alight when it comes out at tick 30, 1.31 kg at tick 100.
+    it "takes a cold grate to a fire that sustains itself" do
+      op = EngineRig.cold(engine)
+      events = light!(op, ticks: 30)
+      lit = ignited_kg(op)
+      events += light!(op, ticks: 70, igniter_out: 1)
+
       # The difference between a fire and a heater somebody left on.
-      expect(ignited_kg(op)).to be > 0.1
-      expect(contents(op, :firebox, :ash)).to be > 0.0
+      expect(ignited_kg(op)).to be > 2.0 * lit
+      expect(contents(op, :fire_bed, :ash)).to be > 0.0
       expect(op.telemetry.fetch(:bunker)[:kg]).to be < 12_000.0
       expect(breakages(events)).to be_empty
     end
@@ -128,16 +151,20 @@ RSpec.describe "the steam engine", crew: :reference do
   # one of those claims is about the *startup* rather than about a stage. The safety valve, the
   # tube bundle and the cylinder relief are all measured in `engine_stages_spec` in tens of ticks.
   describe "going without the safety devices" do
-    # The sharpest result on the machine, and genuinely a cold-start claim: a cold stack has no
-    # buoyancy, so an engine with no forced draught cannot even establish its fire, let alone
-    # raise steam. Measured at 100 ticks — 636 K and 3.1 kPa, against 1,013 K with the donkey.
-    it "cannot raise steam at all with no blower fitted" do
+    # **A banked fire on natural draught alone only smokes.** With the regulator shut the blastpipe
+    # has nothing to blow, and a stack over a banked fire hardly draws, so the bed does not come
+    # through and the drum falls. Measured at 200 ticks: 15 kg of the bed alight against all of it
+    # on the bellows.
+    it "cannot bring a banked fire through with no blower fitted" do
       stripped = engine(loadout: { blower: nil })
-      light!(stripped, ticks: 100)
+      bring_up!(stripped, ticks: 20)
+      was = pressure_of(stripped, :boiler)
+      bring_up!(stripped, ticks: 180, from: 20)
+      bellows = engine.tap { |op| bring_up!(op, ticks: 200) }
 
       expect(rpm(stripped)).to be_within(1e-6).of(0.0)
-      expect(pressure_of(stripped, :boiler)).to be < 50_000.0
-      expect(ignited_kg(stripped)).to be < 0.5 * ignited_kg(engine.tap { |o| light!(o, ticks: 100) })
+      expect(pressure_of(stripped, :boiler)).to be < was
+      expect(ignited_kg(stripped)).to be < 0.5 * ignited_kg(bellows)
     end
   end
 
@@ -176,9 +203,9 @@ RSpec.describe "the steam engine", crew: :reference do
     # `engine_stages_spec` balances five different working states for 400 ticks each, which is
     # better coverage of the code paths — but all five start from an engine that is already hot,
     # so the ledger lines a cold start writes (an igniter injecting, a fire first catching) are
-    # only crossed here. Measured over this window: **mass 1.1e-16, energy exactly 0.**
+    # only crossed here.
     it "balances mass and energy through lighting up" do
-      op = engine
+      op = EngineRig.cold(engine)
       before_mass = ReactorSim::Ledger.mass_balance(op.total_mass, op.ledger)
       before_joules = ReactorSim::Ledger.energy_balance(op.total_joules, op.ledger)
 
@@ -195,7 +222,7 @@ RSpec.describe "the steam engine", crew: :reference do
   # The reason this operation was built. All build-time, so all free.
   describe "the architectural thesis" do
     it "builds both engines from the same parts" do
-      shared = %i[atmosphere bunker stoker damper firebox flue supply feed_pump
+      shared = %i[atmosphere bunker stoker damper grate fire_bed firebox flue supply feed_pump
                   boiler relief throttle cylinder flywheel load]
 
       %i[high_pressure atmospheric].each do |variant|

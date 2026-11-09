@@ -21,6 +21,9 @@ module ReactorSim
 
       # Sources are configuration; two with the same settings are interchangeable.
       def label = self.class.name.split("::").last.downcase
+
+      # The nodes this source reads, which is what places its instrument.
+      def nodes = [ @node ]
     end
 
     # A raw field out of a node's state hash.
@@ -55,7 +58,7 @@ module ReactorSim
         # gauge glass shows and why a swelling boiler reads high. See `Nodes::Boiler`.
         effective_fill: :with_content,
         contents_kg: :state_only,
-        # How close a sump is to the mark where it stops being wet and starts being flooded.
+        # How close standing water is to the mark where it stops being wet and starts being flooded.
         # A fraction rather than a weight, because that is what a float on a chain reports.
         flooding: :with_content,
         # Rotation and wear. All state-only, because none of them need to know what the
@@ -66,7 +69,7 @@ module ReactorSim
         kinetic_joules: :state_only,
         stress_fraction: :with_content,
         integrity: :state_only,
-        # Rope a hoist has paid out, and how much of it the cage is not hanging on.
+        # Rope a hoist has paid out, and how much of it its conveyance is not hanging on.
         position_m: :state_only,
         slack_m: :state_only
       }.freeze
@@ -97,7 +100,7 @@ module ReactorSim
     # **A level is the condensed phases and nothing else.** It used to read `contents_volume`,
     # which prices every parcel at its nominal density — gases included — and a gas has no
     # business being measured that way, because it expands to fill whatever it is in rather than
-    # occupying a fixed share of it. On the steam engine's boiler that reads **317% full**.
+    # occupying a fixed share of it. On a working boiler that reads **317% full**.
     #
     # `room_m3` is where the right rule already lives (see `Holds`), so a level is what a node
     # has not left room for. Nodes that report unlimited room — `Atmosphere` — have no
@@ -141,7 +144,7 @@ module ReactorSim
 
     # What **fraction** of a node's contents is one substance, as a percentage.
     #
-    # `Contents` in kilograms is the wrong reading wherever the total can move: a district
+    # `Contents` in kilograms is the wrong reading wherever the total can move: a room
     # holding 30 kg of firedamp is comfortable with the fan running and lethal without it,
     # because the air went with the fan. Concentration is the quantity that means one thing in
     # both cases — and it is the quantity every damp is described in, because it is what a
@@ -249,6 +252,8 @@ module ReactorSim
 
         Reading.of(values.public_send(OPERATIONS.fetch(@operation)))
       end
+
+      def nodes = @sources.flat_map(&:nodes).uniq
     end
   end
 end

@@ -26,7 +26,7 @@ module ReactorSim
 
     attr_reader :id, :type, :nodes, :links, :paths, :gas_neighbours, :thermal_links, :drive_links, :layout,
                 :control_points, :diagnostics, :minions, :state, :content, :time_scale,
-                :options, :rngs, :routing
+                :options, :rngs, :routing, :grudges
 
     def initialize(id:, type:, nodes:, links: [], thermal_links: [], drive_links: [],
                    passages: [], places: [], control_points: [], diagnostics: [], minions: [],
@@ -53,6 +53,9 @@ module ReactorSim
       @layout = Layout.new(passages: passages, control_points: control_points,
                            places: places, nodes: @nodes)
       @routing = build_routing
+      # Who dislikes whom before anything has happened, earlier matches included (`grudges:`
+      # in `options:`, from the delivery tier).
+      @grudges = Animosity.table(@minions.values, @options[:grudges])
 
       validate_graph!
       # Routes are derived from the graph, which is configuration rather than state, so this
@@ -86,7 +89,7 @@ module ReactorSim
     # nothing sane to clamp a station to: unlike a number out of range, a mistyped lever has no
     # nearest valid neighbour.
     # **An unreachable station is refused, not attempted.** Where there is geometry a posting can
-    # be impossible for *this* minion — a narrow crawl they cannot fit through, a ladderway they
+    # be impossible for *this* minion — a narrow crawl they cannot fit through, a ladder they
     # cannot climb — and walking them into a wall for the rest of the match is worse than saying
     # no. Reachability is per-minion because the gates are.
     # **A posting may name a lever or a person.** Sending somebody to a person is a *fetch
@@ -150,7 +153,7 @@ module ReactorSim
 
     # **Counted over `posting`, not `station`.** Two people sent to a one-man hole must be
     # refused when the order is given, not discovered on arrival minutes later — and the second
-    # of them would otherwise walk the length of the district to stand in somebody's lap.
+    # of them would otherwise walk the length of the place to stand in somebody's lap.
     #
     # The minion being posted is excluded, so re-sending somebody to the station they already
     # hold stays the no-op an at-least-once log needs it to be.
@@ -353,14 +356,18 @@ module ReactorSim
       # it as a lever puts a slider on the panel that does nothing, and leaving it out of
       # `stations` makes the one place crew start unreachable from the crew screen.
       { operation_id: @id,
-        instruments: @diagnostics.values.map(&:chrome),
+        instruments: @diagnostics.values.map { |d| d.chrome.merge(places: instrument_places(d)) },
         controls: @control_points.values.select(&:commandable?).map { |c|
-          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit }
+          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit, capacity: c.capacity, place: c.place }
         },
-        stations: @control_points.values.reject(&:internal?).map { |c| { id: c.id, label: c.label } },
+        # `capacity` is how many the post takes (nil: no limit), so the crew screen can show a
+        # gang filling up from the postings it already has.
+        stations: @control_points.values.reject(&:internal?).map { |c|
+          { id: c.id, label: c.label, capacity: c.capacity, place: c.place }
+        },
         # **Empty for an operation with no geometry**, which is what makes the panel's "where
-        # are they" line nil-accepting rather than a mine-only feature: the steam engine ships
-        # no places and the client renders nothing.
+        # are they" line nil-accepting: an operation that declares no places gets nothing
+        # rendered.
         places: @layout.places.filter_map { |id|
           place = @layout.place(id)
           { id: id, label: place.label } if place
@@ -430,6 +437,18 @@ module ReactorSim
 
     private
 
+    # **Where an instrument is read**, derived, in `Layout` order: its observer's post's place;
+    # else the places of the nodes it reads; else the places of the posts working those nodes — a
+    # way between two rooms is in both. Empty is nowhere in particular: the works.
+    def instrument_places(diagnostic)
+      return [ @layout.place_of(diagnostic.observer) ] if @layout.place_of(diagnostic.observer)
+
+      nodes = diagnostic.source.nodes
+      found = nodes.filter_map { |node| @layout.place_of_node(node) }
+      found = @control_points.values.select { |c| nodes.include?(c.node) }.filter_map(&:place) if found.empty?
+      @layout.places & found
+    end
+
     # --- phases --------------------------------------------------------------
 
     # Phase 0. Levers travel toward their targets. All actuation entropy belongs here,
@@ -437,14 +456,29 @@ module ReactorSim
 
     # --- construction --------------------------------------------------------
 
+    # **A conduit an effort post works is `worked:`, and only those are.** Its lever arrives in
+    # worker-equivalents, and a conduit that does not know it clamps the crew to one worker's rate
+    # at the valve and at its own ports — silently, so a five-man face would cut one man's coal.
+    # The other way round, a valve read as a crew would let its position run past 100%.
+    def validate_worked!
+      @nodes.each_value do |node|
+        next unless node.is_a?(Nodes::Conduit)
+
+        levers = [ node.control_id, node.head_control_id ].compact
+        effort = levers.any? { |id| @control_points[id]&.effort? }
+        next if effort == node.worked? || levers.empty?
+
+        raise Error, "conduit #{node.id}: worked by #{levers.join(', ')} " \
+                     "but #{node.worked? ? '' : 'not '}declared worked:"
+      end
+    end
+
     def validate_graph!
       # Nodes, levers, instruments and crew share one flat id namespace, because they share
       # one rng table — `build_rngs` keys every stream by component id. A collision hands two
       # components the same stream, which is silent, survives a snapshot, and quietly destroys
-      # the order-independence the per-name streams exist to provide.
-      #
-      # Not hypothetical: the obvious name for a steam engine's fireman is `stoker`, and
-      # `:stoker` is already the node that carries fuel to the firebox.
+      # the order-independence the per-name streams exist to provide. The obvious name for a post
+      # is often the obvious name for the node it works.
       ids = @nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys
       duplicates = ids.tally.select { |_, count| count > 1 }.keys
       raise Error, "duplicate component ids: #{duplicates.join(', ')}" if duplicates.any?
@@ -456,17 +490,23 @@ module ReactorSim
         raise Error, "minion #{minion.id}: no control point #{station}"
       end
 
-      # **An `observer:` names a station, and the station has to exist.** While the seam was
-      # inert this went unchecked and five of the steam engine's gauges named posts that were
-      # never control points — `:fireman`, `:yardhand` — which read as intent and did nothing.
-      # The moment the seam went live they became gauges that could never be manned and so
-      # were permanently offline. A decorative observer is worse than none.
+      # **An `observer:` names a station, and the station has to exist.** A gauge naming a post
+      # that is not a control point can never be manned, and so is permanently offline. A
+      # decorative observer is worse than none.
       @diagnostics.each_value do |diagnostic|
         station = diagnostic.observer
         next if station.nil? || @control_points.key?(station)
 
         raise Error, "diagnostic #{diagnostic.id}: no control point #{station} to observe it"
       end
+
+      # **A light's places have to exist.** One aimed at a place that is not there lights nobody.
+      @nodes.each_value do |node|
+        missing = node.respond_to?(:lights) ? node.lights - @layout.places : []
+        raise Error, "#{node.id}: lights no place called #{missing.join(', ')}" if missing.any?
+      end
+
+      validate_worked!
 
       # A mishap is suffered by the part it names, and only a part that understands that kind of
       # mishap can. Aimed anywhere else it would be a peril that silently breaks nothing.
@@ -479,6 +519,22 @@ module ReactorSim
 
           raise Error, "peril #{peril.id}: #{peril.mishap.fetch(:node)} cannot suffer " \
                        "#{peril.mishap.fetch(:kind)}"
+        end
+      end
+
+      validate_hazards!
+
+      # The same of a post's openings: sabotage aimed at a part that cannot suffer it is a feud
+      # that silently does nothing.
+      @control_points.each_value do |control|
+        control.openings.each do |opening|
+          next unless opening.mishap
+
+          target = @nodes[opening.mishap.fetch(:node)]
+          next if target.respond_to?(:suffers?) && target.suffers?(opening.mishap.fetch(:kind))
+
+          raise Error, "opening #{opening.id}: #{opening.mishap.fetch(:node)} cannot suffer " \
+                       "#{opening.mishap.fetch(:kind)}"
         end
       end
 
@@ -513,11 +569,19 @@ module ReactorSim
     #
     # Streams are derived from the NAME, never from position, which is why adding a crew to an
     # existing operation perturbs no stream that was already there — and therefore changes no
-    # physics. That property is what made it safe to give the steam engine a crew without
+    # physics. That property is what makes it safe to give an operation a crew without
     # re-tuning it.
+    # Scoped by operation, except for a node that names a **match-wide** stream — the sky — so
+    # that every operation in a match draws the same one.
+    # Each person also has a temper stream (`Animosity.stream`), a wound stream (`Injury.stream`) and
+    # a cover stream (`Cover.stream`).
     def build_rngs(seed)
-      (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys)
-        .to_h { |id| [ id, Rng.stream(seed, "#{@id}/#{id}") ] }
+      streams = (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys).to_h do |id|
+        shared = @nodes[id].respond_to?(:shared_stream) ? @nodes[id].shared_stream : nil
+        [ id, Rng.stream(seed, shared || "#{@id}/#{id}") ]
+      end
+      personal = @minions.keys.flat_map { |id| [ Animosity.stream(id), Injury.stream(id), Cover.stream(id) ] }
+      streams.merge(personal.to_h { |stream| [ stream, Rng.stream(seed, "#{@id}/#{stream}") ] })
     end
 
     # A snapshot round-trips through JSON, which stringifies symbol keys — and only keys.
@@ -574,7 +638,9 @@ module ReactorSim
                                  via: minion_state[:via]&.to_sym,
                                  riding: minion_state[:riding]&.to_sym,
                                  injury: minion_state[:injury]&.to_sym,
-                                 carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze)
+                                 carrying: Array(minion_state[:carrying]).map(&:to_sym).freeze,
+                                 fight: restored_fight(minion_state[:fight]),
+                                 wounds: restored_wounds(minion_state[:wounds]))
               .freeze ]
       end
 
@@ -593,18 +659,67 @@ module ReactorSim
         mishap.merge(node: mishap.fetch(:node).to_sym, kind: mishap.fetch(:kind).to_sym).freeze
       end
 
+      # A deliberate slip waiting for phase 0 names a lever and a slip kind, both values.
+      spite = state.fetch(:spite, []).map do |deed|
+        deed.merge(control: deed.fetch(:control).to_sym, slip: deed.fetch(:slip).to_sym).freeze
+      end
+
       state.merge(nodes: nodes.freeze, diagnostics: diagnostics.freeze, controls: controls.freeze,
-                  minions: minions.freeze, mishaps: mishaps.freeze,
+                  minions: minions.freeze, mishaps: mishaps.freeze, spite: spite.freeze,
                   events: state.fetch(:events, [])).freeze
     end
+
+    # **Every harm a part can do says what it does to a body**, known kinds as shares and known
+    # causes, or the machine does not build: nothing reaches the Danger Check untyped.
+    def validate_hazards!
+      @nodes.each do |id, node|
+        hazards = node.respond_to?(:failure_hazards) ? node.failure_hazards : {}
+        hazards.each do |mode, declared|
+          owner = "node #{id} #{mode}"
+          raise Error, "#{owner}: tags: is gone — declare wounds: and causes:" if declared.key?(:tags)
+
+          Wounds.shares!(owner, declared[:wounds])
+          Wounds.causes!(owner, declared[:causes])
+          crushed = declared.dig(:along, :crushed)
+          Wounds.shares!("#{owner} crushed", crushed[:wounds]) if crushed
+        end
+        boarding = node.respond_to?(:boarding_hazard) ? node.boarding_hazard : nil
+        Wounds.shares!("node #{id} boarding", boarding[:wounds]) if boarding
+      end
+    end
+
+    # Who somebody is rowing with and which melee they are in are held as values; restored as
+    # Strings, a row would name nobody and a melee's members would each be in a fight of one.
+    def restored_fight(fight)
+      return nil if fight.nil?
+
+      fight.merge(fight.slice(:with, :melee).transform_values(&:to_sym)).freeze
+    end
+
+    # **A wound names its kind, tier, variant and cause as values**: a String kind matches no
+    # standing wound, so heat would open a second one beside the first, and a String tier is no
+    # rung of the ladder.
+    def restored_wounds(wounds)
+      Array(wounds).map do |wound|
+        wound.merge(wound.slice(:kind, :tier, :id, :cause).transform_values(&:to_sym)).freeze
+      end.freeze
+    end
+
+    # **What somebody brings from earlier matches**: `options[:wounds]` is
+    # `{ person => [{ kind:, depth:, variant:, cause: }] }`, healed already by the delivery tier.
+    def carried_wounds(minion) = (Wounds.carried_over(@options[:wounds]) || {}).fetch(minion.minion, [])
 
     def build_initial_state
       { nodes: @nodes.to_h { |id, n| [ id, n.initial_state(@rngs.fetch(id), @content) ] }.freeze,
         controls: @control_points.to_h { |id, c| [ id, c.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
         diagnostics: @diagnostics.to_h { |id, d| [ id, d.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
-        minions: @minions.to_h { |id, m| [ id, m.initial_state(@rngs.fetch(id)).freeze ] }.freeze,
+        minions: @minions.to_h { |id, m|
+          fresh = m.initial_state(@rngs.fetch(id)).merge(Animosity.initial_state(@rngs.fetch(Animosity.stream(id))))
+          [ id, Injury.carried(fresh, carried_wounds(m), @content.wounds).freeze ]
+        }.freeze,
         ledger: Ledger.initial.freeze,
         mishaps: [].freeze,
+        spite: [].freeze,
         events: [] }.freeze
     end
   end

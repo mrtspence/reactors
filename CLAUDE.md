@@ -57,7 +57,7 @@ no longer exists. Read them for why a decision was made, never as a description 
 ## Commands
 
 ```sh
-bundle exec rspec                          # full suite (~10 min)
+bundle exec rspec                          # full suite (~20 min)
 bundle exec rspec --dry-run                # count the examples a full run should reach
 bundle exec rspec spec/reactor_sim/conservation_spec.rb   # one file
 bin/rubocop                                # style + the bug-catching cops
@@ -93,6 +93,7 @@ So: before you call a piece of work done, check this table and update what your 
 | A concern's config, state or methods | [`docs/reference/nodes.md`](docs/reference/nodes.md), [`concerns/CLAUDE.md`](lib/reactor_sim/concerns/CLAUDE.md) |
 | A stock node added or removed | [`docs/reference/nodes.md`](docs/reference/nodes.md), [`nodes/CLAUDE.md`](lib/reactor_sim/nodes/CLAUDE.md) |
 | A Source, Filter, Display, or `SIGNATURES` entry | [`docs/reference/diagnostics.md`](docs/reference/diagnostics.md), [`diagnostics/CLAUDE.md`](lib/reactor_sim/diagnostics/CLAUDE.md) |
+| Where anything sits on screen, or the goal layout | [`docs/reference/layout.md`](docs/reference/layout.md) |
 | A resource tag, reaction key, or material field | [`docs/guides/add-content.md`](docs/guides/add-content.md), [`content/CLAUDE.md`](content/CLAUDE.md) |
 | An operation or variant | [`docs/guides/build-an-operation.md`](docs/guides/build-an-operation.md), [`operations/CLAUDE.md`](lib/reactor_sim/operations/CLAUDE.md) |
 | A spec file, or the helper split | [`spec/CLAUDE.md`](spec/CLAUDE.md) |
@@ -115,6 +116,23 @@ So: before you call a piece of work done, check this table and update what your 
   address the reader's supposed instinct. Say what is true, once.
 - **`docs/design_sketches/` is the exception** and may stay verbose — it is the home for
   reasoning, alternatives and back-and-forth. Link to it instead of reproducing it.
+
+### Shared code speaks no operation's language
+
+**Everything outside an operation's own folder is shared** — the tick, the graph, the stock nodes,
+the concerns, physics, diagnostics, people, assembly — **and its names are generic.** Identifiers,
+state keys, config keys and comments say *room*, *post*, *conveyance*, *carrier*, *way*, *traffic*,
+*vessel*; never one operation's *district*, *cage*, *hewer*, *fireman*, *pit bottom*, *train* or
+*footplate*. A stock node may be named for the generic thing it is (`Boiler`, `Hoist`, `Rope`), and
+that is not an operation's word. **Content is named for what it is** — a resource, an item of kit, a
+ticket (`coal`, the Pit Helmet, the Shotfirer's Ticket) — wherever its catalogue lives.
+
+- **Describe the mechanism, not the case that motivated it.** The operation's example belongs in its
+  own `operations/<name>/` code or its design sketch.
+- **Inside `operations/<name>/`, specific names are right.** The colliery's banksman is the
+  banksman.
+- **Before finishing a change to a shared file, grep it for operation words.** A shared file that
+  knows one operation's vocabulary is the first step to a shared file that knows its behaviour.
 
 ### A seam left for later must say so, in the code, by name
 
@@ -148,6 +166,10 @@ Do not add a new inventory list without a derivation command next to it.
 
 ## Working style
 
+- **A shape written twice is extracted, and its rule written down.** Before writing a node, read
+  the stock shapes in [`nodes/CLAUDE.md`](lib/reactor_sim/nodes/CLAUDE.md#a-shape-written-twice-is-a-stock-shape)
+  — a fire is a `FuelBed`, a busy conduit has `traffic:`. Finding yourself copying another node's
+  code is the signal to lift it into the library and add the shape there, in the same change.
 - **Design before implementation.** Non-trivial features get a design doc reviewed and
   iterated before code. `docs/design_sketches/` is input to that, not a description of what
   exists.

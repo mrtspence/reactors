@@ -31,7 +31,8 @@ module ReactorSim
   class Slot
     WHEN_EMPTY = %i[omit bypass].freeze
 
-    attr_reader :id, :accepts, :label, :group, :default, :when_empty, :bypass, :informs
+    attr_reader :id, :accepts, :label, :group, :default, :when_empty, :bypass, :informs, :spec, :needs,
+                :needs_at_least
 
     # `group:` is presentation, and the only thing here that is. An outfitting screen reads down
     # a machine by system — fire, then water, then steam, then the engine — because that is how
@@ -42,8 +43,23 @@ module ReactorSim
     # the one way a fitting can shape another slot's wiring, and named here so the dependency is
     # visible in the slot list rather than hidden in a builder. A dumb drift tells the furnace where
     # its air comes from. It reaches part builders, not the chassis fixtures.
+    #
+    # `spec:` is what this slot tells the part fitted in it about itself, over the assembly's own
+    # spec: which of several engines it belongs to (`names:`, a `Names`), so two engines' boilers
+    # are two ids.
+    #
+    # `needs:` names the slot this one belongs to: **built only while that one is fitted**, and
+    # neither required nor checked while it is not. A machine is a dozen slots — its engine,
+    # bunker, tank, valve and working parts — under one that says whether it is there at all;
+    # fitting that one brings the rest on their defaults, and leaving it empty costs
+    # nothing and says nothing.
+    #
+    # `needs_at_least:` asks more of it: `{ stat => figure }` the part fitted there must reach, so a
+    # washhouse of four bays builds a fourth bay and one of three does not.
     def initialize(id:, accepts:, label: nil, group: :other, required: false, default: nil,
-                   when_empty: :omit, bypass: nil, informs: [])
+                   when_empty: :omit, bypass: nil, informs: [], spec: {}, needs: nil, needs_at_least: {})
+      @needs = needs&.to_sym
+      @needs_at_least = needs_at_least.to_h { |stat, figure| [ stat.to_sym, figure ] }.freeze
       @id = id.to_sym
       @accepts = accepts.to_sym
       @label = label || @id.to_s.tr("_", " ").capitalize
@@ -53,6 +69,7 @@ module ReactorSim
       @when_empty = when_empty.to_sym
       @bypass = normalise_bypass(bypass)
       @informs = Array(informs).map(&:to_sym).freeze
+      @spec = spec.freeze
 
       validate!
       freeze
@@ -83,6 +100,10 @@ module ReactorSim
     end
 
     def validate!
+      if @needs.nil? && @needs_at_least.any?
+        raise Error, "slot #{@id}: needs_at_least: says what the part in its needs: slot must reach, and it names none"
+      end
+
       unless WHEN_EMPTY.include?(@when_empty)
         raise Error, "slot #{@id}: when_empty must be one of #{WHEN_EMPTY.join(', ')}, " \
                      "got #{@when_empty.inspect}"

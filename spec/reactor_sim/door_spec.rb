@@ -16,11 +16,11 @@ RSpec.describe "the haulage door" do
   def open(op) = op.state.dig(:nodes, :door, :open)
   def door(op) = op.nodes.fetch(:door)
 
-  # One tick of the door's own rule, against a road whose traffic is given as of last tick and a
-  # trapper working at `trapping` percent.
+  # One tick of the door's own rule, against a road whose traffic is given as of last tick — as a
+  # share of a full gang's — and a trapper working at `trapping` percent.
   def after_a_tick(op, open:, tubs: 0.0, trapping: 0.0)
     road = op.nodes.fetch(:tub_road)
-    carried = tubs * road.port(:outlet).capacity_kg(ReactorSim::DT)
+    carried = tubs * road.full_crew_kg_per_s * ReactorSim::DT
     states = op.state[:nodes].merge(tub_road: op.state.dig(:nodes, :tub_road).merge(carried_kg: carried))
     ctx = ReactorSim::Tick::Context.new(controls: { trapping: trapping }, dt: ReactorSim::DT,
                                         nodes: op.nodes, states: states)

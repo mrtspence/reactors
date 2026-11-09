@@ -145,6 +145,13 @@ firedamp and belting declare it. **A hot spot is a node**, never a second solve;
 **It does not replace distinct nodes for distinct temperatures.** A reactor's fuel pin is
 genuinely hundreds of kelvin above its coolant; no ignited fraction expresses that.
 
+**A fire is two bodies**: the bed on its grate (`Nodes::FuelBed`) and the space over it. With
+ignition, `rate_per_s` is how fast lit fuel burns at full air — coal's 10⁻³, a lump lasting a quarter
+of an hour — so a grate's bed builds to minutes of burning and its air sets what it burns. Starved,
+the lit mass settles where its air can burn it, which is a banked fire; it stays hot because the bed
+is its own body and **radiates by its lit share** (`radiant_share`, read by `Arbiter.heat_couplings`).
+See [`physics.md`](../../../docs/reference/physics.md#a-fuel-bed-is-a-body-of-its-own).
+
 **Outside its range a flame burns what it lights, one for one** — there is no front to move on —
 so a candle's seed is a flame cap's worth. **A premixed fuel's lit share gets only its share of
 the air** (`Reaction.premixed_share`), so a rich mixture burns rich from the first gram.

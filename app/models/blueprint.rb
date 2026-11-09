@@ -164,7 +164,7 @@ class Blueprint
     # Elowynne, an elf who reads a gauge glass better than she shifts coal.
     #
     # The label is their NAME, because that is what a roster screen shows and what a player
-    # remembers when one of them is on the injury list.
+    # remembers when one of them is out healing.
     # **`hireable`, not `minions`.** The last-resort standin is an individual like any other and
     # is deliberately not for sale: it turns up when nobody better will, which is the entire
     # point of it, so it must never appear as something to unlock.

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -19,10 +19,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
     t.datetime "created_at", null: false
     t.boolean "disqualified", default: false, null: false
     t.bigint "opened_at_tick", null: false
+    t.string "operation_id", null: false
     t.string "owner_id", null: false
     t.string "run_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["owner_id", "run_id", "achievement_id"], name: "idx_on_owner_id_run_id_achievement_id_6a52275d8e", unique: true
+    t.index ["owner_id", "run_id", "operation_id", "achievement_id"], name: "index_attempts_on_owner_run_machine", unique: true
   end
 
   create_table "awards", force: :cascade do |t|
@@ -33,6 +34,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
     t.bigint "tick"
     t.datetime "updated_at", null: false
     t.index ["owner_id", "achievement_id"], name: "index_awards_on_owner_id_and_achievement_id", unique: true
+  end
+
+  create_table "grudges", force: :cascade do |t|
+    t.float "amount", default: 0.0, null: false
+    t.jsonb "applied_ticks", default: [], null: false
+    t.datetime "created_at", null: false
+    t.string "holder_id", null: false
+    t.string "owner_id", null: false
+    t.string "run_id"
+    t.string "target_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["owner_id", "holder_id", "target_id"], name: "index_grudges_on_owner_id_and_holder_id_and_target_id", unique: true
   end
 
   create_table "incidents", force: :cascade do |t|
@@ -77,15 +90,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
     t.index ["run_id"], name: "index_match_runs_on_run_id", unique: true
   end
 
-  create_table "minion_conditions", force: :cascade do |t|
-    t.string "cause"
+  create_table "match_setups", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.integer "matches_remaining", default: 0, null: false
-    t.string "minion_id", null: false
-    t.string "owner_id", null: false
-    t.string "run_id"
+    t.string "match_id", null: false
+    t.string "season", null: false
     t.datetime "updated_at", null: false
-    t.index ["owner_id", "minion_id"], name: "index_minion_conditions_on_owner_id_and_minion_id", unique: true
+    t.index ["match_id"], name: "index_match_setups_on_match_id", unique: true
   end
 
   create_table "operations", force: :cascade do |t|
@@ -102,11 +112,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
   create_table "progresses", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "metric", null: false
+    t.string "operation_id"
+    t.string "operation_type", null: false
     t.string "owner_id", null: false
     t.string "run_id"
     t.datetime "updated_at", null: false
     t.float "value", default: 0.0, null: false
-    t.index ["owner_id", "run_id", "metric"], name: "index_progresses_on_owner_id_and_run_id_and_metric", unique: true, nulls_not_distinct: true
+    t.index ["owner_id", "run_id", "operation_id", "operation_type", "metric"], name: "index_progresses_on_owner_run_machine_metric", unique: true, nulls_not_distinct: true
   end
 
   create_table "rosters", force: :cascade do |t|
@@ -126,5 +138,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_30_140000) do
     t.string "owner_id", null: false
     t.datetime "updated_at", null: false
     t.index ["owner_id", "kind", "blueprint_id"], name: "index_unlocks_on_owner_id_and_kind_and_blueprint_id", unique: true
+  end
+
+  create_table "wounds", force: :cascade do |t|
+    t.string "cause"
+    t.datetime "created_at", null: false
+    t.float "depth", null: false
+    t.string "kind", null: false
+    t.string "minion_id", null: false
+    t.string "owner_id", null: false
+    t.string "run_id", null: false
+    t.integer "slot", null: false
+    t.datetime "updated_at", null: false
+    t.integer "variant", null: false
+    t.index ["owner_id", "minion_id", "run_id", "slot"], name: "index_wounds_on_owner_id_and_minion_id_and_run_id_and_slot", unique: true
   end
 end

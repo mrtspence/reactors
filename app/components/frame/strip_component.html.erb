@@ -1,0 +1,12 @@
+<div class="frame-strip flex flex-wrap items-stretch gap-x-6 gap-y-2 px-4 py-2 border-b border-slate-800"
+     data-controller="gauges">
+  <section aria-label="The weather" class="flex flex-wrap gap-2">
+    <%= render InstrumentComponent.with_collection(frame.weather) %>
+  </section>
+
+  <% if frame.outputs.any? %>
+    <section aria-label="Output" class="flex flex-wrap gap-2 lg:ml-auto">
+      <%= render InstrumentComponent.with_collection(frame.outputs) %>
+    </section>
+  <% end %>
+</div>

@@ -19,8 +19,8 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > snapshot.
 > `Crew.normalise` is its `Assembly#resolve_loadout` — every **seat** named including the
 > unfilled ones, every id symbolised, `:none` for a slot deliberately emptied. An unfilled seat
-> is not an empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "on the
-> injury list" the same thing to the engine.
+> is not an empty one: `Crew::STANDIN` turns up, which is what makes "nobody chosen" and "out
+> healing" the same thing to the engine.
 >
 > **How many seats there are comes from the fitted crew quarters**, found by what its slot
 > *accepts* rather than by a slot id — `Assembly#crew_capacity` and `#crew_origin`. A roster
@@ -33,8 +33,10 @@ and an atmospheric engine restores as a high-pressure one — a total, silent di
 > `pit_bottom_shift` slots) put three seats in the district and three at the pit bottom to start
 > with, five of either upgraded, posted to nothing, so there is work to do before anybody has
 > walked anywhere. A part declares `stats: { advance_seats:, advance_place: }`;
-> `Assembly#advance_shifts` reads them in slot order and `Mine.crew_for` deals them from the end of
-> the roster, face first, so the first seats stay at bank. It is a property of the SEAT, decided
+> `Assembly#advance_shifts` reads them in slot order and `Crew.minions` deals them from the end of
+> the roster, face first, so the first seats stay at bank. A part fitted in several slots — the
+> open pit's bench hut, at either bench — leaves out `advance_place:` and takes its slot's
+> `names.place`. It is a property of the SEAT, decided
 > by the loadout at build, so a draft roster never changes the answer; the crew screen reads it
 > back off the built minions' `default_place`. The pit bottom has its own refuge
 > (`pit_bottom_rest`, room for one) beside the district's.
@@ -105,7 +107,216 @@ Three ways that goes wrong, all of them silent:
   look the same to the builder.
 - **The registered builder whitelists its keywords.** An option it does not name is an
   `ArgumentError` at restore. Loud, which is right — but `options:` and that signature have to
-  move together.
+  move together. `conditions:` (the match's sky) is one of them on every operation with an
+  `Outdoors` fixture.
+
+## The sky over it
+
+**An operation with anything outdoors carries `Nodes::Outdoors` as a fixture, its places declare
+`exposure:`, and its panel and slots take `WeatherGauges`** — the guesses on a post that works
+outdoors (the hour among them), the instruments as a fitted slot, at the end of `PANEL_ORDER`, all
+`role: :weather`. Nothing about the weather is written per operation. **What a machine makes is
+`role: :output`** on its gauge — the pit's Finished Ore, the colliery's Coal Raised, the engine's
+Indicated Power. **A board off a node's `SIGNALS` names its calm ones** (`CALM`, through
+`Displays::Prose.signals`), which is what the console's places box reads. Rain reaches a holder through a `Nodes::Catchment`. Full checklist:
+[`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-sky-over-it).
+
+## The people in it, and each other
+
+**A crewed operation's builder and register block take `grudges:`** and keep it in `options:`
+(`Animosity.carried_over`). What a feud can do there is declared, never coded: `openings:` on a post
+(a mishap or a slip somebody there could do on purpose, and whom it reaches), `opportunity: true` on
+a peril (somewhere a person can be pushed), `oversees:` on a boss's post. The colliery's are the
+banksman's and the onsetter's false all-clear, the banksman's tub down the shaft, the hauling hands'
+loosed set and the shotfirer's charge left live, with the overman in a `supervision` slot. Checklist:
+[`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-people-in-it-and-each-other).
+
+## Mobile engines
+
+**A shovel's or a locomotive's engine is its own** (`MobileEngine`), never a load on the line
+shaft: the stationary engine's own pieces at a tenth the size, under the engine's own names. An
+operation carrying one fits `MobileEngine.slots(engine, place:)` among its own slots — the engine
+itself, then the safety valve, what reads the water and the pressure, a plug, the bunker, the
+tank and the cab — and supplies the rest: the `Atmosphere`, the place it stands in, and whatever its flywheel
+drives. `MobileEngine.driver(assembly, engine, place:)` is the driver's post, built after assembly
+because he reads by whatever was fitted.
+
+- **Every id is the engine's** (`Names`): `names.(:boiler)` is `:shovel_1_boiler`, so two shovels
+  are two engines. The prefix is the engine's own slot name, unique by construction. A
+  `SteamEngine` builder or fragment helper a mobile engine shares takes `names:`, defaulting to
+  `SteamEngine::HOUSE` — no prefix, so the stationary engine is bit-identical.
+- **Her cab is a slot** (an open platform to start, a wooden cab, a steel cab): a `Nodes::Shelter`
+  over the fireman's and the driver's posts, so they stay at them when a shot is called, under its
+  cover — a wooden cab as a timber shelter, a steel one as steel.
+- **Two people work it**: the fireman, an effort post at the blueprint's rate, and the driver, a
+  governor post working the throttle to his post's lever and the feed to the water he reads. Every
+  other lever is `internal:` and held where the part declares. A sidegrade that gives the player a
+  lever is a different part, not a flag.
+- **The gauges are the driver's**: a reading part builds nothing and sets how finely he reads.
+- **He keeps her from racing**: past her governed speed he eases the throttle, and shuts it a fifth
+  over — a shovel's work comes and goes with every swing.
+- **Her fire is the stationary engine's two bodies**: a bed on the grate (`fire_bed`, about 30 kg on
+  the vertical engine and 60 on the heavy one) and the firebox over it.
+- **She starts at work**: `MobileEngine.raised` puts a freshly built operation's engines in the
+  state one was observed in — the fitted engine's own (`BY_ENGINE`: `AT_WORK` for the vertical
+  engine, `HEAVY_AT_WORK` for the heavy one), her fire `alight` and her drum at `full_head` so she
+  announces neither — and her fireman and driver start at their posts
+  (`advance_posts:` on the engine part). One set of figures an engine, so a retune moves them all.
+- **Two engines**: the vertical engine, and the heavy one at about twice the fire and the power.
+  The fireman fires at the blueprint's rate whatever the work, so the heavy engine burns twice the
+  coal and water standing or working.
+- **The starting bunker and tank hold about an hour's coal and half an hour's water**; the larger
+  tiers are a convenience. **The driver tops her up** through whatever is fitted (`Driver::TopUp`, a
+  valve, the holder it fills and its full figure): a shovel's hose from the standpipe and coal chute
+  from a drop beside it, a train's water column and coal stage at her stand. He calls under half and
+  stops at full; a train waits at the stand until topped.
+
+**A steam shovel is a mobile engine digging** (`MobileEngine.shovel_slots(shovel, place:, bench:, car:,
+standpipe:)`): the engine's slots plus the dipper, its chain and its boom. The host gives it the
+bench it digs, the car it fills and the standpipe its hose draws on. **`Dipper` is a holder going round
+dig, swing, dump, swing back**, filled as hard as the craneman's effort and the shaft's speed allow, the
+cut, the lift and the swing charged off the shaft as drags — so hard ground slows the engine. It
+declares **both ports every tick**, a zero where it is not taking or giving: a holder that declared
+nothing would let the path drive the flow, and the bench would pour through it into the car. The
+pitmen keep the face in `reach` (and splice a parted `Chain`); the `Boom` tires past its rating and
+can be damaged by anything that fails beside it. Its board in words is `MobileEngine.board`.
+
+**A locomotive is a mobile engine on wheels** (`MobileEngine.locomotive_slots(loco, place:, track:,
+serves:, dump:)`): the engine's slots plus its train — running gear and cars tiered together, because
+a train is weighed and braked as one — and its brake. **`Train` is the hoist laid flat**, running a
+`Track` the host supplies (sections each with a place and a grade, and `loading` and `dump` marks),
+geared to the engine's flywheel through a forward and a reverse clutch as the winder's drum is. The
+shovel it `serves:` dumps through the train's **loading landing** (`shovel_slots(..., dumps_into:)`),
+and the dumpmen tip it into the host's `dump:` through another — a `Nodes::Landing` each, so nothing
+moves while the train is away. **The driver runs the round** (`locomotive_driver`, a `Round` around
+the engine's `Driver`): he believes his brake does what it does on the steepest bank empty, and eases
+in and brakes late by his lateness. **`place:` is the footplate**, a place the train carries
+(`Place#carried_by`) that shares its hazards with wherever the train stands. Its board is
+`MobileEngine.train_board`. **The footplate is boarded at the loading mark and the dump**, by a
+passage through each landing (`Nodes::Landing#boards?`), open only while she stands there.
+
+**Two trains may share a road** (`road:` on `locomotive_slots`): a loop by the shovel, the second
+starting at its `passing` mark, and past `main` a single road one train's at a time. Each driver
+waits in the loop while the other has the shovel and goes out only on a clear road, read from a
+`MobileEngine::RoadSignal` — a flagman, a train staff or block signals — or from his own look, which
+he can misjudge (a `judged: :wrongly` peril, a mishap on his train). A flagman out of his depth
+waves one on with the road taken; worn block signals stick at clear. **Two trains touching on the
+road and closing past a buffer's speed have collided**, both, as a fiat; slower, they buffer up.
+**A shovel dumps into whichever train stands under it** (`cars: { carriers: }`, `dumps_into:` a list).
+
+## The open pit
+
+**A sunk limonite pit, worked by hand** (`OpenPit`): two benches of a narrow cut, the stripping
+over the ore, each face **got into its muck pile and carried out by barrow** up the ramp road — the
+spoil to the tip head, which the dumpmen spread into the dump, the wash ore (limonite in clay) to
+the bin at bank. Machines are upgrades fitted into the same faces later (`design_sketches/open-pit.md`).
+
+- **`OpenPit::Bench` is geometry**: a bench held as a stock, its face's `advanced_m` the mass dug
+  off it over its cross-section. A bench `beneath:` another is worked only behind that one's face,
+  a berm back (`uncovered_kg`), so the stripping ratio falls out of the two thicknesses and a
+  stripping gang that falls behind stops the ore.
+- **The ground is drawn per match** (`OpenPit::Ground`, a triangular spread, no transcendental):
+  each bench's thickness, and **hard stretches** along the stripping cut, met as the face reaches
+  them, hidden until then. `Ground::ORDINARY` pins it.
+- **One part serves both faces**: a face's getting and carrying slots carry `names:` (`face(:ore)`)
+  and `tips_into:` in their spec, as a mobile engine's slots do.
+- **Outbuildings** at each bench and the dump deal advance seats and rest people there.
+- **A steam shovel and a dinky at each face, both upgrades** (`upgrade:` on the machine's slots;
+  `Slot#needs`). The pit reads which are fitted off the loadout first and wires the face for them:
+  a shovel casts onto the muck, or dumps into a standing train and casts while none stands, as its
+  casting lever says; a dinky is loaded by hand from the muck, and by the shovel if there is one.
+  **A shovel reads its face as the getters do** — `hardness` costs its engine more, `uncovered_kg`
+  stops its moving up — off any bench that reports them. The tracks are built from the median
+  depths. A fitted engine starts at work (`MobileEngine.raised`) with its crew at their posts.
+- **Every place is open to the sky**; the bank holds the atmosphere and the rest are `open_air:`.
+- **Every job is gated on light** (`darkvision`): the sky's by day; by night a carried lamp, the
+  area's lighting, or eyes that see in the dark.
+- **Washing hangs off its one line shaft** (`Nodes::Import`), the only power a consuming
+  operation knows of. `OpenPit::LogWasher` takes wash ore raked in by its hands and water from the
+  head tank the pump fills from the reservoir, and **parts it by tag**: its `:washed` outlet
+  accepts `ore`, its `:slurry` outlet `gangue` and the water. **A tier's efficiency is the one
+  number for its losses** — the rest of the limonite goes to the mud dam with the clay — and the
+  slurry outlet's `transport_affinity` sends exactly the shares washed. It draws only the water it
+  needs, two ticks in hand, so an eager pump cannot lock the ore out of a trough full of water. The
+  `Reservoir` is full or nearly so in almost every match and nearly dry in a very few.
+- **A washhouse of bays**: a `washhouse` slot whose part's `bays` stat says how many of the six bay
+  slots are built (`needs_at_least:`), each bay a washer of its own with its own hands, board and
+  peril, its ids the bay's (`bay_2_washer`). Every bay shares the one bin, the one pump (a tiered
+  slot) and the one dam, so they compete for ore and water. A conduit carries one path, which is
+  why the pump fills a **head tank** each washer draws on.
+- **The pit's water stands in its sump** (`OpenPit::Sump`, at the bottom of the ore bench):
+  seepage from the strata (`OpenPit::Seepage`, a rate a metre of the ore bench's depth by the
+  ground's drawn `wetness`, and every spring the ore face has reached — drawn, hidden until met)
+  and rain on the pit (`Nodes::Catchment`). Past its hole the water stands on the ore floor and the
+  bench reads it as **hardness** (`wetted_by:`), so the getters and a shovel both slow, and at the
+  flood mark nothing is uncovered. Over a man's head the ore bench is `Place#water:` deep: anybody
+  there treads water, and spent, drowns. **The bailers** lift it to the reservoir by hand; a **sump
+  pump** is an upgrade on the line shaft. The reservoir takes rain of its own, and what is over its
+  crest leaves by an `OpenPit::Spillway` to drainage.
+- **Faces hang and slide**: digging off a bench's `:out` undercuts it (`overhang_kg`), the barmen
+  (`OpenPit::Barring`, a gang at each face) bring it down through `:barred` into the muck, and past a
+  hidden threshold — drawn afresh for every slide — it slides down `:slide` onto the face's slip
+  pile (`OpenPit::Slip`). That is a part failure that heals itself, the goaf's pattern: it hurts
+  whoever is on the bench, takes a share of a fitted shovel's boom, and buries the face until the
+  pile has drained into the muck (and a shovel's reach). **The dump's edge** (`OpenPit::TipHead`)
+  loads with tipping and settles with time, and breaks back the same way.
+- **The dams stand above the pit** (a place of their own): the mud dam and the reservoir, each an
+  `OpenPit::Embankment` in a tiered slot. A wall wears held above its safe fill, the dam hands (and a
+  larger reservoir's bankmen) puddle it, it weeps and slumps before it goes, and over the crest it
+  breaches at once. **A breach runs its pond's water into the sump** — flooding the pit is the point —
+  and the wall is rebuilt in the match, which shuts the breach. The dam starts part full of settled
+  clay; its decant (`OpenPit::Decant`) gives the free water back to the reservoir, and a larger
+  reservoir has a scour valve to draw it down.
+- **Blasting is a slot** (empty to start: jumper holes, gopher holes, dynamite), a `Nodes::ShotHole`
+  at each face worked by a powder gang that wants the Shotfirer's Ticket — and works without it, its
+  unticketed perils (`unless_tagged: :shotfirer`) then biting too. **A shot breaks the ground ahead**
+  (`Bench#broken_kg`, off the hole's `brought_down_kg`), which the face digs loose whatever stretch or
+  frost it is in. A charged hole waits for the face's fire lever, so the range can be cleared; flyrock
+  comes down for a couple of seconds after (`:flying`), hardest at that face. **Frost** builds in a
+  bench below freezing and hardens it; **dynamite freezes** below 8 °C in its magazine and misfires
+  the more for it, and the thawing house keeps it warm — too warm, and it sweats and can go up.
+- **A blast warning** (a slot, empty to start: a shout, a horn, a horn and sentries) is `informs:
+  { warning: }` to the shot holes: the fire lever sounds it, everybody in its reach who heeds it
+  takes cover where they stand and mans nothing, and the shot follows the tier's interval after; at
+  the all clear they are back at work. A shout reaches its own face, a horn the pit, the sentries,
+  posted, the bank and the works too. **Blast shelters** (a slot: timber or steel) seat some of
+  those at each bench, the rest crouch; flyrock is `sheltered:`. A powder gang's spite can fire a
+  shot unwarned (the `fired_unwarned` opening).
+- **A crusher ahead of the bays**, an empty slot: `OpenPit::Crusher`, a driven conduit from the bin
+  into a hopper, charging the shaft per kilogram. **Lumps are the hands' rate, not a particle
+  size**: a bay raking uncrushed ore from the bin breaks the lumps first and rakes a third as fast as
+  from the hopper, and its logs wear `UNCRUSHED_WEAR` times as fast. The pit reads whether a crusher
+  is fitted off the loadout first (`feed_for`) and wires the bays to the bin or the hopper. The
+  crusher is fed by hand, or by **a feed belt** (`Nodes::Belt`, a slot that `needs: :crusher`) with
+  nobody on it, which stalls fed past its grip.
+- **Finishing is calcining, as chemistry**: a `kiln` slot (an open clamp worked by one gang, or a
+  shaft kiln with chargers and drawers), `OpenPit::Kiln` a `Nodes::FuelBed` hosting `coal_combustion` and
+  `limonite_calcining`, so what it finishes is decided by its heat. The coal goes in with the ore by
+  a lever (`OpenPit::CoalCharge`, a share of what was charged last tick), the air by its eyes, and
+  its own heat draws through its throat; short of air it burns to monoxide. **The draw takes what
+  lies at the bottom**, calcined or not, and the ash with it, onto the finished heap, and **the
+  goal counts its hematite only**. The kiln top is a place whose air is a vessel of its own, fed by
+  the throat and cleared by the open air across it (`OpenPit::Breeze`, more in a wind), so a choked
+  kiln gasses its chargers through `Breath`. The coal in the charge is a bed of tens of kilograms
+  burning over minutes, and the eyes stopped up still breathe (`EYES_LEAK`), so a kiln shut down
+  smoulders. The kiln starts at work, `laid:` from its tier's `working` figures.
+- **The pit's coal is a yard at bank** (a sized slot) that the kiln, the trains' stands and the
+  shovels draw on, and **a siding fills it** (`Nodes::Siding`, empty to start): wagons on a
+  timetable, shovelled out by the unloaders, or dropped over a staithe. **Coal reaches the machines
+  by their coalers**, a gang a line: each fitted shovel has a drop beside it, and the stripping
+  train a coal stage at the spoil dump, each kept from the yard; the ore train's stage is a chute off
+  the yard at bank. Water reaches a train at its stand from the reservoir.
+- **A passing track at a face** lets a second dinky share the face's road, and **road signals** at
+  the face (none, a flagman, a train staff, block signals) are what its drivers read it by.
+- **Night lighting, an area at a time**: `pit_lighting` (both benches and the haul road) and
+  `bank_lighting` (bank, dump, dams, kiln), empty to start, each a `Nodes::Lighting` that `lights:`
+  its area's places. Fire baskets are a `FuelBed` of yard coal the light reads; Wells lights an oil
+  burner fed from a tank, filled from the `oil_store` (a required sized slot); arc lamps a dynamo
+  on the line shaft whose carbons start part spent. **The area's lever at bank is what burns** —
+  coal fed, oil fed, arcs on — off by default; its lamp man keeps it supplied or trimmed, and is
+  gated on light himself. The baskets' coal and the lamps' tank start stocked by the shift before.
+  Poor light worsens the footing perils (`underfoot: { dark: }`): the ramps, the water's edge, the
+  kiln's mouth.
 
 ## Assembled from parts
 
@@ -115,7 +326,10 @@ An operation is built from a **chassis** (the frame: fixed topology, which slots
 
 ```ruby
 Parts.register(:id, kind:, provides: [], instruments: []) { |spec| Fragment.new(...) }
-Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass: [...])
+Slot.new(id:, accepts:, required:, default:, when_empty: :omit | :bypass, bypass: [...],
+         spec: { names: Names.new(prefix, place:) },   # what this slot tells its part about itself
+         needs: :other_slot,                           # built only while that slot is fitted
+         needs_at_least: { stat: figure })             # ... with a part reaching that
 Assembly.new(slots:, loadout:, spec:, fixtures:, instruments:, routes:, advisories:)
 ```
 
@@ -201,6 +415,15 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    speed. Leave it infinite on an **effort** station, where `capability` already supplies the
    rate and a finite travel would charge the same minion twice.
 
+   **A post is a job for one unless its part says otherwise, and a crew's work sums.** An effort
+   post arrives at its node in **worker-equivalents** (lever × Σ capability; 100 is one competent
+   hand flat out), so rate the node **per worker** and cap nothing but the crew. Give a gang's
+   part a `crew:` stat and pass it to both the post's `capacity:` and the node's `crew:` — the node
+   needs it because its `activity` is measured against a full crew. A conduit an effort post works
+   is `worked: true`, which `Operation#validate_worked!` enforces in both directions; without it the
+   valve and its ports would clamp the gang to one worker's rate, silently. A governor post holds
+   one.
+
    **An `effort:` blend must say which kind of strong it means, and the engine cannot catch a
    wrong answer.** `strength` is a strength-to-weight *ratio*, so three keys are available and a
    station that names the wrong one still builds, still sums to 1.0, and silently makes a big
@@ -211,9 +434,11 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    | `force` | `strength × mass ÷ 70` | pushing a tub, heaving rock, a heavy lever — friction and leverage, where bulk pays linearly |
    | `swing` | `√force` | a tool at the end of an arm, where technique and the tool cap what bulk buys |
    | `strength` | the ratio itself | where power-to-weight really is the question — moving your own body |
+   | `precision` | agility 0.6 + dexterity 0.4 | a quick, deft hand: cutting a fuse or a strand, socketing a rope. Slow, fine work names `dexterity` instead |
 
    Ask *"would half a tonne of ogre be four times better at this, or twice?"* Four is `force`;
-   twice is `swing`. See
+   twice is `swing`; and if it would be no better at all but an elf would, `precision`. A weapon's
+   `handling:` names the same keys. See
    [`design_sketches/strength-to-weight.md`](../../docs/design_sketches/strength-to-weight.md).
 
    `complexity:` is the **other** axis and orthogonal to `effort:`: effort says how *fast* a
@@ -238,7 +463,8 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    **A ventilating furnace is a slot beside the fan** (`furnace`: fire basket, brick furnace,
    double furnace). The return comes up by way of the upcast foot in either frame, and the fan's
    conduit carries the shaft's depth of stack, so the furnace's flue warming the foot draws the
-   whole upcast with no power at all. A furnaceman stokes it. **Its air is the return's**, so
+   whole upcast with no power at all. A furnaceman stokes it. **The furnace is a `Nodes::FuelBed`**
+   drawn through a `Nodes::Grate`, the upcast foot the space over its fire. **Its air is the return's**, so
    return gas in its range fires at the furnace, and the front runs back into the district.
    **The dumb drift** (its own slot) feeds the fire from the intake through a regulator instead.
    It does it by `informs: { furnace_fed_from: :intake }`, the one way a fitting shapes another
@@ -252,7 +478,7 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    the haulage stopped until the hauling hands splice it. **A runaway catch** (its own slot: catch
    points or drags) informs the rope haulage where it stands on the road and how much it holds.
    Below it a runaway reaches `1 − holds` of what it would have, and the door's wreck scales the
-   same way. **A belt conveyor** (`Mine::Conveyor`)
+   same way. **A belt conveyor** (`Mine::Conveyor`, a roadway that is a `Nodes::Belting`)
    carries with nobody on the road, its feed a lever. Fed past what its drum grips — less with water
    on the pit bottom — it stalls, and the drum (a `Bearing` loaded by the belt) turns on under it and
    heats. **The drum lights the spillage, and the spillage the belt**, each through a `hot_spot:`:
@@ -262,7 +488,8 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
    so the smoke goes inbye to the face; fire-resistant belting does not carry the fire.
 
    **Shotfiring is a slot of its own** (`blasting`, empty to start: black powder or permitted
-   explosives). A ticketed shotfirer works `Mine::ShotHole`, a conduit from the magazine that
+   explosives). A ticketed shotfirer works `Mine::ShotHole` (the colliery's `Nodes::ShotHole`), a
+   conduit from the magazine that
    passes one charge when the hole is ready; the charge's fumes land in the district and the coal and
    dust the shot brings down follow through `ShotYield` conduits, off its running total. **Its
    accidents are perils of his post**: a blown-out shot is a flame in the room for a tick, and a
@@ -297,9 +524,13 @@ it is never a blueprint. The dev match ropes it to the pit with `REACTOR_DEV_ENG
 
 The steam engine is deliberately two machines — Watt's atmospheric and Trevithick's
 high-pressure — differing only in what the cylinder exhausts into and a few sizes. `slots(spec)`
-and `fixtures(spec)` branch on the `CHASSIS` hash. (It was `VARIANTS`, and the keyword was
-`variant:`; the concept did not change when the engine became assembled from parts, only what
-it is now one axis of.)
+and `fixtures(spec)` branch on the `CHASSIS` hash.
+
+**Both start banked**, as the shift before left them: the fire a small core under green coal
+(`SteamEngine::BANKED_BED`, the fire bed's `laid:`) and the drum warm below its valve
+(`BANKED_DRUM_K`, by boiler). The bellows, with the regulator shut, bring the fire through in under
+a minute and working pressure in about two and a half. The fire is two bodies — a `Nodes::FuelBed`
+on a `Nodes::Grate`, and the firebox over it — and the damper leaks shut (`DAMPER_LEAK`).
 
 **A chassis owns what a slot cannot express.** Fitting the condenser does not add a branch, it
 *reroutes* the cylinder's exhaust — and "absent means rerouted" is a frame decision, not a

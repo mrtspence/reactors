@@ -32,11 +32,11 @@ require "support/engine_rig"
 #
 #     water   1200   800    400    200    100    50 kg
 #     expose  0.04   0.36   0.68   0.84   0.92   0.96
-#     crown    454   644    835    930    977  1001 K
+#     crown    457   668    878    984   1036  1063 K
 #
-# **Two of the water levels are load-bearing and not interchangeable.** At 800 kg the plug gets
+# **Two of the water levels are load-bearing and not interchangeable.** At 850 kg the plug gets
 # there first and the shell is unmarked; below that the plate has already taken a bite out of it
-# (integrity 0.99 at 400 kg and under). And an explosion needs water *left to flash* — 400 kg
+# (integrity 0.998 at 800 kg, 0.99 at 400 kg and under). And an explosion needs water *left to flash* — 400 kg
 # unzips the shell where 200 kg merely seam-splits, because severity scales with the flash.
 #
 # See `design_sketches/suite-runtime.md` §7.
@@ -56,7 +56,7 @@ RSpec.describe "the crown sheet", crew: :reference do
   # **The level where the plug gets there first** — it melts, and the shell is still unmarked. Also
   # the level at which the glass is still flattering the drum, which is the same fact twice: this
   # is the moment the hazard is survivable *and* invisible, which is what makes it the accident.
-  def saved_water = 800.0
+  def saved_water = 850.0
 
   # A drum whose shell has already been worked, so the failure itself is what gets tested rather
   # than the hundreds of ticks of erosion that lead to it.
@@ -64,7 +64,7 @@ RSpec.describe "the crown sheet", crew: :reference do
 
   # **A plug that has already gone.** `melted` alone is not enough: the plug re-derives it from
   # `fusible_remaining_kg` every tick, so seeding the flag without the metal reads back as `false`
-  # on tick 1 — the same stored-versus-derived distinction as the firebox's `alight`.
+  # on tick 1 — the same stored-versus-derived distinction as the fire's `alight`.
   def plug_gone = { melted: true, fusible_remaining_kg: 0.0 }
 
   def boiler_state(op) = op.state.fetch(:nodes).fetch(:boiler)
@@ -121,14 +121,12 @@ RSpec.describe "the crown sheet", crew: :reference do
     # Starting from a plug that is *already* blown is what makes this a claim about the
     # consequence rather than a second measurement of how long the plug takes to melt.
     #
-    # Measured over 10 ticks: 728.6 K in the firebox against an intact engine's 1024.5, with 1.5 kg
-    # of water and steam sitting in the fire.
     it "puts the engine out of service by putting its fire out" do
       doused, = starved(engine, 10, water: bare_plate_water, nodes: { fusible_plug: plug_gone })
       intact, = starved(engine, 10, water: ordinary_water)
 
-      expect(held(doused, :firebox, :water) + held(doused, :firebox, :steam)).to be > 0.0
-      expect(temperature_k(doused, :firebox)).to be < temperature_k(intact, :firebox)
+      expect(held(doused, :fire_bed, :water) + held(doused, :fire_bed, :steam)).to be > 0.0
+      expect(temperature_k(doused, :fire_bed)).to be < temperature_k(intact, :fire_bed)
       expect(shaft_power_w(doused)).to be < shaft_power_w(intact)
     end
 

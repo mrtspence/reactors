@@ -37,7 +37,7 @@ module ReactorSim
         # Shaft work arriving FROM another operation, which is the entry side of somebody else's
         # `joules_to_work`. The only line here whose counterpart is on a different operation's
         # books, so the two cancel in a match-level balance and each operation still closes on
-        # its own. A mine buying power from an engine is the case this exists for.
+        # its own. A consumer buying power from an engine is the case this exists for.
         joules_imported: 0.0,
         joules_advected_out: 0.0, # energy carried out with departing mass
         mass_added: 0.0,          # feedstock arriving from outside the operation
@@ -48,11 +48,10 @@ module ReactorSim
         # discharge nor a fault: it is the running cost of the machine, and reading it as a
         # spill would make an engine that is working properly look like one that is leaking.
         mass_consumed: 0.0,
-        # **Material that left because the operation did its job**: water lifted out of a mine,
-        # ore sent to the surface, gas delivered to a main. The fourth exit, and the only
-        # productive one — `joules_to_work` has been the energy side of this since the first
-        # ledger and there has never been a mass equivalent, so an operation whose *output* is
-        # material could not be booked at all. A mine's output is material.
+        # **Material that left because the operation did its job**: water lifted out, ore sent
+        # away, gas delivered to a main. The fourth exit, and the only productive one —
+        # `joules_to_work` is the energy side of it, and without this an operation whose
+        # *output* is material could not be booked at all.
         mass_delivered: 0.0 }
     end
 

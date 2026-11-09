@@ -44,7 +44,7 @@ module ReactorSim
     # both ends. See `radiative_conductance` and `docs/design_sketches/radiation.md`.
     #
     # **A firebox heats its water legs mostly by radiation**, and a linear term cannot say the
-    # thing every fireman knows — that a *bright* fire is worth far more than a merely hot one.
+    # thing everybody who tends a fire knows — that a *bright* fire is worth far more than a merely hot one.
     def initialize(a:, b:, conductance:, emissivity: 0.0, radiating_area_m2: 0.0)
       @a = a.to_sym
       @b = b.to_sym

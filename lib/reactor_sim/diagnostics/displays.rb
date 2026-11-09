@@ -85,20 +85,29 @@ module ReactorSim
     # Fed by a Bands filter, this is how durability becomes readable without ever becoming
     # a health bar: "the fitting is showing some cracks". Pair it with Lag and Misread and
     # the report is not just vague but occasionally wrong, which is the intended texture.
+    #
+    # `calm:` names the phrases that ask nothing of anybody — a machine at its ordinary work. The chrome carries
+    # them, and only them, so the console can tell where to look without learning the rest of the
+    # list. Undeclared, no phrase is ever pressing.
     class Prose < Base
-      def initialize(phrases)
+      def initialize(phrases, calm: [])
         super()
         @phrases = phrases.map(&:to_s).freeze
+        @calm = calm.map(&:to_s).freeze
         raise Error, "prose display needs at least one phrase" if @phrases.empty?
+        raise Error, "calm phrase(s) not in the display: #{(@calm - @phrases).join(', ')}" unless (@calm - @phrases).empty?
 
         freeze
       end
+
+      # A board in words from a node's `SIGNALS`, its calm ones named by key.
+      def self.signals(signals, calm:) = new(signals.values, calm: calm.map { |key| signals.fetch(key) })
 
       def render(value, _flags)
         @phrases.fetch(value.to_i.clamp(0, @phrases.size - 1))
       end
 
-      def chrome = { kind: :prose }
+      def chrome = @calm.empty? ? { kind: :prose } : { kind: :prose, calm: @calm }
     end
   end
 end

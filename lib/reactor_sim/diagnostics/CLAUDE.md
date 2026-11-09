@@ -142,3 +142,20 @@ taxonomy lives on the filter, so adding one cannot silently miss a hook somewher
 **Declare it on very few instruments.** If every gauge becomes a person's opinion the panel
 stops being trustworthy at all and the player disengages from instruments entirely, which is
 the opposite of the intent.
+
+## `role:` says an instrument belongs to the whole machine
+
+`:output` (what it makes) or `:weather`, and nothing else (`Diagnostic::ROLES`). The chrome carries
+it and the delivery tier draws it apart from the rest. Every catalogued machine marks at least one
+output; every `WeatherGauges` reading is the weather.
+
+## An instrument's place is derived, and a board's calm words declared
+
+**`Operation#panel` gives each instrument `places:`** — its observer's post's, else its nodes'
+(`Source#nodes`), else those of the posts working its nodes, else none — and each lever its post's
+`place:`. Nothing declares them, so a new gauge lands where it is read. Detail:
+[`diagnostics.md`](../../../docs/reference/diagnostics.md#where-everything-is).
+
+**`Prose` takes `calm:`**, the phrases that ask nothing of anybody, and its chrome carries only
+those. A board off a node's `SIGNALS` is `Prose.signals(SIGNALS, calm: CALM)`, with `CALM` kept
+beside the signals; a board with no calm words is never pressing.

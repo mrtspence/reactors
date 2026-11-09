@@ -10,6 +10,7 @@ make. These tell you *what is true* and should be kept accurate:
 - `reference/invariants.md` — the four rules. Read first, always.
 - `reference/tick.md`, `reference/settlement.md`, `reference/physics.md`,
   `reference/nodes.md`, `reference/diagnostics.md`
+- `reference/layout.md` — where everything sits on screen now, and the goal layout as a to-do
 - `guides/build-an-operation.md`, `guides/add-content.md`
 - `current_progress.md` — what is done, what is next, and the traps that have already cost time
 
@@ -45,9 +46,10 @@ decision was made, never as a description of the current system:
 - **Contract rules are different** — the four invariants, the phase order, the `settle_mass`
   stages. They change rarely and deliberately, so they are written out in full and a change to
   one is a notable event, not a maintenance chore.
-- **Reference docs record the bug that produced the rule.** Nearly every "do not do X" in here
-  is a real defect that cost real time. When you fix something subtle, add the *why* rather
-  than only the *what* — that is what makes these docs worth reading twice.
+- **Reference docs state the rule and its why, never the story of the bug.** Nearly every "do not
+  do X" in here is a real defect that cost real time; the rule and the mechanism behind it are
+  what a reader needs, and the account of how it was found belongs in `design_sketches/` (or the
+  traps list in `current_progress.md`).
 - Keep operational reference and rationale separate. When a rationale doc and a reference doc
   disagree, the reference doc is current and the rationale doc is history.
 - The per-directory `CLAUDE.md` files summarise the local non-negotiables and **point here** for

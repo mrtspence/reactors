@@ -75,9 +75,9 @@ module ReactorSim
     # ceiling on it. (Scaling the extent would charge a fire for its draught twice, which is the
     # mistake `Resources::Ignition` records having made with the lit-mass term.)
     # **Per reaction, because a node can host two that are choked by different things.** A
-    # firebox throttles everything on its grate alike and ignores the argument; a mine's
-    # district is inerted against its coal dust and not against its gas, and a single figure
-    # for both meant stone dusting quietly cancelled the firedamp hazard as well.
+    # firebox throttles everything on its grate alike and ignores the argument; a room inerted
+    # against a dust need not be inerted against a gas, and a single figure for both cancels the
+    # gas hazard as well.
     def reaction_throttle(_state, _content, _reaction_id = nil) = 1.0
 
     # --- lifecycle -----------------------------------------------------------
@@ -114,8 +114,8 @@ module ReactorSim
     # which reactions can happen inside it.
     def reactions = []
 
-    # **Ways this node's existence hurts people with nothing broken** — tubs going past, a
-    # shaft with no railings. The counterpart to `failure_hazards`, which needs a failure
+    # **Ways this node's existence hurts people with nothing broken** — traffic going past, an
+    # edge with no railings. The counterpart to `failure_hazards`, which needs a failure
     # first. Empty for almost everything, and a fitting removes one by not declaring it.
     def perils = []
 

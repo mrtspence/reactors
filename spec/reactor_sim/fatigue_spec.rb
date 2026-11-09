@@ -249,7 +249,7 @@ RSpec.describe ReactorSim::Fatigue do
       control = station
       minion, sound = worker
       _, hurt = worker
-      hurt = hurt.merge(injury: :minor)
+      hurt = hurt.merge(injury: :minor, wounds: [ { kind: :crush, tier: :minor, derates: { strength: 0.8 } } ])
 
       expect(described_class.accrual(minion, hurt, control, 1.0))
         .to be > described_class.accrual(minion, sound, control, 1.0)

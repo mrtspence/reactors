@@ -121,10 +121,8 @@ RSpec.describe ReactorSim::Crew do
       op = engine(crew: { crew_1: { minion: :elowynne }, crew_2: { minion: :galathas } })
            .operation(:eng)
 
-      expect(op.minions.fetch(:crew_2).strength)
-        .to be > op.minions.fetch(:crew_1).strength
-      expect(op.minions.fetch(:crew_2).dexterity)
-        .to be < op.minions.fetch(:crew_1).dexterity
+      expect(op.minions.fetch(:crew_2).grudges).to have_key(:throg)
+      expect(op.minions.fetch(:crew_1).grudges).not_to have_key(:throg)
     end
 
     # **The rule the whole release exists for, and it has to be structural.** A machine that lets

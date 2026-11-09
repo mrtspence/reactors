@@ -32,6 +32,47 @@ Operation.new(
 rebuilt identically every time from the registered builder. That is what lets a snapshot be
 a bag of floats rather than an object graph.
 
+### The sky over it
+
+**Every operation with anything outdoors carries the sky as a fixture.** Three things, all
+shared, so a new operation writes none of the weather itself:
+
+1. A `Nodes::Outdoors` node (id `:outdoors`) built from `conditions:`. The builder and its
+   `Operations.register` block take `conditions:` and put it in `options:`, so a restore rebuilds
+   the same sky. Nil is the standard sky, which is what every spec gets.
+2. `WeatherGauges.guesses(observer:)` among the fixture's diagnostics, observed by whoever works
+   outdoors; `WeatherGauges.instruments` merged into the catalogue; `WeatherGauges::ORDER` at the
+   end of `PANEL_ORDER`; `WeatherGauges.slot` in the slot list. They carry `role: :weather`
+   already, so the console draws them in its strip.
+3. **`exposure:` on each place the weather reaches** — 1 for open ground, a fraction for a
+   building, nothing underground. It shifts the ambient of every node in the place, offers the
+   sky's light and its `wet`/`icy` footing to the people there, and lets the wind at them.
+
+Rain reaches a holder through a `Nodes::Catchment` of the ground that drains to it.
+
+### The people in it, and each other
+
+**A crewed operation's builder and register block take `grudges:`** — who already hates whom from
+earlier matches, by person — and put it in `options:` through `Animosity.carried_over`, beside
+`crew:`. Then three declarations decide what a feud can do there:
+
+1. **`openings:` on a post** (`Animosity::Opening`): what somebody stood there could do to
+   somebody they hate — a mishap the part named can suffer, or a slip of their own lever — with
+   who it `reaches:` and the `harm:` they believe it does. The colliery's banksman can send a tub
+   down onto the cage or ring the cage away from a boarder; the hauling hands can loose a set; the
+   shotfirer can leave a charge live for the hewers.
+2. **`opportunity: true` on a peril**: somewhere a person can be pushed — in front of a tub, into a
+   belt, off the deck — while it is live.
+3. **`oversees:` on a post** makes it a boss's: whoever stands there may step into a quarrel in
+   those places. The colliery sells one in a `supervision` slot that is empty by default.
+
+A post with none of these still sees rows and brawls between whoever works it.
+
+**Sending people to cover is declared, too.** A node that should — a shot hole with a `warning:` —
+answers `take_cover(state)` with the places it calls; a peril cover keeps off is `sheltered:`; a
+`Nodes::Shelter` seats people in a place or covers a post (a cab over an engine's crew). The tick
+does the rest (`Cover`): who heeds it, who sits where, who mans nothing until the all clear.
+
 ---
 
 ## The five decisions, in order
@@ -68,13 +109,57 @@ supply → boiler loop is exactly the topology a topological sort could not have
 ### 3. Where does heat go, and torque?
 
 ```ruby
-ThermalLink.new(a: :firebox, b: :boiler, conductance: 9_000.0)   # W/K
+ThermalLink.new(a: :firebox, b: :boiler, conductance: 300.0)   # W/K
 DriveLink.new(a: :flywheel, b: :load, stiffness: 9_000.0)
 ```
+
+**A furnace is two bodies**: its fuel on a grate as a `Nodes::FuelBed`, fed its air through a
+`Nodes::Grate` and opening onto a holder for the space over the fire — the steam engine's
+`firebox_fragment` is the worked example. A fire lumped into one body with its gas cannot hold a
+banked core hot. Start it `laid:` where the shift before would have left it burning. **Anything
+that burns a solid fuel is one**, subclassed for what is special: the open pit's `Kiln` is a
+`FuelBed` with ore in the bed. The other stock shapes — a machine started part-way through a
+story seeding its latch, a busy conduit's `traffic:` — are listed in
+[`nodes.md`](../reference/nodes.md#a-shape-written-twice-is-a-stock-shape).
 
 Every `Thermal` node also needs an `ambient_conductance` or the operation becomes a perfect
 heat accumulator. Waste heat is not optional — it is what makes conservation cheap *and*
 physically sensible.
+
+**Fixed plant is a load on the operation's line shaft; mobile plant carries its own engine.** A
+shovel or a locomotive fits `MobileEngine.slots(engine, place:)` among the operation's slots and
+gets a complete small steam engine under its own names, worked by a fireman and a driver
+(`MobileEngine.driver(assembly, engine, place:)`, added to the control points after assembly). The
+operation supplies the `Atmosphere`, the place the engine stands in — which breathes the atmosphere,
+as its `air:` or as an `open_air:` place — and a drive link from `names.(:flywheel)` to whatever it
+drives. Its routes are `MobileEngine.routes(engine, place:)`. A **steam shovel** is
+`MobileEngine.shovel_slots` instead, and its host also gives it, by id, the bench it digs (a holder of
+what is dug), the car it fills, the standpipe its tank is hosed from and, with `coal_from:`, the drop
+of coal its bunker is topped from; `MobileEngine.board` is its
+status in words for the panel. A **locomotive** is `MobileEngine.locomotive_slots(loco, place:,
+track:, serves:, dump:)`: the host gives it a `Track` (sections with their places and grades, a
+`loading` and a `dump` mark), the shovel it serves — whose `shovel_slots` then takes the train's cars
+as its `car:` and its loading landing in `dumps_into:` (a list, one landing a train) — and the holder
+it is tipped into. `stand: { water:, coal: }` gives it a water column and a coal stage at its dump;
+`road:` and `starts_at:` put a second train on the same road (a `passing` and a `main` mark on the
+track, and a `MobileEngine::RoadSignal` if the host fits one). Its driver post is
+`MobileEngine.locomotive_driver(assembly, loco, place:, track:, road:)` and its board
+`MobileEngine.train_board`. `place:` is its footplate: the host puts the engine's nodes there, and the
+train carries it. See `spec/support/mobile_rig.rb` for the smallest host of all three.
+
+**A machine can be an upgrade.** `upgrade: "Stripping Shovel"` on `shovel_slots` or
+`locomotive_slots` makes its principal slot — the dipper, the train — optional and empty to start,
+and every other slot of the machine `needs:` it (`Slot#needs`): built only while it is fitted, not
+required while it is not, a group of its own on the outfitting screen. **`needs_at_least:`** asks
+more of the slot it needs — a stat its part must reach — so a washhouse of four bays builds a
+fourth bay and one of three does not (`OpenPit.washing_slots`). `shovel_routes` and
+`locomotive_routes` take the same `upgrade:` so their reach is checked only when the machine is
+there, and the host builds the driver's post and the board only for what is fitted. **A host wires
+its faces for what is fitted**, read off the loadout before building the slots (`OpenPit.assembly_for`
+is the worked example): with a train, the shovel dumps through the train's loading landing and casts
+onto the muck (`cast_to:`) while none stands (`cars:`), as its casting lever says. **A fresh build
+starts its engines at work** with `MobileEngine.raised(op, engines)`, the observed figures of the
+engine fitted (`MobileEngine::BY_ENGINE`); a restore carries its own state and is left alone.
 
 ### 4. What can the player touch?
 
@@ -84,8 +169,10 @@ ControlPoint.new(id: :throttle_open, label: "Throttle", node: :throttle, default
 
 Nodes read `ctx.controls.fetch(:throttle_open)` — the lever's **actual** position. A control
 point with `stiffness:` travels toward its target over several ticks; the default is
-instantaneous. An **effort** station (`effort:`) reads as its position scaled by whoever is posted
-there, and nothing at all with nobody there. A **governor** post (`governor:`) drives other,
+instantaneous. An **effort** station (`effort:`) reads as its position scaled by the crew posted
+there, summed — **worker-equivalents**, 100 for one competent hand flat out — and nothing at all
+with nobody there. Rate its node **per worker**, and declare a conduit it works `worked: true`
+with `crew:` set to the post's capacity, or the build refuses it. A **governor** post (`governor:`) drives other,
 `internal:` levers from its own — the mine's winding engineman works the clutches and brake to
 send the cage where the player names. See [`operations/CLAUDE.md`](../../lib/reactor_sim/operations/CLAUDE.md).
 
@@ -93,6 +180,16 @@ send the cage where the player names. See [`operations/CLAUDE.md`](../../lib/rea
 
 The interesting design work. See [`../reference/diagnostics.md`](../reference/diagnostics.md).
 Give the two things that will kill the player the best instruments — and even those late.
+
+**Mark what the machine makes `role: :output`** on its gauge, as many as it has; the console draws
+them in the strip at the top of every screen, and `diagnostic_spec` refuses a catalogued machine
+with none.
+
+**The console shows one place at a time**, and puts each gauge in its place by who reads it or
+what it reads — nothing to declare, but a gauge reading only nodes in no place, with no observer
+and no post on them, lands in The Works. **A board in words names its calm phrases** — a node's
+`CALM` beside its `SIGNALS`, through `Displays::Prose.signals` — or it never tells the places box
+that something there needs looking at.
 
 ---
 
@@ -124,23 +221,33 @@ end
 station they all start at. Where they *are* lives in `state[:minions]`, because assignment is a
 command (`assign_minion`, absolute and idempotent like `set_control`).
 
-Five things to know:
+Things to know:
 
-- **Nobody starts at a working station, and it has to stay that way.** A machine that lets an
-  effort station be a starting post hands the player a shift already at the face for free — which
-  for a mine is most of the operation given away. Deploying the shift is the opening move.
+- **Nobody starts at a working station — except the crew of a machine that was already running
+  when the match began.** A shift already at the face for free is most of a mine given away, so
+  deploying the shift is the opening move. But a mobile engine's steam was raised by the advance
+  shift, and its driver and fireman are at their posts because the engine is at work: a part
+  declaring `stats: { advance_posts: [roles] }` deals a seat to each of those posts, named as its
+  slot names them (`Assembly#advance_shifts`). Use it for exactly that case and no other.
 - **A seat may start in a different PLACE, which is a different statement.** The mine's shift
   parts start the last seats in the district and at the pit bottom with **no station at all**:
   they are somewhere useful and still posted to nothing, so the opening move is still the
   player's. Without them a spatial operation's first five minutes are a walk. Build it the same
   way — a fitted part declaring `stats: { advance_seats:, advance_place: }`, read by
-  `assembly.advance_shifts` in slot order and dealt onto `place:` on the `Minion` at build, never
-  by the roster. Being a part is what lets a player buy a bigger head start.
-- **A station may have room for only so many.** `capacity:` on a `ControlPoint` is how many
-  people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
-  posting nobody can walk to. Every lever but one declares none and takes a crowd; the mine's
-  refuge hole takes one man, and a bigger cut-out is something a pit buys. Counted over
-  `posting`, so the refusal lands when the order is given rather than on arrival.
+  `assembly.advance_shifts` in slot order and dealt onto `place:` on the `Minion` at build
+  (`Crew.minions`), never by the roster. Being a part is what lets a player buy a bigger head
+  start. A part fitted in several slots — a hut that may stand at either of two benches — leaves
+  out `advance_place:` and takes its slot's `spec[:names].place`.
+- **A station has room for so many, and their work sums.** `capacity:` on a `ControlPoint` is how
+  many people may be posted there, and `assign_minion` refuses past it exactly as it refuses a
+  posting nobody can walk to. **A lever defaults to one**; a part with room for a gang says so —
+  as a `crew:` stat, passed by its fragment to both the post and the node — and an upgrade raises
+  it. A post with no `node:` (quarters, a rest post) defaults to no limit. **A governor post holds
+  one**, refused at build. Counted over `posting`, so the refusal lands when the order is given
+  rather than on arrival.
+- **Size what is downstream of a gang, or don't.** A worked conduit caps nothing but its crew; if
+  the next fitting cannot take what a strong gang moves, the work backs up there, which is the
+  player's allocation problem and not a cap to add.
 - **A crew quarters builds no node.** It is a *place*, and a place is a `ControlPoint` with no
   `node:` — `ControlPoint#lever?` is what keeps it off the lever strip while leaving it on the
   crew screen. Do **not** write `provides: %i[quarters]`: `provides:` names NODE ids, and node,
@@ -148,7 +255,7 @@ Five things to know:
 - **Ids are one flat namespace** with nodes, control points and diagnostics, because they key one
   RNG table. `validate_graph!` refuses a duplicate. Seats are `crew_1`, `crew_2` precisely so
   they cannot collide with machinery — the natural name for a steam engine's fireman is `stoker`,
-  which is already the conduit feeding the firebox.
+  which is already the conduit feeding the fire.
 - **An unmanned effort station delivers nothing**, and so does one manned by somebody spent —
   `capability` reaches exactly zero at `fatigue` 1.0. Neither is wired; both simply follow.
 - **The roster rides in `options:`**, like the loadout, or a restored snapshot rebuilds a

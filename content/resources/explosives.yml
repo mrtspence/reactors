@@ -19,3 +19,11 @@ permitted_explosive:
   tags: [explosive]
   specific_heat_j_per_kg_k: 1300
   density_kg_per_m3: 1100
+
+# **Dynamite**: nitroglycerin soaked into kieselguhr, Nobel's of 1867. Far stronger than powder for its
+# weight, and it **freezes at about 8 °C** — frozen it misfires, and thawing it by the stove killed
+# men. Whether a charge is frozen is the magazine's temperature, read by the shot hole.
+dynamite:
+  tags: [explosive]
+  specific_heat_j_per_kg_k: 1200
+  density_kg_per_m3: 1450

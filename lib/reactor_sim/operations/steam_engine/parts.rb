@@ -15,7 +15,7 @@ module ReactorSim
       # **Every lever in this engine stands in the one room**, so they are built through here
       # rather than seventeen registrations each repeating it. A control with no place at all
       # would read as workable from anywhere, which is a different claim and not this one.
-      def lever(**opts) = ControlPoint.new(place: :engine_house, **opts)
+      def lever(names = HOUSE, **opts) = ControlPoint.new(place: names.place, **opts)
 
       # --- shared shapes ---------------------------------------------------------
       #
@@ -24,24 +24,30 @@ module ReactorSim
       # never in links or levers. The numbers, and the sweeps that chose them, sit on the
       # registrations below.
 
-      def damper_fragment(conductance:)
+      # `internal: true` is a mobile engine's damper, held by its blueprint at `default` and worked
+      # by nobody.
+      def damper_fragment(conductance:, names: HOUSE, default: 50.0, internal: false)
         Fragment.new(
-          nodes: [ SteamEngine.damper(conductance: conductance) ],
-          links: [ Link.new(from: [ :damper, :outlet ], to: [ :firebox, :air_in ]) ],
+          nodes: [ SteamEngine.damper(conductance: conductance, names: names) ],
+          links: [ Link.new(from: [ names.(:damper), :outlet ], to: [ names.(:grate), :inlet ]) ],
           control_points: [
-            SteamEngine.lever(id: :damper_open, label: "Damper", node: :damper, default: 50.0)
+            SteamEngine.lever(names, id: names.(:damper_open), label: "Damper", node: names.(:damper), default: default,
+                                 internal: internal)
           ]
         )
       end
 
-      def chimney_fragment(blastpipe:)
+      def chimney_fragment(blastpipe:, names: HOUSE, **sizes)
         Fragment.new(
-          nodes: [ SteamEngine.flue(blastpipe: blastpipe) ],
-          links: [ Link.new(from: [ :flue, :outlet ], to: [ :atmosphere, :exhaust ]) ]
+          nodes: [ SteamEngine.flue(blastpipe: blastpipe, names: names, **sizes) ],
+          links: [ Link.new(from: [ names.(:flue), :outlet ], to: [ :atmosphere, :exhaust ]) ]
         )
       end
 
-      def boiler_fragment(shell_radius_m:, wall_thickness_m:, working_pressure_pa:)
+      # `sizes:` are the drum's own figures (`SteamEngine.boiler`); the radiant path is the fire's,
+      # and `convective:` the firebox's, both scaled with it.
+      def boiler_fragment(shell_radius_m:, wall_thickness_m:, working_pressure_pa:, names: HOUSE,
+                          radiant: { conductance: 50.0, radiating_area_m2: 24.0 }, convective: 300.0, **sizes)
         Fragment.new(
           # **The drum ships its own hole.** A boiler you can fit is a boiler that can burst, so
           # the breach belongs to this fragment rather than to the chassis — fit a different
@@ -49,51 +55,43 @@ module ReactorSim
           # rupture. It is shut and costs nothing until the shell fails; see `Nodes::Breach`.
           nodes: [ SteamEngine.boiler(shell_radius_m: shell_radius_m,
                                       wall_thickness_m: wall_thickness_m,
-                                      working_pressure_pa: working_pressure_pa),
-                   SteamEngine.boiler_breach ],
+                                      working_pressure_pa: working_pressure_pa, names: names, **sizes),
+                   SteamEngine.boiler_breach(names: names) ],
           links: [
-            Link.new(from: [ :boiler, :breach_out ],   to: [ :boiler_breach, :inlet ]),
+            Link.new(from: [ names.(:boiler), :breach_out ],   to: [ names.(:boiler_breach), :inlet ]),
             # `:spill`, not `:exhaust`. Both end in the sky; only one of them was meant to, and
             # booking them together would make every efficiency figure built on the ledger a
             # lie. See `Nodes::Atmosphere`.
-            Link.new(from: [ :boiler_breach, :outlet ], to: [ :atmosphere, :spill ])
+            Link.new(from: [ names.(:boiler_breach), :outlet ], to: [ :atmosphere, :spill ])
           ],
-          # **The firebox glowing straight at the water legs, and it genuinely glows now.** This
-          # was a flat 3500 W/K, which could not say the thing every fireman knows: a *bright*
-          # fire is worth far more than a merely hot one. The radiant term goes as T⁴, so the
-          # draught and the damper now change how much heat reaches the water rather than only
-          # how much fuel is burnt.
+          # **The fire glowing straight at the water legs**, the T⁴ term carried by the share of the
+          # bed alight (`Nodes::FuelBed#radiant_share`): a *bright* fire is worth far more than a
+          # merely hot one, and a banked bed under green coal hardly radiates at all, which is what
+          # keeps its core hot. At work — the bed near 1,050 K, the water 430 K — 24 m² at ε 0.9 is
+          # about 2.4 kW/K, the larger part of the heat to the water.
           #
-          # **The split is calibrated against the total, not chosen freely.** At the working
-          # point — fire ~1020 K, water ~430 K — 24 m² at ε 0.9 gives about 2180 W/K of
-          # radiation, and the 1100 W/K left over is convection: flue gas does touch the legs on
-          # its way to the tubes, and that part is linear. The sum is ~3280 W/K, which is where
-          # the flat figure sat, so the release changes the *shape* of the path rather than its
-          # size. Radiation is two thirds of it, which is a firebox.
-          #
-          # Get that sum wrong and nothing announces it: an under-strength path makes the fire
-          # run HOTTER, because the heat cannot leave it, and the reading that looks like a
-          # better fire is the bottleneck.
-          #
-          # The other half of the fire→water path is the tube bundle, which arrives with
-          # `:stock_boiler_tubes` — the split matters more than either number.
-          thermal_links: [ ThermalLink.new(a: :firebox, b: :boiler, conductance: 1_100.0,
-                                           emissivity: 0.9, radiating_area_m2: 24.0) ]
+          # **The firebox's gas touches the legs on its way to the tubes**, linearly. The rest of the
+          # fire→water path is the tube bundle, which arrives with `:stock_boiler_tubes`.
+          thermal_links: [ ThermalLink.new(a: names.(:fire_bed), b: names.(:boiler), conductance: radiant.fetch(:conductance),
+                                           emissivity: 0.9, radiating_area_m2: radiant.fetch(:radiating_area_m2)),
+                           ThermalLink.new(a: names.(:firebox), b: names.(:boiler), conductance: convective) ]
         )
       end
 
-      def safety_valve_fragment(relief_pa:, max_relief_pa:)
+      # `adjustable: false` is a dead-weight valve, and brings no levers at all.
+      def safety_valve_fragment(relief_pa:, max_relief_pa:, names: HOUSE, adjustable: true, **valve)
         Fragment.new(
-          nodes: [ SteamEngine.relief_valve(relief_pa: relief_pa, max_relief_pa: max_relief_pa) ],
+          nodes: [ SteamEngine.relief_valve(relief_pa: relief_pa, max_relief_pa: max_relief_pa, names: names,
+                                            adjustable: adjustable, **valve) ],
           links: [
-            Link.new(from: [ :boiler, :relief_out ], to: [ :relief, :inlet ]),
-            Link.new(from: [ :relief, :outlet ],     to: [ :atmosphere, :exhaust ])
+            Link.new(from: [ names.(:boiler), :relief_out ], to: [ names.(:relief), :inlet ]),
+            Link.new(from: [ names.(:relief), :outlet ],     to: [ :atmosphere, :exhaust ])
           ],
-          control_points: [
-            SteamEngine.lever(id: :ease_safety, label: "Ease the Safety Valve", node: :relief),
-            SteamEngine.lever(id: :valve_setting, label: "Safety Valve Margin", node: :relief,
-                             default: 100.0)
-          ]
+          control_points: adjustable ? [
+            SteamEngine.lever(names, id: names.(:ease_safety), label: "Ease the Safety Valve", node: names.(:relief)),
+            SteamEngine.lever(names, id: names.(:valve_setting), label: "Safety Valve Margin", node: names.(:relief),
+                                 default: 100.0)
+          ] : []
         )
       end
 
@@ -105,42 +103,47 @@ module ReactorSim
       # piston's own face, which is four times larger and would be a different mechanism.
       def ring_load_area_m2(bore_m) = Math::PI * bore_m * 0.085
 
-      def cylinder_fragment(spec, bore_m:, stroke_m:, heat_capacity:)
+      # The piston rings' own figures, which a smaller barrel overrides (`cylinder_fragment`'s
+      # `rings:`).
+      def ring_figures(names)
+        {
+          mass_kg: 60.0, static_load_n: 2_400.0, film_speed_m_s: 2.2, viscous_c: 6.0, oil_charge_kg: 0.8,
+          # Rings sit inside a tonne of iron casting, which is a far better heat path than a bearing
+          # housing in open air — so they run hot but not dangerously so.
+          ambient_conductance: 260.0,
+          stress_rate: 45.0,
+          # **Rings are the consumable, and this is the number that says so.** 76 kW of boundary
+          # rubbing at the reference setting puts a set at roughly 5 hours of running, 4.1 flat out
+          # — several sessions, not one.
+          wear_rate: 7.3e-7,
+          # Rings rub twice a revolution over a long stroke, so they drink faster than a journal does.
+          oil_loss_kg_per_m: 1.4e-4,
+          # **The route to a worn bore that is not hydraulic lock.** Rings that have wiped no longer
+          # seal, and what they score on the way is the barrel.
+          damages: { wiped: { names.(:cylinder) => 0.35 }, seized: { names.(:cylinder) => 0.6 } }
+        }
+      end
+
+      # `rings:` overrides the piston rings' own figures for a smaller barrel; `cutoff:` is the
+      # valve gear's lever, internal where the blueprint holds it.
+      def cylinder_fragment(spec, bore_m:, stroke_m:, heat_capacity:, names: HOUSE, rings: {},
+                            cutoff: { default: 100.0, internal: false }, **barrel)
         Fragment.new(
           # The barrel ships its own hole, the way the drum does: fit a cylinder and you get
           # that cylinder's way of coming apart. Shut and free until the head lets go.
           nodes: [ SteamEngine.cylinder(spec, bore_m: bore_m, stroke_m: stroke_m,
-                                              heat_capacity: heat_capacity),
-                   SteamEngine.piston_rings(stroke_m: stroke_m, material: :bronze,
+                                              heat_capacity: heat_capacity, names: names, **barrel),
+                   SteamEngine.piston_rings(stroke_m: stroke_m, material: :bronze, names: names,
                                             load_area_m2: ring_load_area_m2(bore_m),
-                                            mass_kg: 60.0, content: Content.default,
-                                            static_load_n: 2_400.0, film_speed_m_s: 2.2,
-                                            viscous_c: 6.0, oil_charge_kg: 0.8,
-                                            # Rings sit inside a tonne of iron casting, which is
-                                            # a far better heat path than a bearing housing in
-                                            # open air — so they run hot but not dangerously so.
-                                            ambient_conductance: 260.0,
-                                            stress_rate: 45.0,
-                                            # **Rings are the consumable, and this is the number
-                                            # that says so.** 76 kW of boundary rubbing at the
-                                            # reference setting puts a set at roughly 5 hours of
-                                            # running, 4.1 flat out — several sessions, not one.
-                                            wear_rate: 7.3e-7,
-                                            # Rings rub twice a revolution over a long stroke, so
-                                            # they drink faster than a journal does.
-                                            oil_loss_kg_per_m: 1.4e-4,
-                                            # **The route to a worn bore that is not hydraulic
-                                            # lock.** Rings that have wiped no longer seal, and
-                                            # what they score on the way is the barrel.
-                                            damages: { wiped: { cylinder: 0.35 },
-                                                       seized: { cylinder: 0.6 } }),
-                   SteamEngine.cylinder_breach ],
+                                            content: Content.default,
+                                            **ring_figures(names).merge(rings)),
+                   SteamEngine.cylinder_breach(names: names) ],
           links: [
-            Link.new(from: [ :cylinder, :breach_out ],    to: [ :cylinder_breach, :inlet ]),
-            Link.new(from: [ :cylinder_breach, :outlet ], to: [ :atmosphere, :spill ])
+            Link.new(from: [ names.(:cylinder), :breach_out ],    to: [ names.(:cylinder_breach), :inlet ]),
+            Link.new(from: [ names.(:cylinder_breach), :outlet ], to: [ :atmosphere, :spill ])
           ],
           control_points: [
-            SteamEngine.lever(id: :cutoff, label: "Cut-off", node: :cylinder, default: 100.0)
+            SteamEngine.lever(names, id: names.(:cutoff), label: "Cut-off", node: names.(:cylinder), **cutoff)
           ]
         )
       end
@@ -160,45 +163,211 @@ module ReactorSim
         )
       end
 
-      def flywheel_fragment(mass_kg:, radius_m:, friction:, safety_factor:)
+      # `belted:` is whether the wheel brings its belt to this engine's load; a mobile engine's host
+      # links whatever it drives itself.
+      def flywheel_fragment(mass_kg:, radius_m:, friction:, safety_factor:, names: HOUSE, belted: true)
         Fragment.new(
           nodes: [ SteamEngine.flywheel(mass_kg: mass_kg, radius_m: radius_m,
-                                        friction: friction, safety_factor: safety_factor) ],
+                                        friction: friction, safety_factor: safety_factor, names: names) ],
           # **A belt drive loses single-digit percent, and `stiffness` is what says so.** At
           # steady state a viscous coupling dissipates exactly `Δω / ω_driver` of what crosses
           # it, so the slip fraction *is* the loss fraction and the number follows from a target:
           # `k ≥ torque / (slip × ω)`. At 9 000 this ran 22% slip and burned a fifth of the
           # engine — measured only once the load stopped being slammed to a standstill every
           # tick, which was hiding it. See `docs/design_sketches/bearings.md` §1.1.
-          drive_links: [ DriveLink.new(a: :flywheel, b: :load, stiffness: 150_000.0) ]
+          drive_links: belted ? [ DriveLink.new(a: names.(:flywheel), b: names.(:load), stiffness: 150_000.0) ] : []
         )
       end
 
-      def load_fragment(moment_of_inertia:, max_torque:, rated_omega:)
+      def load_fragment(moment_of_inertia:, max_torque:, rated_omega:, names: HOUSE, label: "Mill Drive",
+                        lever_label: "Mill Load")
         Fragment.new(
           nodes: [ SteamEngine.load(moment_of_inertia: moment_of_inertia,
-                                    max_torque: max_torque, rated_omega: rated_omega) ],
+                                    max_torque: max_torque, rated_omega: rated_omega, names: names, label: label) ],
           control_points: [
-            SteamEngine.lever(id: :load_demand, label: "Mill Load", node: :load, default: 60.0)
+            SteamEngine.lever(names, id: names.(:load_demand), label: lever_label, node: names.(:load), default: 60.0)
+          ]
+        )
+      end
+
+      # **The fire is two bodies**: the bed on its grate, and the firebox over it.
+      #
+      #   damper ─➤ grate ─➤ fire bed ─➤ over the fire ─➤ firebox ─➤ tubes
+      #
+      # `bed:`, `grate:` and `box:` are each one's own figures. `igniter: false` is a fire nobody
+      # lights, because it was lit before the match.
+      def firebox_fragment(names: HOUSE, igniter: true, bed: {}, grate: {}, box: {})
+        Fragment.new(
+          nodes: [ SteamEngine.fire_bed(names: names, **bed), SteamEngine.grate(names: names, **grate),
+                   SteamEngine.over_fire(names: names), SteamEngine.firebox(names: names, **box) ],
+          links: [
+            Link.new(from: [ names.(:grate), :outlet ],     to: [ names.(:fire_bed), :air_in ]),
+            Link.new(from: [ names.(:fire_bed), :flue_out ], to: [ names.(:over_fire), :inlet ]),
+            Link.new(from: [ names.(:over_fire), :outlet ], to: [ names.(:firebox), :gas_in ])
+          ],
+          control_points: igniter ? [ SteamEngine.lever(names, id: names.(:igniter), label: "Igniter", node: names.(:fire_bed)) ] : []
+        )
+      end
+
+      def bunker_fragment(names: HOUSE, **sizes) = Fragment.new(nodes: [ SteamEngine.fuel_bunker(names: names, **sizes) ])
+
+      # `lever:` is the stoking lever's own options — held at a default where a blueprint sets how
+      # hard the fireman fires.
+      def stoker_fragment(names: HOUSE, lever: {}, **sizes)
+        Fragment.new(
+          nodes: [ SteamEngine.stoker(names: names, **sizes) ],
+          links: [
+            Link.new(from: [ names.(:bunker), :out ],    to: [ names.(:stoker), :inlet ]),
+            Link.new(from: [ names.(:stoker), :outlet ], to: [ names.(:fire_bed), :fuel_in ])
+          ],
+          # **Effort, not a valve**, and the lever here is an instruction rather than a setting:
+          # "fire her as hard as you can" gets you whatever the person at the firehole can
+          # actually shift. Mostly back, a little placement — a shovelful has to go to the right
+          # part of the grate, which is why dexterity is in the blend at all.
+          #
+          # `SteamEngine.stoker`'s 0.25 kg/s is therefore **what a competent human manages**, not
+          # a mechanical limit: a day-labourer moves a third of it and a strong fireman with a
+          # shovel roughly double.
+          # **The heaviest station on the engine: about five minutes flat out.** `exertion:` is
+          # fatigue per second for a competent hand with the lever hard over — and the figure that
+          # matters is `1/(3 × exertion)`, not `1/exertion`, because the runaway divides
+          # time-to-spent by three (`Fatigue::LOAD_CEILING`). So 1.1e-3 is ~300 simulated seconds
+          # at `dt` 0.25 s. At a third of the lever the same person lasts most of an hour, which
+          # is what makes firing rate a decision rather than a setting.
+          control_points: [ SteamEngine.lever(names, id: names.(:stoking), label: "Stoking Effort", node: names.(:stoker),
+                                                 # A shovel is a tool, so `swing` — see `hewing`.
+                                                 effort: { swing: 0.75, dexterity: 0.25 },
+                                                 aided_by: :shovelling, exertion: 1.1e-3, **lever) ]
+        )
+      end
+
+      # `worked: false` is a shaking grate, held at its lever's default rather than raked by hand.
+      def ash_pan_fragment(names: HOUSE, worked: true, default: 0.0)
+        Fragment.new(
+          nodes: [ SteamEngine.ash_pan(names: names, worked: worked) ],
+          links: [
+            Link.new(from: [ names.(:fire_bed), :ash_out ], to: [ names.(:ash_pan), :inlet ]),
+            Link.new(from: [ names.(:ash_pan), :outlet ], to: [ :atmosphere, :exhaust ])
+          ],
+          control_points: [
+            # Effort, like the stoker and for the same reason — its own comment on
+            # `SteamEngine.ash_pan` already called it "somebody's effort with a shovel". More
+            # awkward than firing, hence the heavier dexterity share: an ashpan is raked out
+            # bent double under a locomotive rather than swung at from standing.
+            if worked
+              SteamEngine.lever(names, id: names.(:ash_raking), label: "Rake the Ashpan", node: names.(:ash_pan),
+                                   effort: { swing: 0.6, dexterity: 0.4 },
+                                   aided_by: :shovelling, exertion: 9.3e-4)
+            else
+              SteamEngine.lever(names, id: names.(:ash_raking), label: "Shaking Grate", node: names.(:ash_pan),
+                                   default: default, internal: true)
+            end
+          ]
+        )
+      end
+
+      def boiler_tubes_fragment(names: HOUSE, conductance_to_water: 20_000.0, **sizes)
+        Fragment.new(
+          nodes: [ SteamEngine.boiler_tubes(names: names, **sizes) ],
+          links: [
+            Link.new(from: [ names.(:firebox), :flue_out ],    to: [ names.(:boiler_tubes), :inlet ]),
+            Link.new(from: [ names.(:boiler_tubes), :outlet ], to: [ names.(:flue), :inlet ])
+          ],
+          # Strong, so the tube metal sits near the water rather than near the fire. What
+          # limits the transfer is the enthalpy the gas is carrying, not this number.
+          thermal_links: [ ThermalLink.new(a: names.(:boiler_tubes), b: names.(:boiler), conductance: conductance_to_water) ]
+        )
+      end
+
+      def water_supply_fragment(names: HOUSE, **sizes) = Fragment.new(nodes: [ SteamEngine.water_supply(names: names, **sizes) ])
+
+      # `feed:` is the feed lever's own options — internal, where somebody other than the player
+      # works it.
+      def feedwater_fragment(names: HOUSE, pump_kg_per_s: 2.0, steam_kg_per_s: 0.20, feed: {})
+        Fragment.new(
+          nodes: [ SteamEngine.feed_pump(names: names, max_kg_per_s: pump_kg_per_s), SteamEngine.injector(names: names),
+                   SteamEngine.injector_steam(names: names, max_kg_per_s: steam_kg_per_s) ],
+          links: [
+            Link.new(from: [ names.(:supply), :out ],            to: [ names.(:feed_pump), :inlet ]),
+            Link.new(from: [ names.(:feed_pump), :outlet ],      to: [ names.(:injector), :water_in ]),
+            Link.new(from: [ names.(:boiler), :injector_out ],   to: [ names.(:injector_steam), :inlet ]),
+            Link.new(from: [ names.(:injector_steam), :outlet ], to: [ names.(:injector), :steam_in ]),
+            Link.new(from: [ names.(:injector), :out ],          to: [ names.(:boiler), :feed_in ])
+          ],
+          control_points: [ SteamEngine.lever(names, id: names.(:feed), label: "Feed Pump", node: names.(:feed_pump), **feed) ]
+        )
+      end
+
+      def fusible_plug_fragment(names: HOUSE)
+        Fragment.new(
+          nodes: [ SteamEngine.fusible_plug(names: names) ],
+          links: [
+            Link.new(from: [ names.(:boiler), :plug_out ],     to: [ names.(:fusible_plug), :inlet ]),
+            Link.new(from: [ names.(:fusible_plug), :outlet ], to: [ names.(:fire_bed), :plug_in ])
+          ]
+        )
+      end
+
+      # `throttle:` is the regulator lever's own options.
+      def regulator_fragment(names: HOUSE, conductance: 1.5e-3, throttle: {})
+        Fragment.new(
+          # The regulator ships its own hole, like every other part that can fail — but note
+          # **the breach is fed from the BOILER, not from the throttle.** A conduit holds
+          # nothing, so a burst pipe has no contents of its own to lose; it has to drain a
+          # holder, and naming the drum says the split is on the boiler side of the valve.
+          # `senses:` and the inlet link are deliberately different nodes. See `Nodes::Breach`.
+          nodes: [ SteamEngine.throttle(names: names, conductance: conductance), SteamEngine.steam_pipe_breach(names: names) ],
+          links: [
+            Link.new(from: [ names.(:boiler), :steam_out ], to: [ names.(:throttle), :inlet ]),
+            Link.new(from: [ names.(:throttle), :outlet ],  to: [ names.(:steam_chest), :in ]),
+            Link.new(from: [ names.(:boiler), :steam_pipe_out ],   to: [ names.(:steam_pipe_breach), :inlet ]),
+            Link.new(from: [ names.(:steam_pipe_breach), :outlet ], to: [ :atmosphere, :spill ])
+          ],
+          control_points: [
+            SteamEngine.lever(names, id: names.(:throttle_open), label: "Throttle", node: names.(:throttle), **throttle)
+          ]
+        )
+      end
+
+      def steam_chest_fragment(names: HOUSE, **sizes)
+        Fragment.new(
+          nodes: [ SteamEngine.steam_chest(names: names, **sizes), SteamEngine.steam_chest_breach(names: names) ],
+          links: [
+            Link.new(from: [ names.(:steam_chest), :out ], to: [ names.(:cylinder), :inlet ]),
+            Link.new(from: [ names.(:steam_chest), :breach_out ],   to: [ names.(:steam_chest_breach), :inlet ]),
+            Link.new(from: [ names.(:steam_chest_breach), :outlet ], to: [ :atmosphere, :spill ])
+          ]
+        )
+      end
+
+      # `cocks:` is the cocks' lever's own options.
+      def drain_cocks_fragment(names: HOUSE, cocks: {}, **sizes)
+        Fragment.new(
+          nodes: [ SteamEngine.drain_cocks(names: names, **sizes) ],
+          links: [
+            Link.new(from: [ names.(:cylinder), :drain ],     to: [ names.(:drain_cocks), :inlet ]),
+            Link.new(from: [ names.(:drain_cocks), :outlet ], to: [ :atmosphere, :exhaust ])
+          ],
+          control_points: [
+            SteamEngine.lever(names, id: names.(:cylinder_cocks), label: "Cylinder Cocks", node: names.(:drain_cocks), **cocks)
           ]
         )
       end
 
       # --- fire ----------------------------------------------------------------
 
+      # Banked by the shift before (`SteamEngine::BANKED_BED`), so a match opens on a fire to bring up
+      # rather than one to light.
       Parts.register(:stock_firebox, kind: :firebox, label: "Firebox",
-                     provides: %i[firebox], instruments: %i[firebox_temp fire_state],
-                     stats: { volume_m3: 6.0, igniter_kw: 120 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.firebox ],
-          control_points: [ SteamEngine.lever(id: :igniter, label: "Igniter", node: :firebox) ]
-        )
+                     provides: %i[fire_bed grate over_fire firebox], instruments: %i[firebox_temp fire_state],
+                     stats: { volume_m3: 6.0, grate_area_m2: 2.0, igniter_kw: 120 }) do |_spec|
+        SteamEngine.firebox_fragment(bed: { laid: SteamEngine::BANKED_BED })
       end
 
       Parts.register(:stock_bunker, kind: :bunker, label: "Fuel Bunker",
                      provides: %i[bunker], instruments: %i[coal_remaining],
                      stats: { volume_m3: 40.0, coal_kg: 12_000.0 }) do |_spec|
-        Fragment.new(nodes: [ SteamEngine.fuel_bunker ])
+        SteamEngine.bunker_fragment
       end
 
       # **A well-oiled journal is very efficient, and that is not a bug in the numbers.** These
@@ -236,7 +405,7 @@ module ReactorSim
           mass_kg: 52.0, material: :bronze, stress_rate: 120.0, wear_rate: 4.0e-7,
           oil_loss_kg_per_m: 2.0e-4,
           damages: { seized: { cylinder: 0.5, flywheel: 0.4 } },
-          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+          endangers: { seized: { wounds: { crush: 0.7, burn: 0.3 }, scales_with: :rim_speed_m_s,
                                  reference: 27.0, stations: { oiling: 1.0 } } }
         )
       end
@@ -269,7 +438,7 @@ module ReactorSim
           oil_charge_kg: 0.0, oil_loss_kg_per_m: 0.0,
           viscous_c: 1.2, stress_rate: 25.0, wear_rate: 6.0e-8,
           damages: { seized: { cylinder: 0.5, flywheel: 0.5 } },
-          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+          endangers: { seized: { wounds: { crush: 0.7, burn: 0.3 }, scales_with: :rim_speed_m_s,
                                  reference: 27.0, stations: { oiling: 1.0 } } }
         )
       end
@@ -307,7 +476,7 @@ module ReactorSim
           # 27 m/s is the reference rim speed — a 1.5 m flywheel at its working 18 rad/s — so a
           # seizure at ordinary running scales to 1.0 and one on a barred-over engine to almost
           # nothing.
-          endangers: { seized: { tags: %i[burn crush], scales_with: :rim_speed_m_s,
+          endangers: { seized: { wounds: { crush: 0.7, burn: 0.3 }, scales_with: :rim_speed_m_s,
                                  reference: 27.0, stations: { oiling: 1.0 } } }
         )
       end
@@ -336,8 +505,8 @@ module ReactorSim
                      provides: %i[oil_feed_journals oil_feed_rings],
                      stats: { max_kg_per_s: 0.06 }) do |_spec|
         Fragment.new(
-          nodes: [ SteamEngine.oil_line(id: :oil_feed_journals),
-                   SteamEngine.oil_line(id: :oil_feed_rings) ],
+          nodes: [ SteamEngine.oil_line(id: :oil_feed_journals, worked: true),
+                   SteamEngine.oil_line(id: :oil_feed_rings, worked: true) ],
           links: [
             Link.new(from: [ :oil_store, :out ],            to: [ :oil_feed_journals, :inlet ]),
             Link.new(from: [ :oil_feed_journals, :outlet ], to: [ :main_bearings, :oil_in ]),
@@ -422,31 +591,7 @@ module ReactorSim
 
       Parts.register(:stock_stoker, kind: :stoking_gear, label: "Stoking Line",
                      provides: %i[stoker], stats: { max_kg_per_s: 0.25 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.stoker ],
-          links: [
-            Link.new(from: [ :bunker, :out ],    to: [ :stoker, :inlet ]),
-            Link.new(from: [ :stoker, :outlet ], to: [ :firebox, :fuel_in ])
-          ],
-          # **Effort, not a valve**, and the lever here is an instruction rather than a setting:
-          # "fire her as hard as you can" gets you whatever the person at the firehole can
-          # actually shift. Mostly back, a little placement — a shovelful has to go to the right
-          # part of the grate, which is why dexterity is in the blend at all.
-          #
-          # `SteamEngine.stoker`'s 0.25 kg/s is therefore **what a competent human manages**, not
-          # a mechanical limit: a day-labourer moves a third of it and a strong fireman with a
-          # shovel roughly double.
-          # **The heaviest station on the engine: about five minutes flat out.** `exertion:` is
-          # fatigue per second for a competent hand with the lever hard over — and the figure that
-          # matters is `1/(3 × exertion)`, not `1/exertion`, because the runaway divides
-          # time-to-spent by three (`Fatigue::LOAD_CEILING`). So 1.1e-3 is ~300 simulated seconds
-          # at `dt` 0.25 s. At a third of the lever the same person lasts most of an hour, which
-          # is what makes firing rate a decision rather than a setting.
-          control_points: [ SteamEngine.lever(id: :stoking, label: "Stoking Effort", node: :stoker,
-                                             # A shovel is a tool, so `swing` — see `hewing`.
-                                             effort: { swing: 0.75, dexterity: 0.25 },
-                                             aided_by: :shovelling, exertion: 1.1e-3) ]
-        )
+        SteamEngine.stoker_fragment
       end
 
       # Raking out the ashpan. **Not optional chrome** — it is the remedy that makes the choked
@@ -455,22 +600,7 @@ module ReactorSim
       # itself over a long game and no lever a player can reach will help.
       Parts.register(:stock_ash_pan, kind: :ash_handling, label: "Ashpan",
                      provides: %i[ash_pan], stats: { max_kg_per_s: 0.5 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.ash_pan ],
-          links: [
-            Link.new(from: [ :firebox, :ash_out ], to: [ :ash_pan, :inlet ]),
-            Link.new(from: [ :ash_pan, :outlet ], to: [ :atmosphere, :exhaust ])
-          ],
-          control_points: [
-            # Effort, like the stoker and for the same reason — its own comment on
-            # `SteamEngine.ash_pan` already called it "somebody's effort with a shovel". More
-            # awkward than firing, hence the heavier dexterity share: an ashpan is raked out
-            # bent double under a locomotive rather than swung at from standing.
-            SteamEngine.lever(id: :ash_raking, label: "Rake the Ashpan", node: :ash_pan,
-                             effort: { swing: 0.6, dexterity: 0.4 },
-                             aided_by: :shovelling, exertion: 9.3e-4)
-          ]
-        )
+        SteamEngine.ash_pan_fragment
       end
 
       # **0.35 sits at the knee of the draught curve.** Measured at full controls, blower OFF,
@@ -582,16 +712,7 @@ module ReactorSim
       Parts.register(:stock_boiler_tubes, kind: :boiler_tubes, label: "Boiler Tubes",
                      provides: %i[boiler_tubes],
                      stats: { conductance: 4.0, material: :wrought_iron }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.boiler_tubes ],
-          links: [
-            Link.new(from: [ :firebox, :flue_out ],    to: [ :boiler_tubes, :inlet ]),
-            Link.new(from: [ :boiler_tubes, :outlet ], to: [ :flue, :inlet ])
-          ],
-          # Strong, so the tube metal sits near the water rather than near the fire. What
-          # limits the transfer is the enthalpy the gas is carrying, not this number.
-          thermal_links: [ ThermalLink.new(a: :boiler_tubes, b: :boiler, conductance: 20_000.0) ]
-        )
+        SteamEngine.boiler_tubes_fragment
       end
 
       # **The blastpipe is part of the chimney, not a part of its own**, on two counts.
@@ -626,7 +747,7 @@ module ReactorSim
       Parts.register(:stock_water_supply, kind: :water_supply, label: "Water Supply",
                      provides: %i[supply], instruments: %i[water_remaining],
                      stats: { volume_m3: 12.0, water_kg: 6_000.0 }) do |_spec|
-        Fragment.new(nodes: [ SteamEngine.water_supply ])
+        SteamEngine.water_supply_fragment
       end
 
       # **The feed pump, the injector and its steam pipe are ONE part**, because they are one
@@ -641,17 +762,7 @@ module ReactorSim
       Parts.register(:stock_injector, kind: :feedwater, label: "Injector and Feed Pump",
                      provides: %i[feed_pump injector injector_steam],
                      stats: { pump_kg_per_s: 2.0, steam_kg_per_s: 0.20 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.feed_pump, SteamEngine.injector, SteamEngine.injector_steam ],
-          links: [
-            Link.new(from: [ :supply, :out ],            to: [ :feed_pump, :inlet ]),
-            Link.new(from: [ :feed_pump, :outlet ],      to: [ :injector, :water_in ]),
-            Link.new(from: [ :boiler, :injector_out ],   to: [ :injector_steam, :inlet ]),
-            Link.new(from: [ :injector_steam, :outlet ], to: [ :injector, :steam_in ]),
-            Link.new(from: [ :injector, :out ],          to: [ :boiler, :feed_in ])
-          ],
-          control_points: [ SteamEngine.lever(id: :feed, label: "Feed Pump", node: :feed_pump) ]
-        )
+        SteamEngine.feedwater_fragment
       end
 
       # A 5 m³ drum at 0.6 m radius is about 4.4 m long — a locomotive-sized barrel — and 14 mm
@@ -671,7 +782,8 @@ module ReactorSim
                               material: :wrought_iron, rated_pressure: "14.39 atm",
                               working_pressure: "5 atm" }) do |_spec|
         SteamEngine.boiler_fragment(shell_radius_m: 0.6, wall_thickness_m: 0.014,
-                                    working_pressure_pa: 5.0 * Units::STANDARD_PRESSURE_PA)
+                                    working_pressure_pa: 5.0 * Units::STANDARD_PRESSURE_PA,
+                                    initial_temperature_k: SteamEngine::BANKED_DRUM_K.fetch(:locomotive_boiler))
       end
 
       # A wide, thin drum: a beam engine's boiler is a big low-pressure thing, and 6 mm of
@@ -690,7 +802,8 @@ module ReactorSim
                               material: :wrought_iron, rated_pressure: "4.93 atm",
                               working_pressure: "1.2 atm" }) do |_spec|
         SteamEngine.boiler_fragment(shell_radius_m: 0.75, wall_thickness_m: 0.006,
-                                    working_pressure_pa: 1.2 * Units::STANDARD_PRESSURE_PA)
+                                    working_pressure_pa: 1.2 * Units::STANDARD_PRESSURE_PA,
+                                    initial_temperature_k: SteamEngine::BANKED_DRUM_K.fetch(:beam_boiler))
       end
 
       # --- steam ---------------------------------------------------------------
@@ -821,19 +934,13 @@ module ReactorSim
                                           max_relief_pa: 2.2 * Units::STANDARD_PRESSURE_PA)
       end
 
-      # **Into the firebox, not to the sky**, and that is the whole point of the part. A plug
+      # **Onto the fire, not to the sky**, and that is the whole point of the part. A plug
       # that vented outside would be a leak; venting onto the grate is what kills the fire and
       # forces the driver to stop, which is the safety function.
       Parts.register(:stock_fusible_plug, kind: :fusible_plug, label: "Fusible Plug",
                      provides: %i[fusible_plug], instruments: %i[plug_blown],
                      stats: { material: :fusible_alloy, plug_kg: 0.05 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.fusible_plug ],
-          links: [
-            Link.new(from: [ :boiler, :plug_out ],     to: [ :fusible_plug, :inlet ]),
-            Link.new(from: [ :fusible_plug, :outlet ], to: [ :firebox, :plug_in ])
-          ]
-        )
+        SteamEngine.fusible_plug_fragment
       end
 
       # Boiler → regulator → chest is **pressure-driven**, because the throttle declares a
@@ -845,35 +952,12 @@ module ReactorSim
       Parts.register(:stock_regulator, kind: :regulator, label: "Throttle Valve",
                      provides: %i[throttle],
                      stats: { conductance: 1.5e-3, rangeability: 8.0 }) do |_spec|
-        Fragment.new(
-          # The regulator ships its own hole, like every other part that can fail — but note
-          # **the breach is fed from the BOILER, not from the throttle.** A conduit holds
-          # nothing, so a burst pipe has no contents of its own to lose; it has to drain a
-          # holder, and naming the drum says the split is on the boiler side of the valve.
-          # `senses:` and the inlet link are deliberately different nodes. See `Nodes::Breach`.
-          nodes: [ SteamEngine.throttle, SteamEngine.steam_pipe_breach ],
-          links: [
-            Link.new(from: [ :boiler, :steam_out ], to: [ :throttle, :inlet ]),
-            Link.new(from: [ :throttle, :outlet ],  to: [ :steam_chest, :in ]),
-            Link.new(from: [ :boiler, :steam_pipe_out ],   to: [ :steam_pipe_breach, :inlet ]),
-            Link.new(from: [ :steam_pipe_breach, :outlet ], to: [ :atmosphere, :spill ])
-          ],
-          control_points: [
-            SteamEngine.lever(id: :throttle_open, label: "Throttle", node: :throttle)
-          ]
-        )
+        SteamEngine.regulator_fragment
       end
 
       Parts.register(:stock_steam_chest, kind: :steam_chest, label: "Steam Chest",
                      provides: %i[steam_chest], stats: { volume_m3: 1.0 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.steam_chest, SteamEngine.steam_chest_breach ],
-          links: [
-            Link.new(from: [ :steam_chest, :out ], to: [ :cylinder, :inlet ]),
-            Link.new(from: [ :steam_chest, :breach_out ],   to: [ :steam_chest_breach, :inlet ]),
-            Link.new(from: [ :steam_chest_breach, :outlet ], to: [ :atmosphere, :spill ])
-          ]
-        )
+        SteamEngine.steam_chest_fragment
       end
 
       # --- engine --------------------------------------------------------------
@@ -915,16 +999,7 @@ module ReactorSim
       # correction to it.
       Parts.register(:stock_drain_cocks, kind: :drain_cocks, label: "Cylinder Cocks",
                      provides: %i[drain_cocks], stats: { max_kg_per_s: 0.25 }) do |_spec|
-        Fragment.new(
-          nodes: [ SteamEngine.drain_cocks ],
-          links: [
-            Link.new(from: [ :cylinder, :drain ],     to: [ :drain_cocks, :inlet ]),
-            Link.new(from: [ :drain_cocks, :outlet ], to: [ :atmosphere, :exhaust ])
-          ],
-          control_points: [
-            SteamEngine.lever(id: :cylinder_cocks, label: "Cylinder Cocks", node: :drain_cocks)
-          ]
-        )
+        SteamEngine.drain_cocks_fragment
       end
 
       # Its base is where it has always sat — 1.5× the boiler valve's safe setting — but stated
@@ -1068,10 +1143,8 @@ module ReactorSim
           Slot.new(id: :bunker, accepts: :bunker, label: "Fuel Bunker", group: :fire,
                    required: true, default: :stock_bunker),
           # **The biggest single upgrade on the engine.** Without the bundle the flue gas goes
-          # straight from firebox to chimney and the only fire→water path is the radiant one,
-          # which is a plain shell boiler. Radiant only puts the firebox at 676 K and sends 90%
-          # of the fuel up the chimney for 41 kW of shaft work, against 895 K and 47.3 kW with
-          # tubes — and that comparison uses a radiant conductance tuned *for* the tubeless case.
+          # straight from firebox to chimney, and the only fire→water paths are the fire's radiance
+          # and the firebox's gas on the legs, which is a plain shell boiler.
           #
           # The thermal link to the drum leaves with it, because it is in the part's fragment.
           Slot.new(id: :boiler_tubes, accepts: :boiler_tubes, label: "Boiler Tubes", group: :water,
@@ -1147,7 +1220,8 @@ module ReactorSim
           # many hands the operation can field and where they begin the shift — so an engine
           # without one has no crew at all, rather than a crew that starts nowhere.
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Crew Quarters", group: :crew,
-                   required: true, default: :mess_room)
+                   required: true, default: :mess_room),
+          WeatherGauges.slot
         ]
 
         return base unless spec.fetch(:condenser)
@@ -1178,7 +1252,10 @@ module ReactorSim
             Link.new(from: [ :cylinder, :exhaust ], to: [ :flue, :inlet ])
           end
 
-        Fragment.new(nodes: [ Nodes::Atmosphere.new ], links: [ exhaust ])
+        Fragment.new(nodes: [ Nodes::Atmosphere.new, Nodes::Outdoors.new(setup: spec[:conditions]) ],
+                     links: [ exhaust ],
+                     # What whoever is at the fire makes of the weather through the door.
+                     diagnostics: WeatherGauges.guesses(observer: :stoking).values)
       end
 
       # **One room, because that is what a stationary plant was.** Separating the boiler into
@@ -1200,7 +1277,9 @@ module ReactorSim
       # place that names a node the operation does not have — an engine with no boiler tubes
       # stopped building at all.
       def engine_house(fragment)
-        Place.new(id: :engine_house, label: "Engine House", air: :atmosphere,
+        # Walled and roofed: it keeps most of the weather off the machinery, and the light through
+        # its windows is a third of the day's.
+        Place.new(id: :engine_house, label: "Engine House", air: :atmosphere, exposure: 0.3,
                   nodes: fragment.nodes.map(&:id) - OUTSIDE)
       end
 
@@ -1217,11 +1296,11 @@ module ReactorSim
       # Note these are about *reachability*, not about wisdom. A build with no safety valve
       # satisfies every one of them and is a perfectly legal thing to take out onto a shift.
       ROUTES = [
-        { from: :bunker, to: :firebox, carrying: :fuel,
+        { from: :bunker, to: :fire_bed, carrying: :fuel,
           as: "no route for coal to reach the grate" },
-        { from: :atmosphere, to: :firebox, carrying: :gas,
+        { from: :atmosphere, to: :fire_bed, carrying: :gas,
           as: "no route for air to reach the fire" },
-        { from: :firebox, to: :atmosphere, carrying: :gas,
+        { from: :fire_bed, to: :atmosphere, carrying: :gas,
           as: "the fire has no way to breathe out — nothing carries the flue gas away" },
         { from: :supply, to: :boiler, carrying: :liquid,
           as: "no route for feedwater to reach the boiler" },

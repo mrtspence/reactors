@@ -27,14 +27,18 @@ grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n'
 ```
 
 At the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`, `exhaust`,
-`explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`,
-`oxidiser`, `solid`, `structural`, `waste`, `working_fluid`. (`inert` is descriptive — it marks
+`explosive`, `fuel`, `fusible`, `gangue`, `gas`, `inert`, `liquid`, `lubricant`, `metal`, `moderator`,
+`ore`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`. (`inert` is descriptive — it marks
 what cannot burn, and nothing reads it: a reaction names its reagents, so being left out of one is
 what makes a substance inert.)
 
+> **`ore` and `gangue` are transport tags, and they are what a washer is.** Wash ore is both at
+> once, as dug; the log washer's clean outlet accepts `ore` and its slurry outlet `gangue` and the
+> water, so the parting is the ports' own filtering — nothing in the engine knows about washing.
+
 > **`explosive` is a transport tag and nothing else**, the way `dust` is: only the charge line from
 > the magazine carries it, so a shot's charge never rides out on the tubs or up the return. Its
-> resources (`black_powder`, `permitted_explosive`) are not `fuel` — a charge is fired, it does not
+> resources (`black_powder`, `permitted_explosive`, `dynamite`) are not `fuel` — a charge is fired, it does not
 > catch — and each fires by a reaction with no ignition block and no temperature gate, so it reacts
 > the tick it lands and leaves its fumes.
 
@@ -112,7 +116,7 @@ coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }   # 12.0 = 12.0
   enthalpy_j_per_unit: -30000000           # negative = exothermic
-  rate_per_s: 6.0
+  rate_per_s: 0.001
   min_temperature_k: 500
 ```
 
@@ -124,9 +128,12 @@ a data file where nobody would look when conservation started failing.
   whole `consumes` set. It must also **absorb any formation-enthalpy difference between the
   two sides** — the stoichiometry itself conserves enthalpy exactly, so this is the only place
   a reaction may change system energy.
-- **`rate_per_s` must suit the timestep.** `extent = limit × (1 − e^(−rate × dt))`. At rate 0.8
-  and dt 0.25 only 18% of the available reaction happens per tick, so a firebox starves in the
-  middle of a full grate. Combustion wants ~6–14.
+- **With an `ignition:` block, `rate_per_s` is how fast LIT fuel burns** at full air, a share of it
+  a second — a physical figure, not a timestep one. Coal's is 10⁻³, so a lit lump lasts a quarter of
+  an hour and a grate's bed builds to minutes of burning (`Nodes::FuelBed`). Without the block it
+  scales the reaction against its limiting reagent, `extent = limit × (1 − e^(−rate × dt))`, and wants
+  to be large enough for the timestep: at 0.8 and dt 0.25 only 18% of what is available reacts a
+  tick.
 - **`min_temperature_k` is not the ignition point.** A node is one lumped temperature, so there
   is no local hot spot to light. It means *"the bulk temperature at which this reaction
   sustains itself"*, well below the temperature a match applies to a corner. Set at coal's true
@@ -186,24 +193,43 @@ elf:
     darkvision: 0.3
 
 # content/minions/crew.yml — layer two: who they actually are, as OFFSETS
-galathas:
-  name: Galathas        # required. A name is what separates a person from a race.
+elowynne:
+  name: Elowynne        # required. A name is what separates a person from a race.
   archetype: elf        # required, and checked — an unknown race is refused at boot
+  mass_kg: -10.0        # an offset, beside stats and never inside them
   stats:
-    strength: 0.35      # strong for an elf…
-    dexterity: -0.25    # …and heavy-handed with it
-  tags:
-    clumsy: 0.2
+    intelligence: 0.1   # quicker than most elves…
+    agility: 0.1        # …and lighter on her feet
 ```
+
+**Every key on an archetype or an individual is checked against the keys that layer may hold**,
+and so is every key under an individual's `stats:` — and an item's or a course's — against the
+stats. The sheet is folded by picking out what it knows, so anything else would never be read and
+nothing would say so — a `mass_kg` under `stats:` would leave somebody at their race's weight.
 
 Four layers in all: **archetype → individual → training → equipment**, each offsetting the last.
 The last two are the delivery tier's, because they are things a player *owns* and ownership is not
 something the simulation may know about. `Registry#sheet(id)` returns the first two folded.
 
-- **The six stats are fixed; everything else is a tag.** Fixed because the engine reads them and
+- **The stats are fixed; everything else is a tag.** Fixed because the engine reads them and
   needs a number rather than an absence. `toughness` drives the Danger Check; `endurance` divides
   fatigue accrual; `intelligence` drives the `observer:` path; `dexterity` is precision work;
-  `charisma` is declared and read by nothing yet.
+  `charisma` is a boss's authority and a person's allure; `agility` is getting out of the way and
+  half of walking; `combat_prowess` multiplies `attack` and `defend`. A human is 1.0 at each, and
+  **every one multiplies somewhere**, so a race that omits one is refused at boot rather than
+  quietly unable to dodge.
+- **`grudges:`** on a race or an individual is who they dislike, by race or by person, 0..1;
+  **`resented_by:`** on an individual is who dislikes *them*. Both are checked against known races
+  and people at boot. **Temperament** is tags in opposed pairs, read net —
+  `short_tempered`/`even_tempered`, `callous`/`kindly`, `reckless`/`conscientious`,
+  `spiteful`/`forgiving`, `violent_nature`/`gentle`, `annoying`/`calming` — and `distracting` makes somebody hard to work
+  beside, `focused` resists it, `defence` is defensive gear, `cutting` is the knife's aid. An item
+  may carry `weapon: { handling:, edge:, wounds: }` — a blend of what it asks of the hand (a pick
+  swing-heavy, a knife precision-heavy, summing past one for a good weapon), severity its edge adds
+  whoever holds it, and the kinds of wound a blow leaves as shares of it (`{ puncture: 0.8, impact:
+  0.2 }`), each resisted by its own `_resistance` and tiered on its own share — so the main kind
+  carries most of it. `regeneration` and `slow_healer` are how fast
+  somebody's wounds heal between matches.
 - **`strength` is a strength-to-WEIGHT ratio, and 1.0 is a human's.** Below 1.0 means worse
   pound-for-pound than a person, which is where most large things sit — strength grows with
   cross-section and weight with volume. So an ogre is **0.65** and overwhelming anyway, because
@@ -246,6 +272,27 @@ something the simulation may know about. `Registry#sheet(id)` returns the first 
 - **Values ADD across layers, then clamp. Consumers multiply.** Merge adds, use multiplies.
 - **Health, fatigue, station and injury are state, not content** — they change during a match and
   live in `state[:minions]`. Getting that backwards would make a hurt minion recover on restore.
+
+## Wounds
+
+`content/wounds/` is what a harm leaves on a body: **kind → tier → variant**, every kind
+(`Wounds::KINDS`), all four tiers, exactly five variants a tier, each a `label`, a `weight` and
+`derates:` on real stats, 0..1. Complete or refused at boot, so no wound falls back to a generic one.
+**A variant's place in its tier matters**: a wound that heals or deepens across a tier becomes the
+variant in the same place in the next. Guide:
+[`docs/guides/add-content.md`](../docs/guides/add-content.md#a-wound).
+
+## Climates
+
+`content/conditions/` holds the skies a match is played under, by season — what a season is like
+and the mix of spells it draws from. **A spell's figures are offsets stretched by a drawn
+severity**, so one season gives both a mild match and a hard one; what falls takes its form from
+the temperature. Every key is required and checked at boot. Guide:
+[`docs/guides/add-content.md`](../docs/guides/add-content.md#a-climate).
+
+- **`cold_resistance`** on kit is what stands against `Chill`, as `heat_resistance` does against
+  `Scorch`. **`drowning_resistance`** — a cause's resistance, as `rockfall_resistance` is — keeps
+  somebody afloat in deep water; nothing carries it yet.
 
 ## Validation and testing
 

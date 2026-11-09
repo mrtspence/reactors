@@ -22,4 +22,5 @@ class LeverComponent < ViewComponent::Base
   def min = control.fetch(:min).to_f
   def max = control.fetch(:max).to_f
   def unit = control[:unit].presence
+  def capacity = control[:capacity]
 end

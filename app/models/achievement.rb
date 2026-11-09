@@ -10,6 +10,11 @@
 # **A prerequisite lives on the blueprint**, so a blueprint carries everything needed to answer
 # "may I have this yet?" in one place rather than in a rules engine nobody can read end to end.
 #
+# **Every achievement is earned on one kind of machine** (`operation_type:`, required), and only
+# that machine's own records count toward it: a window opens and closes on one operation's
+# transitions, and a meter reads one operation's ledger. A kiln catching in the pit says nothing
+# about the stationary engine's fire.
+#
 # Three shapes, because most achievements should cost one line:
 #
 #   when_seen:   a point fact, complete the moment it arrives
@@ -19,20 +24,24 @@
 # Anything stranger takes a `predicate:` receiving the fold and the record — the seam this is
 # meant to be extended through. See `docs/design_sketches/event_system.md` §2 and §10.
 module Achievement
-  Definition = Struct.new(:id, :label, :when_seen, :when_meter, :reaches, :scope,
+  Definition = Struct.new(:id, :label, :operation_type, :when_seen, :when_meter, :reaches, :scope,
                           :between, :lasting_ticks, :disqualified_by, :predicate,
                           keyword_init: true) do
     def point? = !when_seen.nil?
     def meter? = !when_meter.nil?
     def extent? = !between.nil?
+
+    # Whether a record off the log is this machine's to count.
+    def counts?(record) = record["operation_type"].to_s == operation_type
   end
 
   DEFINITIONS = {}
 
   module_function
 
-  def define(id, label:, **options)
-    DEFINITIONS[id.to_sym] = Definition.new(id: id.to_sym, label: label, **options).freeze
+  def define(id, label:, operation_type:, **options)
+    DEFINITIONS[id.to_sym] = Definition.new(id: id.to_sym, label: label, operation_type: operation_type.to_s,
+                                            **options).freeze
   end
 
   # **Derived from the definitions, never written out beside them.** It was a hand-maintained
@@ -70,7 +79,7 @@ module Achievement
   # numbers; achievements are rules.
 
   define :first_full_head_of_steam,
-         label: "A Full Head of Steam",
+         label: "A Full Head of Steam", operation_type: :steam_engine,
          when_seen: { type: "steam_raised" }
 
   # **"Without the pilot at all" is not expressible**, because the igniter is what lights a cold
@@ -82,26 +91,26 @@ module Achievement
   # from the fire catching to working pressure, spoilt by the pilot coming back on or the fire
   # going out.
   define :raised_steam_from_cold_alone,
-         label: "A Clean Cold Start",
+         label: "A Clean Cold Start", operation_type: :steam_engine,
          between: { opens: "fire_lit", closes: "steam_raised" },
          disqualified_by: [ { type: "heater_engaged" }, { type: "fire_out" } ]
 
   # An hour of simulated running at 4 Hz. `closes:` is the fire going out rather than the match
   # ending, deliberately — nothing here may wait on match lifecycle, which is not built.
   define :ran_an_hour_without_blowing_off,
-         label: "An Hour of Quiet Steam",
+         label: "An Hour of Quiet Steam", operation_type: :steam_engine,
          between: { opens: "steam_raised", closes: "fire_out" },
          lasting_ticks: 14_400,
          disqualified_by: [ { type: "blew_off", node: "relief" } ]
 
   define :burst_a_flywheel,
-         label: "Centrifugal Education",
+         label: "Centrifugal Education", operation_type: :steam_engine,
          when_seen: { type: "part_failed", node: "flywheel" }
 
   # The ledger's own line, read straight off a meter reading. No event counts this and none
   # should: it changes every tick, so it belongs to the accumulator that already tracks it and
   # is checked by the conservation specs.
   define :generated_a_gigajoule,
-         label: "A Gigajoule of Honest Work",
+         label: "A Gigajoule of Honest Work", operation_type: :steam_engine,
          when_meter: "joules_to_work", reaches: 1.0e9, scope: :lifetime
 end

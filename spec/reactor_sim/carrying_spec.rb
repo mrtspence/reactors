@@ -30,7 +30,7 @@ module Carriers
   def self.archetype(size)
     { label: size.to_s.capitalize, mass_kg: SIZES.fetch(size).fetch(:mass),
       strength: SIZES.fetch(size).fetch(:strength), toughness: 1.0, endurance: 1.0e6,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
       tags: { mining_effectiveness: 0.6, shovelling: 0.5, darkvision: 0.8 } }
   end
 

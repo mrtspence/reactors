@@ -13,7 +13,7 @@ module ReactorSim
     #   faster than the far end   a BRAKE — the same law linearised as `τ(ω)/ω`; what it takes out
     #                             is booked to `:work` and sent to the far end
     #
-    # So a shed load, an overrunning cage and a surging engine all cross the boundary with no rule
+    # So a shed load, an overrunning hoist and a surging engine all cross the boundary with no rule
     # saying they do.
     #
     # **The braking end sends everything it takes; the driven end spends what its shaft

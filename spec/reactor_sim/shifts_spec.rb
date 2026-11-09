@@ -5,9 +5,9 @@ require "support/constructed"
 require "support/pit_rig"
 
 # **Who is already down when the match starts**, and where they can rest. The shifts are fitted
-# parts — three at the face and three at the pit bottom to start with, five of either upgraded —
-# dealt from the end of the roster, face first, so the first seats stay at bank. The pit bottom has
-# its own refuge, room for one. See `design_sketches/roadway-shift.md`.
+# parts — one at the face and one at the pit bottom to start with, bigger ones upgraded — dealt
+# from the end of the roster, face first, so the first seats stay at bank. The pit bottom has its
+# own refuge, room for one. See `design_sketches/roadway-shift.md`.
 RSpec.describe "shifts" do
   include Constructed
   include PitRig
@@ -22,12 +22,19 @@ RSpec.describe "shifts" do
 
   def seats(places, place) = places.select { |_, at| at == place }.keys
 
-  it "starts three at the face and three at the pit bottom, from the end of the roster" do
-    places = starting
+  # Counts come from the parts, so a retune of a shift or the lamp cabin moves nothing here.
+  def shift_seats(part) = ReactorSim::Parts.fetch(part).stats.fetch(:advance_seats)
+  def roster = ReactorSim::Parts.fetch(:lamp_cabin).stats.fetch(:crew_capacity)
+  def seat_ids(range) = range.map { |i| :"crew_#{i}" }
 
-    expect(seats(places, :district)).to eq(%i[crew_8 crew_9 crew_10])
-    expect(seats(places, :pit_bottom)).to eq(%i[crew_5 crew_6 crew_7])
-    expect(seats(places, :bank)).to eq(%i[crew_1 crew_2 crew_3 crew_4])
+  it "deals the face shift from the end of the roster and the pit bottom shift before it" do
+    places = starting
+    face = shift_seats(:advance_shift)
+    bottom = shift_seats(:pit_bottom_shift)
+
+    expect(seats(places, :district)).to eq(seat_ids((roster - face + 1)..roster))
+    expect(seats(places, :pit_bottom)).to eq(seat_ids((roster - face - bottom + 1)..(roster - face)))
+    expect(seats(places, :bank)).to eq(seat_ids(1..(roster - face - bottom)))
   end
 
   it "posts them to nothing, so where they work is still the first decision" do
@@ -36,17 +43,22 @@ RSpec.describe "shifts" do
     expect(%i[crew_5 crew_8].map { |id| pit.state.dig(:minions, id, :station) }).to all(be_nil)
   end
 
-  it "starts five of either with the back shift and the underground stable" do
-    expect(seats(starting(face_shift: :back_shift), :district).size).to eq(5)
-    expect(seats(starting(pit_bottom_shift: :underground_stable), :pit_bottom).size).to eq(5)
+  it "starts more hands below with the back shift and the underground stable" do
+    expect(seats(starting(face_shift: :back_shift), :district).size)
+      .to be > seats(starting, :district).size
+    expect(seats(starting(pit_bottom_shift: :underground_stable), :pit_bottom).size)
+      .to be > seats(starting, :pit_bottom).size
   end
 
-  # Ten seats and ten places underground: the face is dealt first, and nobody is left at bank.
+  # The face is dealt first, the pit bottom gets what is left, and nobody is dealt twice.
   it "never deals more than the roster holds, the face first" do
     places = starting(face_shift: :back_shift, pit_bottom_shift: :underground_stable)
+    face = [ shift_seats(:back_shift), roster ].min
+    bottom = [ shift_seats(:underground_stable), roster - face ].min
 
-    expect(seats(places, :district)).to eq(%i[crew_6 crew_7 crew_8 crew_9 crew_10])
-    expect(seats(places, :pit_bottom)).to eq(%i[crew_1 crew_2 crew_3 crew_4 crew_5])
+    expect(seats(places, :district).size).to eq(face)
+    expect(seats(places, :pit_bottom).size).to eq(bottom)
+    expect(places.size).to eq(roster)
   end
 
   it "starts everybody at bank with no shift fitted" do

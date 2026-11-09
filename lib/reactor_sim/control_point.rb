@@ -24,7 +24,7 @@ module ReactorSim
 
     attr_reader :id, :label, :node, :min, :max, :default, :unit, :stiffness, :effort, :aided_by,
                 :exertion, :recovery, :place, :gated_by, :capacity, :complexity, :requires,
-                :governor
+                :governor, :openings, :oversees
 
     # **A valve is not a job, and that distinction is what makes a crew matter.** Most controls
     # are valves: a regulator goes where you put it and who put it there is irrelevant. A few are
@@ -47,12 +47,12 @@ module ReactorSim
     # > is a derivative; capability is the rate itself.
     #
     # `stiffness` is for a lever that genuinely takes time to travel, in percent of its range per
-    # second, scaled by whoever is stood there. The mine's valves ship finite figures; infinite
+    # second, scaled by whoever is stood there. A heavy valve ships a finite figure; infinite
     # means frictionless, and `actual` snaps to `target`.
     # **`exertion:` is what this job costs, and it belongs here for the same reason `effort:`
     # does** — the machine is what knows that shovelling is not watching a gauge. It is fatigue
     # per second for a competent, unaided human with the lever hard over, so its reciprocal reads
-    # as "flat out, spent in": the stoker's `8.3e-4` is twenty minutes.
+    # as "flat out, spent in": `8.3e-4` is twenty minutes.
     #
     # `recovery:` is the other direction and is a property of *where somebody is standing* rather
     # than what they are doing. An effort station recovers nothing, because you are still at the
@@ -61,11 +61,12 @@ module ReactorSim
     # `place:` is **where this lever stands** — a place id in the operation's `Layout` — and is
     # what makes manning it cost a walk. Nil means it can be worked from anywhere, which is every
     # control in an operation that declares no passages at all.
-    # `capacity:` is **how many people this station has room for**, and nil — every lever in the
-    # game but one — means it does not care. A hole cut in a roadway side takes one man, and a
-    # bigger one is something a mine buys, so the number is a part's stat rather than a rule.
-    # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can
-    # walk to.
+    # `capacity:` is **how many people this station has room for**. A lever defaults to one; a
+    # part that has room for a gang says so, and its workers' efforts sum (`Tick#crews`). A post
+    # with nothing to work — the crew quarters — defaults to no limit, since the quarters' own
+    # `crew_capacity` already bounds it. The number is a part's stat rather than a rule, and
+    # `Operation#assign_minion` refuses a posting past it, the way it refuses one nobody can walk
+    # to. **A governor post holds one**: two people do not drive one machine.
     # `complexity:` is **how tricky this lever is to work correctly**, and is the exact parallel
     # to `effort:` — deliberately orthogonal to it. `effort:` says how *fast* a job happens and
     # therefore depends on who does it; `complexity:` says whether it happens *correctly*. A
@@ -75,16 +76,23 @@ module ReactorSim
     # `requires:` names the tag a certificated post wants. Lacking it never forbids the posting
     # — a player may always put the wrong person on anything — it makes them likelier to get it
     # wrong, which is what a ticket actually buys.
+    #
+    # `openings:` are what somebody at this post who hates somebody could do to them with it
+    # (`Animosity::Opening`). `oversees:` makes it a boss's post: the places whose quarrels whoever
+    # stands here may step into.
     def initialize(id:, label: nil, node: nil, min: 0.0, max: 100.0, default: 0.0,
                    unit: "%", stiffness: Float::INFINITY, effort: nil, aided_by: nil,
                    exertion: 0.0, recovery: nil, place: nil, gated_by: nil, capacity: nil,
-                   complexity: 0.0, requires: nil, internal: false, governor: nil)
+                   complexity: 0.0, requires: nil, internal: false, governor: nil,
+                   openings: [], oversees: [])
       @id = id.to_sym
+      @openings = Array(openings).freeze
+      @oversees = Array(oversees).map(&:to_sym).freeze
       # **A lever nobody commands.** Its `actual` is written in phase 0 by the governor of the
       # post that works it, and `set_control` refuses it; it is not on the player's panel.
       @internal = internal
       # **A post whose occupant drives other levers**, from this lever's value and the machine's
-      # last-tick state — an engineman winding to a destination. With nobody posted, it does
+      # last-tick state — somebody working a hoist to a destination. With nobody posted, it does
       # nothing and those levers hold where they were left.
       @governor = governor
       @label = label || @id.to_s.tr("_", " ").capitalize
@@ -102,7 +110,7 @@ module ReactorSim
       @gated_by = gated_by&.map(&:to_sym)&.freeze
       @exertion = exertion.to_f
       @recovery = (recovery || (effort ? 0.0 : Fatigue::BASE_RECOVERY)).to_f
-      @capacity = capacity&.to_i
+      @capacity = capacity&.to_i || (@node ? 1 : nil)
       @complexity = complexity.to_f
       @requires = requires&.to_sym
       validate_effort!
@@ -118,7 +126,7 @@ module ReactorSim
     def effort? = !@effort.nil?
 
     # **Something a player can move, as opposed to somewhere a person can stand.** Every station
-    # is a control point — that is what `station_index`, `endangers:` and fatigue all resolve
+    # is a control point — that is what `Tick#crews`, `endangers:` and fatigue all resolve
     # through — but the crew quarters controls nothing, so it has no `node:` and belongs on the
     # crew screen rather than the lever strip. Derived rather than declared, because a lever with
     # nothing on the other end of it is not a lever by construction.
@@ -239,9 +247,12 @@ module ReactorSim
     # Zero would be a station nobody may ever be posted to, which is indistinguishable from one
     # that does not exist and is never what anybody meant to declare.
     def validate_capacity!
-      return if @capacity.nil? || @capacity.positive?
+      unless @capacity.nil? || @capacity.positive?
+        raise Error, "control #{@id}: capacity #{@capacity} must be positive or absent"
+      end
+      return if @governor.nil? || @capacity == 1
 
-      raise Error, "control #{@id}: capacity #{@capacity} must be positive or absent"
+      raise Error, "control #{@id}: a governor post holds one person, not #{@capacity.inspect}"
     end
   end
 end

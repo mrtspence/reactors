@@ -31,7 +31,9 @@ module ReactorSim
                        stats: { strength: 0.2 },
                        # The sketch's worked example: a shovel should be a large bonus to
                        # moving coal specifically, rather than a small bonus to everything.
-                       tags: { shovelling: 0.5 })
+                       tags: { shovelling: 0.5 },
+                       # A heavy blade on a long handle: swung, and not a good weapon.
+                       weapon: { handling: { swing: 0.75, precision: 0.15 }, edge: 0.2, wounds: { impact: 1.0 } })
 
     # The shovel's opposite number, and the reason `aided_by:` is per station rather than per
     # job: the same person is better at one of the two depending on what is in their hand.
@@ -46,7 +48,8 @@ module ReactorSim
                        description: "A fitter's spanner, sized for boiler mountings.",
                        mass_kg: 0.8,
                        stats: { dexterity: 0.15 },
-                       tags: { fitting: 0.3 })
+                       tags: { fitting: 0.3 },
+                       weapon: { handling: { swing: 0.6, precision: 0.3 }, edge: 0.1, wounds: { impact: 1.0 } })
 
     # The sketch's other worked example, and the one that shows a tag cutting both ways: the
     # candle is what lets you see down a drift, and it is what ignites the gas in one.
@@ -57,7 +60,8 @@ module ReactorSim
                        # to want it.
                        mass_kg: 4.0,
                        stats: { strength: 0.05 },
-                       tags: { mining_effectiveness: 0.25, darkvision: 0.1, open_flame: true })
+                       tags: { mining_effectiveness: 0.25, darkvision: 0.1, open_flame: true },
+                       weapon: { handling: { swing: 0.7, precision: 0.2 }, edge: 0.8, wounds: { puncture: 0.8, impact: 0.2 } })
 
     # **The gate is multiplied, so a crude kit is 0.25 × 0.1 and genuinely hopeless.** That is
     # the design — a hewer with a stone pick and a candle is not a slightly worse hewer — but it
@@ -67,7 +71,9 @@ module ReactorSim
                        description: "A steel pick, wedges, and a lamp worth the name.",
                        mass_kg: 3.0,
                        stats: { strength: 0.1 },
-                       tags: { mining_effectiveness: 0.8, darkvision: 0.5, open_flame: true })
+                       tags: { mining_effectiveness: 0.8, darkvision: 0.5, open_flame: true },
+                       # A heavy point you swing hard: all arm, very little aim.
+                       weapon: { handling: { swing: 0.8, precision: 0.2 }, edge: 1.0, wounds: { puncture: 0.8, impact: 0.2 } })
 
     # **What makes a casualty somebody else's problem rather than nobody's.** `Burden` reads
     # `stretcher` as an aid to the lift limit, so this is what lets a hand carry somebody their own
@@ -104,7 +110,7 @@ module ReactorSim
                        # third face of the same decision rather than a new one.
                        mass_kg: 9.0,
                        stats: { dexterity: -0.2, endurance: -0.25 },
-                       tags: { heat_resistance: 0.7, scald_resistance: 0.5, burn_resistance: 0.6 })
+                       tags: { heat_resistance: 0.7, burn_resistance: 0.6 })
 
     Equipment.register(:fettlers_gloves, slot: :gear, label: "Fettler's Gloves",
                        description: "Thick enough to hold hot iron, clumsy with a valve.",
@@ -115,7 +121,16 @@ module ReactorSim
     Equipment.register(:oilskin_coat, slot: :gear, label: "Oilskin Coat",
                        description: "Sheds water, steam and most of what a boiler throws.",
                        mass_kg: 2.0,
-                       tags: { heat_resistance: 0.2, scald_resistance: 0.35 })
+                       tags: { heat_resistance: 0.2, burn_resistance: 0.35 })
+
+    # **The winter kit, and it is gear**, so in the cold it is the coat or the helmet. Heavy wool
+    # buys a man at bank about fifteen degrees against the wind, and costs a little stamina at
+    # any work hard enough to sweat in it.
+    Equipment.register(:greatcoat, slot: :gear, label: "Greatcoat and Mittens",
+                       description: "Thick wool to the knee, and mittens on a string.",
+                       mass_kg: 3.5,
+                       stats: { dexterity: -0.1, endurance: -0.05 },
+                       tags: { cold_resistance: 0.5 })
 
     # **The first kit that answers the pit rather than the firebox.** A stone off the roof, a
     # knock against the shaft side, the jolt of a cage stopped hard — and a little against being
@@ -178,6 +193,24 @@ module ReactorSim
                        mass_kg: 14.0,
                        stats: { strength: -0.1, dexterity: -0.15 },
                        tags: { respirator: 0.85, respirator_air: 9_600 })
+
+    # Cuts a fuse, a strand, a lashing — and, drawn in a fight somebody means to finish, a man.
+    # Utility, so it competes with the lamp.
+    Equipment.register(:clasp_knife, slot: :utility, label: "Clasp Knife",
+                       description: "A folding blade with a marlinspike. Every rope man carries one.",
+                       mass_kg: 0.2,
+                       tags: { cutting: 0.3 },
+                       # A blade is placed, not swung: nearly all of it is the hand's precision, and the
+                       # sharpness more of the work than any tool's. Mostly the stab, a little the slash.
+                       weapon: { handling: { swing: 0.2, precision: 0.8 }, edge: 1.3, wounds: { puncture: 0.8, cut: 0.2 } })
+
+    # **What a crew wears against a succubus**, or anything else worth looking at instead of the
+    # work: `focused` resists distraction. Narrows what they take in of everything else too.
+    Equipment.register(:blinkers, slot: :utility, label: "Blinkers",
+                       description: "Leather side-flaps on a cap band. Eyes front.",
+                       mass_kg: 0.2,
+                       stats: { intelligence: -0.05 },
+                       tags: { focused: 0.5 })
 
     # --- training ------------------------------------------------------------
     #

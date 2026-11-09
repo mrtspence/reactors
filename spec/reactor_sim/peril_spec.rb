@@ -44,7 +44,7 @@ module PerilCrew
 
   def self.archetype(spec)
     { label: "Hand", mass_kg: 70.0, strength: 1.2, toughness: spec[:toughness], endurance: 1.0e6,
-      intelligence: 1.0, dexterity: 1.0, charisma: 1.0,
+      intelligence: 1.0, dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
       tags: spec[:tags].merge(darkvision: 0.9, mining_effectiveness: 0.6, shovelling: 0.6) }
   end
 
@@ -62,12 +62,11 @@ module PerilCrew
   # run once reported a *sound* crew suffering more than a poor one.
   POSTED = %i[crew_1 crew_2 crew_3].freeze
 
-  # **What to seed a posted hand's margin at to put them on the edge of an accident.** The road
-  # closes the last of it inside a couple of hundred ticks; at 0.10 it mends faster than it spends
-  # and nothing happens. In the module rather than in the `describe` because a constant assigned
-  # inside an example group lands on `Object`, where it collides with every other spec file's idea
-  # of what that name means.
-  ON_THE_EDGE = 0.05
+  # **What to seed a posted hand's margin at to put them on the edge of an accident**: next to
+  # nothing, so the first of it the road spends tips them over, however busy the road is. In the
+  # module rather than in the `describe` because a constant assigned inside an example group lands
+  # on `Object`, where it collides with every other spec file's idea of what that name means.
+  ON_THE_EDGE = 1.0e-6
 
   # **A pit whose crossing the manholes have something to show for**: whether a given accident is
   # saved is the dodge die's, so the pairing examples need a seed where at least one is — and the
@@ -174,7 +173,7 @@ RSpec.describe "perils" do
     # any tick that happened to cost nothing returns several times what the road takes.
     it "hands nothing back to somebody still standing in the road" do
       hand = pit(:poor).minions.fetch(:crew_2)
-      quiet = { ReactorSim::Peril.new(id: :caught_in_haulage, severity: 2.2,
+      quiet = { ReactorSim::Peril.new(id: :caught_in_haulage, severity: 2.2, wounds: { crush: 1.0 },
                                       places: %i[pit_bottom]) => 0.0 }
       state = { margin: 0.5, margin_full: 1.4, fatigue: 0.0 }
 
@@ -225,7 +224,8 @@ RSpec.describe "perils" do
   # this tick, so the claims are about `Blunder.pick` and `Blunder.spend` themselves.
   describe "which accident it was" do
     def peril(id, rate:, severity: 1.0, **opts)
-      ReactorSim::Peril.new(id: id, severity: severity, rate: rate, places: %i[pit_bottom], **opts)
+      wounds = severity.positive? ? { wounds: { crush: 1.0 } } : {}
+      ReactorSim::Peril.new(id: id, severity: severity, rate: rate, places: %i[pit_bottom], **wounds, **opts)
     end
 
     let(:caught) { peril(:caught_in_haulage, rate: 1.0) }
@@ -270,7 +270,12 @@ RSpec.describe "perils" do
     end
 
     it "takes the rate from the severity when none is given" do
-      expect(ReactorSim::Peril.new(id: :plain, severity: 2.2, places: %i[x]).rate).to eq(2.2)
+      expect(ReactorSim::Peril.new(id: :plain, severity: 2.2, wounds: { crush: 1.0 }, places: %i[x]).rate).to eq(2.2)
+    end
+
+    it "refuses a peril that hurts and says nothing of the wounds it deals" do
+      expect { ReactorSim::Peril.new(id: :vague, severity: 2.2, places: %i[x]) }
+        .to raise_error(ReactorSim::Error, /says nothing of the wounds/)
     end
 
     it "lets a mishap and an injury compete in one pick" do
@@ -288,8 +293,7 @@ RSpec.describe "perils" do
   end
 
   # **`edge: true` throughout this group**, because every claim in it is about what happens once
-  # the margin is gone rather than about how long the road takes to take it. The crossing lands on
-  # tick 131 and catches all three posted hands.
+  # the margin is gone rather than about how long the road takes to take it.
   describe "when it runs out" do
     it "hurts somebody, and says which peril did it" do
       accidents, = shift(:poor, edge: true)

@@ -92,6 +92,9 @@ module ReactorSim
           at_bank: "standing at bank",
           at_bottom: "standing at the pit bottom"
         }.freeze
+        # The winding going about its business (`Displays::Prose.signals`).
+        CALM = %i[lowering raising bell_bank bell_bottom boarding_bank boarding_bottom unloading loading
+                  called_bank called_bottom at_bank at_bottom].freeze
 
         # Slack past this and the cage is hung — the slack lamp's own first band.
         HUNG_M = 0.3
@@ -131,7 +134,7 @@ module ReactorSim
           deck_kg = contents_kg(states, @deck)
           return 0.0 if deck_kg <= EMPTY_KG && contents_kg(states, @coal_from, :coal) <= EMPTY_KG
           return 100.0 if deck_kg <= EMPTY_KG
-          return 0.0 unless drum.cage_stopped_at?(drum_state, drum.depth_m)
+          return 0.0 unless drum.conveyance_stopped_at?(drum_state, drum.depth_m)
 
           deck_kg >= @deck_full_kg || contents_kg(states, @coal_from, :coal) <= EMPTY_KG ? 0.0 : 100.0
         end
@@ -164,7 +167,7 @@ module ReactorSim
           return drum_state[:failure] if drum_state[:failure]
           return :hung if drum.slack_m(drum_state) >= HUNG_M
 
-          :lodged if drum.shaft && states.dig(drum.shaft, :jam_m)
+          :lodged if drum.obstructed_by && states.dig(drum.obstructed_by, :jam_m)
         end
 
         def at_landing(landing, states, shuttling:, marshals:, slipping:, boarding:, waiting:)

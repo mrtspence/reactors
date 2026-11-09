@@ -119,13 +119,11 @@ RSpec.describe "events" do
     # **A pit whose posted crew are one tick from an accident.** Every mine example in this group
     # wants a casualty or a fire, and both used to be reached by running thousands of ticks —
     # which measures `peril_spec`'s and `district_fire_spec`'s claims rather than this file's.
-    # **0.005 and not 0.05**, which is worth recording: `PitRig`'s collier is a plain 1.0 hand
-    # where `peril_spec`'s is clumsy and green, so the road closes the last of their margin far
-    # more slowly — at 0.05 it mends faster than it spends and nobody is ever hurt. A margin seed
-    # belongs to the hand it is seeded on.
+    # The margin is next to nothing, so the first the road spends tips them over however busy it
+    # is.
     def pit_on_the_brink
       pit = build_pit(id: "h", seed: 5, loadout: { winder: :cage_gear })
-      brink = %i[crew_1 crew_2 crew_3].to_h { |seat| [ seat, { margin: 0.005 } ] }
+      brink = %i[crew_1 crew_2 crew_3].to_h { |seat| [ seat, { margin: 1.0e-6 } ] }
       at_the_face(seed(pit, minions: brink)).tap do |op|
         levers!(op, hewing: 100, haulage: 100, timbering: 100, coal_winding: 100, pumping: 100)
       end
@@ -153,7 +151,7 @@ RSpec.describe "events" do
     # **The casualty is built rather than waited for.** A hidden margin takes thousands of ticks
     # to spend down on a haulage road, and how long that takes is `peril_spec`'s claim — what is
     # wanted here is simply somebody hurt, with a `cause:` on the record. Seeding the posted
-    # crew's margin on the brink reaches the crossing on tick 131.
+    # crew's margin on the brink reaches the crossing within a few ticks.
     it "says what hurt somebody, not merely that something did" do
       op = pit_on_the_brink
       to_a_person = %i[minion_hurt minion_spent]
@@ -204,7 +202,32 @@ RSpec.describe "events" do
       op = ReactorSim::Match
            .create(id: "b", seed: 1, operations: [ { id: "eng", type: :steam_engine } ])
            .operation(:eng)
-      expect(op.nodes.fetch(:firebox).send(:fire_severity)).to be(:info)
+      expect(op.nodes.fetch(:fire_bed).send(:fire_severity)).to be(:info)
+    end
+  end
+
+  # **A machine says nothing about the state it began in.** A fire laid alight or a drum raised
+  # before the match seeds its transition's latch, or the first tick announces it — and an
+  # achievement folded from that record is handed out for nothing. Every machine on every frame,
+  # and the pit with the machines that start at work.
+  describe "the state a machine starts in" do
+    def starting = %i[fire_lit fire_out steam_raised heater_engaged]
+
+    def machines
+      fresh = ReactorSim::Operations.catalogued.flat_map do |type|
+        ReactorSim::Operations.chassis_for(type).map { |chassis| [ type, { chassis: chassis } ] }
+      end
+      fresh + [ [ :open_pit, { loadout: { stripping_shovel_dipper: :yard_dipper, stripping_train_train: :dinkey_train } } ] ]
+    end
+
+    it "is announced by nothing in its first ticks" do
+      announced = machines.flat_map do |type, options|
+        match = ReactorSim::Match.create(id: "s", seed: 1, operations: [ { id: :probe, type: type, **options } ])
+        events = Array.new(3) { match.step! }.flatten
+        events.select { |e| starting.include?(e[:type]) }.map { |e| [ type, options, e[:type], e[:node] ] }
+      end
+
+      expect(announced).to be_empty
     end
   end
 end

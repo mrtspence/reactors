@@ -2,8 +2,8 @@
 
 require "rails_helper"
 
-# The dev engine has a console and nothing to fit: no outfitting or crew screen, and no place in
-# the fitting screens' machine switcher.
+# The dev engine has a console and nothing to fit: no outfitting or crew screen, and a fitting
+# screen's nav row sends it to its console.
 RSpec.describe "The dev engine's console", type: :request do
   before do
     allow(ENV).to receive(:[]).and_call_original
@@ -30,7 +30,7 @@ RSpec.describe "The dev engine's console", type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
-  it "is not offered by the fitting screens' switcher" do
+  it "is not offered a fitting screen by another machine's nav row" do
     get edit_loadout_path(match_id: DevMatch::ID, operation_id: "pit")
 
     expect(response.body).to include(edit_loadout_path(match_id: DevMatch::ID, operation_id: "engine"))

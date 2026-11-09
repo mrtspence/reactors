@@ -1,0 +1,48 @@
+# frozen_string_literal: true
+
+module ReactorSim
+  module Nodes
+    # **A landing: material goes on or off something that comes and goes, but only while it stands
+    # there.** `carrier:` names the node it serves — a hoist, cars on a track — which answers
+    # `standing_at?(state, mark_m)`; away or moving, the landing passes nothing and what was sent
+    # waits upstream. Whoever works it is the lever (`control_id:`, often an effort station), so with
+    # nobody at the landing nothing moves however long the carrier stands.
+    #
+    # **`boards: true` makes it the way aboard as well**: a passage running `through:` it is open
+    # only while its carrier stood at its mark last tick (`standing`), so people step on and off a
+    # carried place there and nowhere else.
+    #
+    #   config: carrier, mark_m, boards (plus Conduit's, `perils:` and `traffic:` among them)
+    #   state:  standing, with `boards:`
+    class Landing < Conduit
+      def initialize(carrier:, mark_m:, boards: false, **opts)
+        @carrier = carrier.to_sym
+        @mark_m = mark_m.to_f
+        @boards = boards
+        super(**opts)
+      end
+
+      attr_reader :carrier, :mark_m
+
+      def boards? = @boards
+
+      def throughput_kg(state, ctx)
+        return 0.0 unless standing?(ctx)
+
+        super
+      end
+
+      def apply(state, ctx, grant)
+        applied = super
+        @boards ? applied.merge(standing: standing?(ctx)) : applied
+      end
+
+      def blocks_passage?(state, _content = nil) = super || (@boards && !state.fetch(:standing, false))
+
+      def standing?(ctx)
+        carrier_state = ctx.node_state(@carrier)
+        !carrier_state.nil? && ctx.nodes[@carrier].standing_at?(carrier_state, @mark_m)
+      end
+    end
+  end
+end

@@ -22,6 +22,11 @@ how many people happened to be watching would change the match.
 **Nothing here is autoloaded.** Add new files to the `require_relative` chain in
 `lib/reactor_sim.rb`, in dependency order. That chain is the dependency graph, on purpose.
 
+**Everything here outside `operations/<name>/` is shared, and names nothing from one operation**
+(the root `CLAUDE.md`, "Shared code speaks no operation's language"). Generic words in identifiers,
+state keys, config keys and comments — room, post, conveyance, carrier, way, traffic — and an
+operation's own words only in its own folder.
+
 ## Layout, in dependency order
 
 ```
@@ -35,15 +40,29 @@ operations/   specific machines, assembled from everything above
 
 Top-level files: `tick.rb` (the eight phases, in order), `operation.rb` (config, commands,
 projection, serialisation), `match.rb` (many operations in lockstep), `content.rb`,
-`control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`.
+`control_point.rb`, `minion.rb` (who stands at a lever), `command.rb`, `event.rb`, `rng.rb`,
+and `conditions.rb` — the sky a match is played under: kinds of condition (the weather, the light)
+that draw once from the outdoors node's **match-wide** stream at `initial_state` and are read as a
+pure function of the clock, through a fixed set of channels a later kind reuses. No die is thrown
+after the start. See [`design_sketches/conditions.md`](../../docs/design_sketches/conditions.md).
 
-What a person is subject to lives in six pure modules over a state hash they do not own,
+What a person is subject to lives in nine pure modules over a state hash they do not own,
 none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
-air), `scorch.rb` (the heat), `peril.rb` (the place, and the hidden margin it spends) and
-`burden.rb` (what they are carrying).
-**A harm that works continuously owes a dwell counter past collapse** — `asphyxia` and
-`burns` — because `Severity.escalate` will not announce the same tier twice and a steady
-grind therefore never reaches `:mortal` on its own.
+air), `scorch.rb` (the heat), `chill.rb` (the cold, and the strain of working in heat),
+`peril.rb` (the place, and the hidden margin it spends), `burden.rb` (what they are carrying),
+`cover.rb` (taking cover when a place is called to — under cover they man nothing, and a
+`sheltered:` peril reaches them by `1 − cover`) and `animosity.rb` (each other). **What any of them leaves is wounds** (`wounds.rb`): a harm declares
+the kinds it deals as shares of its severity and its causes, each kind is bitten separately, and
+each bite past the first band leaves a named wound out of `content/wounds/`. Wounds stack, derate
+the stats they name, and outlive the match, healing between them; every bite also comes off
+`resilience`, which collapses somebody at empty. **Only grave harm kills by attrition** — the
+continuous harms and acute bites of the severe band or worse, counted in `grave` — so no pile of
+knocks finishes anybody, and a run of stab wounds does. **One bite of `OUTRIGHT` times their
+toughness kills outright** however much is left, which is the only route to death a person's own
+build moves. `injury` is the
+condition all that comes to, derived. **A harm that works continuously deepens one standing wound
+of its kind** — heat, cold, bad air — rather than adding one a tick, from a running `dose`, and
+owes a dwell counter past collapse (`asphyxia`, `burns`, `chilled`) to reach `:mortal`.
 
 > **A burden is gear and people, and the arithmetic cannot tell them apart.** `mass_kg` is the
 > body; `worn_kg` is what is hanging off it; a carried person contributes both of theirs. Keeping
@@ -58,11 +77,38 @@ grind therefore never reaches `:mortal` on its own.
 > kobold out reads as a rest. Measured — a kobold on a half-tired human over a minute is +0.064
 > fatigue with the gate and **−0.068 without it**. Armour you can rest off; a body you cannot.
 
-> **Every die thrown for a person is thrown in `Tick#draw_fates`, in phase 0, unconditionally
-> for everybody.** A conditional draw makes the RNG stream depend on the condition and the
-> divergence surfaces as a snapshot replaying differently, days later, somewhere unrelated.
-> Keeping the count fixed and in one method is what makes it checkable — see
+> **Every die thrown for a person is thrown in phase 0, unconditionally for everybody** — in
+> `Tick#draw_fates` from their own stream, in `Tick#draw_tempers` from a second stream of
+> their own (`Animosity.stream`), in `Tick#draw_wounds` from a third (`Injury.stream`) and in
+> `Tick#draw_cover` from a fourth (`Cover.stream`), so none moves another. A conditional draw makes
+> the RNG stream depend on the condition and the divergence surfaces as a snapshot replaying
+> differently, days later, somewhere unrelated. Keeping the count fixed and in one method per
+> stream is what makes it checkable — see
 > [`invariants.md`](../../docs/reference/invariants.md#2-determinism).
+
+> **What people do to each other is `animosity.rb`, and its phase is `provoke.rb` (6d′).** A
+> grudge runs holder → target and comes from the race, the individual (`grudges:`, and
+> `resented_by:` written from the target's side), earlier matches (`options[:grudges]`, from the
+> delivery tier) and this one (the holder's state), added and clamped — `Operation#grudges` is the
+> built table. A hidden `patience`, `Blunder`'s margin with a target, runs out into a row, a brawl,
+> a shove into a peril declared `opportunity: true`, or sabotage through a post's `openings:`
+> (`Animosity::Opening`: a mishap through `state[:mishaps]`, or a slip of their own through
+> `state[:spite]`). A post with `oversees:` is a boss's. **Shoves and sabotage are all or
+> nothing; blows are graded** by how far `strike` beat `defend`, and hit by `attack` — the
+> contest itself (a bell-curved roll, landing, damage, a critical that `pierces:` the armour and
+> part of the toughness) is `combat.rb`, pure arithmetic any future fight reuses. **A brawl is a
+> melee of any size**, one `fight: { melee: }` per member and no shared record, lasting while anybody
+> in it is still angry with somebody there. **It spreads**: a fighter drags in somebody watching, and
+> somebody standing by piles in — spoiling for it, or near snapping with somebody in it they hate. A
+> fighter mans nothing (`Tick#crews` leaves them out), so a fight empties every post it takes in, and
+> does not walk. See
+> [`design_sketches/animosity-and-distraction.md`](../../docs/design_sketches/animosity-and-distraction.md).
+>
+> **`Minion#avoid` is every hazard's getting-out-of-the-way** — `√(wits × agility)`, the agility
+> slowed by what is carried — and safety saves, refuges, being caught by a runaway, the accident
+> margin and `defend` all read it. Wits alone stays where the question is judgement: slips,
+> lateness, misjudging, gauges. **Distraction** is `ambient_for`'s `distracting` — the allure of
+> everybody else in the room — and divides wits.
 
 ## Events are the other output, and they have one rule
 
@@ -81,6 +127,13 @@ Two more rules that cost something to learn:
 
 - **The engine reports transitions; the delivery tier composes them into meaning.** A node may
   not know what an achievement is, or every new one becomes a simulation change.
+- **Every record says which machine it came from.** `Match#step!` stamps each event with `tick`,
+  `operation_id` and `operation_type`, and a meter reading carries the same two. The delivery tier
+  counts an achievement only on its own kind of machine, a window only on the operation that
+  opened it.
+- **A machine reports only what happened in the match.** One that starts part-way through a story
+  — a fire laid alight, a drum raised — seeds that transition's latch, or its first tick reports the
+  start as news (`nodes/CLAUDE.md`, "A shape written twice").
 - **Emit on a transition, with hysteresis where the signal is noisy.** `ReliefValve` announced
   itself 20 times in 40 ticks before it had a time-based re-arm, because it senses a
   reconstructed per-stroke pressure that swings through its whole range every tick.
@@ -106,7 +159,12 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > station**: everybody starts in the quarters and is *sent* somewhere, so deploying the shift is
 > the opening move of a match. Jobs are derived, never declared: they are exactly the control
 > points with `effort:`. When there are more of those than seats, something is always
-> unattended, which is the point.
+> unattended, which is the point. `Crew.minions` turns the roster into people, dealing an
+> advance shift's seats out to where it starts.
+>
+> **A post takes as many as its `capacity` and their work sums** (`Tick#crews`). A lever defaults
+> to one; a gang's part raises it. An effort post reaches its node in **worker-equivalents** —
+> 100 is one competent hand flat out — so nodes are rated per worker and cap nothing but the crew.
 
 > **`aided_by:` adds and `gated_by:` multiplies, and the difference is a design decision rather
 > than an arithmetic one.** A shovel makes shovelling better and its absence makes it merely
@@ -118,10 +176,12 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 >
 > **A gate can also be satisfied by the ROOM.** A lamp on the wall and a lamp on your belt are
 > the same fact to `darkvision`, so a node that answers `ambient_tags(state, levers)` offers its
-> tags to everybody standing in its place, and `Minion#gate` takes **the better of the two,
-> never the sum** — two lamps do not let you see twice. `Tick#ambient_tags` builds the map from
-> N−1 node state and this tick's lever positions, so it cannot depend on phase order; an
-> operation with no places skips it and every gate stays what the minion carries.
+> tags to everybody standing in its place — or in the places it `lights`, a set of lamps along a
+> working (`Nodes::Lighting`) — and `Minion#gate` takes **the better of the two, never the sum** —
+> two lamps do not let you see twice. `Tick#ambient_tags` builds the map from N−1 node state and
+> this tick's lever positions, so it cannot depend on phase order; an operation with no places
+> skips it and every gate stays what the minion carries. **The light is footing too**: a peril's
+> `underfoot: { dark: }` is worse the less somebody sees by, short of a lamp's worth.
 >
 > **An ignition source belongs to the room, the same way.** A node that answers
 > `ignition(state, levers)` offers `{ kg_per_s:, watts:, cause: }` to the air of its place, and
@@ -166,6 +226,10 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > **Only the gas phase is breathed.** Water on the floor and coal in the tubs take up none of a
 > lungful. A room whose air node answers `submerged?` — the pit bottom, water to the roof — has
 > nothing to breathe at all, so drowning is the same dwell, collapse and rescue race as afterdamp.
+> **In open water nobody drowns until they are spent**: a place whose `water:` is `deep?` has
+> them treading it — exertion with no post (`Fatigue.advance(exerting:)`, as a brawl) — and only
+> spent do they go under, the place's air then none for them, the wound `drowned`. `drowning`
+> is a cause, so `drowning_resistance` keeps somebody afloat.
 >
 > **Apparatus runs out, and a set with no air left is no protection at all** — no taper, because
 > there is no half a breath. `respirator:` is how well it filters, `respirator_air:` is how many
@@ -181,7 +245,9 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 > and misses the fireman who left two minutes ago. Prefer `places:` for anything that fills a
 > room; keep `stations:` for the genuinely hands-on, and for an operation with no geometry, which
 > has only stations to name. Both keys are walked by `injury_spec`, because a declaration in the
-> namespace nobody looks up is a hazard that silently hurts nobody.
+> namespace nobody looks up is a hazard that silently hurts nobody. **A place can move**: a
+> footplate is carried by its train (`carried_by:`), and phase 6b shares what reaches it with the
+> place the train stands in, and back, by its `shares:` — nothing else about it moves.
 
 `injury.rb` is `Concerns::Wearing` for people, and the copied shape is deliberate while the
 vocabulary is not: a part has `durability` and a `failure`, a person has `resilience` and an
@@ -206,20 +272,29 @@ the same lever costs a day-labourer far more than a strong fireman.
 
 > **The Danger Check throws no dice, and that is the design rather than a workaround.**
 > `resilience` is rolled ONCE, at `initial_state` — one of the three places entropy is permitted
-> — so every check afterwards is a deterministic comparison. Injuries therefore replay exactly,
-> survive a snapshot, and need no amendment to the entropy invariant. The uncertainty is the
-> hidden threshold, exactly as `durability_range` is for a part.
+> — so every check afterwards is a deterministic comparison; the one die it reads, which of a
+> tier's variants a wound is, was thrown in phase 0. Injuries therefore replay exactly, survive a
+> snapshot, and need no amendment to the entropy invariant. The uncertainty is the hidden
+> threshold, exactly as `durability_range` is for a part.
+>
+> **Nothing reaches it untyped.** A hazard with no `wounds:`, an unknown kind or cause, or shares
+> that do not sum to one is refused when the machine is built (`Operation#validate_hazards!`), a
+> peril or a weapon when it is made, and an incomplete catalogue at boot.
 >
 > A hazard's severity **scales with a figure the part reports on its failure event**
 > (`scales_with:`/`reference:`), because a small steam escape is not a large one. Reading the
 > event rather than the node keeps phase 6b order-independent and puts the magnitude on the
 > durable record.
 
-Plus the assembly layer — `part.rb` (`Part` and `Fragment`), `parts.rb` (the registry),
-`slot.rb`, `assembly.rb`. **All four are build-time only.** They resolve a chassis and a
+Plus the assembly layer — `names.rb` (what a machine built more than once calls its pieces),
+`part.rb` (`Part` and `Fragment`), `parts.rb` (the registry), `slot.rb`, `assembly.rb`. **All five
+are build-time only.** They resolve a chassis and a
 loadout into the flat lists `Operation` has always taken, and nothing in them is reachable from
 `Tick`, `Arbiter` or any node. Keep it that way: a `Context` method taking a slot id would put
-assembly structure on the hot path for a lookup that could have been decided at build.
+assembly structure on the hot path for a lookup that could have been decided at build. **A slot may
+`needs:` another** and is then built only while that one is fitted — a machine's dozen fittings under
+the one slot that says whether it is there at all — and with `needs_at_least:`, only while the part
+there reaches a stat, as a washhouse's bays are.
 
 A `Fragment` carries nodes, links, thermal and drive links, control points — and `diagnostics`,
 for the parts that **are** instruments. Everything else names its gauges by id and the
@@ -278,6 +353,7 @@ you rearrange:
 
 ## Style
 
-Comments here record the bug that produced the rule, and `Metrics/*` cops are deliberately
-off because the ordering in `Arbiter#settle_mass` and `Tick#call` is the thing a reader most
-needs to see in one place. Keep both conventions.
+Comments state the rule and its non-obvious why, present tense, as the root `CLAUDE.md` says; the
+bug that produced a rule belongs in its design sketch. `Metrics/*` cops are deliberately off
+because the ordering in `Arbiter#settle_mass` and `Tick#call` is the thing a reader most needs to
+see in one place.

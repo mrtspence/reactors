@@ -96,13 +96,13 @@ RSpec.describe MatchRunner do
   end
 
   # **Each operation, every tick** — which is what the name always said and what only became
-  # checkable once there was more than one machine. Two operations in lockstep means two views
-  # per tick, each naming itself.
+  # checkable once there was more than one machine. Operations in lockstep means one view per
+  # operation per tick, each naming itself.
   it "publishes a view for each operation every tick" do
     result = run_with([ [], [], [] ])
     published = result[:sink].published
 
-    expect(published.map { |p| p[:tick] }).to eq([ 1, 1, 2, 2, 3, 3 ])
+    expect(published.map { |p| p[:tick] }).to eq([ 1, 2, 3 ].flat_map { |t| [ t ] * DevMatch.operation_ids.size })
     expect(published.map { |p| p[:operation_id] }.uniq).to match_array(DevMatch.operation_ids)
   end
 

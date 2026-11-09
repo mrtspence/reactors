@@ -1,0 +1,67 @@
+# What the sky over an operation does, by season.
+#
+# A match is played in one season, chosen at setup; the spells it gets and how hard they bite are
+# drawn from the seed (`Conditions::Weather`). Every figure here is a first guess at a northern
+# English coalfield and is meant to be tuned.
+#
+#   latitude_deg       how long the day is, with the season's `day_of_year`
+#   mean_k             the season's mean air temperature
+#   daily_range_k      peak to trough across a day; the low is near dawn, the high mid-afternoon
+#   pressure_pa        the season's mean sea-level pressure
+#   severity           the range `severity` is drawn from: how far a spell's offsets are stretched
+#   spells             the mix, as weights, and what each kind of spell is like:
+#     weight           how often it comes up, against the others
+#     minutes          how long one lasts, as a range
+#     offset_k         what it does to the temperature, on top of the season and the day
+#     precipitation    kg/m²/s at the spell's height (1 mm/h is 2.8e-4); its form follows the
+#                      temperature — snow below freezing, sleet just above, rain above that
+#     wind_m_s         wind speed
+#     pressure_trend   Pa per hour while the spell holds: a storm falls ahead of itself
+northern_coalfield:
+  label: "A Northern Coalfield"
+  latitude_deg: 54.8
+  seasons:
+    winter:
+      day_of_year: 15
+      mean_k: 276.0
+      daily_range_k: 5.0
+      pressure_pa: 101_000.0
+      severity: [ 0.6, 1.6 ]
+      spells:
+        fair: { weight: 3, minutes: [ 60, 240 ], offset_k: -2.0, precipitation: 0.0, wind_m_s: 3.0, pressure_trend: 60.0 }
+        unsettled: { weight: 4, minutes: [ 40, 120 ], offset_k: 1.0, precipitation: 3.0e-4, wind_m_s: 7.0, pressure_trend: -150.0 }
+        storm: { weight: 2, minutes: [ 30, 90 ], offset_k: -1.0, precipitation: 1.4e-3, wind_m_s: 15.0, pressure_trend: -400.0 }
+        cold_snap: { weight: 2, minutes: [ 60, 240 ], offset_k: -9.0, precipitation: 2.0e-4, wind_m_s: 9.0, pressure_trend: 100.0 }
+    spring:
+      day_of_year: 105
+      mean_k: 282.0
+      daily_range_k: 8.0
+      pressure_pa: 101_300.0
+      severity: [ 0.5, 1.4 ]
+      spells:
+        fair: { weight: 4, minutes: [ 60, 240 ], offset_k: 1.5, precipitation: 0.0, wind_m_s: 3.0, pressure_trend: 50.0 }
+        unsettled: { weight: 4, minutes: [ 40, 120 ], offset_k: -1.0, precipitation: 4.0e-4, wind_m_s: 6.0, pressure_trend: -150.0 }
+        storm: { weight: 1, minutes: [ 30, 90 ], offset_k: -2.0, precipitation: 1.6e-3, wind_m_s: 12.0, pressure_trend: -350.0 }
+        cold_snap: { weight: 1, minutes: [ 60, 180 ], offset_k: -6.0, precipitation: 2.0e-4, wind_m_s: 7.0, pressure_trend: 100.0 }
+    summer:
+      day_of_year: 196
+      mean_k: 289.0
+      daily_range_k: 9.0
+      pressure_pa: 101_600.0
+      severity: [ 0.5, 1.6 ]
+      spells:
+        fair: { weight: 5, minutes: [ 60, 240 ], offset_k: 2.0, precipitation: 0.0, wind_m_s: 2.5, pressure_trend: 40.0 }
+        unsettled: { weight: 3, minutes: [ 40, 120 ], offset_k: -1.5, precipitation: 4.0e-4, wind_m_s: 5.0, pressure_trend: -120.0 }
+        storm: { weight: 1, minutes: [ 20, 60 ], offset_k: -3.0, precipitation: 3.0e-3, wind_m_s: 12.0, pressure_trend: -300.0 }
+        heat_spell: { weight: 2, minutes: [ 90, 300 ], offset_k: 9.0, precipitation: 0.0, wind_m_s: 1.5, pressure_trend: 20.0 }
+    autumn:
+      day_of_year: 288
+      mean_k: 283.0
+      daily_range_k: 7.0
+      pressure_pa: 101_100.0
+      severity: [ 0.5, 1.5 ]
+      spells:
+        fair: { weight: 3, minutes: [ 60, 240 ], offset_k: 1.0, precipitation: 0.0, wind_m_s: 3.0, pressure_trend: 50.0 }
+        unsettled: { weight: 4, minutes: [ 40, 120 ], offset_k: 0.0, precipitation: 5.0e-4, wind_m_s: 7.0, pressure_trend: -160.0 }
+        storm: { weight: 2, minutes: [ 30, 90 ], offset_k: -1.5, precipitation: 1.8e-3, wind_m_s: 14.0, pressure_trend: -420.0 }
+        cold_snap: { weight: 1, minutes: [ 60, 180 ], offset_k: -6.0, precipitation: 1.5e-4, wind_m_s: 8.0, pressure_trend: 90.0 }

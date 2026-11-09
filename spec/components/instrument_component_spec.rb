@@ -73,19 +73,26 @@ RSpec.describe InstrumentComponent, type: :component do
   end
 
   # The panel is data-driven, so the whole console must survive whatever the operation declares.
-  # The high-pressure engine has twelve instruments and the atmospheric one thirteen.
+  # What belongs to the whole machine — its output, the weather — is the frame's strip's to draw.
   describe "the real steam engine panel" do
-    it "renders every instrument the operation declares, whichever chassis it is" do
+    it "renders every instrument with no role, whichever chassis it is, and none with one" do
       %i[high_pressure atmospheric].each do |chassis|
         panel = ReactorSim::Match
                 .create(id: "p", seed: 1,
                         operations: [ { id: :eng, type: :steam_engine, chassis: chassis } ])
                 .panel(operation_id: :eng)
+        own, strip = panel.fetch(:instruments).partition { |chrome| chrome[:role].nil? }
 
-        html = render_inline(PanelComponent.new(panel: panel))
+        places = ConsolePlaces.new(panel)
+        html = places.map do |place|
+          render_inline(PlacePanelComponent.new(place:, shown: true, here: [], minions: [],
+                                                stations: panel.fetch(:stations), places_known: false))
+        end
+        drawn = html.flat_map { |panel_html| panel_html.css("[data-instrument-id]").map { |el| el["data-instrument-id"] } }
 
-        expect(html.css("[data-instrument-id]").size).to eq(panel.fetch(:instruments).size)
-        expect(html.css("[data-lever-id]").size).to eq(panel.fetch(:controls).size)
+        expect(drawn).to match_array(own.map { |chrome| chrome[:id].to_s })
+        expect(drawn & strip.map { |chrome| chrome[:id].to_s }).to be_empty
+        expect(html.sum { |panel_html| panel_html.css("[data-lever-id]").size }).to eq(panel.fetch(:controls).size)
       end
     end
   end

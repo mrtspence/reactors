@@ -1,0 +1,20 @@
+<section class="frame-places flex flex-col gap-1" aria-label="Places"
+         data-controller="places" data-places-operation-value="<%= operation_id %>">
+  <h2 class="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Places</h2>
+  <ul class="flex flex-col">
+    <% places.each_with_index do |place, index| %>
+      <li>
+        <button type="button" data-action="places#select" data-places-id-param="<%= place.id %>"
+                data-places-line="<%= place.id %>" data-places-boards="<%= boards(place) %>"
+                aria-current="<%= index.zero? ? "true" : "false" %>"
+                class="w-full grid grid-cols-[1fr_auto] gap-x-2 rounded px-2 py-1 text-left
+                       hover:bg-slate-800 aria-[current=true]:bg-slate-800 aria-[current=true]:ring-1
+                       aria-[current=true]:ring-slate-600">
+          <span class="text-sm text-slate-200 truncate"><%= place.label %></span>
+          <span class="text-xs tabular-nums text-slate-400" data-places-count></span>
+          <span class="col-span-2 text-[11px] text-amber-300 truncate" data-places-words></span>
+        </button>
+      </li>
+    <% end %>
+  </ul>
+</section>

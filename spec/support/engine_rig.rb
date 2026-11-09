@@ -46,35 +46,36 @@ module EngineRig
   WORKING = { igniter: 0, blower: 0, damper_open: 85, stoking: 60, feed: 45,
               throttle_open: 60, load_demand: 80, cylinder_cocks: 0 }.freeze
 
-  # The fire, as it burns: a shallow bed, a quarter of it alight, with its own ash and flue gas in
-  # among it. `oxidiser_kg` is the fire's memory of the draught and is a rate, not a stock — see
-  # `Resources::Ignition`. **The bed is the one the engine settles to**, read off 3,000 ticks of
-  # working: a deeper one than this is short of air, and short of air coal goes to carbon monoxide,
-  # so an over-fed seed is a transient rather than a working fire.
-  FIRE_K = 1_010.0
-  FIRE = { coal: 0.461, air: 1.01, ash: 11.7, flue_gas: 1.113 }.freeze
-  IGNITED_KG = 0.115
-  OXIDISER_KG = 1.422
+  # The fire, as it burns: a bed of 150-odd kilograms, nearly all of it alight, with its own ash
+  # and gas in among it, and the firebox's gas over it. `oxidiser_kg` is the fire's memory of the
+  # draught — see `Resources::Ignition`. **The bed is the one the engine settles to**, read off
+  # 3,000 ticks of working after raising steam from banked on the bellows.
+  FIRE_K = 1_089.0
+  FIRE = { coal: 154.1, air: 0.34, ash: 25.0, flue_gas: 0.434 }.freeze
+  IGNITED_KG = 153.6
+  OXIDISER_KG = 0.742
+  BOX_K = 1_026.0
+  BOX = { air: 0.531, flue_gas: 0.681 }.freeze
 
   # The drum at its working mark. 608 kPa is where the stock safety valve holds it, so this is an
   # engine sitting on its valve — which is the ordinary condition of a well-fired one.
-  DRUM_K = 432.0
-  DRUM = { water: 2_118.5, steam: 8.76 }.freeze
+  DRUM_K = 432.2
+  DRUM = { water: 1_777.1, steam: 9.8 }.freeze
 
-  CHEST_K = 424.0
-  CHEST = { steam: 2.16 }.freeze
+  CHEST_K = 424.4
+  CHEST = { steam: 2.19 }.freeze
 
   # **The cylinder runs far cooler than the steam that feeds it**, which is not an error: it
   # exhausts every stroke and the expansion cools the charge. Seeding it at drum temperature puts
   # the compression pressure above the relief valve's setting and the engine then lifts it on
   # every stroke of an "ordinary" run — a constructed state that is not the state it claims.
-  CYLINDER_K = 348.0
-  CYLINDER = { steam: 0.41, water: 0.059 }.freeze
+  CYLINDER_K = 349.8
+  CYLINDER = { steam: 0.415, water: 0.061 }.freeze
 
-  TUBES_K = 529.0
-  FLUE_K = 461.0
-  THROTTLE_K = 432.0
-  RPM = 163.5
+  TUBES_K = 521.8
+  FLUE_K = 452.8
+  THROTTLE_K = 432.3
+  RPM = 160.0
 
   def engine(chassis: :high_pressure, seed: 42, loadout: {})
     ReactorSim::Match
@@ -100,13 +101,14 @@ module EngineRig
   # **The patches alone**, for a caller that has to seed through something other than a bare
   # operation — `Constructed#seed_match`, when a digest or replay example needs the match's own
   # copy to carry the state too.
+  # The firebox's gas is never hotter than the fire under it, so a dead fire seeds a cold box.
   def at_work_nodes(op, fire_k: FIRE_K, drum_k: DRUM_K, rpm: RPM, ash: FIRE.fetch(:ash),
-                    ignited: IGNITED_KG, water: DRUM.fetch(:water), **extra)
+                    ignited: IGNITED_KG, water: DRUM.fetch(:water), coal: FIRE.fetch(:coal), **extra)
     {
-      # `alight` is deliberately not seeded: the firebox derives it every tick from the ignited
-      # mass, so it is not in a fresh node's state and `seed` refuses it.
-      firebox: body(op, :firebox, fire_k, **FIRE.merge(ash: ash))
-        .merge(ignition: { coal_combustion: { kg: ignited, oxidiser_kg: OXIDISER_KG } }),
+      fire_bed: body(op, :fire_bed, fire_k, **FIRE.merge(ash: ash, coal: coal))
+        .merge(ignition: { coal_combustion: { kg: [ ignited, coal ].min, oxidiser_kg: OXIDISER_KG } },
+               alight: ignited.positive?),
+      firebox: body(op, :firebox, [ BOX_K, fire_k ].min, **BOX),
       boiler: body(op, :boiler, drum_k, **DRUM.merge(water: water)),
       steam_chest: body(op, :steam_chest, CHEST_K, **CHEST),
       cylinder: body(op, :cylinder, CYLINDER_K, **CYLINDER),
@@ -116,6 +118,20 @@ module EngineRig
       **wall(op, :flue, FLUE_K),
       **extra
     }
+  end
+
+  # **An engine nobody banked**: the grate bare and cold, the drum at the room's temperature, air in
+  # both halves of the fire. Every engine is built banked, so a claim about lighting one from cold
+  # starts here.
+  def cold(op)
+    ambient = ReactorSim::Units::STANDARD_TEMPERATURE_K
+    air = ->(id) { op.nodes.fetch(id).volume_m3 * 1.204 }
+    seed(op, nodes: {
+      fire_bed: body(op, :fire_bed, ambient, air: air.(:fire_bed))
+        .merge(ignition: { coal_combustion: { kg: 0.0, oxidiser_kg: 0.0 } }, alight: false),
+      firebox: body(op, :firebox, ambient, air: air.(:firebox)),
+      boiler: body(op, :boiler, ambient, water: DRUM.fetch(:water))
+    })
   end
 
   # Set the levers and turn the handle. **Tens of ticks, not thousands** — what used to need
@@ -157,7 +173,7 @@ module EngineRig
   # and a blastpipe all act on.
   def draught_kg(op) = node_state(op, :damper).fetch(:carried_kg, 0.0)
 
-  def reaction_throttle(op, id = :firebox)
+  def reaction_throttle(op, id = :fire_bed)
     op.nodes.fetch(id).reaction_throttle(node_state(op, id), op.content)
   end
 

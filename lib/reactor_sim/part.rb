@@ -26,9 +26,9 @@ module ReactorSim
     # The definitions still live in the panel — an instrument part's builder calls a panel helper
     # and passes it figures — so the commentary stays put and only the numbers move.
     # `passages:` is the fourth kind of edge — ways **people** use — and a part contributes them
-    # exactly as it contributes links. A cage is a fitting that adds a way through the shaft, so
-    # fitting one is what makes the shaft ridable; without it there is only the ladderway the
-    # chassis supplies.
+    # exactly as it contributes links. A hoist is a fitting that adds a ridden way, so fitting one
+    # is what makes the way ridable; without it there is only the way on foot the chassis
+    # supplies.
     # `places:` are the spaces those passages join and those nodes sit in. A part rarely declares
     # one — the rooms belong to the chassis, because they are the building — but a fitting that
     # opens somewhere new has nowhere else to say so.

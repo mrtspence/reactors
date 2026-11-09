@@ -6,11 +6,14 @@ disk, and only once, never during a tick.
 
 ```
 content/
-  resources/    water.yml, combustion.yml, damps.yml, materials.yml
-  reactions/    combustion.yml
+  resources/    substances, by family (water, combustion, damps, ground, materials, …)
+  reactions/    combustion, explosives, calcining
   archetypes/   races.yml     — kinds of person
   minions/      crew.yml      — the people themselves
+  wounds/       the wound catalogue
 ```
+
+The files themselves are a snapshot: `ls content/*/` is the truth.
 
 Every `*.yml` in a folder is loaded and merged, so file names are organisational only.
 
@@ -47,14 +50,14 @@ grep -h "tags:" content/resources/*.yml | tr -d '[]' | cut -d: -f2 | tr ',' '\n'
 ```
 
 In use at the time of writing: `bearing`, `breathable`, `conductor`, `coolant`, `damp`, `dust`,
-`exhaust`, `explosive`, `fuel`, `fusible`, `gas`, `inert`, `liquid`, `lubricant`, `metal`,
-`moderator`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
+`exhaust`, `explosive`, `fuel`, `fusible`, `gangue`, `gas`, `inert`, `liquid`, `lubricant`, `metal`,
+`moderator`, `ore`, `oxidiser`, `solid`, `structural`, `waste`, `working_fluid`.
 
 **A tag does one of three jobs and the word does not say which**, so say it when you add one:
 
 | Job | Examples | Read by |
 |---|---|---|
-| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust`, `explosive` | `Port#accepts?` |
+| Transport — what a port will carry | `gas`, `liquid`, `solid`, `dust`, `explosive`, `ore`, `gangue` | `Port#accepts?` — a washer's two outlets part wash ore by `ore` and `gangue` |
 | Reaction — what a substance can do in one | `fuel`, `oxidiser`, `inert` | reactions, ignition, a node's `reaction_throttle` |
 | Physiology — what it does to a person | `breathable` | `Breath` |
 
@@ -135,7 +138,7 @@ coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }    # 12.0 = 12.0
   enthalpy_j_per_unit: -30000000            # negative = exothermic
-  rate_per_s: 6.0
+  rate_per_s: 0.001
   min_temperature_k: 500
 ```
 
@@ -166,7 +169,7 @@ coal_combustion:
   consumes: { coal: 1.0, air: 11.0 }
   produces: { flue_gas: 11.9, ash: 0.1 }
   enthalpy_j_per_unit: -30000000
-  rate_per_s: 1.5
+  rate_per_s: 0.001
   limited_by: air                 # whose supply picks the pathway
   alternatives:                   # ordered, most of it first
     - consumes: { coal: 1.0, air: 5.5 }
@@ -194,25 +197,20 @@ The rules, all enforced at boot:
 > you are the first to build on it, treat a surprise as a gap in
 > [`reaction-pathways.md`](../design_sketches/reaction-pathways.md), not a bug in your content.
 
-### `rate_per_s` must suit the timestep — and it means something different once a reaction ignites
+### `rate_per_s` means two things, by whether a reaction ignites
 
 `extent = limit × (1 − e^(−rate × dt))`.
 
 Without an `ignition:` block, `limit` is the available reagents, so this is "how much of what
 is present reacts per second" and it wants to be **high**: at `rate 0.8` and `dt 0.25` only 18%
-happens per tick, and a firebox set that slow starves in the middle of a full grate because
-draught blows past unreacted.
+happens per tick, and a vessel set that slow lets what passes through blow past unreacted.
 
-**With `ignition:`, `limit` is capped by the mass actually alight, so the same number becomes
-"how fast lit fuel is consumed" — and it wants to be far lower.** Coal was left at `6.0` across
-that change, which meant 78% of the fire vanished every tick; the lit mass could never
-accumulate, and `oxidiser_demand` (derived from the same rate) then asked for a kilogram of air
-per tick to sustain a 0.12 kg fire. The whole engine read as air-starved.
-
-It is also **sharply peaked rather than forgiving** — too slow and the fire cannot outpace the
-boiler draining it, too fast and the lit mass outruns `spread_per_s` and goes out. Coal's
-plateau is 1.5–2.0 and both edges are outright failures. Measurements are in
-[`content/reactions/combustion.yml`](../../content/reactions/combustion.yml).
+**With `ignition:`, the fuel term is capped by the mass actually alight, so the number is how
+fast lit fuel burns at full air — a physical figure.** Coal's is `0.001`: a lit lump lasts about a
+quarter of an hour, so a grate's bed builds until it burns what is stoked, minutes of burning, and
+its air then sets what it burns. A fuel bed is a body of its own (`Nodes::FuelBed`), so its heat
+holds while the gas over it cools. See
+[`physics.md`](../reference/physics.md#a-fuel-bed-is-a-body-of-its-own).
 
 **Re-measure it whenever you change `spread_per_s`, `quench_per_s`, or the firebox geometry.**
 
@@ -311,30 +309,41 @@ kinds of person. The same person can do either, which is what made it the wrong 
 elf:
   label: Elf
   mass_kg: 60.0        # REQUIRED, and not a stat — see below
-  strength: 0.85       # a strength-to-WEIGHT ratio, 1.0 = human. All six stats are required
+  strength: 0.85       # a strength-to-WEIGHT ratio, 1.0 = human. Every stat is required
   toughness: 0.7
   endurance: 0.85
   intelligence: 1.25
   dexterity: 1.2
   charisma: 1.1
+  agility: 1.3
+  combat_prowess: 1.3
   tags:
     darkvision: 0.3
+    conscientious: 0.2 # temperament, read against its opposite
+  grudges:             # who this race dislikes, by race or by person, 0..1
+    orc: 0.4
 
 # content/minions/crew.yml — layer two, who they are, written as OFFSETS
-galathas:
-  name: Galathas        # required — a name is what separates a person from a race
+elowynne:
+  name: Elowynne        # required — a name is what separates a person from a race
   archetype: elf        # required, and checked at boot
-  mass_kg: 8.0          # optional offset — a big elf. Absent means "weighs what elves weigh"
-  stats:
-    strength: 0.35      # strong for an elf…
-    dexterity: -0.25    # …and heavy-handed with it
-  tags:
-    clumsy: 0.2
+  mass_kg: -10.0        # optional offset, beside stats and never inside them — a slight elf
+  stats:                # stats only — any other key is refused at boot
+    intelligence: 0.1   # quicker than most elves…
+    dexterity: 0.1
+    agility: 0.1        # …and lighter on her feet
+
+galathas:               # nothing but his race, and one quarrel of his own
+  name: Galathas
+  archetype: elf
+  grudges:
+    throg: 0.6          # a person, this time
+  # resented_by: { dwarf: 0.5 }   # who dislikes HIM — a notorious past, written from his side
 ```
 
 Omit a stat to take the race's figure unchanged; omit `stats:` entirely for somebody unremarkable.
 
-**`mass_kg` is a seventh required field on an archetype, and it is deliberately not a stat.** Stats
+**`mass_kg` is required on an archetype too, and it is deliberately not a stat.** Stats
 pass through `Minion#effective`, which derates them by injury — so a broken arm would make somebody
 *lighter*. It is not a tag either, because `Sheet::TAG_RANGE` is 0..1 and an ogre cannot be said at
 all. **A race that omits it raises at boot**: it is read by the lift limit and the burden ratio, and
@@ -371,21 +380,26 @@ two already folded.
 
 Rules worth knowing before you add one:
 
-- **The six stats are fixed and every archetype declares all of them.** The engine reads them and
-  needs a number rather than an absence. `strength` drives actuation, `toughness` drives the
-  Danger Check, `endurance` divides fatigue accrual; the other three are declared and read by
-  nothing yet.
+- **The stats are fixed and every archetype declares all of them.** The engine reads them and
+  needs a number rather than an absence. `strength` drives actuation, `toughness` the Danger
+  Check, `endurance` divides fatigue accrual, `intelligence` and `dexterity` are wits and fine
+  work, `charisma` a boss's authority and a person's allure, `agility` getting out of the way and
+  half of walking, `combat_prowess` the scraps survived — a human is 1.0, a trained fighter 2 or 3.
+  `agility` and `combat_prowess` **multiply** into `avoid`, `attack` and `defend`, which is why a
+  missing one is refused rather than defaulted.
 - **`endurance` is resistance to tiring, 1.0 for a human by definition**, and it is separate from
   `strength` on purpose: what a worker gets done and what it costs them are different claims.
   Equipment may carry a negative offset, which is how bulky kit says *"this tires me"*.
 - **`dexterity` does not replace `clumsy`.** How finely somebody works and how often they drop
   things are two different statements about one person, and a steady-handed worker who knocks
   things over is a real person.
-- **A hazard tag needs no engine change — it needs a resister with a matching name.** A peril
-  or a failure tagged `%i[crush impact]` is resisted by `crush_resistance` and
-  `impact_resistance` through one naming convention in `Injury.resistance`, so adding a kind
-  of harm means adding gear that names it and nothing else. The flip side is that **a hazard
-  tag nothing resists is simply unresistable**, silently — grep the tag before you invent it.
+- **Gear resists a kind of wound or a cause by name.** A harm dealing `{ crush: 0.6, impact: 0.4 }`
+  is resisted kind by kind, by `crush_resistance` and `impact_resistance`, and one with
+  `causes: %i[rockfall]` by `rockfall_resistance` too (`Injury.resisted`). Kinds are
+  `Wounds::KINDS` and causes `Wounds::CAUSES`. **`drowning_resistance`** keeps somebody afloat in
+  deep water — less treading, and at 1.0 they never go under (`Breath.treading`); a respirator
+  already masks going under as it masks bad air. **A kind nothing resists is simply unresistable**,
+  so grep before you rely on one.
 - **`clumsy` and `boneheaded` are the same family at opposite ends.** Clumsy makes the *bite*
   worse once something has gone wrong; boneheaded makes the *mistake* likelier in the first
   place. Pulling the wrong lever is not the same failing as dropping it, and only one of them
@@ -400,17 +414,122 @@ Rules worth knowing before you add one:
   is simply present.
 - **Values add across layers and are then clamped; consumers multiply what they read.** Merge
   adds, use multiplies. Getting this the other way round makes every piece of kit a rounding error.
-- **Health, fatigue, station and injury are state, not content.** They change during a match and
-  live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion recovers on
-  restore.
+- **Health, fatigue, station, wounds and injury are state, not content.** They change during a
+  match and live in `state[:minions]`; stats do not and live here. Backwards, and a hurt minion
+  recovers on restore. **`regeneration`** and **`slow_healer`** are how fast somebody's wounds heal
+  between matches, added to and taken from `Wounds::HEAL_PER_MATCH`.
 - **A tag that gets used up is a rating here and a remainder in state**, and it needs both. A
   respirator declares `respirator:` (how well it filters) and `respirator_air:` (how many
   **ticks** it holds); `Minion#initial_state` seeds `apparatus` from the second and phase 6c
   spends it. **A set with no air is no protection at all** — `respirator` alone is inert — so
   the two are written together or the kit does nothing.
 
-The gauge-reading path (a diagnostic's `observer:`) is reserved and read by nothing — see
-`docs/simulation_architecture.md` §7.
+`intelligence` and `dexterity` feed a diagnostic's `observer:` through `Minion#wits`: whoever is
+posted at that gauge's station is how good its reading is. See `docs/reference/diagnostics.md`.
+
+**`cold_resistance`** is what warm kit buys against `Chill` (a greatcoat is 0.5), the cold's
+counterpart to `heat_resistance`. `unfeeling`, like `unburning`, is a race the cold does not
+reach, and nothing declares it yet.
+
+### Grudges, temperament, and what is worth fighting with
+
+**`grudges:`** is who a race or a person dislikes, keyed by race or by person, 0..1; **`resented_by:`**
+(a person only) is who dislikes *them*. Race, individual, earlier matches and this one add, then
+clamp. A key that names no race and no person is refused at boot.
+
+**Temperament is tags in opposed pairs, read net** (`a − b`) through a steep curve:
+`short_tempered`/`even_tempered` (how fast resentment wears through), `callous`/`kindly` (how much
+harm to the target), `reckless`/`conscientious` (how much to anybody caught with them),
+`spiteful`/`forgiving` (how deep a wrong is remembered, and how slowly it fades between matches) and
+`violent_nature`/`gentle` (feeding temper, and acting as a grudge against everybody, so a violent
+race brawls and draws on people it does not hate) and `annoying`/`calming` (how much
+their mere presence wears on everybody else's patience, grudge or none). A grudge also counts in part as
+callousness towards the one it is held against, so a deep one makes a kind race dangerous to that
+race alone. `boneheaded`
+sometimes takes a harmful act for a harmless one.
+
+**`distracting`** makes somebody hard to work beside — squared, times their charisma
+(`Minion#allure`) — and **`focused`** shuts it out. **`defence`** is defensive gear, summed through
+the fold. An equipment item may declare **`weapon: { handling:, edge:, wounds: }`**:
+- `handling:` is what it asks of the hand, a blend in the vocabulary of a station's `effort:`. A
+  pick is `{ swing: 0.8, precision: 0.2 }` and a knife the other way round. The weights may sum past
+  one for a good weapon or short of it for a poor one; bare hands are `{ swing: 0.42, precision:
+  0.18 }`.
+- `edge:` is severity it adds to a landed blow whoever holds it.
+- `wounds:` are the kinds of wound a blow leaves, as shares of it: a pick `{ puncture: 0.8,
+  impact: 0.2 }`, a knife `{ puncture: 0.8, cut: 0.2 }`. **Give the main kind most of it**: each
+  kind's share is a wound of its own, tiered on its own bite, so an even split leaves two lesser
+  wounds where the blow deserved one bad one, and never reaches `OUTRIGHT`.
+
+Its weight to swing is the item's own `mass_kg`, which is what a fight tires somebody by against
+their `force`. A fighter swings one weapon at a time, whichever suits them best. `puncture` and
+`cut` are resisted by `puncture_resistance` and `cut_resistance` like any kind, and nothing resists
+them yet. **`cutting`** is the knife's aid at the rope and fuse posts.
+
+### A wound
+
+`content/wounds/*.yml` is the catalogue of what a harm leaves on a body: **kind → tier → variant**,
+every kind of `Wounds::KINDS`, all four tiers (`minor`, `significant`, `severe`, `mortal`), and
+exactly five variants a tier (`Wounds::VARIANTS`), each a `label`, a `weight` against the others of its tier, and
+`derates:` — stats it multiplies while carried, 0..1. Anything missing or misnamed is refused at
+boot.
+
+```yaml
+crush:
+  severe:
+    shattered_leg: { label: Shattered leg, weight: 1, derates: { agility: 0.2, strength: 0.6 } }
+    broken_spine: { label: Broken spine, weight: 1, derates: { strength: 0.2, agility: 0.1 } }
+    crushed_pelvis: { label: Crushed pelvis, weight: 1, derates: { agility: 0.15, strength: 0.4 } }
+    mangled_hand: { label: Mangled hand, weight: 1, derates: { dexterity: 0.1, strength: 0.6, combat_prowess: 0.5 } }
+    crushed_ribs: { label: Crushed ribs, weight: 1, derates: { endurance: 0.2, strength: 0.4 } }
+```
+
+**A variant's place in its tier matters**: a wound that heals into a lesser tier, or deepens into a
+worse one, becomes the variant in the same place there. Which tier a wound is comes from the depth
+of the bite that made it, against `Wounds::BANDS`; healing wears the depth down between matches.
+See [`design_sketches/wounds.md`](../design_sketches/wounds.md).
+
+A harm a part or a place can do declares **`wounds:`** as shares of its severity, summing to one,
+and **`causes:`** for what protects against it, in the same declarations it always had:
+
+```ruby
+endangers: { roof_fall: { wounds: { crush: 1.0 }, causes: %i[rockfall], places: { district: 6.4 } } }
+Peril.new(id: :misstep, wounds: { crush: 1.0 }, causes: %i[fall], severity: 1.6, places: %i[shaft])
+```
+
+A machine whose harm says nothing of its wounds, or names a kind or cause nobody knows, does not
+build.
+
+**Where a severity sits.** A blow in a brawl is about 1. An everyday peril — a slip, a tub, the
+belt — sits at 1–3, in the severe band (1.6–5.0) at worst, so it hurts and sometimes carries
+somebody out. A catastrophe meant to kill whoever is near — an explosion, a fall of ground, a
+blast — sits well past the mortal band at its reference, around 10, on its **near side**, so no
+body and no kit survives there and a small one, scaled down, still carries people out. Its far
+side — the next room along, the man at the damper — keeps an everyday figure, so where somebody
+stood still decides whether they live.
+
+---
+
+## A climate
+
+`content/conditions/*.yml` holds the skies a match can be played under, by season. A season
+declares `day_of_year`, `mean_k`, `daily_range_k`, `pressure_pa`, a `severity` range and its
+`spells`; a spell declares `weight`, `minutes`, `offset_k`, `precipitation` (kg/m²/s at its
+height — 1 mm/h is 2.8e-4), `wind_m_s` and `pressure_trend` (Pa per hour). `Registry` refuses a
+season or a spell missing any of them at boot. A climate also declares `latitude_deg`, which
+with the season's day decides how long its day is.
+
+**A spell's figures are offsets on the season, stretched by the drawn `severity`**, so one table
+gives both a mild winter and a hard one. What falls takes its form from the temperature — snow,
+sleet or rain — rather than being declared. Spells are referred to by **sorted index** in state,
+so renaming one is harmless and adding one renumbers the others (no snapshot holds them across a
+content change).
+
+The rooms a weather reaches offer `wet` and `icy` to the people in them, and a peril reads them
+through `underfoot:`. Neither is a resource tag: they are room tags, like `darkvision`. A peril's
+`underfoot: { dark: }` reads the person's own sight instead — the better of their lamp and the
+room's light, short of `Peril::FOOTING_LIGHT` (a proper lamp's 0.5); carried along a way, only
+their lamp.
 
 ---
 

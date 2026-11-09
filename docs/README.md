@@ -18,9 +18,12 @@ of those four rules silently destroys crash recovery, replay and reproducibility
 | Understand energy, mass, temperature, pressure, rotation | [`reference/physics.md`](reference/physics.md) |
 | Write or modify a node | [`reference/nodes.md`](reference/nodes.md) |
 | Add or change a gauge | [`reference/diagnostics.md`](reference/diagnostics.md) |
+| See where everything sits on screen, now and in the goal layout | [`reference/layout.md`](reference/layout.md) |
 | **Build a new operation from scratch** | [`guides/build-an-operation.md`](guides/build-an-operation.md) |
 | Add a substance, reaction or material | [`guides/add-content.md`](guides/add-content.md) |
 | Know what is done and what is next | [`current_progress.md`](current_progress.md) |
+| Tune brawls, and see what a change does to every pairing | `ruby script/tuning/brawls.rb` → [`tuning/brawls.md`](tuning/brawls.md) |
+| See how tempers play out in a crowd, and what a boss stops | `ruby script/tuning/crowds.rb` → [`tuning/crowds.md`](tuning/crowds.md) |
 
 ## Reference vs rationale
 

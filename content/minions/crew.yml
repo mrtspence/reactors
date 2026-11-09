@@ -9,8 +9,8 @@
 #
 # `content/archetypes/` is the baseline; everything here is an **offset** on the race named in
 # `archetype:`, and training and equipment offset it further. So two elves are not the same
-# worker, which is the whole reason this layer exists: Elowynne is quick and observant where
-# Galathas is unusually strong for an elf and clumsier with it.
+# worker, which is the whole reason this layer exists: Elowynne is slight, quick and deft, where
+# Galathas is an elf like any other with a quarrel of his own.
 #
 # Omit a stat to take the race's figure unchanged. `stats:` may be omitted entirely.
 #
@@ -18,8 +18,11 @@
 #
 #   name:       what a panel calls them. Required — an individual without one is an archetype.
 #   archetype:  their race, from content/archetypes/. Required, and checked at boot.
-#   stats:      offsets, added to the race's
+#   mass_kg:    an offset on the race's weight, beside stats and never inside them
+#   stats:      offsets, added to the race's — stats only; anything else is refused at boot
 #   tags:       their own traits, added to the race's
+#   grudges:    who they dislike, by race or by person, added to the race's
+#   resented_by: who dislikes THEM, by race or by person — a notorious past, written from their side
 #   hireable:   false for somebody who exists but cannot be unlocked. Defaults true.
 #
 # **No health, no fatigue, no injury, no equipment.** Those are either match state, minted fresh
@@ -29,50 +32,54 @@
 jim:
   name: Jim Ashfield
   archetype: human
+  mass_kg: 5.0
   stats:
     strength: 0.15
     dexterity: -0.1
   tags:
     practised: true
-    heat_hardened: 0.2
 
 elowynne:
   name: Elowynne
   archetype: elf
+  mass_kg: -10.0
   stats:
     intelligence: 0.1
-    dexterity: 0.15
-  tags:
-    keen_eyed: 0.25
+    dexterity: 0.1
+    agility: 0.1
 
-# The counter-example, and the reason the individual layer exists at all: another elf, and not
-# remotely the same worker as Elowynne. Strong for an elf, and heavy-handed with it.
 galathas:
   name: Galathas
   archetype: elf
-  stats:
-    strength: 0.35
-    toughness: 0.15
-    dexterity: -0.25
-  tags:
-    clumsy: 0.2
+  grudges:
+    throg: 0.6
 
-# The first ogre, and deliberately the plainest possible one: everything his race gives him and a
-# little more in the arms. An individual who adds nothing but a stat offset is worth having in
-# content precisely because it shows the layer working — the race is doing all the interesting
-# work here, and Throg is still not quite the same worker as the next ogre hired.
 throg:
   name: Throg Bigfist
   archetype: ogre
-  stats:
-    strength: 0.1
+
+urist:
+  name: Urist Glazecanyons
+  archetype: dwarf
+
+dalthu:
+  name: Dalthu Splintertusk
+  archetype: orc
+
+arunessa:
+  name: Arunessa
+  archetype: succubus
+
+rijgazh:
+  name: Rijgazh HateScowls
+  archetype: goblin
 
 # --- the last resort --------------------------------------------------------------------
 #
 # **`hireable: false`, and that single field is the whole of what makes this different.** The
 # point of a last resort is that it cannot be taken away, so it is not a blueprint, cannot be
 # unlocked, cannot be trained and cannot be upgraded — it simply turns up, in any number, to
-# fill a crew slot nobody better is standing in. When a favourite is on the injury list, this
+# fill a crew slot nobody better is standing in. When a favourite is out healing, this
 # is who you get instead, and that is the sting.
 #
 # It lives here rather than as a special case in code so there is **one** way a minion's sheet

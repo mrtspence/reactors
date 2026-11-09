@@ -74,10 +74,15 @@ require_relative "reactor_sim/rng"
 require_relative "reactor_sim/sheet"
 # The escalation rule a failing part and a hurt person share. Before `concerns/`, which uses it.
 require_relative "reactor_sim/severity"
+# What a harm leaves on a body, and the catalogue of it. Before `content`, which validates the
+# catalogue against it, and before `equipment`, whose weapons declare the wounds they deal.
+require_relative "reactor_sim/wounds"
 require_relative "reactor_sim/content"
 # A leaf, required this early only because `Concerns::Wearing` emits one and concerns load
 # before nodes. Conceptually it belongs with the outputs, beside `diagnostics/player_view`.
 require_relative "reactor_sim/event"
+# The sky's schedule and readings, which the outdoors node holds.
+require_relative "reactor_sim/conditions"
 require_relative "reactor_sim/physics/parcel"
 require_relative "reactor_sim/physics/resources"
 require_relative "reactor_sim/physics/resources/saturation"
@@ -112,11 +117,17 @@ require_relative "reactor_sim/concerns/prompt_reaction"
 
 require_relative "reactor_sim/graph/node"
 require_relative "reactor_sim/nodes/conduit"
+require_relative "reactor_sim/nodes/grate"
+require_relative "reactor_sim/nodes/landing"
+require_relative "reactor_sim/nodes/belt"
+require_relative "reactor_sim/nodes/shot_hole"
 require_relative "reactor_sim/nodes/vessel"
+require_relative "reactor_sim/nodes/fuel_bed"
 require_relative "reactor_sim/nodes/wall"
 require_relative "reactor_sim/nodes/boiler"
 require_relative "reactor_sim/nodes/flywheel"
 require_relative "reactor_sim/nodes/load"
+require_relative "reactor_sim/nodes/lighting"
 require_relative "reactor_sim/nodes/bearing"
 require_relative "reactor_sim/nodes/brake"
 require_relative "reactor_sim/nodes/hoist"
@@ -127,12 +138,16 @@ require_relative "reactor_sim/nodes/motor"
 # A shaft turned from outside this operation — the receiving end of another operation's work.
 require_relative "reactor_sim/nodes/import"
 require_relative "reactor_sim/nodes/atmosphere"
+require_relative "reactor_sim/nodes/outdoors"
+require_relative "reactor_sim/nodes/catchment"
+require_relative "reactor_sim/nodes/siding"
 # Where an operation's output goes, and the only writer of `mass_delivered`.
 require_relative "reactor_sim/nodes/delivery"
 require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 require_relative "reactor_sim/nodes/fusible_plug"
 require_relative "reactor_sim/nodes/breach"
+require_relative "reactor_sim/nodes/shelter"
 
 # How work tires the person doing it. Before `control_point`, which reads its BASE_RECOVERY to
 # default a station that declares none.
@@ -154,14 +169,24 @@ require_relative "reactor_sim/breath"
 # What the heat where somebody is standing does to them. After `injury`, whose resilience it
 # grinds directly rather than draining a pool of its own; `tick` is the only caller.
 require_relative "reactor_sim/scorch"
+require_relative "reactor_sim/chill"
 # A way a place can hurt somebody with nothing broken, and the hidden margin it spends. After
 # `injury`, whose Danger Check it hands a hazard to; `tick` is the only caller.
 require_relative "reactor_sim/peril"
+# Taking cover when a place is called to. Pure over a person's state; `tick` is the only caller.
+require_relative "reactor_sim/cover"
 # What somebody is carrying — gear and people, one concept — and what it costs their pace and
 # their wind. After `injury`, whose `numeric` and deratings it reads through the minion it is
 # handed; read by `minion` and by `tick`.
 require_relative "reactor_sim/burden"
 require_relative "reactor_sim/minion"
+# One blow against one guard: the dice, landing, damage, criticals. Pure arithmetic, read by
+# whatever comes to blows — `animosity`'s brawls first.
+require_relative "reactor_sim/combat"
+# Grudges, tempers and what people do to each other. After `peril` and `minion`, whose margin it
+# copies and whose attack and defence it reads; `provoke` is its phase, and `tick` its only caller.
+require_relative "reactor_sim/animosity"
+require_relative "reactor_sim/provoke"
 require_relative "reactor_sim/diagnostics/sources"
 require_relative "reactor_sim/diagnostics/filters"
 require_relative "reactor_sim/diagnostics/displays"
@@ -173,10 +198,13 @@ require_relative "reactor_sim/operations"
 
 # Parts and slots: how an operation is assembled from swappable components. Pure
 # configuration, resolved once at build — nothing below this line is reachable from the tick.
+require_relative "reactor_sim/names"
 require_relative "reactor_sim/part"
 require_relative "reactor_sim/parts"
 require_relative "reactor_sim/slot"
 require_relative "reactor_sim/assembly"
+# The weather's gauges and instrument parts, shared by every operation with a sky over it.
+require_relative "reactor_sim/operations/weather_gauges"
 
 require_relative "reactor_sim/tick"
 require_relative "reactor_sim/operation"
@@ -186,9 +214,22 @@ require_relative "reactor_sim/operations/steam_engine/definition"
 require_relative "reactor_sim/operations/steam_engine/parts"
 require_relative "reactor_sim/operations/steam_engine/panel"
 
+require_relative "reactor_sim/operations/mobile_engine/driver"
+require_relative "reactor_sim/operations/mobile_engine/engine_board"
+require_relative "reactor_sim/operations/mobile_engine/shovel"
+require_relative "reactor_sim/operations/mobile_engine/train"
+require_relative "reactor_sim/operations/mobile_engine/round"
+require_relative "reactor_sim/operations/mobile_engine/road"
+require_relative "reactor_sim/operations/mobile_engine/raised"
+require_relative "reactor_sim/operations/mobile_engine/definition"
+require_relative "reactor_sim/operations/mobile_engine/parts"
+
 require_relative "reactor_sim/operations/mine/winding"
 require_relative "reactor_sim/operations/mine/definition"
 require_relative "reactor_sim/operations/mine/parts"
 require_relative "reactor_sim/operations/mine/panel"
+require_relative "reactor_sim/operations/open_pit/definition"
+require_relative "reactor_sim/operations/open_pit/parts"
+require_relative "reactor_sim/operations/open_pit/panel"
 
 require_relative "reactor_sim/operations/dev_engine"

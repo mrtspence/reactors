@@ -43,7 +43,7 @@ module SlipCrew
 
   def self.archetype(spec)
     { label: "Hand", mass_kg: 70.0, strength: 1.0, toughness: 1.0, endurance: 1.0e6,
-      intelligence: spec[:intelligence], dexterity: 1.0, charisma: 1.0,
+      intelligence: spec[:intelligence], dexterity: 1.0, charisma: 1.0, agility: 1.0, combat_prowess: 1.0,
       tags: spec[:tags].merge(darkvision: 0.9, mining_effectiveness: 0.6, shovelling: 0.5) }
   end
 

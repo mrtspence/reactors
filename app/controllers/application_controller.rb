@@ -63,12 +63,12 @@ class ApplicationController < ActionController::Base
     @match_operations ||= Operation.in_match(params[:match_id]).to_a
   end
 
-  # **Every machine here you may fit out**, which is what the fitting screens switch between.
-  # Ownership is the filter that matters: a player who operates one machine gets a list of one and
-  # the switcher does not render, so this is a development affordance without being a development
-  # branch.
-  def operable_siblings
-    @operable_siblings ||= match_operations.select { |op| op.operable_by?(current_player) && op.fittable? }
+  # The layout's frame for this page (`Frame`), nil where there is none.
+  def current_frame
+    return @current_frame if defined?(@current_frame)
+
+    @current_frame = Frame.for(controller: controller_name, match_id: params[:match_id],
+                               operation: current_operation, player: current_player)
   end
-  helper_method :operable_siblings
+  helper_method :current_frame
 end

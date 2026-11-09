@@ -13,14 +13,14 @@ require "support/engine_rig"
 # the regulator, and it was being paid again by every example that wanted a working engine.
 #
 # So the state is **constructed** — see `EngineRig`, where every figure was read off a running
-# engine rather than invented — and only the ticks that decide a claim are run. Measured: a
-# seeded engine is in its working regime on tick 20, against 3,600 for a cold start.
+# engine rather than invented — and only the ticks that decide a claim are run: a seeded engine
+# is in its working regime at once, where raising steam takes the bellows minutes.
 #
 # ## What is not here
 #
-# **Cold-starting the engine by its real operating procedure**, which is a claim about the
-# *procedure* and genuinely needs the whole run: blower on, igniter in, mill on the belt before
-# the regulator opens. That lives in `steam_engine_spec` along with the other things only a whole
+# **Bringing the banked engine through, or lighting a cold one, by the real procedure**, which is a
+# claim about the *procedure* and genuinely needs the run: the bellows on and the regulator shut
+# until there is steam. That lives in `steam_engine_spec` along with the other things only a whole
 # machine can answer — that both chassis build, that a snapshot restores, that conservation holds
 # end to end. One slow run there, not thirty-eight.
 #
@@ -36,17 +36,17 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
   # first few ticks would be a scramble back to equilibrium, and every measurement taken after it
   # would be a measurement of that scramble.
   #
-  # Measured across 400 ticks the drum holds 607.5 → 607.8 kPa and the fire 1010.0 → 1001.5 K.
+  # Measured across 400 ticks the drum holds 607.6 → 608.0 kPa and the fire 1089.0 → 1078.6 K.
   describe "the constructed state" do
     it "carries on from the state it was given, with no transient" do
       op = at_work(engine)
       drum = pressure_pa(op, :boiler)
-      fire = temperature_k(op, :firebox)
+      fire = temperature_k(op, :fire_bed)
 
       run!(op, 200)
 
       expect(pressure_pa(op, :boiler)).to be_within(0.02 * drum).of(drum)
-      expect(temperature_k(op, :firebox)).to be_within(0.02 * fire).of(fire)
+      expect(temperature_k(op, :fire_bed)).to be_within(0.02 * fire).of(fire)
       expect(rpm(op)).to be_within(0.1 * EngineRig::RPM).of(EngineRig::RPM)
     end
 
@@ -80,16 +80,16 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       cold = at_work(engine, fire_k: 320.0, ignited: 0.0)
       run!(cold, 20, igniter: 0)
 
-      expect(node_state(cold, :firebox).dig(:ignition, :coal_combustion, :kg)).to be_within(1e-9).of(0.0)
-      expect(temperature_k(cold, :firebox)).to be < 400.0
+      expect(node_state(cold, :fire_bed).dig(:ignition, :coal_combustion, :kg)).to be_within(1e-9).of(0.0)
+      expect(temperature_k(cold, :fire_bed)).to be < 400.0
     end
 
     it "keeps burning once it is alight, with no igniter at all" do
       op = at_work(engine)
       run!(op, 20, igniter: 0)
 
-      expect(node_state(op, :firebox).dig(:ignition, :coal_combustion, :kg)).to be > 0.1
-      expect(temperature_k(op, :firebox)).to be > 900.0
+      expect(node_state(op, :fire_bed).dig(:ignition, :coal_combustion, :kg)).to be > 0.1
+      expect(temperature_k(op, :fire_bed)).to be > 900.0
     end
 
     it "burns fuel and leaves ash behind" do
@@ -97,8 +97,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       bunker = op.telemetry.fetch(:bunker)[:kg]
       run!(op, 30)
 
-      expect(held(op, :firebox, :ash)).to be > 0.0
-      expect(held(op, :firebox, :flue_gas)).to be > 0.0
+      expect(held(op, :fire_bed, :ash)).to be > 0.0
+      expect(held(op, :fire_bed, :flue_gas)).to be > 0.0
       expect(op.telemetry.fetch(:bunker)[:kg]).to be < bunker
     end
 
@@ -110,7 +110,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       run!(open, 20, damper_open: 85)
       run!(shut, 20, damper_open: 0)
 
-      expect(temperature_k(shut, :firebox)).to be < temperature_k(open, :firebox)
+      expect(temperature_k(shut, :fire_bed)).to be < temperature_k(open, :fire_bed)
     end
 
     # **The grate silting up, measured with no ticks at all.** Ash is produced by combustion and
@@ -137,7 +137,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       run!(raked, 20, raking: :crew_2, ash_raking: 100)
       run!(banked, 20, ash_raking: 100)
 
-      expect(held(raked, :firebox, :ash)).to be < held(banked, :firebox, :ash)
+      expect(held(raked, :fire_bed, :ash)).to be < held(banked, :fire_bed, :ash)
       expect(reaction_throttle(raked)).to be > reaction_throttle(banked)
     end
   end
@@ -159,7 +159,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
 
     # **An unmanned bellows is identical to no blower at all.** Nothing implements that — an
     # unmanned effort station already delivered nothing — and it is why the bellows is a real cost
-    # rather than a slower button. Measured: 0.84814 kg/tick either way, to five decimals.
+    # rather than a slower button. Measured: 0.77539 kg/tick either way, to five decimals.
     it "delivers nothing at all from a bellows nobody is working" do
       unmanned = draught(at_work(engine(loadout: { blower: :hand_bellows })), blower: 100)
       none = draught(at_work(engine(loadout: { blower: nil })))
@@ -205,7 +205,7 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     # heights, which no part offers — the first caller would be a `transport_spec` rig, where the
     # generic machinery belongs. Until then this proves the fire drives the draught and not that
     # ten metres is worth more than five.
-    # Measured: 0.845 kg/tick up a stack at 462.8 K against 0.601 up one at 382.0 K.
+    # Measured: 0.776 kg/tick up a stack at 452.2 K against 0.690 up one at 392.8 K.
     it "draws less up a cold stack than up a hot one" do
       lit = at_work(engine)
       dead = at_work(engine, fire_k: 300.0, ignited: 0.0)
@@ -221,9 +221,9 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
     # pulling harder draws harder and makes more steam to pull with.
     #
     # Asserted as the *gain from working the engine*, which is the mechanism rather than a
-    # figure — and it is exact on the control side. Measured over 100 ticks: with the blastpipe,
-    # standing 0.089 kg/tick against working 0.845, a **9.4× gain**; with a plain chimney, 0.0872
-    # against 0.0872, a gain of exactly 1.00.
+    # figure — and it is exact on the control side. Measured over 20 ticks: with the blastpipe,
+    # standing 0.297 kg/tick against working 0.776, a **2.6× gain**; with a plain chimney, 0.0847
+    # against 0.0847, a gain of exactly 1.00.
     it "draws harder the harder the engine works, but only through a blastpipe" do
       gains = %i[blastpipe_chimney plain_chimney].map do |chimney|
         standing = at_work(engine(loadout: { chimney: chimney }), rpm: 0.0)
@@ -259,8 +259,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
       expect(drum_joules(lit) - was.first).to be > 5.0 * (drum_joules(out) - was.last)
     end
 
-    # **The biggest upgrade on the machine.** With no tube bundle the only fire-to-water path is
-    # radiant, which is a plain shell boiler. Measured over 40 ticks: 30.3 MJ against 18.1.
+    # **The biggest upgrade on the machine.** With no tube bundle the only fire-to-water paths are
+    # the fire's radiance and the firebox's gas on the legs, which is a plain shell boiler.
     it "carries much more of it through the tubes than through the shell alone" do
       full = at_work(engine, drum_k: 400.0)
       bare = at_work(engine(loadout: { boiler_tubes: nil }), drum_k: 400.0)
@@ -269,8 +269,8 @@ RSpec.describe "the steam engine, stage by stage", crew: :reference do
 
       expect(drum_joules(full) - was.first).to be > 1.3 * (drum_joules(bare) - was.last)
       expect(bare.nodes).not_to have_key(:boiler_tubes)
-      # The convective path leaves with the bundle; only the radiant one is left.
-      expect(bare.thermal_links.length).to eq(1)
+      # The tubes' path to the water leaves with the bundle.
+      expect(full.thermal_links.length - bare.thermal_links.length).to eq(1)
     end
   end
 

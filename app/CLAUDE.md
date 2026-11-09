@@ -9,9 +9,11 @@ app/runner/       MatchRunner (4 Hz loop), CommandConsumer, ViewBroadcaster — 
 app/kafka/        CommandProducer, EventProducer — web and runner side
 app/controllers/  Consoles, Commands, Loadouts, LoadoutDrafts, MatchResets, Crews, CrewDrafts
 app/channels/     OperationChannel — read-only, telemetry out, backfills a joining client
-app/components/   PanelComponent -> InstrumentComponent -> Instruments::{Needle,Digital,Prose,Lamp}
-app/services/     Outfitting, ProgressionDigest, InjuryList — resolved arguments, never params
-app/javascript/   controllers/console_controller.js, channels/consumer.js
+app/components/   Frame::{Nav,Strip,Feed,Places,Placeholder}Component; PlacePanelComponent -> InstrumentComponent -> Instruments::*, LeverComponent, CrewRowComponent
+app/models/frame.rb  the layout's frame for one page — which machine, which screen, its strip
+app/models/console_places.rb  the console's panel cut by place
+app/services/     Outfitting, ProgressionDigest, WoundList, GrudgeList — resolved arguments, never params
+app/javascript/   controllers/{stream,gauges,levers,crew,places,feed,outfit}_controller.js, console/, channels/consumer.js
 ```
 
 `ls app/models/` is the truth. **Match runtime state never touches Postgres** — it lives in the
@@ -118,10 +120,12 @@ pressure gauge's full-scale reading. That is why both processes read it through
 
 **`REACTOR_DEV_ENGINE=1` is the same kind of switch**, read only through `DevMatch.dev_engine?`
 and ignored outside development and test. It adds the developer's engine to the match and ropes
-the pit to it instead of to the steam engine. The runner provisions the match's `Operation` rows
+the pit to it instead of to the steam engine, and a second to the open pit's line shaft, which
+nothing else turns yet. The runner provisions the match's `Operation` rows
 at boot, so the console appears and disappears with the flag. **A machine with no assembler has
 no outfitting or crew screen** (`Operation#fittable?`): the console hides both links, the
-fitting screens 404 through `require_fittable!`, and their switcher leaves it out.
+fitting screens 404 through `require_fittable!`, and on a fitting screen its nav pill goes to its
+console (`Frame#screen_for`).
 
 > **`loadout:` is the second thing, and it came due in stage 4.** A player now chooses the
 > configuration on the outfitting screen, which is exactly the moment the old TODO warned about.
@@ -140,6 +144,44 @@ fitting screens 404 through `require_fittable!`, and their switcher leaves it ou
 > the panel coming *from* the runner — published to a compacted topic, or sent over the channel
 > on subscribe — which is where this goes when matches are created on demand.
 
+## Match setup
+
+```
+GET   …/matches/:match_id/setup/edit    the season
+PATCH …/matches/:match_id/setup         set it, and rebuild the match
+```
+
+**Match-level, because one sky covers every machine in it.** `MatchSetup` holds the season (the
+climate's seasons come from the sim's content, not a list here); `DevMatch.build` passes it to
+every fittable operation as `conditions:`, and the reset command carries it once, as
+`"conditions"`, beside the per-operation specs. Saving it rebuilds the match through
+`DevMatch.request_reset!`, the one path a reset takes, so the season is chosen before the crew
+and the rig are outfitted for it. The weather inside the season is the seed's.
+
+## Wounds across matches
+
+**Taken in play, written down, handed back, healed.** `WoundList` (in `ProgressionConsumer`) writes
+every wound a `minion_hurt` names to a `Wound` row — written at the depth reported, keyed by the run
+and the wound's place among the person's (`slot`), or by its own row for a wound carried in (`ref`),
+so a replay changes nothing and a wound that deepens is the same row. `DevMatch` hands the account's
+wounds to every crewed machine as `wounds:`, and the reset command carries them once, as
+`"wounds"`. Each match start heals them (`Wound.heal!`, through `Wounds.heal`, faster for
+`regeneration`, slower for `slow_healer`) **before** the reset command is built, so the match being
+built is the one a severe wound comes back to lesser. **Somebody is unavailable while any wound would
+carry them out** (`Wound.remaining_for`, which the crew screen and `DevMatch#available` read), for as
+many matches as it takes to heal below that. The standin carries nothing.
+
+## Grudges across matches
+
+**Formed in play, written down, handed back, worn away.** `GrudgeList` (beside `WoundList` in
+`ProgressionConsumer`) writes each `grudge_formed` to a `Grudge` row per owner, holder and target —
+person ids, never standins — idempotent per run and tick, because the stream is at-least-once.
+`DevMatch` hands the account's grudges to every crewed machine as `grudges:`, and the reset command
+carries them once, as `"grudges"`, for the same reason it carries the season. Each match start
+fades them (`Grudge.fade!`, by the holder's spite through `Animosity.faded`) beside the healing of
+wounds. Race and authored grudges are content and never written here. **Nothing shows them
+yet** — a report and a recruitment screen are where they belong.
+
 ## The outfitting screen
 
 ```
@@ -147,6 +189,13 @@ GET   …/operations/:id/loadout/edit    the screen
 PATCH …/operations/:id/loadout         fit it, and rebuild the engine from cold
 POST  …/operations/:id/loadout_draft   evaluate a build without storing it
 ```
+
+**A machine's fittings are grouped under it and greyed while it is not fitted.** A slot that
+`needs:` another (a shovel's boiler needs its dipper) is shown with "with the …" in place of
+required or optional — "with a washhouse of 4 bays" where it needs its host to reach a figure
+(`Outfitting#waiting_on`) — and its dropdown keeps the stored choice selected — a required one that
+selected its first option would overwrite the choice on the next save. A slot group with no entry
+of its own in `SLOT_GROUPS` is headed by its own name.
 
 **The chassis is a choice on this screen, and it decides what slots exist** — the atmospheric
 frame has a condenser and the high-pressure one does not. Two rules follow, and both were bugs
@@ -262,20 +311,25 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   unconditionally until the event system was built, because nothing could observe a match
   closely enough to award anything — and the day it started telling the truth, two specs
   written against the stub failed, which was the point.
+- **An achievement is earned on one kind of machine.** Its definition names `operation_type:`
+  (required), and `ProgressionDigest` counts only that machine's records: a window
+  (`AchievementAttempt`) is kept per operation, and a meter (`Progress`) folds per operation in a
+  run and per kind of machine for the lifetime figure. A kiln catching in the pit opens nothing the
+  stationary engine's drum can close.
 - **An owner nobody can name has earned nothing.** `earned?(id, owner_id: nil)` is `false`, not
   true: there is no auth yet, and an unattributable gate should stay shut rather than open for
   everybody.
-- **A roster is intent; availability is applied at build.** A minion on the injury list stays in
-  the `rosters` row and is dropped when the machine is built, so recovery restores them with no
+- **A roster is intent; availability is applied at build.** A minion too hurt to work stays in
+  the `rosters` row and is dropped when the machine is built, so healing restores them with no
   second decision from the player. It must be applied in **both** `DevMatch.build` and
   `reset_command` — the runner rebuilds from the command payload, not from the table, so
   filtering only one of them fields somebody the screen has just refused.
 - **Refusing and substituting are different statements.** Posting somebody unavailable is refused
   by the screen; leaving a post *empty* substitutes the standin silently, because that is a
   choice rather than a mistake.
-- **The recovery clock may not live in `DevMatch.build`.** The web process calls it to rebuild a
-  `Match` for the panel and the roster, so a decrement there would let a player heal their crew by
-  refreshing the page. `DevMatch.start!` is called where a match actually starts.
+- **Healing may not live in `DevMatch.build`.** The web process calls it to rebuild a `Match` for
+  the panel and the roster, so healing there would let a player mend their crew by refreshing the
+  page. `DevMatch.start!` is called where a match actually starts.
 - **Minions come from `Content.hireable`, never `Content.minions`.** The last-resort standin is an
   ordinary individual in content — one resolution path rather than a special case in the engine —
   and `hireable: false` is the single field keeping it out of the shop. Enumerate all minions and
@@ -354,6 +408,32 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
 
 ## The view layer
 
+- **Where a region sits is in [`docs/reference/layout.md`](../docs/reference/layout.md)**, with
+  the goal layout beside it. A change that moves, adds or fills a region updates it in the same
+  change. The `.frame` grid in `app/assets/tailwind/application.css` places every region; a region
+  is a component that never positions itself.
+- **The frame is the layout's, not a page's.** `current_frame` (`Frame.for`) frames the page's
+  machine, or the match's primary for match setup; a page yields its centre and `:left`. The nav
+  row and strip, and the feed, are `data-turbo-permanent` with ids naming the machine, so they
+  keep their subscription across one machine's screens and are replaced on another's.
+- **The frame shows only its own machine's state.** Another player's output never reaches this
+  player's strip.
+- **One subscription, announced on `window`.** `stream_controller` merges each view and
+  dispatches `reactor:view` (`{ state }`), `reactor:incidents` and `reactor:cleared`; a painter
+  (`gauges`, `levers`, `crew`, `feed`) listens, and on connect sends `reactor:request` to be
+  painted at once under a frame already live. Commands go back as `reactor:command`
+  (`{ command }`), and only the stream posts them. **A permanent element is moved on every
+  visit**, which disconnects and reconnects its controllers; the stream defers its teardown a turn,
+  silent meanwhile so it never paints another machine's page, and a reconnect cancels it.
+- **An instrument with a `role:` is the strip's** (`:weather`, `:output`); the console's place
+  panels draw the rest. One home each on a screen.
+- **The console is one place at a time.** `ConsolePlaces` cuts the panel by the `places:` and
+  `place:` the sim derived: a `PlacePanelComponent` for each place and then The Works, or one panel
+  for a machine with a single place, which has no places box. Every panel is in the page and one
+  is shown, so a hidden one stays painted; an instrument on a way between two places is drawn in
+  both, and `gauges` paints every element for an id. `places` keeps the choice per machine in
+  `localStorage`; `crew` moves each person's row into their place's panel and lists who is on
+  the way.
 - **The page renders chrome only.** Not one simulation value reaches it from the controller;
   every gauge starts at `—` and fills when the first projection arrives. Cheap to serve, and
   impossible to serve stale.
@@ -368,7 +448,8 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   custom property also avoids the layout that animating a width would cost.
 - **`ProseComponent` must never infer severity** from a phrase's position. `Displays::Prose`
   withholds its phrase list on purpose; reconstructing it would hand back exactly the
-  information the display exists to hide.
+  information the display exists to hide. **The one thing it sends is its `calm:` phrases**, which
+  its author declared and the places box compares a reading against — nothing about the rest.
 - **Tailwind cannot build classes from runtime strings** — map colour symbols to classes in
   Ruby (`LampComponent::COLOURS`), never interpolate into a class attribute.
 
