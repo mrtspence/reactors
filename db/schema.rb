@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -19,10 +19,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
     t.datetime "created_at", null: false
     t.boolean "disqualified", default: false, null: false
     t.bigint "opened_at_tick", null: false
+    t.string "operation_id", null: false
     t.string "owner_id", null: false
     t.string "run_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["owner_id", "run_id", "achievement_id"], name: "idx_on_owner_id_run_id_achievement_id_6a52275d8e", unique: true
+    t.index ["owner_id", "run_id", "operation_id", "achievement_id"], name: "index_attempts_on_owner_run_machine", unique: true
   end
 
   create_table "awards", force: :cascade do |t|
@@ -111,11 +112,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
   create_table "progresses", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "metric", null: false
+    t.string "operation_id"
+    t.string "operation_type", null: false
     t.string "owner_id", null: false
     t.string "run_id"
     t.datetime "updated_at", null: false
     t.float "value", default: 0.0, null: false
-    t.index ["owner_id", "run_id", "metric"], name: "index_progresses_on_owner_id_and_run_id_and_metric", unique: true, nulls_not_distinct: true
+    t.index ["owner_id", "run_id", "operation_id", "operation_type", "metric"], name: "index_progresses_on_owner_run_machine_metric", unique: true, nulls_not_distinct: true
   end
 
   create_table "rosters", force: :cascade do |t|

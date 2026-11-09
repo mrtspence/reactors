@@ -9,9 +9,11 @@ app/runner/       MatchRunner (4 Hz loop), CommandConsumer, ViewBroadcaster — 
 app/kafka/        CommandProducer, EventProducer — web and runner side
 app/controllers/  Consoles, Commands, Loadouts, LoadoutDrafts, MatchResets, Crews, CrewDrafts
 app/channels/     OperationChannel — read-only, telemetry out, backfills a joining client
-app/components/   PanelComponent -> InstrumentComponent -> Instruments::{Needle,Digital,Prose,Lamp}
+app/components/   Frame::{Nav,Strip,Feed,Places,Placeholder}Component; PlacePanelComponent -> InstrumentComponent -> Instruments::*, LeverComponent, CrewRowComponent
+app/models/frame.rb  the layout's frame for one page — which machine, which screen, its strip
+app/models/console_places.rb  the console's panel cut by place
 app/services/     Outfitting, ProgressionDigest, WoundList, GrudgeList — resolved arguments, never params
-app/javascript/   controllers/console_controller.js, channels/consumer.js
+app/javascript/   controllers/{stream,gauges,levers,crew,places,feed,outfit}_controller.js, console/, channels/consumer.js
 ```
 
 `ls app/models/` is the truth. **Match runtime state never touches Postgres** — it lives in the
@@ -122,7 +124,8 @@ the pit to it instead of to the steam engine, and a second to the open pit's lin
 nothing else turns yet. The runner provisions the match's `Operation` rows
 at boot, so the console appears and disappears with the flag. **A machine with no assembler has
 no outfitting or crew screen** (`Operation#fittable?`): the console hides both links, the
-fitting screens 404 through `require_fittable!`, and their switcher leaves it out.
+fitting screens 404 through `require_fittable!`, and on a fitting screen its nav pill goes to its
+console (`Frame#screen_for`).
 
 > **`loadout:` is the second thing, and it came due in stage 4.** A player now chooses the
 > configuration on the outfitting screen, which is exactly the moment the old TODO warned about.
@@ -308,6 +311,11 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   unconditionally until the event system was built, because nothing could observe a match
   closely enough to award anything — and the day it started telling the truth, two specs
   written against the stub failed, which was the point.
+- **An achievement is earned on one kind of machine.** Its definition names `operation_type:`
+  (required), and `ProgressionDigest` counts only that machine's records: a window
+  (`AchievementAttempt`) is kept per operation, and a meter (`Progress`) folds per operation in a
+  run and per kind of machine for the lifetime figure. A kiln catching in the pit opens nothing the
+  stationary engine's drum can close.
 - **An owner nobody can name has earned nothing.** `earned?(id, owner_id: nil)` is `false`, not
   true: there is no auth yet, and an unattributable gate should stay shut rather than open for
   everybody.
@@ -400,6 +408,32 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
 
 ## The view layer
 
+- **Where a region sits is in [`docs/reference/layout.md`](../docs/reference/layout.md)**, with
+  the goal layout beside it. A change that moves, adds or fills a region updates it in the same
+  change. The `.frame` grid in `app/assets/tailwind/application.css` places every region; a region
+  is a component that never positions itself.
+- **The frame is the layout's, not a page's.** `current_frame` (`Frame.for`) frames the page's
+  machine, or the match's primary for match setup; a page yields its centre and `:left`. The nav
+  row and strip, and the feed, are `data-turbo-permanent` with ids naming the machine, so they
+  keep their subscription across one machine's screens and are replaced on another's.
+- **The frame shows only its own machine's state.** Another player's output never reaches this
+  player's strip.
+- **One subscription, announced on `window`.** `stream_controller` merges each view and
+  dispatches `reactor:view` (`{ state }`), `reactor:incidents` and `reactor:cleared`; a painter
+  (`gauges`, `levers`, `crew`, `feed`) listens, and on connect sends `reactor:request` to be
+  painted at once under a frame already live. Commands go back as `reactor:command`
+  (`{ command }`), and only the stream posts them. **A permanent element is moved on every
+  visit**, which disconnects and reconnects its controllers; the stream defers its teardown a turn,
+  silent meanwhile so it never paints another machine's page, and a reconnect cancels it.
+- **An instrument with a `role:` is the strip's** (`:weather`, `:output`); the console's place
+  panels draw the rest. One home each on a screen.
+- **The console is one place at a time.** `ConsolePlaces` cuts the panel by the `places:` and
+  `place:` the sim derived: a `PlacePanelComponent` for each place and then The Works, or one panel
+  for a machine with a single place, which has no places box. Every panel is in the page and one
+  is shown, so a hidden one stays painted; an instrument on a way between two places is drawn in
+  both, and `gauges` paints every element for an id. `places` keeps the choice per machine in
+  `localStorage`; `crew` moves each person's row into their place's panel and lists who is on
+  the way.
 - **The page renders chrome only.** Not one simulation value reaches it from the controller;
   every gauge starts at `—` and fills when the first projection arrives. Cheap to serve, and
   impossible to serve stale.
@@ -414,7 +448,8 @@ accident — see [`design_sketches/blueprints.md`](../docs/design_sketches/bluep
   custom property also avoids the layout that animating a width would cost.
 - **`ProseComponent` must never infer severity** from a phrase's position. `Displays::Prose`
   withholds its phrase list on purpose; reconstructing it would hand back exactly the
-  information the display exists to hide.
+  information the display exists to hide. **The one thing it sends is its `calm:` phrases**, which
+  its author declared and the places box compares a reading against — nothing about the rest.
 - **Tailwind cannot build classes from runtime strings** — map colour symbols to classes in
   Ruby (`LampComponent::COLOURS`), never interpolate into a class attribute.
 

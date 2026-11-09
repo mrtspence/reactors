@@ -12,14 +12,20 @@ module ReactorSim
     module WeatherGauges
       module_function
 
-      # The first five are somebody's word and go on every panel; the last three are fitted.
-      ORDER = %i[how_it_feels the_light the_weather the_wind the_knee thermometer barometer the_glass].freeze
+      # The first six are somebody's word and go on every panel; the last three are fitted.
+      ORDER = %i[the_hour the_light how_it_feels the_weather the_wind the_knee thermometer barometer the_glass].freeze
+
+      # The hour as somebody judges it by the sun, from midnight: the small hours, then by day.
+      HOURS = [ 5.0, 8.0, 11.0, 13.0, 16.0, 19.0, 22.0 ].freeze
 
       # What falls, as `Outdoors` sums it up for a man looking at it.
       FALLING = [ "dry", "spitting", "raining", "pouring", "sleet", "snowing", "a blizzard" ].freeze
 
       def guesses(observer:)
         {
+          the_hour: guess(:the_hour, "The Hour", observer, :hour, HOURS,
+                          [ "the small hours", "early morning", "morning", "about noon", "afternoon",
+                            "late afternoon", "evening", "night" ], magnitude: 0.5),
           how_it_feels: guess(:how_it_feels, "How It Feels", observer, :feels_k,
                               [ 258.0, 268.0, 276.0, 284.0, 292.0, 298.0, 304.0 ],
                               [ "bitter — can't feel my hands", "freezing", "feels cold", "fresh", "mild",
@@ -27,7 +33,7 @@ module ReactorSim
           the_light: guess(:the_light, "The Light", observer, :daylight, [ 0.05, 0.4, 0.8 ],
                            [ "pitch black", "getting dark", "grey", "broad daylight" ], magnitude: 0.1),
           the_weather: Diagnostic.new(
-            id: :the_weather, label: "The Weather", observer: observer,
+            id: :the_weather, label: "The Weather", observer: observer, role: :weather,
             source: Sources::Field.new(Nodes::Outdoors::ID, :falling),
             filters: [ Filters::Lag.new(4) ],
             display: Displays::Prose.new(FALLING)
@@ -44,18 +50,21 @@ module ReactorSim
       def instruments
         {
           thermometer: Diagnostic.new(
-            id: :thermometer, label: "Thermometer", source: Sources::Field.new(Nodes::Outdoors::ID, :outdoor_k),
+            id: :thermometer, label: "Thermometer", role: :weather,
+            source: Sources::Field.new(Nodes::Outdoors::ID, :outdoor_k),
             filters: [ Filters::Lag.new(8) ],
             display: Displays::Digital.new(unit: "°C", precision: 0, convert: :k_to_c)
           ),
           barometer: Diagnostic.new(
-            id: :barometer, label: "Barometer", source: Sources::Field.new(Nodes::Outdoors::ID, :pressure_pa),
+            id: :barometer, label: "Barometer", role: :weather,
+            source: Sources::Field.new(Nodes::Outdoors::ID, :pressure_pa),
             filters: [ Filters::Lag.new(4) ],
             display: Displays::Needle.new(unit: "kPa", precision: 1, min: 96_000.0, max: 106_000.0, convert: :kpa)
           ),
           # Which way the glass is going, Pa/s: falling fast is a storm, or gas off the goaf.
           the_glass: Diagnostic.new(
-            id: :the_glass, label: "The Glass", source: Sources::Field.new(Nodes::Outdoors::ID, :pressure_pa),
+            id: :the_glass, label: "The Glass", role: :weather,
+            source: Sources::Field.new(Nodes::Outdoors::ID, :pressure_pa),
             filters: [ Filters::Average.new(240), Filters::Rate.new,
                        Filters::Bands.new([ -250.0 / 3600.0, -60.0 / 3600.0, 60.0 / 3600.0 ]) ],
             display: Displays::Prose.new([ "falling fast", "falling", "steady", "rising" ])
@@ -65,7 +74,7 @@ module ReactorSim
 
       def guess(id, label, observer, key, thresholds, phrases, magnitude:)
         Diagnostic.new(
-          id: id, label: label, observer: observer,
+          id: id, label: label, observer: observer, role: :weather,
           source: Sources::Field.new(Nodes::Outdoors::ID, key),
           filters: [ Filters::Lag.new(4), Filters::Misread.new(chance: 0.04, magnitude: magnitude, deadband: magnitude),
                      Filters::Bands.new(thresholds) ],

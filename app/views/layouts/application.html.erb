@@ -23,9 +23,34 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
-    <main class="container mx-auto mt-28 px-5 flex">
-      <%= yield %>
-    </main>
+  <%# **The frame is the layout's** (docs/reference/layout.md): the nav row and the strip, and the
+      feed, on every page and kept across navigation by `data-turbo-permanent`. A page yields the
+      centre, and `:left` where it has a left column. Where each region sits is the `.frame` grid
+      in app/assets/tailwind/application.css. %>
+  <body class="bg-slate-900 text-slate-100">
+    <% if (frame = current_frame) %>
+      <div class="frame">
+        <header id="<%= frame.dom_id(:top) %>" class="frame-top" data-turbo-permanent
+                data-controller="stream"
+                data-stream-match-id-value="<%= frame.match_id %>"
+                data-stream-operation-id-value="<%= frame.operation_id %>"
+                data-stream-commands-url-value="<%= operation_commands_path(match_id: frame.match_id, operation_id: frame.operation_id) %>">
+          <%= render Frame::NavComponent.new(frame: frame) %>
+          <%= render Frame::StripComponent.new(frame: frame) %>
+        </header>
+
+        <% if content_for?(:left) %>
+          <div class="frame-left"><%= yield :left %></div>
+        <% end %>
+
+        <main class="frame-centre"><%= yield %></main>
+
+        <aside id="<%= frame.dom_id(:feed) %>" class="frame-feed" data-turbo-permanent>
+          <%= render Frame::FeedComponent.new(frame: frame) %>
+        </aside>
+      </div>
+    <% else %>
+      <main><%= yield %></main>
+    <% end %>
   </body>
 </html>

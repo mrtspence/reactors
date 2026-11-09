@@ -103,7 +103,7 @@ module ReactorSim
 
       @operations.flat_map do |operation|
         operation.step!(dt: dt, tick: @tick).map do |event|
-          event.merge(tick: @tick, operation_id: operation.id)
+          event.merge(tick: @tick, operation_id: operation.id, operation_type: operation.type)
         end
       end
     end

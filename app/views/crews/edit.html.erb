@@ -4,13 +4,9 @@
     The Stimulus controller sits on the FRAME rather than the form, for the reason the
     outfitting screen records: a controller on the form would be torn down and rebuilt on every
     preview, where one here survives and simply re-scans. %>
-<div class="mx-auto max-w-3xl p-4 text-slate-200">
+<div class="max-w-3xl p-4 text-slate-200">
   <header class="mb-4">
-    <div class="flex items-center gap-3">
-      <h1 class="text-lg font-semibold">Crew</h1>
-      <div class="grow"></div>
-      <%= render "shared/machine_switcher", route: :edit_crew_path %>
-    </div>
+    <h1 class="text-sm uppercase tracking-widest text-slate-300">Crew</h1>
     <p class="text-sm text-slate-400">
       Who stands where, and what they have with them. An empty post is not an empty post —
       the labour exchange will send somebody, and you will not enjoy it.

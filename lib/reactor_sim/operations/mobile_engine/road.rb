@@ -33,6 +33,9 @@ module ReactorSim
           on_the_road: "a train on the road",
           clear: "road clear"
         }.freeze
+        # What asks nothing of anybody (`Displays::Prose.signals`). The drivers' own look is a
+        # road with no signals fitted, which says so for the whole match.
+        CALM = %i[own_look handing_over on_the_road clear].freeze
 
         KINDS = %i[flagman staff block].freeze
 

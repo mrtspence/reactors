@@ -872,6 +872,45 @@ part:
       wrought_iron: 2500
       wood: 2400
       cast_iron: 600        # the drop doors' gear
+  # A shot's warning, and somewhere to take cover from it.
+  shout:
+    materials: {}           # the powder gang's own voice
+  horn:
+    materials:
+      bronze: 6
+  horn_and_sentries:
+    materials:
+      bronze: 6
+      wood: 20              # the sentries' flags and boards
+  timber_shelters:
+    materials:
+      wood: 1800            # a hut by each face, heavy timber roofed over
+  steel_shelters:
+    materials:
+      steel: 1400
+      wood: 400
+  # Light for night work, an area at a time, and the oil the flares burn.
+  fire_baskets:
+    materials:
+      wrought_iron: 120     # a score of baskets and their stakes
+  wells_lights:
+    materials:
+      wrought_iron: 240     # four tripods, tanks and burners
+      cast_iron: 60
+      bronze: 20            # the hand pumps
+  arc_lamps:
+    materials:
+      copper: 380           # the dynamo's windings and the line to the poles
+      wrought_iron: 300
+      steel: 120
+  oil_drums:
+    materials:
+      wrought_iron: 40
+      fuel_oil: 200
+  oil_store:
+    materials:
+      wrought_iron: 300
+      fuel_oil: 1000
   # --- mobile engines ----------------------------------------------------------------------
   # The shovel's and the locomotive's own engine, and what is tiered around it. A bigger bunker or
   # tank is paid for partly in the coal the pit has raised.
@@ -918,6 +957,15 @@ part:
   mobile_fusible_plug:
     materials:
       fusible_alloy: 2
+  # The cab over the fireman and the driver: the open platform comes with the engine.
+  open_cab:
+    materials: {}
+  wooden_cab:
+    materials:
+      wood: 300
+  steel_cab:
+    materials:
+      steel: 450
   mobile_try_cocks:
     materials: {}
   # The shovel's working parts.

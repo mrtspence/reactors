@@ -172,6 +172,27 @@ RSpec.describe "conditions" do
       expect(bare).not_to include(:barometer)
       expect(fitted).to include(:barometer, :thermometer, :the_glass)
     end
+
+    it "marks every weather reading as the weather's, guesses and instruments alike" do
+      weather = pit(weather_instruments: :barometer).panel.fetch(:instruments).select { |i| i[:role] == :weather }
+
+      expect(weather.map { |i| i[:id] }).to match_array(ReactorSim::Operations::WeatherGauges::ORDER)
+    end
+
+    it "tells the hour by the sun, in words" do
+      hour = ReactorSim::Operations::WeatherGauges.guesses(observer: :banksman).fetch(:the_hour)
+      told = lambda do |h|
+        rng = ReactorSim::Rng.stream(1, "hour")
+        state = hour.initial_state(rng)
+        6.times do |t|
+          state = hour.record(state, {}, { outdoors: { hour: h } }, ConditionsSpec::Ctx.new(0.25, content, t), rng)
+        end
+        hour.read(state)
+      end
+
+      expect([ 2.0, 12.0, 23.0 ].map(&told).uniq.size).to eq(3)
+      expect(told.(12.0)).to eq("about noon")
+    end
   end
 
   it "conserves mass and energy under a hard winter" do

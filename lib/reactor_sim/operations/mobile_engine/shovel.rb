@@ -46,6 +46,8 @@ module ReactorSim
           blowing_off: "standing by — blowing off",
           digging: "digging"
         }.freeze
+        # The shovel going about its round (`Displays::Prose.signals`).
+        CALM = %i[moving_up waiting_on_cars standing_by blowing_off digging].freeze
 
         attr_reader :heat_capacity, :ambient_conductance, :initial_temperature_k, :ambient_k, :volume_m3,
                     :capacity_kg, :fill_kg_per_s, :swing_s, :lift_m, :work_j_per_kg, :swing_w, :driven_by,

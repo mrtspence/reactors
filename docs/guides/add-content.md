@@ -526,7 +526,10 @@ so renaming one is harmless and adding one renumbers the others (no snapshot hol
 content change).
 
 The rooms a weather reaches offer `wet` and `icy` to the people in them, and a peril reads them
-through `underfoot:`. Neither is a resource tag: they are room tags, like `darkvision`.
+through `underfoot:`. Neither is a resource tag: they are room tags, like `darkvision`. A peril's
+`underfoot: { dark: }` reads the person's own sight instead — the better of their lamp and the
+room's light, short of `Peril::FOOTING_LIGHT` (a proper lamp's 0.5); carried along a way, only
+their lamp.
 
 ---
 

@@ -90,6 +90,9 @@ module ReactorSim
           running_empty: "running empty",
           stopped: "stopped on the road"
         }.freeze
+        # Her round going as it should (`Displays::Prose.signals`).
+        CALM = %i[standing_by blowing_off loading waiting_on_road in_the_loop tipping at_the_stand tipped
+                  running_loaded running_empty].freeze
 
         attr_reader :moment_of_inertia, :radius_m, :friction, :tare_kg, :load_kg, :rated_m_s, :track, :cars,
                     :brake, :engine, :loader, :tipper, :demand_control, :perils, :failure_hazards, :failure_damages

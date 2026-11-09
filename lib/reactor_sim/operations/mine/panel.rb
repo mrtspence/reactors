@@ -283,7 +283,7 @@ module ReactorSim
           # What has come off the deck at bank, averaged — coal arrives a deck at a time, so the
           # instantaneous figure is not a reading anybody could use.
           coal_raised: Diagnostic.new(
-            id: :coal_raised, label: "Coal Raised",
+            id: :coal_raised, label: "Coal Raised", role: :output,
             source: Sources::Field.new(:deck_unloading, :carried_kg),
             # A minute's average: a deck comes off in about a minute and a half at a time.
             filters: [ Filters::Average.new(240), Filters::Lag.new(2) ],
@@ -297,7 +297,7 @@ module ReactorSim
           winding_signals: Diagnostic.new(
             id: :winding_signals, label: "Winding",
             source: Sources::Field.new(:cage_drive, :signal),
-            display: Displays::Prose.new(Winding::SIGNALS.values)
+            display: Displays::Prose.signals(Winding::SIGNALS, calm: Winding::CALM)
           ),
 
           # **Where the cage is**, which is what an engineman winding to a mark actually watches:

@@ -42,7 +42,8 @@ shared, so a new operation writes none of the weather itself:
    the same sky. Nil is the standard sky, which is what every spec gets.
 2. `WeatherGauges.guesses(observer:)` among the fixture's diagnostics, observed by whoever works
    outdoors; `WeatherGauges.instruments` merged into the catalogue; `WeatherGauges::ORDER` at the
-   end of `PANEL_ORDER`; `WeatherGauges.slot` in the slot list.
+   end of `PANEL_ORDER`; `WeatherGauges.slot` in the slot list. They carry `role: :weather`
+   already, so the console draws them in its strip.
 3. **`exposure:` on each place the weather reaches** — 1 for open ground, a fraction for a
    building, nothing underground. It shifts the ambient of every node in the place, offers the
    sky's light and its `wet`/`icy` footing to the people there, and lets the wind at them.
@@ -66,6 +67,11 @@ earlier matches, by person — and put it in `options:` through `Animosity.carri
    those places. The colliery sells one in a `supervision` slot that is empty by default.
 
 A post with none of these still sees rows and brawls between whoever works it.
+
+**Sending people to cover is declared, too.** A node that should — a shot hole with a `warning:` —
+answers `take_cover(state)` with the places it calls; a peril cover keeps off is `sheltered:`; a
+`Nodes::Shelter` seats people in a place or covers a post (a cab over an engine's crew). The tick
+does the rest (`Cover`): who heeds it, who sits where, who mans nothing until the all clear.
 
 ---
 
@@ -110,7 +116,11 @@ DriveLink.new(a: :flywheel, b: :load, stiffness: 9_000.0)
 **A furnace is two bodies**: its fuel on a grate as a `Nodes::FuelBed`, fed its air through a
 `Nodes::Grate` and opening onto a holder for the space over the fire — the steam engine's
 `firebox_fragment` is the worked example. A fire lumped into one body with its gas cannot hold a
-banked core hot. Start it `laid:` where the shift before would have left it burning.
+banked core hot. Start it `laid:` where the shift before would have left it burning. **Anything
+that burns a solid fuel is one**, subclassed for what is special: the open pit's `Kiln` is a
+`FuelBed` with ore in the bed. The other stock shapes — a machine started part-way through a
+story seeding its latch, a busy conduit's `traffic:` — are listed in
+[`nodes.md`](../reference/nodes.md#a-shape-written-twice-is-a-stock-shape).
 
 Every `Thermal` node also needs an `ambient_conductance` or the operation becomes a perfect
 heat accumulator. Waste heat is not optional — it is what makes conservation cheap *and*
@@ -170,6 +180,16 @@ send the cage where the player names. See [`operations/CLAUDE.md`](../../lib/rea
 
 The interesting design work. See [`../reference/diagnostics.md`](../reference/diagnostics.md).
 Give the two things that will kill the player the best instruments — and even those late.
+
+**Mark what the machine makes `role: :output`** on its gauge, as many as it has; the console draws
+them in the strip at the top of every screen, and `diagnostic_spec` refuses a catalogued machine
+with none.
+
+**The console shows one place at a time**, and puts each gauge in its place by who reads it or
+what it reads — nothing to declare, but a gauge reading only nodes in no place, with no observer
+and no post on them, lands in The Works. **A board in words names its calm phrases** — a node's
+`CALM` beside its `SIGNALS`, through `Displays::Prose.signals` — or it never tells the places box
+that something there needs looking at.
 
 ---
 

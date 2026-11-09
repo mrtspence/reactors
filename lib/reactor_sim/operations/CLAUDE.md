@@ -114,8 +114,11 @@ Three ways that goes wrong, all of them silent:
 
 **An operation with anything outdoors carries `Nodes::Outdoors` as a fixture, its places declare
 `exposure:`, and its panel and slots take `WeatherGauges`** — the guesses on a post that works
-outdoors, the instruments as a fitted slot, at the end of `PANEL_ORDER`. Nothing about the weather
-is written per operation. Rain reaches a holder through a `Nodes::Catchment`. Full checklist:
+outdoors (the hour among them), the instruments as a fitted slot, at the end of `PANEL_ORDER`, all
+`role: :weather`. Nothing about the weather is written per operation. **What a machine makes is
+`role: :output`** on its gauge — the pit's Finished Ore, the colliery's Coal Raised, the engine's
+Indicated Power. **A board off a node's `SIGNALS` names its calm ones** (`CALM`, through
+`Displays::Prose.signals`), which is what the console's places box reads. Rain reaches a holder through a `Nodes::Catchment`. Full checklist:
 [`build-an-operation.md`](../../../docs/guides/build-an-operation.md#the-sky-over-it).
 
 ## The people in it, and each other
@@ -133,8 +136,8 @@ loosed set and the shotfirer's charge left live, with the overman in a `supervis
 **A shovel's or a locomotive's engine is its own** (`MobileEngine`), never a load on the line
 shaft: the stationary engine's own pieces at a tenth the size, under the engine's own names. An
 operation carrying one fits `MobileEngine.slots(engine, place:)` among its own slots — the engine
-itself, then the safety valve, what reads the water and the pressure, a plug, the bunker and the
-tank — and supplies the rest: the `Atmosphere`, the place it stands in, and whatever its flywheel
+itself, then the safety valve, what reads the water and the pressure, a plug, the bunker, the
+tank and the cab — and supplies the rest: the `Atmosphere`, the place it stands in, and whatever its flywheel
 drives. `MobileEngine.driver(assembly, engine, place:)` is the driver's post, built after assembly
 because he reads by whatever was fitted.
 
@@ -142,6 +145,9 @@ because he reads by whatever was fitted.
   are two engines. The prefix is the engine's own slot name, unique by construction. A
   `SteamEngine` builder or fragment helper a mobile engine shares takes `names:`, defaulting to
   `SteamEngine::HOUSE` — no prefix, so the stationary engine is bit-identical.
+- **Her cab is a slot** (an open platform to start, a wooden cab, a steel cab): a `Nodes::Shelter`
+  over the fireman's and the driver's posts, so they stay at them when a shot is called, under its
+  cover — a wooden cab as a timber shelter, a steel one as steel.
 - **Two people work it**: the fireman, an effort post at the blueprint's rate, and the driver, a
   governor post working the throttle to his post's lever and the feed to the water he reads. Every
   other lever is `internal:` and held where the part declares. A sidegrade that gives the player a
@@ -153,7 +159,8 @@ because he reads by whatever was fitted.
   the vertical engine and 60 on the heavy one) and the firebox over it.
 - **She starts at work**: `MobileEngine.raised` puts a freshly built operation's engines in the
   state one was observed in — the fitted engine's own (`BY_ENGINE`: `AT_WORK` for the vertical
-  engine, `HEAVY_AT_WORK` for the heavy one) — and her fireman and driver start at their posts
+  engine, `HEAVY_AT_WORK` for the heavy one), her fire `alight` and her drum at `full_head` so she
+  announces neither — and her fireman and driver start at their posts
   (`advance_posts:` on the engine part). One set of figures an engine, so a retune moves them all.
 - **Two engines**: the vertical engine, and the heavy one at about twice the fire and the power.
   The fireman fires at the blueprint's rate whatever the work, so the heavy engine burns twice the
@@ -222,8 +229,8 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   stops its moving up — off any bench that reports them. The tracks are built from the median
   depths. A fitted engine starts at work (`MobileEngine.raised`) with its crew at their posts.
 - **Every place is open to the sky**; the bank holds the atmosphere and the rest are `open_air:`.
-- **Every job is gated on light** (`darkvision`), which only the sky gives the pit: by night,
-  only somebody who sees in the dark works.
+- **Every job is gated on light** (`darkvision`): the sky's by day; by night a carried lamp, the
+  area's lighting, or eyes that see in the dark.
 - **Washing hangs off its one line shaft** (`Nodes::Import`), the only power a consuming
   operation knows of. `OpenPit::LogWasher` takes wash ore raked in by its hands and water from the
   head tank the pump fills from the reservoir, and **parts it by tag**: its `:washed` outlet
@@ -268,6 +275,13 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   comes down for a couple of seconds after (`:flying`), hardest at that face. **Frost** builds in a
   bench below freezing and hardens it; **dynamite freezes** below 8 °C in its magazine and misfires
   the more for it, and the thawing house keeps it warm — too warm, and it sweats and can go up.
+- **A blast warning** (a slot, empty to start: a shout, a horn, a horn and sentries) is `informs:
+  { warning: }` to the shot holes: the fire lever sounds it, everybody in its reach who heeds it
+  takes cover where they stand and mans nothing, and the shot follows the tier's interval after; at
+  the all clear they are back at work. A shout reaches its own face, a horn the pit, the sentries,
+  posted, the bank and the works too. **Blast shelters** (a slot: timber or steel) seat some of
+  those at each bench, the rest crouch; flyrock is `sheltered:`. A powder gang's spite can fire a
+  shot unwarned (the `fired_unwarned` opening).
 - **A crusher ahead of the bays**, an empty slot: `OpenPit::Crusher`, a driven conduit from the bin
   into a hopper, charging the shaft per kilogram. **Lumps are the hands' rate, not a particle
   size**: a bay raking uncrushed ore from the bin breaks the lumps first and rakes a third as fast as
@@ -276,7 +290,7 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   crusher is fed by hand, or by **a feed belt** (`Nodes::Belt`, a slot that `needs: :crusher`) with
   nobody on it, which stalls fed past its grip.
 - **Finishing is calcining, as chemistry**: a `kiln` slot (an open clamp worked by one gang, or a
-  shaft kiln with chargers and drawers), `OpenPit::Kiln` a vessel hosting `coal_combustion` and
+  shaft kiln with chargers and drawers), `OpenPit::Kiln` a `Nodes::FuelBed` hosting `coal_combustion` and
   `limonite_calcining`, so what it finishes is decided by its heat. The coal goes in with the ore by
   a lever (`OpenPit::CoalCharge`, a share of what was charged last tick), the air by its eyes, and
   its own heat draws through its throat; short of air it burns to monoxide. **The draw takes what
@@ -285,7 +299,7 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   the throat and cleared by the open air across it (`OpenPit::Breeze`, more in a wind), so a choked
   kiln gasses its chargers through `Breath`. The coal in the charge is a bed of tens of kilograms
   burning over minutes, and the eyes stopped up still breathe (`EYES_LEAK`), so a kiln shut down
-  smoulders. The kiln starts at work (`working:`).
+  smoulders. The kiln starts at work, `laid:` from its tier's `working` figures.
 - **The pit's coal is a yard at bank** (a sized slot) that the kiln, the trains' stands and the
   shovels draw on, and **a siding fills it** (`Nodes::Siding`, empty to start): wagons on a
   timetable, shovelled out by the unloaders, or dropped over a staithe. **Coal reaches the machines
@@ -294,6 +308,15 @@ the bin at bank. Machines are upgrades fitted into the same faces later (`design
   the yard at bank. Water reaches a train at its stand from the reservoir.
 - **A passing track at a face** lets a second dinky share the face's road, and **road signals** at
   the face (none, a flagman, a train staff, block signals) are what its drivers read it by.
+- **Night lighting, an area at a time**: `pit_lighting` (both benches and the haul road) and
+  `bank_lighting` (bank, dump, dams, kiln), empty to start, each a `Nodes::Lighting` that `lights:`
+  its area's places. Fire baskets are a `FuelBed` of yard coal the light reads; Wells lights an oil
+  burner fed from a tank, filled from the `oil_store` (a required sized slot); arc lamps a dynamo
+  on the line shaft whose carbons start part spent. **The area's lever at bank is what burns** —
+  coal fed, oil fed, arcs on — off by default; its lamp man keeps it supplied or trimmed, and is
+  gated on light himself. The baskets' coal and the lamps' tank start stocked by the shift before.
+  Poor light worsens the footing perils (`underfoot: { dark: }`): the ramps, the water's edge, the
+  kiln's mouth.
 
 ## Assembled from parts
 

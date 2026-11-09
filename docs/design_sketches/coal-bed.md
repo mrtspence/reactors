@@ -315,3 +315,16 @@ Seeded with a 150 kg bed, 95% alight:
     it slightly.
 - **"A Clean Cold Start"** opens on `fire_lit`, which a banked start never sends. It can only be
   earned on a relight now.
+
+## 11. Found in the open-pit lookover (2026-11-01)
+
+- **The kiln had copied `FuelBed#laid:` instead of being one.** It seeded its own lit coal and air,
+  missed the `alight` latch, and sent `fire_lit` on tick 1 of every match. In the dev match that
+  opened "A Clean Cold Start" for the stationary engine to close on its banked bring-up, so §10's
+  last line was wrong in practice. The kiln is now a `FuelBed` subclass, `laid:` from its tier's
+  working figures, with a `grate_area_m2` (4 m² the clamp, 1.5 the shaft kiln) that nothing reads
+  until its eyes become a `Grate`.
+- **A raised mobile engine sent `steam_raised` on tick 1** for the same reason, which awarded "A Full
+  Head of Steam" the moment a shovel was fitted. `MobileEngine.raised` seeds `full_head`.
+- **Achievements are now scoped by machine** (`operation_type:`), so even an unseeded latch could
+  only mislead its own machine's record.

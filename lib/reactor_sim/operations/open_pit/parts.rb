@@ -51,9 +51,8 @@ module ReactorSim
       # navvy's twenty tonnes a day of earth, brought into an hour's play. `swing`, a tool at the end
       # of an arm, and gated on a pick as hewing is.
       #
-      # **Every job in the pit is gated on light**, and the pit has none of its own: the sky lights
-      # it by day, and at night only somebody who sees in the dark works. TODO: lighting for night
-      # work, as blueprints — the pit's first caller of a lighting slot.
+      # **Every job in the pit is gated on light**: the sky's by day, and at night a lamp carried,
+      # the area's lighting, or eyes that see in the dark.
       Parts.register(:pick_and_shovel, kind: :pit_getting, label: "Picks and Shovels",
                      description: "A gang with picks and shovels. Slow, and slower in bad ground.",
                      provides: %i[getting], stats: { max_kg_per_s: 0.6, crew: 4 }) do |spec|
@@ -114,12 +113,17 @@ module ReactorSim
                   rate: 0.15, scales_with: :getting, stations: [ names.(:getters) ], opportunity: true)
       end
 
-      # **Off the plank with a loaded barrow**, by the barrows going past, and far worse wet or icy.
+      # **Off the plank with a loaded barrow**, by the barrows going past, and far worse wet, icy or
+      # unseen in the dark.
       def fall_on_the_barrow_way(names)
         Peril.new(id: :"fell_off_the_#{names.prefix}_ramp", wounds: { impact: 1.0 }, causes: %i[fall], severity: 1.4,
                   rate: 0.1, scales_with: :barrows, stations: [ names.(:barrowmen) ],
-                  underfoot: { wet: 1.0, icy: 8.0 }, opportunity: true)
+                  underfoot: FOOTING, opportunity: true)
       end
+
+      # The ground underfoot, wet, icy and unseen; an edge in the dark.
+      FOOTING = { wet: 1.0, icy: 8.0, dark: 4.0 }.freeze
+      UNSEEN_EDGE = { dark: 4.0 }.freeze
 
       # --- washing ----------------------------------------------------------------------------
 
@@ -462,7 +466,8 @@ module ReactorSim
       # **A belt from the bin up to the jaws**, off the line shaft: the feeders' places, and their
       # limit. It needs the crusher, because a belt into a log washer would be the same lumps. Its feed
       # is a lever and nobody is on it; fed past what its drum grips, it stalls, and the drum turns on
-      # under it and heats. Rain on it is 5e's.
+      # under it and heats. Rain does not wet it yet (`Belting`'s `wetted_by:` names a holder, not
+      # the sky).
       FEED_BELT = { grip_kg_per_s: 40.0, feed_kg_per_s: 50.0, lift_m: 8.0 }.freeze
 
       Parts.register(:pit_feed_belt, kind: :pit_belt, label: "Feed Belt",
@@ -510,13 +515,14 @@ module ReactorSim
       #
       # `most_coal` is the coal a kilogram of ore takes with the burners' lever right over; at its
       # middle, a clamp takes about one part in seven and a kiln one in seventeen. `working` is what
-      # it holds at work, which it starts with: read off an hour at work, the coal in the charge a bed
-      # of tens of kilograms burning what the chargers bring.
+      # it holds at work, which it is laid with: read off an hour at work, the coal in the charge a
+      # bed of tens of kilograms burning what the chargers bring, all of it alight. `floor_m2` is
+      # what the charge lies on: a clamp's heap spread wide, a shaft kiln's shaft.
       KILNS = {
         open_clamp: {
           label: "Open Clamp", description: "Ore heaped on small coal and fired. Slow, and hungry for coal.",
           volume_m3: 3.0, heat_capacity: 1.0e5, ambient_conductance: 1_400.0, stack_m: 2.0, eyes: 5.0, throat: 6.0,
-          most_coal: 0.3,
+          most_coal: 0.3, floor_m2: 4.0,
           charging: { post: :clamp_gang, label: "Clamp Gang", crew: 3, kg_per_s: 0.14, place: :kiln_top,
                       effort: { force: 0.6, swing: 0.4 } },
           drawing: { post: :clamp_gang, crew: 3, kg_per_s: 0.12, place: :kiln_top },
@@ -526,7 +532,7 @@ module ReactorSim
           label: "Shaft Kiln", description: "A brick shaft, charged at the top and drawn at the foot. Five times " \
                                             "the clamp, on a third of the coal a tonne.",
           volume_m3: 6.0, heat_capacity: 1.0e6, ambient_conductance: 1_200.0, stack_m: 8.0, eyes: 3.0, throat: 4.0,
-          most_coal: 0.12,
+          most_coal: 0.12, floor_m2: 1.5,
           charging: { post: :kiln_chargers, label: "Kiln Chargers", crew: 3, kg_per_s: 0.7, place: :kiln_top,
                       effort: { force: 0.7, swing: 0.3 } },
           drawing: { post: :kiln_drawers, label: "Kiln Drawers", crew: 3, kg_per_s: 0.6, place: :kiln_foot,
@@ -547,27 +553,32 @@ module ReactorSim
       # **Eyes stopped up still breathe** through the burden, so a kiln shut down smoulders.
       EYES_LEAK = 0.03
 
-      # TODO: a burden choking its own draught by its depth, as a `Nodes::Grate` does a fire's — the
-      # eyes do not read the charge yet. First caller is the gas-fired kiln, whose burden is deeper.
+      # TODO: a burden choking its own draught by its depth (`Kiln#depth_m`) — the eyes a
+      # `Nodes::Grate` on the kiln rather than a plain conduit. First caller is the gas-fired kiln,
+      # whose burden is deeper.
       def kiln_fragment(kiln)
         charging = kiln.fetch(:charging)
         drawing = kiln.fetch(:drawing)
         gang = charging.fetch(:post)
         drawers = drawing.fetch(:post)
+        working = kiln.fetch(:working)
         Fragment.new(
           nodes: [
             Kiln.new(id: :kiln, label: kiln.fetch(:label), volume_m3: kiln.fetch(:volume_m3),
                      heat_capacity: kiln.fetch(:heat_capacity), ambient_conductance: kiln.fetch(:ambient_conductance),
-                     reactions: %i[coal_combustion limonite_calcining], working: kiln.fetch(:working),
+                     reactions: %i[coal_combustion limonite_calcining], grate_area_m2: kiln.fetch(:floor_m2),
+                     laid: { kelvin: working.fetch(:kelvin), contents: working.except(:kelvin),
+                             alight: { coal_combustion: working.fetch(:coal) } },
                      heater_control_id: :kindling, heater_watts: 3.0e4, igniter_kg_per_s: 0.02,
                      ports: [ Port.new(id: :ore_in, direction: :inlet, accepts: [ :ore ], max_kg_per_s: 20.0),
                               Port.new(id: :coal_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 5.0),
                               Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 20.0),
                               Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 20.0),
                               Port.new(id: :draw, direction: :outlet, accepts: %i[ore waste], max_kg_per_s: 20.0) ]),
-            Charging.new(id: :kiln_charging, label: "Charging", accepts: [ :ore ], max_kg_per_s: charging.fetch(:kg_per_s),
-                         heat_capacity: 2.0e3, control_id: gang, worked: true, crew: charging.fetch(:crew),
-                         perils: gang == drawers ? [] : [ into_the_kiln(gang) ]),
+            Nodes::Conduit.new(id: :kiln_charging, label: "Charging", accepts: [ :ore ],
+                               max_kg_per_s: charging.fetch(:kg_per_s), heat_capacity: 2.0e3, control_id: gang,
+                               worked: true, crew: charging.fetch(:crew), traffic: :charging,
+                               perils: gang == drawers ? [] : [ into_the_kiln(gang) ]),
             CoalCharge.new(id: :coal_charging, label: "Coal in the Charge", accepts: [ :fuel ], max_kg_per_s: 5.0,
                            heat_capacity: 1.0e3, control_id: :coal_in_charge, with: :kiln_charging,
                            most_per_kg: kiln.fetch(:most_coal)),
@@ -633,7 +644,7 @@ module ReactorSim
       # **Into the kiln's throat** off the charging floor — or pushed.
       def into_the_kiln(chargers)
         Peril.new(id: :fell_into_the_kiln, wounds: { burn: 0.7, impact: 0.3 }, causes: %i[fall], severity: 6.0,
-                  rate: 0.02, scales_with: :charging, stations: [ chargers ], opportunity: true)
+                  rate: 0.02, scales_with: :charging, stations: [ chargers ], underfoot: UNSEEN_EDGE, opportunity: true)
       end
 
       # **The pit's coal yard** at bank, which the kiln, the trains' stands and the shovels' coal all
@@ -710,6 +721,192 @@ module ReactorSim
                              capacity: crew, effort: { force: 0.6, swing: 0.4 }, gated_by: %i[darkvision], exertion: 8.0e-4)
           ] : []
         )
+      end
+
+      # --- lighting -----------------------------------------------------------------------------
+
+      # **Light for night work, an area at a time** (`Nodes::Lighting`): the faces, or the bank and
+      # the works around it. Each area's lever at bank is what burns — coal into the baskets, oil
+      # into the burners, the arcs on the shaft — off by default, so lighting up at dusk is a
+      # standing order. Its lamp man keeps it supplied: carrying coal, filling the tank, trimming
+      # the carbons. Without him each tier fails its own way, slowly.
+      LIGHT_AREAS = {
+        pit: { label: "Pit", lights: %i[stripping_bench ore_bench haul_road] },
+        bank: { label: "Bank", lights: %i[bank spoil_dump dams kiln_top kiln_foot] }
+      }.freeze
+
+      def lights(area) = Names.new(:"#{area}_lights", place: LIGHT_AREAS.dig(area, :lights).first)
+
+      # **Fire baskets**: a score of iron baskets of yard coal along the work, a few kilograms an
+      # hour each — one fire of them all, a `Nodes::FuelBed`, its light the share of it alight.
+      # **Wells lights**: oil forced to a flare of a few thousand candlepower, about six kilograms
+      # an hour a lamp, four to an area, from a tank the lamp man fills. **Arc lamps**: a dozen arcs
+      # on a dynamo off the line shaft, about ten kilowatts; their carbons last a night, and last
+      # night's are part spent.
+      LIGHTING = {
+        fire_baskets: { label: "Fire Baskets", kind: :baskets, illumination: 0.35,
+                        description: "Iron baskets of coal on stakes. Dim and smoky, and fed from the yard." },
+        wells_lights: { label: "Wells Lights", kind: :wells, illumination: 0.75,
+                        description: "Oil flares on tripods. Bright, and thirsty for oil." },
+        arc_lamps: { label: "Arc Lamps", kind: :arcs, illumination: 1.0,
+                     description: "Arcs on poles, off a dynamo on the line shaft. Daylight, while the shaft turns." }
+      }.freeze
+
+      LIGHTING.each do |id, tier|
+        Parts.register(id, kind: :pit_lighting, label: tier.fetch(:label), description: tier.fetch(:description),
+                           stats: tier.slice(:illumination)) do |spec|
+          OpenPit.lighting_fragment(tier, spec.fetch(:area), ground: spec[:ground])
+        end
+      end
+
+      BASKET_COAL_KG_PER_S = 0.017
+      # An hour of the baskets' coal, at their stakes.
+      BASKET_COAL_KG = 60.0
+      BASKET_HEAP_M3 = 0.12
+      WELLS_OIL_KG_PER_S = 0.007
+      WELLS_TANK_KG = 50.0
+      ARC_LAMPS_W = 1.0e4
+      ARC_CARBONS_S = 28_800.0
+      ARC_STARTS_SPENT = (0.0..0.9)
+      # One lamp man re-carbons a dozen arcs in about half an hour.
+      ARC_TRIM_PER_S = 1.0 / 1_800.0
+      LAMP_MAN_KG_PER_S = { baskets: 0.05, wells: 0.02 }.freeze
+
+      def lighting_fragment(tier, area, ground:)
+        names = lights(area)
+        light = { id: names.prefix, label: "#{LIGHT_AREAS.dig(area, :label)} Lights", illumination: tier.fetch(:illumination),
+                  lights: LIGHT_AREAS.dig(area, :lights), control_id: names.(:lamps), curve: :viscous,
+                  moment_of_inertia: 12.0 }
+        body = { baskets: -> { baskets(names, light) }, wells: -> { wells(names, light) },
+                 arcs: -> { arcs(names, light, ground: ground) } }.fetch(tier.fetch(:kind)).call
+        body.merge(Fragment.new(
+                     places: [ Place.new(id: names.place, nodes: [ names.prefix ]) ],
+                     control_points: [
+                       ControlPoint.new(id: names.(:lamps), label: "#{LIGHT_AREAS.dig(area, :label)} Lights",
+                                        node: names.prefix, default: 0.0, place: :bank),
+                       ControlPoint.new(id: names.(:lamp_man), label: "#{LIGHT_AREAS.dig(area, :label)} Lamp Man",
+                                        node: tier.fetch(:kind) == :arcs ? names.prefix : names.(:supplying),
+                                        default: 100.0, place: :bank, effort: { force: 0.4, dexterity: 0.6 },
+                                        gated_by: %i[darkvision], exertion: 5.0e-4)
+                     ],
+                     diagnostics: [ lights_board(names) ]
+                   ))
+      end
+
+      # The baskets' coal, carried from the yard to a heap by the work and fed in by the lever.
+      def baskets(names, light)
+        bed = names.(:baskets)
+        Fragment.new(
+          nodes: [
+            Nodes::Lighting.new(**light, max_torque: 0.0, rated_omega: 0.0, fire: bed,
+                                         fire_full_kg: BASKET_COAL_KG_PER_S / 0.001, supplied_from: names.(:coal)),
+            # Stocked by the shift before, as the lamps' tank is filled.
+            Nodes::Vessel.new(id: names.(:coal), label: "Basket Coal", volume_m3: BASKET_HEAP_M3, heat_capacity: 1.0e3,
+                              ambient_conductance: 0.0, initial_contents: [ { resource: :coal, kg: BASKET_COAL_KG } ],
+                              ports: [ Port.new(id: :in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 5.0),
+                                       Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 5.0) ]),
+            supply(names, LAMP_MAN_KG_PER_S.fetch(:baskets), accepts: [ :fuel ]),
+            Nodes::Conduit.new(id: names.(:feed), label: "Feeding the Baskets", accepts: [ :fuel ],
+                               max_kg_per_s: BASKET_COAL_KG_PER_S, heat_capacity: 1.0e3, control_id: names.(:lamps)),
+            Nodes::FuelBed.new(id: bed, label: "Fire Baskets", volume_m3: 1.0, grate_area_m2: 3.0, heat_capacity: 1.0e4,
+                               ambient_conductance: 800.0, reactions: %i[coal_combustion],
+                               heater_control_id: names.(:lamps), heater_watts: 5.0e3, igniter_kg_per_s: 0.005,
+                               ports: [ Port.new(id: :fuel_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 1.0),
+                                        Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 5.0),
+                                        Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 5.0) ]),
+            Nodes::Grate.new(id: names.(:grate), label: "Basket Bars", accepts: [ :gas ], bed: bed, max_kg_per_s: 5.0,
+                             conductance: 3.0, choke_depth_m: 0.15, heat_capacity: 1.0e3),
+            Nodes::Conduit.new(id: names.(:smoke), label: "Smoke", accepts: [ :gas ], max_kg_per_s: 5.0, conductance: 3.0,
+                               stack_height_m: 1.0, heat_capacity: 1.0e3)
+          ],
+          links: [ Link.new(from: [ :coal_yard, :out ], to: [ names.(:supplying), :inlet ]),
+                   Link.new(from: [ names.(:supplying), :outlet ], to: [ names.(:coal), :in ]),
+                   Link.new(from: [ names.(:coal), :out ], to: [ names.(:feed), :inlet ]),
+                   Link.new(from: [ names.(:feed), :outlet ], to: [ bed, :fuel_in ]),
+                   *open_fire_links(names, bed) ],
+          places: [ Place.new(id: names.place, nodes: [ names.(:coal), names.(:feed), bed, names.(:grate), names.(:smoke) ]),
+                    Place.new(id: :bank, nodes: [ names.(:supplying) ]) ]
+        )
+      end
+
+      # The oil, filled from the store into the lamps' tank and fed to their burners by the lever.
+      def wells(names, light)
+        burner = names.(:burners)
+        Fragment.new(
+          nodes: [
+            Nodes::Lighting.new(**light, max_torque: 0.0, rated_omega: 0.0, fire: burner,
+                                         fire_full_kg: WELLS_OIL_KG_PER_S / 3.5, supplied_from: names.(:tank)),
+            Nodes::Vessel.new(id: names.(:tank), label: "Lamp Oil", volume_m3: WELLS_TANK_KG * 1.2 / 890.0,
+                              heat_capacity: 2.0e3, ambient_conductance: 0.0,
+                              initial_contents: [ { resource: :fuel_oil, kg: WELLS_TANK_KG } ],
+                              ports: [ Port.new(id: :in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 5.0),
+                                       Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 5.0) ]),
+            supply(names, LAMP_MAN_KG_PER_S.fetch(:wells), accepts: [ :fuel ], from: :oil_store),
+            Nodes::Conduit.new(id: names.(:feed), label: "Oil to the Burners", accepts: [ :fuel ],
+                               max_kg_per_s: WELLS_OIL_KG_PER_S, heat_capacity: 1.0e3, control_id: names.(:lamps)),
+            Nodes::Vessel.new(id: burner, label: "Wells Burners", volume_m3: 0.5, heat_capacity: 2.0e3,
+                              ambient_conductance: 300.0, reactions: %i[oil_combustion],
+                              heater_control_id: names.(:lamps), heater_watts: 5.0e3, igniter_kg_per_s: 1.0e-4,
+                              ports: [ Port.new(id: :fuel_in, direction: :inlet, accepts: [ :fuel ], max_kg_per_s: 1.0),
+                                       Port.new(id: :air_in, direction: :inlet, accepts: [ :gas ], max_kg_per_s: 5.0),
+                                       Port.new(id: :flue_out, direction: :outlet, accepts: [ :gas ], max_kg_per_s: 5.0) ]),
+            Nodes::Conduit.new(id: names.(:grate), label: "Air to the Burners", accepts: [ :gas ], max_kg_per_s: 5.0,
+                               conductance: 3.0, heat_capacity: 1.0e3),
+            Nodes::Conduit.new(id: names.(:smoke), label: "Flare", accepts: [ :gas ], max_kg_per_s: 5.0, conductance: 3.0,
+                               stack_height_m: 1.0, heat_capacity: 1.0e3)
+          ],
+          links: [ Link.new(from: [ :oil_store, :out ], to: [ names.(:supplying), :inlet ]),
+                   Link.new(from: [ names.(:supplying), :outlet ], to: [ names.(:tank), :in ]),
+                   Link.new(from: [ names.(:tank), :out ], to: [ names.(:feed), :inlet ]),
+                   Link.new(from: [ names.(:feed), :outlet ], to: [ burner, :fuel_in ]),
+                   *open_fire_links(names, burner) ],
+          places: [ Place.new(id: names.place, nodes: [ names.(:tank), names.(:feed), burner, names.(:grate), names.(:smoke) ]),
+                    Place.new(id: :bank, nodes: [ names.(:supplying) ]) ]
+        )
+      end
+
+      # The arcs, on the line shaft, their carbons trimmed by the lamp man.
+      def arcs(names, light, ground:)
+        Fragment.new(
+          nodes: [ Nodes::Lighting.new(**light, max_torque: ARC_LAMPS_W / WORKING_OMEGA, rated_omega: WORKING_OMEGA,
+                                       burns_s: ARC_CARBONS_S, tended_by: names.(:lamp_man), tend_per_s: ARC_TRIM_PER_S,
+                                       starts_spent: (ARC_STARTS_SPENT unless ground)) ],
+          drive_links: [ DriveLink.new(a: :line_shaft, b: names.prefix, stiffness: 1.4e3) ]
+        )
+      end
+
+      # The lamp man's carry from the store to the lamps, worked.
+      def supply(names, kg_per_s, accepts:, from: :coal_yard)
+        Nodes::Conduit.new(id: names.(:supplying), label: from == :coal_yard ? "Carrying Coal" : "Filling the Lamps",
+                           accepts: accepts, max_kg_per_s: kg_per_s, heat_capacity: 1.0e3, control_id: names.(:lamp_man),
+                           worked: true, crew: 1)
+      end
+
+      # An open fire's air through its bars and its smoke away, drawn by its own heat.
+      def open_fire_links(names, fire)
+        [ Link.new(from: [ :atmosphere, :intake ], to: [ names.(:grate), :inlet ]),
+          Link.new(from: [ names.(:grate), :outlet ], to: [ fire, :air_in ]),
+          Link.new(from: [ fire, :flue_out ], to: [ names.(:smoke), :inlet ]),
+          Link.new(from: [ names.(:smoke), :outlet ], to: [ :atmosphere, :exhaust ]) ]
+      end
+
+      # **The oil store** at bank, which the Wells lights draw on: drums, or a store of a size.
+      OIL_STORES = {
+        oil_drums: { label: "Oil Drums", oil_kg: 200.0, description: "A few drums of lamp oil. A night of Wells lights." },
+        oil_store: { label: "Oil Store", oil_kg: 1_000.0, description: "A tank of lamp oil. A week of nights." }
+      }.freeze
+
+      OIL_STORES.each do |id, store|
+        Parts.register(id, kind: :pit_oil_store, label: store.fetch(:label), description: store.fetch(:description),
+                           provides: %i[oil_store], stats: store.slice(:oil_kg)) do |_spec|
+          Fragment.new(
+            nodes: [ Nodes::Vessel.new(id: :oil_store, label: "Oil Store", volume_m3: store.fetch(:oil_kg) * 1.2 / 890.0,
+                                       heat_capacity: 1.0e4, ambient_conductance: 0.0,
+                                       initial_contents: [ { resource: :fuel_oil, kg: store.fetch(:oil_kg) } ],
+                                       ports: [ Port.new(id: :out, direction: :outlet, accepts: [ :fuel ], max_kg_per_s: 5.0) ]) ],
+            places: [ Place.new(id: :bank, nodes: %i[oil_store]) ]
+          )
+        end
       end
 
       # **The air over the kiln's top**: what comes up its throat, and the open air across it, never
@@ -827,6 +1024,11 @@ module ReactorSim
                    default: fitted[:blasting], informs: %i[explosive], spec: { machines: machines }),
           Slot.new(id: :magazine, accepts: :pit_magazine, label: "Magazine", group: :blasting, needs: :blasting,
                    default: fitted.fetch(:magazine)),
+          # Empty to start: with no warning the range is cleared by hand.
+          Slot.new(id: :blast_warning, accepts: :pit_blast_warning, label: "Blast Warning", group: :blasting,
+                   needs: :blasting, default: fitted[:blast_warning], informs: %i[warning]),
+          Slot.new(id: :blast_shelters, accepts: :pit_blast_shelters, label: "Blast Shelters", group: :blasting,
+                   needs: :blasting, default: fitted[:blast_shelters]),
           *washing_slots(fitted, feed),
           Slot.new(id: :kiln, accepts: :pit_kiln, label: "Calcining", group: :finishing, required: true,
                    default: fitted.fetch(:kiln)),
@@ -834,6 +1036,13 @@ module ReactorSim
           Slot.new(id: :coal_yard, accepts: :pit_coal_yard, label: "Coal Yard", group: :coal, required: true,
                    default: fitted.fetch(:coal_yard)),
           Slot.new(id: :siding, accepts: :pit_siding, label: "Siding", group: :coal, default: fitted[:siding]),
+          # Empty to start: the pit is lit by the sky and the lamps people carry.
+          *LIGHT_AREAS.map do |area, light|
+            Slot.new(id: :"#{area}_lighting", accepts: :pit_lighting, label: "#{light.fetch(:label)} Lighting",
+                     group: :lighting, default: fitted[:"#{area}_lighting"], spec: { area: area, ground: spec[:ground] })
+          end,
+          Slot.new(id: :oil_store, accepts: :pit_oil_store, label: "Oil Store", group: :lighting, required: true,
+                   default: fitted.fetch(:oil_store)),
           Slot.new(id: :quarters, accepts: :crew_quarters, label: "Quarters", group: :crew,
                    required: true, default: fitted.fetch(:quarters)),
           # Who starts out in the pit, the stripping bench first.
@@ -1257,11 +1466,12 @@ module ReactorSim
         Parts.register(id, kind: :pit_blasting, label: tier.fetch(:label), description: tier.fetch(:description),
                            informs: { explosive: tier.fetch(:explosive) }, instruments: %i[stripping_shots ore_shots],
                            stats: tier.slice(:yield_kg, :shot_s)) do |spec|
-          FACES.map { |face_id| OpenPit.shot_fragment(face_id, tier, spec.fetch(:machines, {})) }.reduce(:merge)
+          FACES.map { |face_id| OpenPit.shot_fragment(face_id, tier, spec.fetch(:machines, {}), spec[:warning]) }
+               .reduce(:merge)
         end
       end
 
-      def shot_fragment(face_id, tier, machines)
+      def shot_fragment(face_id, tier, machines, warning = nil)
         names = face(face_id)
         struck = { names.(:getters) => names.(:getting) }
         struck[shovel(face_id).(:pitmen)] = shovel(face_id).(:moving_up) if machines.dig(face_id, :shovel)
@@ -1272,7 +1482,8 @@ module ReactorSim
               heat_capacity: 1.0e3, charge_kg: tier.fetch(:charge_kg), perils: shot_perils(names, tier, struck.keys),
               fired_by: names.(:powder_gang), struck_by: struck, shot_s: tier.fetch(:shot_s), clear_s: SHOT_CLEAR_S,
               yield_kg: tier.fetch(:yield_kg), blown_out_yield: SHOT_BLOWN_OUT_YIELD, fire_control: names.(:fire),
-              charge_from: :magazine, freezes_below_k: (DYNAMITE_FREEZES_K if tier.fetch(:explosive) == :dynamite)
+              charge_from: :magazine, freezes_below_k: (DYNAMITE_FREEZES_K if tier.fetch(:explosive) == :dynamite),
+              warning: warning && warning_at(names, warning)
             ),
             # Where the charge goes off, and its fumes away into the open air.
             Nodes::Vessel.new(id: names.(:shot), label: "#{face_label(names)} Shot", volume_m3: 5.0, heat_capacity: 1.0e3,
@@ -1293,7 +1504,8 @@ module ReactorSim
             ControlPoint.new(id: names.(:powder_gang), label: "#{face_label(names)} Powder Gang", node: names.(:shot_hole),
                              default: 100.0, place: names.place, capacity: POWDER_GANG,
                              effort: { precision: 0.6, intelligence: 0.4 }, gated_by: %i[darkvision], exertion: 6.0e-4,
-                             complexity: 1.0, requires: :shotfirer, openings: [ left_live(names, struck.keys) ]),
+                             complexity: 1.0, requires: :shotfirer,
+                             openings: [ left_live(names, struck.keys), *([ fired_unwarned(names, struck.keys) ] if warning) ]),
             # **The word to fire**: a lever, so the range can be cleared first. Left at fire, every hole
             # goes as soon as it is charged.
             ControlPoint.new(id: names.(:fire), label: "#{face_label(names)} Fire", node: names.(:shot_hole), default: 100.0,
@@ -1356,7 +1568,7 @@ module ReactorSim
       def flyrock(names, throw)
         thrown = ->(id, places, severity, rate) {
           Peril.new(id: id, wounds: { impact: 1.0 }, causes: %i[rockfall], severity: severity * throw, rate: rate,
-                    scales_with: :flying, places: places)
+                    scales_with: :flying, places: places, sheltered: true)
         }
         [ thrown.(:flyrock_at_the_face, [ names.place ], 3.0, 600.0),
           thrown.(:flyrock_across_the_pit, ACROSS.fetch(names.prefix), 2.0, 60.0),
@@ -1367,6 +1579,72 @@ module ReactorSim
       def left_live(names, struck)
         Animosity::Opening.new(id: :left_live, stations: struck, harm: 3.6,
                                mishap: { node: names.(:shot_hole), kind: :misjudged })
+      end
+
+      # **A shot fired without its warning on purpose**, with the man he hates working the face.
+      def fired_unwarned(names, struck)
+        Animosity::Opening.new(id: :fired_unwarned, stations: struck + [ names.(:barmen) ], harm: 3.0,
+                               mishap: { node: names.(:shot_hole), kind: :unwarned })
+      end
+
+      # --- the warning and the shelters --------------------------------------------------------
+
+      # **What warns of a shot, and how far it carries** (`Nodes::ShotHole`'s `warning:`), informed to
+      # the blasting: the powder gang's shout carries to its own face; a horn across the pit; a horn
+      # with sentries on the approaches to the bank and the works too, while the sentries are posted.
+      BLAST_WARNINGS = {
+        shout: { label: "A Shout", warning_s: 15.0, reach: :face,
+                 description: "The powder gang shouts \"fire!\". Their own face hears it." },
+        horn: { label: "A Horn", warning_s: 30.0, reach: :pit, description: "A horn blown before every shot. The whole pit hears it." },
+        horn_and_sentries: { label: "Horn and Sentries", warning_s: 45.0, reach: :pit, sentries: true,
+                             description: "The horn, and sentries on the approaches who send the bank to cover too." }
+      }.freeze
+
+      # The places past the pit a shot's sentries send to cover.
+      SENTRIED = %i[bank spoil_dump dams kiln_top kiln_foot].freeze
+
+      BLAST_WARNINGS.each do |id, tier|
+        Parts.register(id, kind: :pit_blast_warning, label: tier.fetch(:label), description: tier.fetch(:description),
+                           informs: { warning: tier.slice(:warning_s, :reach, :sentries) },
+                           stats: tier.slice(:warning_s)) do |_spec|
+          tier[:sentries] ? OpenPit.sentries_fragment : Fragment.empty
+        end
+      end
+
+      # **The sentries**, a post at bank; unposted, the horn alone.
+      def sentries_fragment
+        Fragment.new(control_points: [
+          ControlPoint.new(id: :blast_sentries, label: "Blast Sentries", place: :bank, capacity: 2, default: 100.0,
+                           effort: { intelligence: 0.5, agility: 0.5 }, gated_by: %i[darkvision], exertion: 2.0e-4)
+        ])
+      end
+
+      # What a face's shot holes warn, and whom.
+      def warning_at(names, warning)
+        reaches = warning.fetch(:reach) == :face ? [ names.place ] : PIT_PLACES
+        { warning_s: warning.fetch(:warning_s), reaches: reaches,
+          sentries: (warning[:sentries] ? { post: :blast_sentries, reaches: SENTRIED } : nil) }
+      end
+
+      PIT_PLACES = %i[stripping_bench ore_bench haul_road].freeze
+
+      # **Blast shelters at each bench**, somewhere to take cover beside the face for as many as they
+      # seat (`Nodes::Shelter`); the rest crouch.
+      BLAST_SHELTERS = {
+        timber_shelters: { label: "Timber Shelters", cover: Nodes::Shelter::TIMBER, seats: 6,
+                           description: "A timber hut by each face. Six can take cover in each." },
+        steel_shelters: { label: "Steel Shelters", cover: Nodes::Shelter::STEEL, seats: 10,
+                          description: "Steel huts by each face. Ten in each, and nothing gets through." }
+      }.freeze
+
+      BLAST_SHELTERS.each do |id, tier|
+        Parts.register(id, kind: :pit_blast_shelters, label: tier.fetch(:label), description: tier.fetch(:description),
+                           stats: tier.slice(:cover, :seats)) do |_spec|
+          Fragment.new(nodes: FACES.map do |face_id|
+            Nodes::Shelter.new(id: face(face_id).(:shelter), label: tier.fetch(:label), cover: tier.fetch(:cover),
+                               places: [ face(face_id).place ], seats: tier.fetch(:seats))
+          end)
+        end
       end
 
       # **The magazine**, at the bank, its charges at its own temperature: a powder house in the
@@ -1466,7 +1744,7 @@ module ReactorSim
       # The drowning is the water's own (`Place#water:`), once they are spent treading it.
       def going_in
         Peril.new(id: :into_the_water, wounds: { impact: 1.0 }, causes: %i[fall], severity: 1.2, rate: 0.1,
-                  scales_with: :over_the_mark, places: %i[ore_bench], opportunity: true)
+                  scales_with: :over_the_mark, places: %i[ore_bench], underfoot: UNSEEN_EDGE, opportunity: true)
       end
 
       # About 3 kg/s at the median depth; the ground's wetness spreads it from under 1 to about 7.

@@ -127,6 +127,7 @@ require_relative "reactor_sim/nodes/wall"
 require_relative "reactor_sim/nodes/boiler"
 require_relative "reactor_sim/nodes/flywheel"
 require_relative "reactor_sim/nodes/load"
+require_relative "reactor_sim/nodes/lighting"
 require_relative "reactor_sim/nodes/bearing"
 require_relative "reactor_sim/nodes/brake"
 require_relative "reactor_sim/nodes/hoist"
@@ -146,6 +147,7 @@ require_relative "reactor_sim/nodes/cylinder"
 require_relative "reactor_sim/nodes/relief_valve"
 require_relative "reactor_sim/nodes/fusible_plug"
 require_relative "reactor_sim/nodes/breach"
+require_relative "reactor_sim/nodes/shelter"
 
 # How work tires the person doing it. Before `control_point`, which reads its BASE_RECOVERY to
 # default a station that declares none.
@@ -171,6 +173,8 @@ require_relative "reactor_sim/chill"
 # A way a place can hurt somebody with nothing broken, and the hidden margin it spends. After
 # `injury`, whose Danger Check it hands a hazard to; `tick` is the only caller.
 require_relative "reactor_sim/peril"
+# Taking cover when a place is called to. Pure over a person's state; `tick` is the only caller.
+require_relative "reactor_sim/cover"
 # What somebody is carrying — gear and people, one concept — and what it costs their pace and
 # their wind. After `injury`, whose `numeric` and deratings it reads through the minion it is
 # handed; read by `minion` and by `tick`.

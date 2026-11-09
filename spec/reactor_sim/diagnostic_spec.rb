@@ -56,6 +56,28 @@ RSpec.describe ReactorSim::Diagnostic do
     end
   end
 
+  describe "its role" do
+    def probe(role) = ReactorSim::Diagnostic.new(id: :probe, source: ReactorSim::Sources::Field.new(:box, :level), role: role)
+
+    it "carries a role in its chrome, and none when it has none" do
+      expect(probe(:output).chrome[:role]).to eq(:output)
+      expect(probe(nil).chrome).not_to have_key(:role)
+    end
+
+    it "refuses a role nobody draws" do
+      expect { probe(:decoration) }.to raise_error(ArgumentError, /unknown role/)
+    end
+
+    it "marks what each catalogued machine makes" do
+      ReactorSim::Operations.catalogued.each do |type|
+        op = ReactorSim::Match.create(id: "m", seed: 1, operations: [ { id: :a, type: type } ]).operations.first
+        roles = op.panel.fetch(:instruments).map { |i| i[:role] }
+
+        expect(roles).to include(:output), "#{type} declares no output"
+      end
+    end
+  end
+
   # `Field` reads numbers and `Flag` reads booleans, and the split is deliberate rather than
   # fussy — see `docs/reference/diagnostics.md`. A flag has no scale, no noise and no units.
   describe ReactorSim::Sources::Flag do
@@ -261,6 +283,21 @@ RSpec.describe ReactorSim::Diagnostic do
       source = described_class.new([ ReactorSim::Sources::Contents.new(:nowhere, :water) ])
 
       expect(source.sample({}, {}, content).available).to be(false)
+    end
+  end
+
+  # The words that ask nothing of anybody, and only those, reach the console.
+  describe "calm words" do
+    let(:signals) { { broken: "broken", working: "working", idle: "idle" } }
+
+    it "sends its calm phrases in its chrome and none of the rest, and nothing when it has none" do
+      expect(ReactorSim::Displays::Prose.signals(signals, calm: %i[working idle]).chrome[:calm]).to eq(%w[working idle])
+      expect(ReactorSim::Displays::Prose.new(signals.values).chrome).not_to have_key(:calm)
+    end
+
+    it "refuses a calm phrase it never says, and a signal it does not have" do
+      expect { ReactorSim::Displays::Prose.new(signals.values, calm: [ "asleep" ]) }.to raise_error(ReactorSim::Error, /asleep/)
+      expect { ReactorSim::Displays::Prose.signals(signals, calm: %i[asleep]) }.to raise_error(KeyError)
     end
   end
 

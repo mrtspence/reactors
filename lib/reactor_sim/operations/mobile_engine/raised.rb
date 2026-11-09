@@ -65,10 +65,13 @@ module ReactorSim
         }
         %i[fire_bed firebox boiler injector steam_chest cylinder].each(&body)
         fire = names.(:fire_bed)
+        # Each transition's latch seeded too, so an engine raised before the match does not announce
+        # that its fire caught or its steam came up.
         nodes[fire] = nodes.fetch(fire).merge(
           ignition: nodes.fetch(fire).fetch(:ignition, {}).merge(coal_combustion: { kg: at_work.dig(:fire_bed, :alight_kg) }),
           alight: true
         )
+        nodes[names.(:boiler)] = nodes.fetch(names.(:boiler)).merge(full_head: true)
         at_work.fetch(:walls).each do |role, kelvin|
           id = names.(role)
           nodes[id] = nodes.fetch(id).merge(joules: op.nodes.fetch(id).heat_capacity * kelvin) if nodes.key?(id)

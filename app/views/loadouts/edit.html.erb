@@ -1,24 +1,10 @@
 <% content_for :title, "Reactor — Outfitting" %>
 
-<div class="min-h-screen w-full bg-slate-900 text-slate-100">
-
-  <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
-    <h1 class="text-sm uppercase tracking-widest text-slate-300">
+<div class="p-4 max-w-5xl">
+    <h1 class="mb-4 text-sm uppercase tracking-widest text-slate-300">
       Outfitting
       <span class="text-slate-500">/ <%= @outfitting.chassis.to_s.tr("_", " ") %></span>
     </h1>
-
-    <div class="grow"></div>
-
-    <%= render "shared/machine_switcher", route: :edit_loadout_path %>
-
-    <%= link_to "Back to the console",
-                console_path(match_id: params[:match_id], operation_id: params[:operation_id]),
-                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                       "ring-1 ring-slate-700" %>
-  </header>
-
-  <main class="p-4 max-w-5xl">
 
     <%# **Everything that depends on the selection lives inside one frame**, both verdicts
         included. Changing a dropdown posts the form to the DRAFT resource, Turbo swaps the
@@ -243,5 +229,4 @@
       </div>
     <% end %>
     <% end %>
-  </main>
 </div>

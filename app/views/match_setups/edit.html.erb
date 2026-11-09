@@ -1,19 +1,8 @@
 <% content_for :title, "Reactor — Match Setup" %>
 
-<div class="min-h-screen w-full bg-slate-900 text-slate-100">
+<div class="p-4 max-w-xl">
+    <h1 class="mb-4 text-sm uppercase tracking-widest text-slate-300">Match Setup</h1>
 
-  <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
-    <h1 class="text-sm uppercase tracking-widest text-slate-300">Match Setup</h1>
-
-    <div class="grow"></div>
-
-    <%= link_to "Back to the console",
-                console_path(match_id: params[:match_id], operation_id: DevMatch::PRIMARY),
-                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                       "ring-1 ring-slate-700" %>
-  </header>
-
-  <main class="p-4 max-w-xl">
     <%# The season is the one choice here, and it is the player's: what the weather does inside it —
         which spells, how hard — is drawn when the match starts. Outfit for it before you play. %>
     <%= form_with model: @setup, url: match_setup_path(match_id: params[:match_id]), method: :patch,
@@ -35,5 +24,4 @@
                       class: "self-start text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 " \
                              "ring-1 ring-slate-500" %>
     <% end %>
-  </main>
 </div>

@@ -28,9 +28,17 @@ Diagnostic.new(
              Filters::Range.new(0.0, 1.4e6) ],
   display: Displays::Needle.new(unit: "kPa", convert: :kpa, precision: 0,
                                 min: 0.0, max: 1.4e6),
-  observer: :stoking    # optional: a station whose occupant reads it; :offline with nobody there
+  observer: :stoking,   # optional: a station whose occupant reads it; :offline with nobody there
+  role:     nil         # optional: :output or :weather, read as belonging to the whole machine
 )
 ```
+
+**`role:` marks what belongs to the whole machine rather than any part of it** —
+`Diagnostic::ROLES`, and an unknown one raises. `:output` is what the machine makes (the pit's
+Finished Ore, the colliery's Coal Raised, the engine's Indicated Power), as many as it has;
+`:weather` is every `WeatherGauges` reading. The chrome carries it, and the delivery tier draws
+those in the frame's strip instead of the console's panel. **Every catalogued machine marks at
+least one output** (`diagnostic_spec`).
 
 ---
 
@@ -149,6 +157,12 @@ everything inside the sim is SI, and Kelvin becomes °C here or not at all (`con
 `Prose.new([phrases])` fed by a `Bands` filter is how durability becomes readable without
 ever becoming a health bar: *"the fitting is showing some cracks."*
 
+**`calm:` names the phrases that ask nothing of anybody**, and the chrome carries those and no
+others — the console's places box names a place's first board saying something else, and learns
+nothing more of the list. Undeclared, no phrase is pressing. A board written from a node's
+`SIGNALS` is `Prose.signals(Node::SIGNALS, calm: Node::CALM)`, the node keeping `CALM` beside its
+signals; a calm key it does not have raises at build.
+
 > **A display's own `label:` never reaches the client.** `Diagnostic#chrome` is
 > `@display.chrome.merge(id: @id, label: @label)`, so the diagnostic's label always wins and
 > `Lamp.new(label: "RUPTURE")` has never once shown that word. `loop_rig` still passes one. Name
@@ -198,15 +212,28 @@ are state:
 | `injury` | The mode, or nil |
 
 `op.panel` carries the matching chrome — `stations:` (everywhere a person can stand, a longer
-list than the levers) and `places:` (every room's label, **empty for an operation with no
-geometry**, which is what keeps "where are they" off the steam engine's console).
+list than the levers) and `places:` (every room's label in `Layout` order, **empty for an
+operation with no geometry**).
 
-It exists because the console's crew dropdown could *send* an assignment with no source of truth
-to display one, so it rendered at its first option whatever the real posting was, and a
-reassignment, a reset or a restore was never reflected back. **A station's output now depends on
+The console's crew rows take posting and place from here and nowhere else, so without it a
+reassignment, a reset or a restore would never be reflected back. **A station's output depends on
 who is at it**, which makes this load-bearing rather than chrome: an effort lever that does
 nothing because nobody is manning it is indistinguishable from a broken machine unless the panel
 can say so.
+
+### Where everything is
+
+**Every instrument's chrome carries `places:`, and every control and station its `place:`** —
+derived at build, never declared, which is what lets the console draw one place at a time:
+
+1. an instrument with an `observer:` is where that post stands;
+2. else it is in the places of the nodes its source reads (`Source#nodes`; an `Aggregate`'s is
+   the union of its parts');
+3. else in the places of the posts whose `node:` is one of those — a machine that is no room, its
+   crew stood beside it, or a way between two rooms, which is in both;
+4. else nowhere (`[]`), which the console draws as The Works.
+
+A lever is where its post stands, nil for The Works. `panel_places_spec` walks the three machines.
 
 ### `incidents` are appended, not merged
 
@@ -284,16 +311,16 @@ to diff flags itself.
 `Operations::WeatherGauges` is shared by every operation with a sky over it, because the sky is
 the same whatever is under it.
 
-- **What anybody can say goes on every panel, as prose, and is somebody's word.** "Feels cold",
-  "getting dark", "pouring", "wind's howling", "my knee aches". Each is an observer gauge on the
-  post that is outdoors — the colliery's banksman, the engine's fireman — so nobody there means
-  nothing said, and a daft or benighted reader says it wrong. They read `Field`s off
-  `Nodes::Outdoors` (`feels_k`, `daylight`, `falling`, `wind_m_s`, `pressure_trend`).
+- **What anybody can say goes on every panel, as prose, and is somebody's word.** "About noon",
+  "feels cold", "getting dark", "pouring", "wind's howling", "my knee aches". Each is an observer
+  gauge on the post that is outdoors — the colliery's banksman, the engine's fireman — so nobody
+  there means nothing said, and a daft or benighted reader says it wrong. They read `Field`s off
+  `Nodes::Outdoors` (`hour`, `feels_k`, `daylight`, `falling`, `wind_m_s`, `pressure_trend`).
 - **The numbers are fitted** (slot `weather_instruments`): a thermometer, and a barometer whose
   companion `the_glass` reads the pressure's trend through `Average` then `Rate` into prose —
   falling fast, falling, steady, rising — because the trend is what a pit top read a glass for.
-- They sit **last** on each panel. The sky is worth a glance; the flame cap and the boiler
-  pressure are worth watching.
+- They sit **last** in `PANEL_ORDER`, and every one is `role: :weather`, so the console draws them
+  in the frame's strip rather than among the gauges worth watching.
 
 ## When the gauge is itself a part
 

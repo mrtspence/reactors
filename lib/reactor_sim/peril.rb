@@ -31,19 +31,24 @@ module ReactorSim
   #
   # **`underfoot:` is what the ground does to it**: `{ wet: 1.0, icy: 8.0 }` makes a slip twice as
   # likely on a wet deck and nine times on an icy one, read from what the room offers
-  # (`Tick#under_the_sky`), so it bites as far as the place is open to the weather.
+  # (`Tick#under_the_sky`), so it bites as far as the place is open to the weather. **`dark:` is
+  # the footing unseen**: the better of the person's lamp and the place's light, short of
+  # `FOOTING_LIGHT` — a lamp's worth, by which footing is as sure as by day.
   #
   # **`opportunity: true` is somewhere a person can be pushed** — off an edge, in front of traffic —
   # by somebody who hates them enough (`Animosity`).
+  #
+  # **`sheltered: true` is something cover keeps off** — what a shot throws — so it reaches a person
+  # under cover, or at a post a cab covers, by `1 − cover` (`Cover`).
   #
   # **`wounds:` is what it does to a body**, as shares of its severity (`Wounds.shares!`), and
   # `causes:` what protects against it; a peril that hurts must say.
   Peril = Struct.new(:id, :wounds, :causes, :severity, :rate, :mishap, :scales_with, :when_tagged,
                      :unless_tagged, :places, :stations, :riders, :judged, :underfoot, :opportunity,
-                     keyword_init: true) do
+                     :sheltered, keyword_init: true) do
     def initialize(id:, severity: 0.0, rate: nil, mishap: nil, wounds: nil, causes: [], scales_with: nil,
                    when_tagged: nil, unless_tagged: nil, places: nil, stations: nil, riders: nil,
-                   judged: nil, underfoot: {}, opportunity: false)
+                   judged: nil, underfoot: {}, opportunity: false, sheltered: false)
       hurts = severity.to_f.positive?
       super(id: id.to_sym, severity: severity.to_f, rate: (rate || severity).to_f,
             mishap: Peril.mishap(mishap),
@@ -54,7 +59,7 @@ module ReactorSim
             places: Array(places).map(&:to_sym).freeze,
             stations: Array(stations).map(&:to_sym).freeze,
             riders: Array(riders).map(&:to_sym).freeze,
-            judged: judged&.to_sym, opportunity: opportunity == true,
+            judged: judged&.to_sym, opportunity: opportunity == true, sheltered: sheltered == true,
             underfoot: underfoot.to_h { |tag, k| [ tag.to_sym, k.to_f ] }.freeze)
       if judged && !Peril::JUDGEMENTS.include?(self.judged)
         raise Error, "peril #{id}: judged #{judged.inspect} is neither of #{Peril::JUDGEMENTS.inspect}"
@@ -79,12 +84,18 @@ module ReactorSim
 
     def mishap? = !mishap.nil?
 
-    # What the ground under the room makes of this peril: 1.0 on dry footing, more on wet or ice.
-    def footing(ambient)
-      return 1.0 if underfoot.empty? || ambient.nil?
+    # What the ground under the room makes of this peril: 1.0 on dry footing seen, more on wet or
+    # ice, or unseen. `sight` is the light this person has to see by.
+    def footing(ambient, sight: 1.0)
+      return 1.0 if underfoot.empty?
 
-      1.0 + underfoot.sum { |tag, k| k * Injury.numeric(ambient.fetch(tag, 0.0)) }
+      1.0 + underfoot.sum do |tag, k|
+        k * (tag == :dark ? Peril.unseen(sight) : Injury.numeric(ambient&.fetch(tag, 0.0)))
+      end
     end
+
+    # How much of the ground underfoot goes unseen, 0..1: none from a lamp's worth up.
+    def self.unseen(sight) = ((Peril::FOOTING_LIGHT - sight.to_f) / Peril::FOOTING_LIGHT).clamp(0.0, 1.0)
 
     # **A tag can select a kind of accident rather than only making one likelier.** A hulking
     # minion gets wedged in a narrow way where nobody else could; a small one is missed by
@@ -129,6 +140,9 @@ module ReactorSim
   end
 
   Peril::JUDGEMENTS = %i[rightly wrongly].freeze
+
+  # The light by which footing is as sure as by day: a proper lamp's (`miners_tools`).
+  Peril::FOOTING_LIGHT = 0.5
 
   # The hidden margin of safety every worker carries, and what spends it.
   #
@@ -197,15 +211,23 @@ module ReactorSim
     # What this tick's exposure costs, and what each peril took of it: `[total, bites]`.
     #
     # **Spent by `rate`, never by `severity`** — how often a thing happens is not how bad it is.
-    def spend(reaching, minion, state, dt, ambient: nil, avoid: 1.0)
+    def spend(reaching, minion, state, dt, ambient: nil, avoid: 1.0, cover: 0.0)
       exposed = susceptibility(minion, state, ambient: ambient, avoid: avoid)
       bites = reaching.filter_map do |peril, activity|
         bite = peril.rate * peril.weight_for(minion, state, ambient: ambient) * activity * exposed *
-               peril.footing(ambient) * SPEND_PER_S * dt
+               peril.footing(ambient, sight: sight(minion, state, ambient)) * (peril.sheltered ? 1.0 - cover : 1.0) *
+               SPEND_PER_S * dt
         [ peril, bite ] if bite.positive?
       end
 
       [ bites.sum { |_, bite| bite }, bites ]
+    end
+
+    # What somebody sees their footing by: the better of their lamp and the place's light — but
+    # carried along a way, down a shaft on the rods or in a cage, only their own lamp.
+    def sight(minion, state, ambient)
+      carried = state && (state[:via] || state[:riding])
+      minion.gate(%i[darkvision], carried ? nil : ambient)
     end
 
     # **Which accident it was, picked in proportion to what each peril took this tick.**
@@ -269,8 +291,8 @@ module ReactorSim
     #
     # `which` is this tick's `peril:` fate, used only if the margin crosses here.
     # `ambient:` is the light of the room they are in, which their judgement reads.
-    def advance(reaching, minion, state, dt, rolled, which = 0.0, ambient: nil, avoid: 1.0)
-      spent, bites = spend(reaching, minion, state, dt, ambient: ambient, avoid: avoid)
+    def advance(reaching, minion, state, dt, rolled, which = 0.0, ambient: nil, avoid: 1.0, cover: 0.0)
+      spent, bites = spend(reaching, minion, state, dt, ambient: ambient, avoid: avoid, cover: cover)
       full = state.fetch(:margin_full, 1.0)
       was = state.fetch(:margin, 1.0)
       margin = was - spent

@@ -157,6 +157,27 @@ module ReactorSim
         SteamEngine.fusible_plug_fragment(names: spec.fetch(:names))
       end
 
+      # **The cab over the fireman and the driver** (`Nodes::Shelter` over their posts), their cover
+      # from a shot without leaving them: the earliest engines' open platform, barely better than
+      # crouching behind it; a wooden cab, as a timber shelter; a steel one, as a steel shelter.
+      CABS = {
+        open_cab: { label: "Open Platform", cover: Nodes::Shelter::OPEN,
+                    description: "The footplate open to the sky. A little better than crouching." },
+        wooden_cab: { label: "Wooden Cab", cover: Nodes::Shelter::TIMBER,
+                      description: "Boards and a roof over the crew. Keeps off most of what a shot throws." },
+        steel_cab: { label: "Steel Cab", cover: Nodes::Shelter::STEEL,
+                     description: "Plate all round. Keeps off nearly everything." }
+      }.freeze
+
+      CABS.each do |id, cab|
+        Parts.register(id, kind: :mobile_cab, label: cab.fetch(:label), description: cab.fetch(:description),
+                           stats: cab.slice(:cover)) do |spec|
+          names = spec.fetch(:names)
+          Fragment.new(nodes: [ Nodes::Shelter.new(id: names.(:cab), label: cab.fetch(:label), cover: cab.fetch(:cover),
+                                                   stations: [ names.(:stoking), names.(:driving) ]) ])
+        end
+      end
+
       # --- the shovel -----------------------------------------------------------------------
 
       # **A yard dipper**, a smaller railroad shovel's, sized to the vertical engine: about 1.4 t of

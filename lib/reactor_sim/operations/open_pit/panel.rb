@@ -12,7 +12,7 @@ module ReactorSim
                      %i[crusher_board belt_board shaft_speed water_supply the_dam dam_wall reservoir_bank
                         stripping_face ore_face stripping_road_board ore_road_board stripping_shots ore_shots
                         the_magazine uncovered_ore the_sump the_tip
-                        the_edge ore_at_bank spoil_tipped] +
+                        the_edge ore_at_bank spoil_tipped pit_lights_board bank_lights_board] +
                      WeatherGauges::ORDER).freeze
 
       # Uncovered ore under these, in kilograms: stripping behind, running short, plenty.
@@ -62,12 +62,12 @@ module ReactorSim
           # **The dump's edge, in the dumpmen's words**: the cracks behind it before it breaks back.
           the_edge: Diagnostic.new(
             id: :the_edge, label: "The Edge", observer: :dumpmen, source: Sources::Field.new(:tip_head, :signal),
-            display: Displays::Prose.new(TipHead::SIGNALS.values)
+            display: Displays::Prose.signals(TipHead::SIGNALS, calm: TipHead::CALM)
           ),
 
           # **Whether the barrows can tip**: the tip head as the dumpmen see it.
           the_tip: Diagnostic.new(
-            id: :the_tip, label: "The Tip", source: Sources::Level.new(:tip_head),
+            id: :the_tip, label: "The Tip", observer: :dumpmen, source: Sources::Level.new(:tip_head),
             filters: [ Filters::Lag.new(2), Filters::Bands.new([ 50.0, 85.0 ]) ],
             display: Displays::Prose.new([ "room to tip", "filling up", "full — nowhere to tip" ])
           ),
@@ -88,7 +88,7 @@ module ReactorSim
           # **Finished ore, the goal's count**: the hematite drawn from the kiln, weighed. Ore drawn
           # before it was burnt through is on the same heap and counts for nothing.
           finished_tons: Diagnostic.new(
-            id: :finished_tons, label: "Finished Ore", source: Sources::Contents.new(:finished_ore, :hematite),
+            id: :finished_tons, label: "Finished Ore", role: :output, source: Sources::Contents.new(:finished_ore, :hematite),
             filters: [ Filters::Lag.new(2), Filters::Quantize.new(50.0) ],
             display: Displays::Digital.new(unit: "t", precision: 2, convert: :kilo)
           ),
@@ -118,11 +118,11 @@ module ReactorSim
           # **What the crusher and its belt are doing**, in words.
           crusher_board: Diagnostic.new(
             id: :crusher_board, label: "Crusher", source: Sources::Field.new(:crusher, :signal),
-            display: Displays::Prose.new(Crusher::SIGNALS.values)
+            display: Displays::Prose.signals(Crusher::SIGNALS, calm: Crusher::CALM)
           ),
           belt_board: Diagnostic.new(
             id: :belt_board, label: "Feed Belt", source: Sources::Field.new(:feed_belt, :signal),
-            display: Displays::Prose.new(Nodes::Belt::SIGNALS.values)
+            display: Displays::Prose.signals(Nodes::Belt::SIGNALS, calm: Nodes::Belt::CALM)
           ),
 
           # The one honest gauge in the yard: the shaft is in front of you.
@@ -148,11 +148,11 @@ module ReactorSim
           # **The walls, in the words of whoever is on them**: weeping, then slumping, before they go.
           dam_wall: Diagnostic.new(
             id: :dam_wall, label: "Dam Wall", observer: :dam_hands, source: Sources::Field.new(:mud_dam, :signal),
-            display: Displays::Prose.new(Embankment::SIGNALS.values)
+            display: Displays::Prose.signals(Embankment::SIGNALS, calm: Embankment::CALM)
           ),
           reservoir_bank: Diagnostic.new(
             id: :reservoir_bank, label: "Reservoir Bank", observer: :bankmen, source: Sources::Field.new(:reservoir, :signal),
-            display: Displays::Prose.new(Embankment::SIGNALS.values)
+            display: Displays::Prose.signals(Embankment::SIGNALS, calm: Embankment::CALM)
           )
         }.merge(WeatherGauges.instruments)
       end
@@ -161,13 +161,13 @@ module ReactorSim
       # built by the washer fitted there, one board a bay.
       def washer_board(names)
         Diagnostic.new(id: names.(:board), label: bay_label(names), source: Sources::Field.new(names.(:washer), :signal),
-                       display: Displays::Prose.new(LogWasher::SIGNALS.values))
+                       display: Displays::Prose.signals(LogWasher::SIGNALS, calm: LogWasher::CALM))
       end
 
       # **The kiln's board**, in the burners' words: built by the kiln fitted.
       def kiln_board
         Diagnostic.new(id: :kiln_board, label: "Kiln", source: Sources::Field.new(:kiln, :signal),
-                       display: Displays::Prose.new(Kiln::SIGNALS.values))
+                       display: Displays::Prose.signals(Kiln::SIGNALS, calm: Kiln::CALM))
       end
 
       # **The kiln's heat, as whoever charges it judges it**: by the colour of the fire.
@@ -182,26 +182,38 @@ module ReactorSim
       # **Each face's road, as its signals have it**: clear, a train on it, and what has gone wrong.
       def road_board(names)
         Diagnostic.new(id: names.(:road_board), label: "#{face_label(names)} Road", source: Sources::Field.new(names.(:road), :signal),
-                       display: Displays::Prose.new(MobileEngine::RoadSignal::SIGNALS.values))
+                       display: Displays::Prose.signals(MobileEngine::RoadSignal::SIGNALS, calm: MobileEngine::RoadSignal::CALM))
+      end
+
+      # **An area's lights, in its lamp man's words**: out, lit, burning low, running dry, carbons
+      # short, dark with the shaft stopped. Built by the lighting fitted.
+      def lights_board(names)
+        Diagnostic.new(id: names.(:board), label: names.prefix.to_s.tr("_", " ").capitalize,
+                       observer: names.(:lamp_man), source: Sources::Field.new(names.prefix, :signal),
+                       display: Displays::Prose.signals(Nodes::Lighting::SIGNALS, calm: Nodes::Lighting::CALM))
       end
 
       SHOT_WORDS = {
-        idle: "no shot charged", charging: "drilling and charging", fired: "shot fired — ground broken",
-        misfire: "a misfire in the hole", clearing: "digging out a misfire", charged: "charged — ready to fire"
+        idle: "no shot charged", charging: "drilling and charging", fired: "shot fired — all clear",
+        misfire: "a misfire in the hole", clearing: "digging out a misfire", charged: "charged — ready to fire",
+        warning: "warning sounded — taking cover"
       }.freeze
+      # A charged hole is waiting on the player's fire lever, so it is not calm.
+      SHOTS_CALM = %i[idle charging fired warning].freeze
 
       def shot_board(face_id)
         names = face(face_id)
         Diagnostic.new(id: :"#{face_id}_shots", label: "#{face_label(names)} Shots", observer: names.(:powder_gang),
                        source: Sources::Field.new(names.(:shot_hole), :status),
-                       display: Displays::Prose.new(Nodes::ShotHole::STATUSES.map { |status| SHOT_WORDS.fetch(status) }))
+                       display: Displays::Prose.signals(Nodes::ShotHole::STATUSES.to_h { |status| [ status, SHOT_WORDS.fetch(status) ] },
+                                                        calm: SHOTS_CALM))
       end
 
       def board(face_id)
         names = face(face_id)
         Diagnostic.new(id: :"#{face_id}_face", label: "#{face_label(names)} Face",
                        source: Sources::Field.new(names.(:bench), :signal),
-                       display: Displays::Prose.new(Bench::SIGNALS.values))
+                       display: Displays::Prose.signals(Bench::SIGNALS, calm: Bench::CALM))
       end
     end
 

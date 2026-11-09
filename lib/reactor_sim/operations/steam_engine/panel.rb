@@ -280,7 +280,7 @@ module ReactorSim
 
       def engine_power
         Diagnostic.new(
-          id: :engine_power, label: "Indicated Power",
+          id: :engine_power, label: "Indicated Power", role: :output,
           # **The shaft figure, not the diagram's.** `indicated_power_w` is what the indicator
           # diagram claims from its two pressures; `shaft_power_w` is what the crank was
           # measurably given, after `Tick#transmit_torque` has held the cylinder to what its

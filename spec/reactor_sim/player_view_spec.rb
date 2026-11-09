@@ -76,10 +76,9 @@ RSpec.describe ReactorSim::PlayerView do
     end
   end
 
-  # **The seam that was dead and claimed not to be.** `CrewComponent`'s own comment said the
-  # posting "arrives on the projection"; it did not, so the station dropdown always rendered at
-  # its first option however the crew were actually posted, and a reassignment, a reset or a
-  # restore was never reflected back.
+  # **The console's crew rows read where each person is from the projection and nowhere else**, so
+  # without it a posting dropdown sits at its first option however the crew are posted, and a
+  # reassignment, a reset or a restore is never reflected back.
   describe "the crew" do
     it "reports where each of them is standing" do
       posted = view(tick: 1, crew: { crew_1: { station: :stoking, injury: nil } })

@@ -184,6 +184,7 @@ module ReactorSim
       fates = @fates = draw_fates                               # phase 0
       @tempers = draw_tempers                                   # phase 0
       @wound_dice = draw_wounds                                 # phase 0
+      @cover_dice = draw_cover                                  # phase 0
       controls = actuate(dt, fates)                             # phase 0
       read = state.fetch(:nodes)                                # phase 1
       # `control_values` builds `@ignition` from the same lever positions, so it comes first.
@@ -212,6 +213,7 @@ module ReactorSim
       felt = place_felt(next_nodes)
       next_minions, cold_events = chill(next_minions, felt, ctx)         # phase 6b″
       next_minions, spent_events = tire(next_minions, next_nodes, controls, ctx, felt)  # phase 6c
+      next_minions = take_cover(next_minions)                    # phase 6c′
       next_minions, blunder_events = blunder(next_minions, next_nodes, fates, ctx) # phase 6d
       tempers = provoke(next_minions, next_nodes, ctx)           # phase 6d′
       next_minions = tempers.minions
@@ -510,8 +512,8 @@ module ReactorSim
         next unless minions.key?(id)
 
         minion_state = state.fetch(:minions).fetch(id)
-        # Somebody in a fight is at their post and working nothing.
-        next if Animosity.fighting?(minion_state)
+        # Somebody in a fight, or under cover, is at their post and working nothing.
+        next if Animosity.fighting?(minion_state) || Cover.taken?(minion_state)
 
         station = minion_state[:station] or next
         (acc[station] ||= []) << id
@@ -550,16 +552,17 @@ module ReactorSim
     #
     # Read from N−1 node state and this tick's lever positions, exactly as `worked` reads N−1
     # minions, so nothing here can depend on phase order. An operation with no places skips it
-    # entirely and every gate stays what the minion carries.
+    # entirely and every gate stays what the minion carries. A node answering `lights` offers to
+    # those places instead of its own — a set of lamps along a working.
     def ambient_tags(levers)
       return {} if layout.places.empty?
 
       lit = nodes.each_with_object({}) do |(id, node), acc|
         next unless node.respond_to?(:ambient_tags)
 
-        place = layout.place_of_node(id) or next
+        places = node.respond_to?(:lights) && node.lights.any? ? node.lights : [ layout.place_of_node(id) ].compact
         offered = node.ambient_tags(state.fetch(:nodes).fetch(id), levers)
-        acc[place] = (acc[place] || {}).merge(offered) { |_, a, b| [ a, b ].max }
+        places.each { |place| acc[place] = (acc[place] || {}).merge(offered) { |_, a, b| [ a, b ].max } }
       end
       under_the_sky(lit)
     end
@@ -1527,6 +1530,61 @@ module ReactorSim
       minions.keys.to_h { |id| [ id, rngs.fetch(Injury.stream(id)).float ] }
     end
 
+    # Phase 0 again: **whether somebody heeds a call to cover**, one die a person a tick from their
+    # own cover stream, called or not.
+    def draw_cover
+      minions.keys.to_h { |id| [ id, Cover.draw(rngs.fetch(Cover.stream(id))) ] }
+    end
+
+    # Phase 6c′. **Who is under cover**, from the places the nodes called as of last tick and each
+    # person's die. Walked by sorted id, so the shelters' seats go the same way whatever order the
+    # roster was declared in. A fighter is in a fight, and somebody at a covered post stays at it.
+    def take_cover(minions_state)
+      called = called_to_cover
+      seated = Hash.new(0)
+      decided = minions_state.keys.sort.each_with_object({}) do |id, acc|
+        minion_state = minions_state.fetch(id)
+        minion = minions[id] or next
+        place = minion_state[:place]
+        unless called.include?(place) && !post_cover.key?(minion_state[:station]) && !Animosity.fighting?(minion_state)
+          acc[id] = minion_state.except(:cover) if minion_state.key?(:cover)
+          next
+        end
+
+        shelter = shelters[place]
+        seat = shelter && seated[place] < shelter.fetch(:seats) ? shelter.fetch(:cover) : nil
+        share = Cover.taken(minion_state[:cover], @cover_dice.fetch(id),
+                            minion.misjudges(minion_state, ambient: ambient_for(minion, minion_state)), seat)
+        seated[place] += 1 if seat && share.positive?
+        acc[id] = minion_state.merge(cover: share)
+      end
+      minions_state.to_h { |id, minion_state| [ id, decided.fetch(id, minion_state) ] }
+    end
+
+    # The places called to cover as of last tick: every node answering `take_cover`.
+    def called_to_cover
+      nodes.each_with_object([]) { |(id, node), acc|
+        acc.concat(node.take_cover(state.fetch(:nodes).fetch(id))) if node.respond_to?(:take_cover)
+      }.uniq
+    end
+
+    # `{ place => { cover:, seats: } }` of the shelters fitted, and `{ station => cover }` of the
+    # posts they cover. Configuration, worked out once.
+    def shelters
+      @shelters ||= nodes.values.grep(Nodes::Shelter).each_with_object({}) do |shelter, acc|
+        shelter.places.each do |place|
+          was = acc[place] || { cover: 0.0, seats: 0 }
+          acc[place] = { cover: [ was.fetch(:cover), shelter.cover ].max, seats: was.fetch(:seats) + shelter.seats }
+        end
+      end
+    end
+
+    def post_cover
+      @post_cover ||= nodes.values.grep(Nodes::Shelter).each_with_object({}) do |shelter, acc|
+        shelter.stations.each { |station| acc[station] = [ acc.fetch(station, 0.0), shelter.cover ].max }
+      end
+    end
+
     # **The Danger Check, with what it needs from the tick**: the catalogue and this person's die.
     def injure(minion, minion_state, hazard)
       Injury.check(minion, minion_state, hazard, catalogue: content.wounds, die: wound_die(minion.id))
@@ -1591,7 +1649,8 @@ module ReactorSim
                                      fates.dig(minion.id, :margin) || 1.0,
                                      fates.dig(minion.id, :peril) || 0.0,
                                      ambient: ambient_for(minion, minion_state),
-                                     avoid: avoid_for(minion, minion_state))
+                                     avoid: avoid_for(minion, minion_state),
+                                     cover: Cover.share(minion_state, post_cover[minion_state[:station]]))
       return after if peril.nil?
 
       guarded = guarding(minion, minion_state, fates)
@@ -1861,7 +1920,8 @@ module ReactorSim
         minion = minions[id]
         # **A brawler's orders wait for the fight to end**, or a quick hand on the crew screen
         # would part every fight before its first blow.
-        next [ id, minion_state ] if minion.nil? || carried.key?(id) || Animosity.fighting?(minion_state)
+        next [ id, minion_state ] if minion.nil? || carried.key?(id) || Animosity.fighting?(minion_state) ||
+                                     Cover.taken?(minion_state)
 
         after = walk(minion, minion_state, ctx, events)
         lifted(minion_state, after).each { |got| events << carried_event(minion, got, ctx) }

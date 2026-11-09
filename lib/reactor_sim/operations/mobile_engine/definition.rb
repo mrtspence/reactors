@@ -44,7 +44,8 @@ module ReactorSim
           slot.(:safety_valve, accepts: :mobile_safety_valve, label: "Safety Valve", default: :dead_weight_valve),
           slot.(:water_reading, accepts: :mobile_water_reading, label: "Water Reading", default: :mobile_try_cocks),
           slot.(:pressure_reading, accepts: :mobile_pressure_reading, label: "Pressure Gauge"),
-          slot.(:fusible_plug, accepts: :mobile_fusible_plug, label: "Fusible Plug")
+          slot.(:fusible_plug, accepts: :mobile_fusible_plug, label: "Fusible Plug"),
+          slot.(:cab, accepts: :mobile_cab, label: "Cab", required: true, default: :open_cab)
         ]
       end
 
@@ -82,7 +83,7 @@ module ReactorSim
       def board(shovel, place:)
         n = names(shovel, place: place)
         Diagnostic.new(id: n.(:board), label: "Shovel", source: Sources::Field.new(n.(:dipper), :signal),
-                       display: Displays::Prose.new(Dipper::SIGNALS.values))
+                       display: Displays::Prose.signals(Dipper::SIGNALS, calm: Dipper::CALM))
       end
 
       # The dig reaches the car whatever it goes through on the way.
@@ -192,7 +193,7 @@ module ReactorSim
       def train_board(loco, place:)
         n = names(loco, place: place)
         Diagnostic.new(id: n.(:board), label: "Train", source: Sources::Field.new(n.(:train), :signal),
-                       display: Displays::Prose.new(Train::SIGNALS.values))
+                       display: Displays::Prose.signals(Train::SIGNALS, calm: Train::CALM))
       end
 
       # **The driver's post on a locomotive**: the engine driver, and the round (`Round`). He calls

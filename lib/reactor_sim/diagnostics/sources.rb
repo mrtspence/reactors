@@ -21,6 +21,9 @@ module ReactorSim
 
       # Sources are configuration; two with the same settings are interchangeable.
       def label = self.class.name.split("::").last.downcase
+
+      # The nodes this source reads, which is what places its instrument.
+      def nodes = [ @node ]
     end
 
     # A raw field out of a node's state hash.
@@ -249,6 +252,8 @@ module ReactorSim
 
         Reading.of(values.public_send(OPERATIONS.fetch(@operation)))
       end
+
+      def nodes = @sources.flat_map(&:nodes).uniq
     end
   end
 end

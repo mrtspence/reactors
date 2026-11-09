@@ -29,7 +29,8 @@ module ReactorSim
       attr_reader :heat_capacity, :ambient_conductance, :ambient_k,
                   :control_id, :max_temperature_k, :stress_rate, :conductance,
                   :stack_height_m, :head_control_id, :blast_from, :blast_pa_per_kg_per_s,
-                  :material, :driven_by, :lift_m, :efficiency, :rated_omega, :delivers_to
+                  :material, :driven_by, :lift_m, :efficiency, :rated_omega, :delivers_to,
+                  :perils, :traffic
 
       def initialize(id:, label: nil, accepts: [], max_kg_per_s:, conductance: nil,
                      one_way: false,
@@ -41,13 +42,17 @@ module ReactorSim
                      ambient_k: Units::STANDARD_TEMPERATURE_K, control_id: nil,
                      rangeability: 1.0, leak_fraction: 0.0, material: nil,
                      max_temperature_k: Float::INFINITY, stress_rate: 0.0,
-                     worked: false, crew: 1)
+                     worked: false, crew: 1, perils: [], traffic: nil)
         # **Worked by people: `max_kg_per_s` is ONE worker's rate**, and the lever arrives in
         # worker-equivalents (`Tick#worked`), so the crew is the ceiling and the ports cap nothing.
         # `crew` is how many the post has room for, which is what a full road's `activity` means.
         @worked = worked
         @rated_kg_per_s = max_kg_per_s.to_f
         @crew = Integer(crew)
+        # The perils of standing beside it, and `traffic:`, the quantity they scale with — its
+        # `crew_share`, so the work going past is the danger and an idle conduit hurts nobody.
+        @perils = perils.freeze
+        @traffic = traffic&.to_sym
         port_kg_per_s = worked ? Float::INFINITY : max_kg_per_s
         super(
           id: id, label: label,
@@ -119,6 +124,15 @@ module ReactorSim
       # What the whole crew passes flat out, which is what busy-ness is measured against: one
       # worker on a road with room for three is a third of a busy road.
       def full_crew_kg_per_s = @rated_kg_per_s * @crew
+
+      # **How busy it was last tick, 0..1**: what it carried against what its whole crew passes
+      # flat out in `dt`, at `pace` of that rate.
+      def crew_share(state, dt, pace: 1.0)
+        full = full_crew_kg_per_s * pace * dt
+        full.positive? ? (state.fetch(:carried_kg, 0.0) / full).clamp(0.0, 1.0) : 0.0
+      end
+
+      def activity(state, quantity, dt) = @traffic && quantity == @traffic ? crew_share(state, dt) : nil
 
       # A check valve. Pipes are bidirectional by default, because reverse flow is real physics
       # rather than an error: a chimney backdraughts when the fire dies, a line siphons, an open

@@ -69,16 +69,16 @@ module ReactorSim
       include Belting
 
       SIGNALS = { standing: "standing", stalled: "stalled", empty: "running empty", carrying: "carrying" }.freeze
+      # What asks nothing of anybody (`Displays::Prose.signals`).
+      CALM = %i[standing empty carrying].freeze
+
+      def initialize(traffic: :belt, **opts)
+        super
+      end
 
       def apply(state, ctx, grant)
         applied = super
         applied.merge(signal: SIGNALS.keys.index(signal(applied, ctx)))
-      end
-
-      def activity(state, quantity, dt)
-        return nil unless quantity == :belt && dt.positive?
-
-        (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
       end
 
       private

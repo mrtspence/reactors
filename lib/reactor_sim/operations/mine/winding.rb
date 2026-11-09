@@ -92,6 +92,9 @@ module ReactorSim
           at_bank: "standing at bank",
           at_bottom: "standing at the pit bottom"
         }.freeze
+        # The winding going about its business (`Displays::Prose.signals`).
+        CALM = %i[lowering raising bell_bank bell_bottom boarding_bank boarding_bottom unloading loading
+                  called_bank called_bottom at_bank at_bottom].freeze
 
         # Slack past this and the cage is hung — the slack lamp's own first band.
         HUNG_M = 0.3

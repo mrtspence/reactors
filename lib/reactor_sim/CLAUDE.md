@@ -46,11 +46,12 @@ that draw once from the outdoors node's **match-wide** stream at `initial_state`
 pure function of the clock, through a fixed set of channels a later kind reuses. No die is thrown
 after the start. See [`design_sketches/conditions.md`](../../docs/design_sketches/conditions.md).
 
-What a person is subject to lives in eight pure modules over a state hash they do not own,
+What a person is subject to lives in nine pure modules over a state hash they do not own,
 none of which draws entropy: `injury.rb` (a blow), `fatigue.rb` (the work), `breath.rb` (the
 air), `scorch.rb` (the heat), `chill.rb` (the cold, and the strain of working in heat),
-`peril.rb` (the place, and the hidden margin it spends), `burden.rb` (what they are carrying) and
-`animosity.rb` (each other). **What any of them leaves is wounds** (`wounds.rb`): a harm declares
+`peril.rb` (the place, and the hidden margin it spends), `burden.rb` (what they are carrying),
+`cover.rb` (taking cover when a place is called to — under cover they man nothing, and a
+`sheltered:` peril reaches them by `1 − cover`) and `animosity.rb` (each other). **What any of them leaves is wounds** (`wounds.rb`): a harm declares
 the kinds it deals as shares of its severity and its causes, each kind is bitten separately, and
 each bite past the first band leaves a named wound out of `content/wounds/`. Wounds stack, derate
 the stats they name, and outlive the match, healing between them; every bite also comes off
@@ -78,8 +79,8 @@ owes a dwell counter past collapse (`asphyxia`, `burns`, `chilled`) to reach `:m
 
 > **Every die thrown for a person is thrown in phase 0, unconditionally for everybody** — in
 > `Tick#draw_fates` from their own stream, in `Tick#draw_tempers` from a second stream of
-> their own (`Animosity.stream`), and in `Tick#draw_wounds` from a third (`Injury.stream`), so
-> none moves another. A conditional draw makes
+> their own (`Animosity.stream`), in `Tick#draw_wounds` from a third (`Injury.stream`) and in
+> `Tick#draw_cover` from a fourth (`Cover.stream`), so none moves another. A conditional draw makes
 > the RNG stream depend on the condition and the divergence surfaces as a snapshot replaying
 > differently, days later, somewhere unrelated. Keeping the count fixed and in one method per
 > stream is what makes it checkable — see
@@ -126,6 +127,13 @@ Two more rules that cost something to learn:
 
 - **The engine reports transitions; the delivery tier composes them into meaning.** A node may
   not know what an achievement is, or every new one becomes a simulation change.
+- **Every record says which machine it came from.** `Match#step!` stamps each event with `tick`,
+  `operation_id` and `operation_type`, and a meter reading carries the same two. The delivery tier
+  counts an achievement only on its own kind of machine, a window only on the operation that
+  opened it.
+- **A machine reports only what happened in the match.** One that starts part-way through a story
+  — a fire laid alight, a drum raised — seeds that transition's latch, or its first tick reports the
+  start as news (`nodes/CLAUDE.md`, "A shape written twice").
 - **Emit on a transition, with hysteresis where the signal is noisy.** `ReliefValve` announced
   itself 20 times in 40 ticks before it had a time-based re-arm, because it senses a
   reconstructed per-stroke pressure that swings through its whole range every tick.
@@ -168,10 +176,12 @@ them multiplies. Getting that round the wrong way makes every piece of kit a rou
 >
 > **A gate can also be satisfied by the ROOM.** A lamp on the wall and a lamp on your belt are
 > the same fact to `darkvision`, so a node that answers `ambient_tags(state, levers)` offers its
-> tags to everybody standing in its place, and `Minion#gate` takes **the better of the two,
-> never the sum** — two lamps do not let you see twice. `Tick#ambient_tags` builds the map from
-> N−1 node state and this tick's lever positions, so it cannot depend on phase order; an
-> operation with no places skips it and every gate stays what the minion carries.
+> tags to everybody standing in its place — or in the places it `lights`, a set of lamps along a
+> working (`Nodes::Lighting`) — and `Minion#gate` takes **the better of the two, never the sum** —
+> two lamps do not let you see twice. `Tick#ambient_tags` builds the map from N−1 node state and
+> this tick's lever positions, so it cannot depend on phase order; an operation with no places
+> skips it and every gate stays what the minion carries. **The light is footing too**: a peril's
+> `underfoot: { dark: }` is worse the less somebody sees by, short of a lamp's worth.
 >
 > **An ignition source belongs to the room, the same way.** A node that answers
 > `ignition(state, levers)` offers `{ kg_per_s:, watts:, cause: }` to the air of its place, and
@@ -343,6 +353,7 @@ you rearrange:
 
 ## Style
 
-Comments here record the bug that produced the rule, and `Metrics/*` cops are deliberately
-off because the ordering in `Arbiter#settle_mass` and `Tick#call` is the thing a reader most
-needs to see in one place. Keep both conventions.
+Comments state the rule and its non-obvious why, present tense, as the root `CLAUDE.md` says; the
+bug that produced a rule belongs in its design sketch. `Metrics/*` cops are deliberately off
+because the ordering in `Arbiter#settle_mass` and `Tick#call` is the thing a reader most needs to
+see in one place.

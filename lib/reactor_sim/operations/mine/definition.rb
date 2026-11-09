@@ -442,7 +442,7 @@ module ReactorSim
       end
 
       # **The door where the haulage crosses from intake to return.** Every set of tubs pushes it
-      # open (`traffic:`, the road's activity as of last tick); a trapper shuts it after them, and a
+      # open (`opened_by:`, the road's activity as of last tick); a trapper shuts it after them, and a
       # self-closing door shuts itself. With nobody trapping a plain door stays as the last tub left
       # it — it does not know nobody is there. An air lock is two doors, so the way through is open
       # only as often as both are at once. An explosion blows it out for good.
@@ -453,23 +453,23 @@ module ReactorSim
         OPENED_PER_S = 0.5
         SHUT_PER_S = 1.2
 
-        def initialize(traffic:, trapper: nil, self_closing_per_s: 0.0, doors: 1, **opts)
-          @traffic = traffic.to_sym
+        def initialize(opened_by:, trapper: nil, self_closing_per_s: 0.0, doors: 1, **opts)
+          @opened_by = opened_by.to_sym
           @trapper = trapper&.to_sym
           @self_closing_per_s = self_closing_per_s.to_f
           @doors = Integer(doors)
           super(**opts)
         end
 
-        attr_reader :traffic, :trapper, :self_closing_per_s, :doors
+        attr_reader :opened_by, :trapper, :self_closing_per_s, :doors
 
         def base_initial_state(rng, content) = super.merge(open: 0.0)
 
         def opening(state) = state.fetch(:open, 0.0)**@doors
 
         def apply(state, ctx, _grant)
-          road = ctx.nodes[@traffic]
-          tubs = road&.activity(ctx.node_state(@traffic), :tubs, ctx.dt).to_f
+          road = ctx.nodes[@opened_by]
+          tubs = road&.activity(ctx.node_state(@opened_by), :tubs, ctx.dt).to_f
           trapping = @trapper ? [ ctx.controls.fetch(@trapper, 0.0) / 100.0, 0.0 ].max : 0.0
           shutting = (SHUT_PER_S * trapping) + @self_closing_per_s
           open = state.fetch(:open, 0.0) + (((OPENED_PER_S * tubs) - shutting) * ctx.dt)
@@ -484,7 +484,7 @@ module ReactorSim
 
       def door(label:, self_closing_per_s: 0.0, doors: 1, trapper: :trapping)
         Door.new(id: :door, label: label, accepts: [ :gas ], leak_fraction: 0.02, max_kg_per_s: 40.0,
-                 conductance: 1.0, heat_capacity: 1.0e3, traffic: :tub_road, trapper: trapper,
+                 conductance: 1.0, heat_capacity: 1.0e3, opened_by: :tub_road, trapper: trapper,
                  self_closing_per_s: self_closing_per_s, doors: doors)
       end
 
@@ -562,8 +562,9 @@ module ReactorSim
           max_torque: max_torque, rated_omega: rated_omega, curve: :constant,
           control_id: :rods, friction: 1.0, endangers: endangers, damages: damages,
           # A missed step, every stroke a chance of it. Mostly a fall onto the next sollar.
+          # A step from rod to sollar, as sure as the light it is taken by.
           perils: [ Peril.new(id: :misstep, wounds: { crush: 1.0 }, causes: %i[fall], severity: 1.6, rate: 0.6,
-                              scales_with: :strokes, riders: %i[man_engine]) ]
+                              scales_with: :strokes, riders: %i[man_engine], underfoot: { dark: 4.0 }) ]
         )
       end
 
@@ -1330,114 +1331,26 @@ module ReactorSim
         )
       end
 
-      # **Light on the roadway, as opposed to light in your hand.**
-      #
-      # Hewing is `gated_by: %i[mining_effectiveness darkvision]` and a gate is a *zero* when it
-      # is missing, so light is not a bonus — it is the difference between a shift that wins
-      # coal and one that does not. A lamp on your belt is the minion's own tag; this is the
-      # other way of getting it, and `Minion#gate` takes the better of the two rather than the
-      # sum, because two lamps do not let you see twice.
-      #
-      # **A `Load`, always**, even for the tiers that burn nothing: the unpowered ones simply
-      # declare no torque and hang off no shaft, so their `omega` stays zero and is never
-      # consulted. That keeps one class, one node id and one slot across a tech tree whose top
-      # end is wired to the engine house and whose bottom end is a candle on a nail.
-      #
-      # **An open-flame tier is an ignition source in the room it lights**, and a safe tier is
-      # not: it declares no flame and offers nothing to `Tick#ignition_sources`. The lever's id
-      # differs too — `:naked_flame` against `:safe_light` — because a fire names what lit it, and
-      # "naked flame" tells the player what to stop doing. Both are labelled "Sconces", because
-      # to the player it is one lever either way — and neither may be called `:sconces`, which is
-      # the NODE: one flat id namespace.
-      #
-      # **A gauze is safe only in still enough air.** Past `gauze_passes_m_s` of draught through the
-      # district — measured off the intake road as of last tick — the flame is blown through the
-      # mesh and the lamp is a naked light after all, named `:gauze` so a fire says so. A stronger
-      # fan is what gets it there.
-      #
-      # **Lamps on a dynamo over-run.** Driven past `BLOWS_AT` of rated speed — less once worn — the
-      # filaments go, and the district is dark with the shift still in it. A flame on a bracket has
-      # no dynamo and cannot.
-      class Lighting < Nodes::Load
-        include Concerns::Wearing
-
-        attr_reader :illumination, :gauze_passes_m_s
-
-        # The intake road's cross-section the draught is read across, m².
-        ROADWAY_M2 = 4.0
-
-        BLOWS_AT = 1.4
-
-        def overload?(state, _ctx, integrity)
-          return false unless @rated_omega.positive?
-
-          omega(state).abs / @rated_omega > 1.0 + ((BLOWS_AT - 1.0) * integrity)
-        end
-
-        def failure_modes = { blown: { derates: { illumination: 0.0 } } }
-
-        def initialize(illumination:, igniter_kg_per_s: 0.0, flame_watts: 0.0,
-                       gauze_passes_m_s: nil, draught_from: :main_road, **opts)
-          @illumination = illumination.to_f
-          @igniter_kg_per_s = igniter_kg_per_s.to_f
-          @flame_watts = flame_watts.to_f
-          @gauze_passes_m_s = gauze_passes_m_s&.to_f
-          @draught_from = draught_from.to_sym
-          super(**opts)
-        end
-
-        # What somebody standing in this room gets for free. Read off N−1 state and the
-        # actuated levers, so it cannot depend on phase order.
-        def ambient_tags(state, levers) = { darkvision: lit(state, levers) }
-
-        # **The flame goes with the lever, not with the light.** A candle turned down is fewer
-        # candles, each as hot as ever, so a powered tier's shaft speed has no say here.
-        def ignition(state, levers)
-          fraction = (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0)
-          return through_the_gauze(state, fraction) if @gauze_passes_m_s
-          return nil unless @igniter_kg_per_s.positive?
-
-          { kg_per_s: @igniter_kg_per_s * fraction, watts: @flame_watts * fraction,
-            cause: @control_id }
-        end
-
-        def through_the_gauze(state, fraction)
-          return nil unless state.fetch(:draught_m_s, 0.0) > @gauze_passes_m_s
-
-          { kg_per_s: OPEN_FLAME.fetch(:igniter_kg_per_s) * fraction,
-            watts: OPEN_FLAME.fetch(:flame_watts) * fraction, cause: :gauze }
-        end
-
-        def draught_m_s(ctx)
-          kg = ctx.node_state(@draught_from)&.fetch(:carried_kg, 0.0).to_f
-          kg / Units::AIR_DENSITY_KG_PER_M3 / ROADWAY_M2 / ctx.dt
-        end
-
-        # Turned down is dimmer; a powered tier whose shaft has stopped is dark. Both are
-        # fractions of what this fitting manages at full.
-        def lit(state, levers)
-          fraction = @control_id ? (levers.fetch(@control_id, 0.0) / 100.0).clamp(0.0, 1.0) : 1.0
-          fraction *= (omega(state).abs / @rated_omega).clamp(0.0, 1.0) if @rated_omega.positive?
-
-          @illumination * fraction * derating(state, :illumination)
-        end
-
-        # Recorded so the panel can read it as an ordinary field, the way `carried_kg` is.
-        def apply(state, ctx, grant)
-          super.merge(lit: lit(state, ctx.controls), draught_m_s: draught_m_s(ctx))
-        end
-      end
-
       # What the open flames down the roadway offer the district: enough seed to light a mixture
       # that will carry it, and a little heat. In gas too lean to carry it the seed is what they
       # burn — a flame cap apiece, about a kilowatt of firedamp for the row.
       OPEN_FLAME = { igniter_kg_per_s: 2.0e-5, flame_watts: 1.2e3 }.freeze
 
+      # The intake road's cross-section a gauze's draught is read across, m².
+      ROADWAY_M2 = 4.0
+
+      # **Light on the roadway** (`Nodes::Lighting`), one node and one slot from a candle on a nail
+      # to lamps on the fan's shaft. **An open-flame tier is an ignition source in the district**,
+      # and its lever is `:naked_flame`, so a fire names what lit it; a safe tier's is
+      # `:safe_light`. Both are labelled "Sconces": to the player it is one lever. **A gauze is safe
+      # only in still enough air**: past `gauze_passes_m_s` through the intake road its flame is
+      # the open flame after all.
       def sconces(illumination:, control_id:, max_torque: 0.0, rated_omega: 0.0, flame: {})
-        Lighting.new(
+        gauze = flame.key?(:gauze_passes_m_s) ? OPEN_FLAME : {}
+        Nodes::Lighting.new(
           id: :sconces, label: "Sconces", illumination: illumination, control_id: control_id,
           max_torque: max_torque, rated_omega: rated_omega, curve: :viscous,
-          moment_of_inertia: 12.0, **flame
+          moment_of_inertia: 12.0, draught_from: :main_road, draught_area_m2: ROADWAY_M2, **gauze, **flame
         )
       end
 
@@ -1473,8 +1386,7 @@ module ReactorSim
 
         # How hard it was cutting this tick, against a full face, and whether the sprays had it wet.
         def apply(state, ctx, grant)
-          cut = state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * ctx.dt)
-          super.merge(cutting: cut.clamp(0.0, 1.0), quenched: SprayLine.wetting(ctx, @sprayed_by) >= 1.0)
+          super.merge(cutting: crew_share(state, ctx.dt), quenched: SprayLine.wetting(ctx, @sprayed_by) >= 1.0)
         end
       end
 
@@ -1642,16 +1554,15 @@ module ReactorSim
         # `rope:` names the haulage rope a road's sets are drawn on, if it has one: parted, the road
         # carries nothing until it is spliced. `advanced_by:` is the node that cuts the face, and
         # what it cut last tick is the ground opened; `supported_by:` is the timbering post.
-        def initialize(advanced_by:, supported_by:, endangers: {}, perils: [], rope: nil, **opts)
+        def initialize(advanced_by:, supported_by:, endangers: {}, rope: nil, **opts)
           @rope = rope&.to_sym
           @advanced_by = advanced_by.to_sym
           @supported_by = supported_by.to_sym
           @failure_hazards = endangers.to_h { |mode, harm| [ mode.to_sym, harm.freeze ] }.freeze
-          @perils = perils.freeze
-          super(**opts)
+          super(traffic: self.class::TRAFFIC, **opts)
         end
 
-        attr_reader :failure_hazards, :perils
+        attr_reader :failure_hazards
 
         def throughput_kg(state, ctx)
           return 0.0 if @rope && ctx.node_state(@rope)&.fetch(:failure, nil)
@@ -1676,21 +1587,12 @@ module ReactorSim
           [ cut - propped, 0.0 ].max
         end
 
-        # A fall does not seal a roadway, it chokes it — a few tubs a shift get past over the
-        # debris until it is cleared. Never 0.0: a road that passes nothing is a better seal
-        # than a sound one, which is the trap `nodes/CLAUDE.md` records for ruptures.
-        # **How busy the road is, 0..1.** What a peril on a haulage road scales with is the
-        # traffic, not the clock — the tub going past is the danger, so a road being worked
-        # flat out is a road that hurts people and an idle one is a corridor.
-        def activity(state, quantity, dt)
-          return nil unless quantity == self.class::TRAFFIC
-
-          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
-        end
-
         # What its perils scale with: the tubs going past.
         TRAFFIC = :tubs
 
+        # A fall does not seal a roadway, it chokes it — a few tubs a shift get past over the
+        # debris until it is cleared. Never 0.0: a road that passes nothing is a better seal
+        # than a sound one, which is the trap `nodes/CLAUDE.md` records for ruptures.
         def failure_modes = { roof_fall: { derates: { throughput: 0.12 } } }
 
         def failure_mode(_state, _ctx, _cause) = :roof_fall
@@ -2058,9 +1960,9 @@ module ReactorSim
       # Two to a landing: one running the tubs on or off and one at the gate.
       LANDING_CREW = 2
 
-      # What the weather on the deck at bank does to running tubs off it: twice as bad wet, nine
-      # times on ice.
-      BANK_FOOTING = { wet: 1.0, icy: 8.0 }.freeze
+      # What the deck at bank does to running tubs off it: twice as bad wet, nine times on ice, and
+      # five times unseen in the dark.
+      BANK_FOOTING = { wet: 1.0, icy: 8.0, dark: 4.0 }.freeze
 
       # The banksman running them off at bank.
       def deck_unloading(max_kg_per_s:, crew: LANDING_CREW)

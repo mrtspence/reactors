@@ -34,7 +34,8 @@ and also sweeps the source statically.
 - Every node, control point, diagnostic and minion gets its **own** RNG stream, named
   `"#{operation_id}/#{component_id}"`, so draws never depend on evaluation order. A minion has a
   **second**, `"#{operation_id}/#{id}/temper"` (`Animosity.stream`), for the dice their temper
-  throws, so adding animosity moved none of their other draws. The sky's node draws from one
+  throws, so adding animosity moved none of their other draws — and a wound stream
+  (`Injury.stream`) and a cover stream (`Cover.stream`) on the same principle. The sky's node draws from one
   stream shared by the whole match (`shared_stream`), so linked operations see one sky.
 - RNG state lives in match state, so it snapshots and restores.
 - **Entropy may only be drawn in three places:** `initial_state`, phase 0 (`actuate`), and
@@ -57,7 +58,8 @@ and also sweeps the source statically.
 > change. `draw_fates` exists as one method returning one fixed-size hash so the count is
 > checkable by reading it — and `draw_tempers` the same, on the temper stream, and
 > `draw_wounds`, one die a tick on the wound stream (`Injury.stream`) for which of a tier's
-> variants a wound is.
+> variants a wound is, and `draw_cover`, one a tick on the cover stream (`Cover.stream`) for
+> whether somebody heeds a call to cover.
 >
 > **Adding or removing a draw there is a replay-breaking change to every existing snapshot.**
 > That is acceptable while nothing durable is stored and must be deliberate afterwards.

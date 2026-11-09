@@ -8,26 +8,21 @@ module ReactorSim
     # waits upstream. Whoever works it is the lever (`control_id:`, often an effort station), so with
     # nobody at the landing nothing moves however long the carrier stands.
     #
-    # `traffic:` names the quantity its perils scale with: how busy the landing is against a full
-    # crew's rate.
-    #
     # **`boards: true` makes it the way aboard as well**: a passage running `through:` it is open
     # only while its carrier stood at its mark last tick (`standing`), so people step on and off a
     # carried place there and nowhere else.
     #
-    #   config: carrier, mark_m, traffic, boards, perils (plus Conduit's)
+    #   config: carrier, mark_m, boards (plus Conduit's, `perils:` and `traffic:` among them)
     #   state:  standing, with `boards:`
     class Landing < Conduit
-      def initialize(carrier:, mark_m:, traffic: nil, boards: false, perils: [], **opts)
+      def initialize(carrier:, mark_m:, boards: false, **opts)
         @carrier = carrier.to_sym
         @mark_m = mark_m.to_f
-        @traffic = traffic&.to_sym
         @boards = boards
-        @perils = perils.freeze
         super(**opts)
       end
 
-      attr_reader :carrier, :mark_m, :traffic, :perils
+      attr_reader :carrier, :mark_m
 
       def boards? = @boards
 
@@ -47,12 +42,6 @@ module ReactorSim
       def standing?(ctx)
         carrier_state = ctx.node_state(@carrier)
         !carrier_state.nil? && ctx.nodes[@carrier].standing_at?(carrier_state, @mark_m)
-      end
-
-      def activity(state, quantity, dt)
-        return nil unless @traffic && quantity == @traffic
-
-        (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
       end
     end
   end

@@ -22,18 +22,23 @@ module ReactorSim
   # may be projected any number of times — player, spectator, a resync of either — and if
   # reading drew noise, how many people happened to be watching would change the match.
   class Diagnostic
-    attr_reader :id, :label, :source, :filters, :display, :observer
+    attr_reader :id, :label, :source, :filters, :display, :observer, :role
 
-    def initialize(id:, source:, filters: [], display: nil, label: nil, observer: nil)
+    # What an instrument reads that belongs to the whole machine rather than any part of it: what
+    # it makes, and the sky over it. The delivery tier draws these apart from the rest.
+    ROLES = %i[output weather].freeze
+
+    def initialize(id:, source:, filters: [], display: nil, label: nil, observer: nil, role: nil)
       @id = id.to_sym
       @label = label || @id.to_s.tr("_", " ").capitalize
       @source = source
       @filters = filters.freeze
       @display = display || Displays::Needle.new
-      # Reserved for minions: whoever is watching this instrument will drive the parameters
-      # of the filters above (docs/simulation_architecture.md §7). Carried now so the seam
-      # exists before there is anything to put in it.
+      # Whose word this is: the post whose people take the reading, or nil for a dial on a wall.
       @observer = observer&.to_sym
+      @role = role&.to_sym
+      raise ArgumentError, "#{@id}: unknown role #{role.inspect} (have #{ROLES.join(', ')})" if @role && !ROLES.include?(@role)
+
       freeze
     end
 
@@ -95,7 +100,7 @@ module ReactorSim
     def flags(state) = state.fetch(:flags)
 
     # Sent once on subscribe so the client can draw the instrument; values stream after.
-    def chrome = @display.chrome.merge(id: @id, label: @label)
+    def chrome = @display.chrome.merge(id: @id, label: @label, **(@role ? { role: @role } : {}))
 
     private
 

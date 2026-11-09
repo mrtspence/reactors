@@ -38,7 +38,7 @@ module ReactorSim
         stripping_getting: :pick_and_shovel, stripping_carrying: :barrows,
         ore_getting: :pick_and_shovel, ore_carrying: :barrows, washhouse: :washhouse, bay_1: :single_log_washer,
         pump: :single_pump, mud_dam: :mud_dam, reservoir: :reservoir, magazine: :powder_house, kiln: :open_clamp,
-        coal_yard: :coal_heap, quarters: :site_hut, stripping_hut: :bench_hut, ore_hut: :bench_hut,
+        coal_yard: :coal_heap, oil_store: :oil_drums, quarters: :site_hut, stripping_hut: :bench_hut, ore_hut: :bench_hut,
         dump_shelter: :dump_shelter
       }.freeze
 
@@ -282,6 +282,8 @@ module ReactorSim
           hard_ground: "into hard ground",
           getting: "getting"
         }.freeze
+        # What asks nothing of anybody (`Displays::Prose.signals`).
+        CALM = %i[broken getting].freeze
 
         # **Broken ground digs loose**: this hardness, against ordinary ground's 1.0.
         BROKEN_HARDNESS = 0.6
@@ -490,13 +492,12 @@ module ReactorSim
       # beneath another gives up no more than is uncovered. Worked harder, and in harder ground,
       # it is more dangerous to stand at (`:getting`).
       class Getting < Nodes::Conduit
-        def initialize(bench:, perils: [], **opts)
+        def initialize(bench:, **opts)
           @bench = bench.to_sym
-          @perils = perils.freeze
           super(**opts)
         end
 
-        attr_reader :bench, :perils
+        attr_reader :bench
 
         def throughput_kg(state, ctx)
           bench = ctx.node_state(@bench) or return 0.0
@@ -505,11 +506,11 @@ module ReactorSim
           uncovered ? [ got, uncovered ].min : got
         end
 
-        # How hard the face was worked, against a full gang, and how hard it was.
+        # How hard the face was worked, against a full gang, and how hard it was. Harder ground
+        # passes less for the same effort, so the effort is what was got times the hardness.
         def apply(state, ctx, grant)
           hardness = (ctx.node_state(@bench) || {}).fetch(:hardness, 1.0)
-          working = ctx.dt.positive? ? state.fetch(:carried_kg, 0.0) * hardness / (full_crew_kg_per_s * ctx.dt) : 0.0
-          super.merge(working: working, hardness: hardness)
+          super.merge(working: crew_share(state, ctx.dt, pace: 1.0 / hardness), hardness: hardness)
         end
 
         def activity(state, quantity, _dt)
@@ -532,14 +533,13 @@ module ReactorSim
 
         # `max_kg_per_s` is one barrowman's on the level, `carry_m` the carry at the top, `bench:`
         # the bench whose depth the ramp climbs.
-        def initialize(bench:, carry_m:, perils: [], **opts)
+        def initialize(bench:, carry_m:, **opts)
           @bench = bench.to_sym
           @carry_m = carry_m.to_f
-          @perils = perils.freeze
           super(**opts)
         end
 
-        attr_reader :bench, :carry_m, :perils
+        attr_reader :bench, :carry_m
 
         def self.trip_s(depth_m, carry_m)
           metres = (depth_m / RAMP_GRADE) + carry_m
@@ -554,10 +554,7 @@ module ReactorSim
 
         def throughput_kg(state, ctx) = super * pace(ctx)
 
-        def apply(state, ctx, grant)
-          full = full_crew_kg_per_s * pace(ctx) * ctx.dt
-          super.merge(traffic: full.positive? ? (state.fetch(:carried_kg, 0.0) / full).clamp(0.0, 1.0) : 0.0)
-        end
+        def apply(state, ctx, grant) = super.merge(traffic: crew_share(state, ctx.dt, pace: pace(ctx)))
 
         def activity(state, quantity, _dt) = quantity == :barrows ? state.fetch(:traffic, 0.0) : nil
       end
@@ -594,6 +591,7 @@ module ReactorSim
           logs_knocking: "washing — the logs knocking",
           washing: "washing"
         }.freeze
+        CALM = %i[washing].freeze
 
         # Under this share of its rated speed the logs are stopped, and it draws this many ticks'
         # worth of water ahead of what it is washing.
@@ -767,19 +765,19 @@ module ReactorSim
           nothing_to_crush: "nothing to crush",
           crushing: "crushing"
         }.freeze
+        CALM = %i[crushing].freeze
 
         # `bin:` what it is fed from, `hopper:` what it crushes into, `feeders:` the post feeding it
         # by hand, if any.
-        def initialize(work_j_per_kg:, bin:, hopper:, feeders: nil, perils: [], **opts)
+        def initialize(work_j_per_kg:, bin:, hopper:, feeders: nil, **opts)
           @work_j_per_kg = work_j_per_kg.to_f
           @bin = bin.to_sym
           @hopper = hopper.to_sym
           @feeders = feeders&.to_sym
-          @perils = perils.freeze
-          super(**opts)
+          super(traffic: :jaws, **opts)
         end
 
-        attr_reader :work_j_per_kg, :perils
+        attr_reader :work_j_per_kg
 
         # What it crushed last tick, priced per kilogram.
         def hydraulic_w(state, ctx)
@@ -789,12 +787,6 @@ module ReactorSim
         def apply(state, ctx, grant)
           applied = super
           applied.merge(signal: SIGNALS.keys.index(signal(applied, ctx)))
-        end
-
-        def activity(state, quantity, dt)
-          return nil unless quantity == :jaws && dt.positive?
-
-          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
         end
 
         private
@@ -821,6 +813,7 @@ module ReactorSim
       #   state: parcels, signal, durability, initial_durability, failure
       class Embankment < Nodes::Vessel
         SIGNALS = { sound: "sound", weeping: "weeping at the toe", slumping: "slumping", breached: "breached" }.freeze
+        CALM = %i[sound].freeze
 
         # Integrity under which the toe weeps, and under which the wall slumps.
         WEEPING = 0.5
@@ -940,7 +933,7 @@ module ReactorSim
 
       # **The reservoir the washer and the pumps draw on**, full or nearly so in almost every
       # match. **Exceedingly rarely it is nearly dry** — a dry season — and a pit washing hard runs
-      # it out. Drawn once at `initial_state`; `ground:` pins it full. Rain tops it up (5e). Its bank
+      # it out. Drawn once at `initial_state`; `ground:` pins it full. Rain tops it up. Its bank
       # is an `Embankment`'s, held at its crest by the spillway: the small one's so strong no match
       # sees it wear, the larger ones' not.
       class Reservoir < Embankment
@@ -977,7 +970,8 @@ module ReactorSim
       # holds past `crest_kg`. A reservoir full in most matches would otherwise refuse what is
       # pumped into it, and the pit would flood behind it.
       #
-      # TODO: the larger reservoirs' rupture starts here — an overtopped bank. Untested until then.
+      # TODO: a spillway sized to its reservoir, which a larger one can overwhelm, and relief
+      # works — the first caller is a great reservoir whose bank goes over in a storm.
       class Spillway < Nodes::Conduit
         def initialize(over:, crest_kg:, **opts)
           @over = over.to_sym
@@ -1015,21 +1009,14 @@ module ReactorSim
       # per man, never more than is hanging (`bench:`'s `overhang_kg`). Its peril scales with how hard
       # they are at it (`:barring`).
       class Barring < Nodes::Conduit
-        def initialize(bench:, perils: [], **opts)
+        def initialize(bench:, **opts)
           @bench = bench.to_sym
-          @perils = perils.freeze
-          super(**opts)
+          super(traffic: :barring, **opts)
         end
 
-        attr_reader :bench, :perils
+        attr_reader :bench
 
         def throughput_kg(state, ctx) = [ super, (ctx.node_state(@bench) || {}).fetch(:overhang_kg, 0.0) ].min
-
-        def activity(state, quantity, dt)
-          return nil unless quantity == :barring && dt.positive?
-
-          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
-        end
       end
 
       # **The tip head, and the dump's edge under it.** Every kilogram tipped onto it loads the edge
@@ -1042,6 +1029,7 @@ module ReactorSim
       #   state: parcels, edge_load_kg, thresholds, slipping_kg, signal, durability, failure
       class TipHead < Nodes::Vessel
         SIGNALS = { sound: "sound", cracking: "cracks behind the edge", broken_back: "broken back" }.freeze
+        CALM = %i[sound].freeze
 
         # The edge load a dump holds before it breaks back, the first time more; rain loads each
         # kilogram tipped `WET_LOADS` more; it settles with this time constant; the dumpmen see the
@@ -1186,19 +1174,19 @@ module ReactorSim
         end
       end
 
-      # **A kiln: washed ore and small coal burnt together**, a vessel hosting `coal_combustion` and
-      # `limonite_calcining`, so how much of its ore is finished is decided by nothing but its heat.
-      # Its air comes in at the eyes and its gas goes up its throat, drawn by its own heat; short of
-      # air its coal burns to monoxide, and it runs cooler for it. What is drawn from it is whatever
-      # lies at the bottom, calcined or not.
+      # **A kiln: washed ore and small coal burnt together**, a fuel bed hosting `coal_combustion`
+      # and `limonite_calcining`, so how much of its ore is finished is decided by nothing but its
+      # heat. Its air comes in at the eyes and its gas goes up its throat, drawn by its own heat;
+      # short of air its coal burns to monoxide, and it runs cooler for it. What is drawn from it is
+      # whatever lies at the bottom, calcined or not.
       #
-      # **It starts at work** (`working:`, kilograms of each resource and `kelvin`): charged, at its
-      # working heat, its coal alight, and the air in it at the outside pressure.
+      # **It starts at work**, laid (`laid:`) as the shift before left it: charged, at its working
+      # heat, its coal alight.
       #
       # It writes **its board** (`signal`), in the burners' words.
       #
-      #   state: parcels, joules, ignition, signal
-      class Kiln < Nodes::Vessel
+      #   state: parcels, joules, ignition, alight, signal
+      class Kiln < Nodes::FuelBed
         SIGNALS = {
           empty: "empty — waiting on the chargers",
           cold: "cold — the fire out",
@@ -1207,30 +1195,14 @@ module ReactorSim
           no_coal: "no coal in the charge",
           burning: "burning well"
         }.freeze
+        CALM = %i[burning].freeze
 
         CALCINING = :limonite_calcining
 
         # Over this share of its gas by volume as monoxide, the burners call it short of air.
         SHORT_OF_AIR = 0.01
 
-        def initialize(working:, **opts)
-          @working = working.freeze
-          super(**opts)
-        end
-
-        def initial_state(rng, content = nil)
-          state = super
-          kelvin = @working.fetch(:kelvin)
-          air_kg = Units::STANDARD_PRESSURE_PA * volume_m3 * content.resource(:air).fetch(:molar_mass_g_per_mol) /
-                   1_000.0 / (Units::GAS_CONSTANT * kelvin)
-          held = @working.except(:kelvin).merge(air: air_kg).map do |resource, kg|
-            Parcel.build(resource: resource, kg: kg, temperature_k: kelvin, content: content)
-          end
-          state.merge(parcels: Parcel.normalise(held), joules: heat_capacity * kelvin,
-                      ignition: state.fetch(:ignition).merge(coal_combustion: { kg: @working.fetch(:coal, 0.0),
-                                                                                oxidiser_kg: 0.0 }),
-                      signal: SIGNALS.keys.index(:burning))
-        end
+        def initial_state(rng, content = nil) = super.merge(signal: SIGNALS.keys.index(:burning))
 
         def calcines_k(content) = content.reaction(CALCINING).fetch(:min_temperature_k).to_f
 
@@ -1264,23 +1236,6 @@ module ReactorSim
         end
       end
 
-      # **Charging a kiln by hand**, a gang rated per man. Its perils scale with how hard it is at it
-      # (`:charging`).
-      class Charging < Nodes::Conduit
-        def initialize(perils: [], **opts)
-          @perils = perils.freeze
-          super(**opts)
-        end
-
-        attr_reader :perils
-
-        def activity(state, quantity, dt)
-          return nil unless quantity == :charging && dt.positive?
-
-          (state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * dt)).clamp(0.0, 1.0)
-        end
-      end
-
       # **The coal laid in with the ore**: as much as the burners' lever says, up to `most_per_kg` a
       # kilogram of what the chargers put in last tick (`with:`). No ore charged, no coal.
       class CoalCharge < Nodes::Conduit
@@ -1304,20 +1259,18 @@ module ReactorSim
       class Drawing < Nodes::Conduit
         HOT_K = 600.0
 
-        def initialize(kiln:, perils: [], **opts)
+        def initialize(kiln:, **opts)
           @kiln = kiln.to_sym
-          @perils = perils.freeze
           super(**opts)
         end
 
-        attr_reader :kiln, :perils
+        attr_reader :kiln
 
         def apply(state, ctx, grant)
           node = ctx.nodes&.[](@kiln)
           held = ctx.node_state(@kiln)
           over = node && held ? node.temperature_k(held, ctx.content) - ambient_k : 0.0
-          busy = ctx.dt.positive? ? state.fetch(:carried_kg, 0.0) / (full_crew_kg_per_s * ctx.dt) : 0.0
-          super.merge(working: busy.clamp(0.0, 1.0), hot: (over / HOT_K).clamp(0.0, 1.0))
+          super.merge(working: crew_share(state, ctx.dt), hot: (over / HOT_K).clamp(0.0, 1.0))
         end
 
         def activity(state, quantity, _dt)

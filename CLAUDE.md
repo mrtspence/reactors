@@ -93,6 +93,7 @@ So: before you call a piece of work done, check this table and update what your 
 | A concern's config, state or methods | [`docs/reference/nodes.md`](docs/reference/nodes.md), [`concerns/CLAUDE.md`](lib/reactor_sim/concerns/CLAUDE.md) |
 | A stock node added or removed | [`docs/reference/nodes.md`](docs/reference/nodes.md), [`nodes/CLAUDE.md`](lib/reactor_sim/nodes/CLAUDE.md) |
 | A Source, Filter, Display, or `SIGNATURES` entry | [`docs/reference/diagnostics.md`](docs/reference/diagnostics.md), [`diagnostics/CLAUDE.md`](lib/reactor_sim/diagnostics/CLAUDE.md) |
+| Where anything sits on screen, or the goal layout | [`docs/reference/layout.md`](docs/reference/layout.md) |
 | A resource tag, reaction key, or material field | [`docs/guides/add-content.md`](docs/guides/add-content.md), [`content/CLAUDE.md`](content/CLAUDE.md) |
 | An operation or variant | [`docs/guides/build-an-operation.md`](docs/guides/build-an-operation.md), [`operations/CLAUDE.md`](lib/reactor_sim/operations/CLAUDE.md) |
 | A spec file, or the helper split | [`spec/CLAUDE.md`](spec/CLAUDE.md) |
@@ -165,6 +166,10 @@ Do not add a new inventory list without a derivation command next to it.
 
 ## Working style
 
+- **A shape written twice is extracted, and its rule written down.** Before writing a node, read
+  the stock shapes in [`nodes/CLAUDE.md`](lib/reactor_sim/nodes/CLAUDE.md#a-shape-written-twice-is-a-stock-shape)
+  — a fire is a `FuelBed`, a busy conduit has `traffic:`. Finding yourself copying another node's
+  code is the signal to lift it into the library and add the shape there, in the same change.
 - **Design before implementation.** Non-trivial features get a design doc reviewed and
   iterated before code. `docs/design_sketches/` is input to that, not a description of what
   exists.

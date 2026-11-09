@@ -1,91 +1,24 @@
 <% content_for :title, "Reactor — #{@operation_id.to_s.titleize}" %>
 
-<div class="min-h-screen bg-slate-900 text-slate-100"
-     data-controller="console"
-     data-console-match-id-value="<%= @match_id %>"
-     data-console-operation-id-value="<%= @operation_id %>"
-     data-console-commands-url-value="<%= operation_commands_path(match_id: @match_id, operation_id: @operation_id) %>"
-     data-console-reset-url-value="<%= match_reset_path(match_id: @match_id) %>">
+<% content_for :left do %>
+  <% if @places.boxed? %>
+    <%= render Frame::PlacesComponent.new(places: @places, operation_id: @operation_id) %>
+  <% end %>
+  <%= render Frame::PlaceholderComponent.new(region: :minimap) %>
+<% end %>
 
-  <header class="flex items-center gap-4 px-4 py-3 border-b border-slate-800">
-    <h1 class="text-sm uppercase tracking-widest text-slate-300">
-      <%= @operation_id.to_s.titleize %>
-      <% if @fittable %>
-        <span class="text-slate-500">
-          / <%= DevMatch.chassis(operation_id: @operation_id).to_s.tr("_", " ") %>
-        </span>
-      <% end %>
-    </h1>
+<% here = @places.seated(@minions) %>
+<div class="p-4 flex flex-col gap-4" data-controller="crew"
+     data-crew-places-value="<%= @panel.fetch(:places).to_h { |place| [ place.fetch(:id), place.fetch(:label) ] }.to_json %>"
+     data-crew-stations-value="<%= @places.stations.to_json %>"
+     data-crew-fallback-value="<%= @places.fallback %>">
+  <% @places.each_with_index do |place, index| %>
+    <%= render PlacePanelComponent.new(place:, shown: index.zero?, here: here.fetch(place.id, []), minions: @minions,
+                                       stations: @panel.fetch(:stations), places_known: @panel.fetch(:places).any?) %>
+  <% end %>
 
-    <%# **The hatch says when it is open.** A development affordance that looks identical to the
-        real thing is how somebody debugs the wrong rule for an afternoon. %>
-    <% if @borrowed %>
-      <span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded
-                   bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40"
-            title="Operated through the development bypass — you do not own this machine.">
-        borrowed
-      </span>
-    <% end %>
-
-    <span class="text-xs text-slate-500 tabular-nums">
-      tick <span data-console-target="tick">—</span>
-    </span>
-
-    <%# Connection state is worth showing plainly: a frozen panel and a disconnected one look
-        identical otherwise, and the first is a physics problem while the second is not. %>
-    <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400"
-          data-console-target="status">connecting…</span>
-
-    <div class="grow"></div>
-
-    <% if DevMatch.time_scale != 1.0 %>
-      <span class="text-xs text-amber-300">time ×<%= DevMatch.time_scale %></span>
-    <% end %>
-
-    <%# Every machine in this match you may look at. One link while there is one operation, which
-        is why it costs nothing to render unconditionally. %>
-    <% @siblings.each do |sibling| %>
-      <%= link_to sibling.operation_id.titleize,
-                  console_path(match_id: sibling.match_id, operation_id: sibling.operation_id),
-                  class: "text-xs px-2 py-1 rounded ring-1 #{
-                    sibling.operation_id == @operation_id.to_s ?
-                      'bg-slate-700 ring-slate-500' : 'bg-slate-800 ring-slate-700 hover:bg-slate-700'
-                  }" %>
-    <% end %>
-
-    <% if @fittable %>
-      <%= link_to "Outfitting",
-                  edit_loadout_path(match_id: @match_id, operation_id: @operation_id),
-                  class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                         "ring-1 ring-slate-700" %>
-
-      <%# Separate from outfitting, because they are separate decisions: what the machine IS, and
-          who is working it. Both rebuild the engine from cold. %>
-      <%= link_to "Crew",
-                  edit_crew_path(match_id: @match_id, operation_id: @operation_id),
-                  class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                         "ring-1 ring-slate-700" %>
-    <% end %>
-
-    <%# The season, which is the match's rather than this machine's. %>
-    <%= link_to "Match setup", edit_match_setup_path(match_id: @match_id),
-                class: "text-xs px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 " \
-                       "ring-1 ring-slate-700" %>
-
-    <button type="button" data-action="console#reset"
-            class="text-xs px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 ring-1 ring-rose-700">
-      Reset engine
-    </button>
-  </header>
-
-  <main class="p-4">
-    <%= render PanelComponent.new(panel: @panel, minions: @minions) %>
-
-    <p class="mt-4 text-xs text-slate-500 max-w-3xl">
-      The fire is banked from the shift before. Send a hand to the bellows, damper 85, stoking 60,
-      feed 40, throttle shut; the bed burns through in under a minute and the drum is at working
-      pressure in about three. Then take the bellows off, open the throttle — and only then put the
-      load on. If the fire has gone out, the igniter at 100 lights it again.
-    </p>
-  </main>
+  <%# How to start this machine, if it has a note of its own: one partial per kind. %>
+  <% if lookup_context.exists?("consoles/notes/#{@kind}", [], true) %>
+    <%= render "consoles/notes/#{@kind}" %>
+  <% end %>
 </div>

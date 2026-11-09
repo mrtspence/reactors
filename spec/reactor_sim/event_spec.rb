@@ -205,4 +205,29 @@ RSpec.describe "events" do
       expect(op.nodes.fetch(:fire_bed).send(:fire_severity)).to be(:info)
     end
   end
+
+  # **A machine says nothing about the state it began in.** A fire laid alight or a drum raised
+  # before the match seeds its transition's latch, or the first tick announces it — and an
+  # achievement folded from that record is handed out for nothing. Every machine on every frame,
+  # and the pit with the machines that start at work.
+  describe "the state a machine starts in" do
+    def starting = %i[fire_lit fire_out steam_raised heater_engaged]
+
+    def machines
+      fresh = ReactorSim::Operations.catalogued.flat_map do |type|
+        ReactorSim::Operations.chassis_for(type).map { |chassis| [ type, { chassis: chassis } ] }
+      end
+      fresh + [ [ :open_pit, { loadout: { stripping_shovel_dipper: :yard_dipper, stripping_train_train: :dinkey_train } } ] ]
+    end
+
+    it "is announced by nothing in its first ticks" do
+      announced = machines.flat_map do |type, options|
+        match = ReactorSim::Match.create(id: "s", seed: 1, operations: [ { id: :probe, type: type, **options } ])
+        events = Array.new(3) { match.step! }.flatten
+        events.select { |e| starting.include?(e[:type]) }.map { |e| [ type, options, e[:type], e[:node] ] }
+      end
+
+      expect(announced).to be_empty
+    end
+  end
 end

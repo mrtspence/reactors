@@ -21,27 +21,33 @@ module ReactorSim
     # range; without one it fires as soon as it is charged. `charge_from:` and `freezes_below_k:`
     # say where the charge is kept and below what it is frozen, which its `:frozen` activity reads.
     #
+    # **`warning:` sounds a warning before the shot** — `{ warning_s:, reaches:, sentries: { post:,
+    # reaches: } }` — and the shot fires `warning_s` after the fire lever, not on it. From the warning
+    # until what it threw is down, it calls the places it `reaches` to take cover (`take_cover`,
+    # `Cover`); its sentries, while posted, carry the call further. A shot fired unwarned (the
+    # `:unwarned` mishap, somebody's spite) calls nobody.
+    #
     #   state: progress, firing, charged, misfires, live, clearing, brought_down_kg, blew_out,
     #          blowout_pending, misfire_pending, misjudged_pending, work, struck, frozen,
-    #          since_fired_s, status
+    #          since_fired_s, status; with a warning, warned_s, warned_shot, unwarned_pending, sentried
     class ShotHole < Conduit
       # How long a shot reads as just fired, s.
       FIRED_S = 30.0
 
-      STATUSES = %i[idle charging fired misfire clearing charged].freeze
+      STATUSES = %i[idle charging fired misfire clearing charged warning].freeze
 
-      MISHAPS = %i[blowout misfire misjudged set_off struck].freeze
+      MISHAPS = %i[blowout misfire misjudged set_off struck unwarned].freeze
 
-      attr_reader :charge_kg, :blowout, :perils, :fired_by, :struck_by, :shot_s, :clear_s, :yield_kg,
-                  :blown_out_yield, :fire_control, :charge_from, :freezes_below_k
+      attr_reader :charge_kg, :blowout, :fired_by, :struck_by, :shot_s, :clear_s, :yield_kg,
+                  :blown_out_yield, :fire_control, :charge_from, :freezes_below_k, :warning
 
       # `shot_s` is a sound hand's seconds to drill, charge and fire one hole and `clear_s` to dig
       # out a misfire; `yield_kg` what one shot brings down, a blown-out one `blown_out_yield` of it.
-      def initialize(charge_kg:, perils:, fired_by:, shot_s:, clear_s:, yield_kg:, blown_out_yield:, blowout: nil,
-                     struck_by: {}, fire_control: nil, charge_from: nil, freezes_below_k: nil, **opts)
+      def initialize(charge_kg:, fired_by:, shot_s:, clear_s:, yield_kg:, blown_out_yield:, blowout: nil,
+                     struck_by: {}, fire_control: nil, charge_from: nil, freezes_below_k: nil, warning: nil, **opts)
+        @warning = warning && warned(warning)
         @charge_kg = charge_kg.to_f
         @blowout = blowout&.freeze
-        @perils = perils.freeze
         @fired_by = fired_by.to_sym
         @struck_by = struck_by.to_h { |control, crew_of| [ control.to_sym, crew_of.to_sym ] }.freeze
         @shot_s = shot_s.to_f
@@ -58,7 +64,17 @@ module ReactorSim
         super.merge(progress: 0.0, firing: false, charged: false, misfires: 0, live: 0, clearing: 0.0,
                     brought_down_kg: 0.0, blew_out: false, blowout_pending: false,
                     misfire_pending: false, misjudged_pending: false, work: 0.0, struck: 0.0, frozen: false,
-                    since_fired_s: FIRED_S, status: 0)
+                    since_fired_s: FIRED_S, status: 0,
+                    **(@warning ? { warned_s: nil, warned_shot: false, unwarned_pending: false, sentried: false } : {}))
+      end
+
+      # The places it calls to cover: from the warning until what the shot threw is down.
+      def take_cover(state)
+        return [] unless @warning
+        coming_down = state.fetch(:firing) || state.fetch(:since_fired_s) < FLYING_S
+        return [] unless !state.fetch(:warned_s).nil? || (state.fetch(:warned_shot) && coming_down)
+
+        state.fetch(:sentried) ? @warning.fetch(:reaches) + @warning.dig(:sentries, :reaches) : @warning.fetch(:reaches)
       end
 
       # One charge, on the tick the hole is fired; nothing otherwise.
@@ -93,6 +109,7 @@ module ReactorSim
         when :misjudged then [ state.merge(misjudged_pending: true), [] ]
         when :set_off then [ went_off(state, :misfires), [] ]
         when :struck then [ went_off(state, :live), [] ]
+        when :unwarned then [ @warning ? state.merge(unwarned_pending: true) : state, [] ]
         else super
         end
       end
@@ -101,10 +118,20 @@ module ReactorSim
         work = [ ctx.controls.fetch(@fired_by, 0.0) / 100.0, 0.0 ].max
         shot = fired(super, ctx).merge(work: work, struck: struck(ctx), frozen: frozen?(ctx))
         shot = shot.fetch(:misfires).positive? ? dig_out(shot, work, ctx) : charge(shot, work, ctx)
+        shot = shot.merge(sentried: ctx.controls.fetch(@warning.dig(:sentries, :post), 0.0).positive?) if sentries?
         shot.merge(status: STATUSES.index(status(shot)))
       end
 
       private
+
+      def warned(warning)
+        sentries = warning[:sentries]
+        { warning_s: warning.fetch(:warning_s).to_f, reaches: Array(warning.fetch(:reaches)).map(&:to_sym).freeze,
+          sentries: sentries && { post: sentries.fetch(:post).to_sym,
+                                  reaches: Array(sentries.fetch(:reaches)).map(&:to_sym).freeze }.freeze }.freeze
+      end
+
+      def sentries? = !@warning&.fetch(:sentries).nil?
 
       # Every post working the face is somebody who might strike a live charge in it, each by how
       # hard against a full crew.
@@ -150,10 +177,19 @@ module ReactorSim
         fire_when_told(done.merge(charged: true), ctx)
       end
 
+      # With a warning, the lever sounds it and the shot follows `warning_s` after; the lever put back
+      # calls it off. Unwarned, it fires at once and calls nobody.
       def fire_when_told(state, ctx)
-        return state if @fire_control && ctx.controls.fetch(@fire_control, 0.0) < 50.0
+        told = !@fire_control || ctx.controls.fetch(@fire_control, 0.0) >= 50.0
+        return state.merge(**(@warning ? { warned_s: nil } : {})) unless told
+        return state.merge(charged: false, firing: true) unless @warning
+        return state.merge(charged: false, firing: true, unwarned_pending: false, warned_s: nil, warned_shot: false) if state.fetch(:unwarned_pending)
 
-        state.merge(charged: false, firing: true)
+        warned = state.fetch(:warned_s)
+        return state.merge(warned_s: 0.0) if warned.nil?
+        return state.merge(warned_s: warned + ctx.dt) if warned + ctx.dt < @warning.fetch(:warning_s)
+
+        state.merge(charged: false, firing: true, warned_s: nil, warned_shot: true)
       end
 
       def went_off(state, which)
@@ -171,7 +207,9 @@ module ReactorSim
       end
 
       def status(state)
-        if state.fetch(:misfires).positive?
+        if @warning && !state.fetch(:warned_s).nil?
+          :warning
+        elsif state.fetch(:misfires).positive?
           state.fetch(:work).positive? ? :clearing : :misfire
         elsif state.fetch(:since_fired_s) < FIRED_S
           :fired

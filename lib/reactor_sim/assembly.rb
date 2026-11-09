@@ -99,7 +99,7 @@ module ReactorSim
     # **Who starts somewhere other than the quarters**: every fitted part declaring
     # `advance_seats:`, as `[{ seats:, place: }]` in slot order — the order the operation deals
     # seats in. The place is the part's `advance_place:`, or, for a part fitted in more than one
-    # slot — a hut at either bench — the place its slot's names give it.
+    # slot, the place its slot's names give it.
     #
     # **And who starts at work**: a part declaring `advance_posts:` — the roles of a machine's crew,
     # an engine that was running when the match began — deals a seat to each of those posts, named

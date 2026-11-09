@@ -13,15 +13,9 @@ class ConsolesController < ApplicationController
     operation = current_operation
 
     @panel = DevMatch.panel(operation_id: operation.operation_id)
+    @places = ConsolePlaces.new(@panel)
     @minions = DevMatch.crew(operation_id: operation.operation_id)
-    @match_id = operation.match_id
     @operation_id = operation.operation_id
-    @fittable = operation.fittable?
-    # **The console says when the hatch is open.** A development affordance that looks identical
-    # to the real thing is how somebody debugs the wrong rule for an afternoon.
-    @borrowed = Operator.bypass? && !operation.owner_id.eql?(current_player)
-    # Only the ones this player may look at, so the switcher never offers a 404.
-    @siblings = Operation.in_match(operation.match_id)
-                         .select { |op| op.viewable_by?(current_player) }
+    @kind = operation.kind
   end
 end

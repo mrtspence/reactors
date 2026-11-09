@@ -356,14 +356,14 @@ module ReactorSim
       # it as a lever puts a slider on the panel that does nothing, and leaving it out of
       # `stations` makes the one place crew start unreachable from the crew screen.
       { operation_id: @id,
-        instruments: @diagnostics.values.map(&:chrome),
+        instruments: @diagnostics.values.map { |d| d.chrome.merge(places: instrument_places(d)) },
         controls: @control_points.values.select(&:commandable?).map { |c|
-          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit, capacity: c.capacity }
+          { id: c.id, label: c.label, min: c.min, max: c.max, unit: c.unit, capacity: c.capacity, place: c.place }
         },
         # `capacity` is how many the post takes (nil: no limit), so the crew screen can show a
         # gang filling up from the postings it already has.
         stations: @control_points.values.reject(&:internal?).map { |c|
-          { id: c.id, label: c.label, capacity: c.capacity }
+          { id: c.id, label: c.label, capacity: c.capacity, place: c.place }
         },
         # **Empty for an operation with no geometry**, which is what makes the panel's "where
         # are they" line nil-accepting: an operation that declares no places gets nothing
@@ -437,6 +437,18 @@ module ReactorSim
 
     private
 
+    # **Where an instrument is read**, derived, in `Layout` order: its observer's post's place;
+    # else the places of the nodes it reads; else the places of the posts working those nodes — a
+    # way between two rooms is in both. Empty is nowhere in particular: the works.
+    def instrument_places(diagnostic)
+      return [ @layout.place_of(diagnostic.observer) ] if @layout.place_of(diagnostic.observer)
+
+      nodes = diagnostic.source.nodes
+      found = nodes.filter_map { |node| @layout.place_of_node(node) }
+      found = @control_points.values.select { |c| nodes.include?(c.node) }.filter_map(&:place) if found.empty?
+      @layout.places & found
+    end
+
     # --- phases --------------------------------------------------------------
 
     # Phase 0. Levers travel toward their targets. All actuation entropy belongs here,
@@ -486,6 +498,12 @@ module ReactorSim
         next if station.nil? || @control_points.key?(station)
 
         raise Error, "diagnostic #{diagnostic.id}: no control point #{station} to observe it"
+      end
+
+      # **A light's places have to exist.** One aimed at a place that is not there lights nobody.
+      @nodes.each_value do |node|
+        missing = node.respond_to?(:lights) ? node.lights - @layout.places : []
+        raise Error, "#{node.id}: lights no place called #{missing.join(', ')}" if missing.any?
       end
 
       validate_worked!
@@ -555,13 +573,14 @@ module ReactorSim
     # re-tuning it.
     # Scoped by operation, except for a node that names a **match-wide** stream — the sky — so
     # that every operation in a match draws the same one.
-    # Each person also has a temper stream (`Animosity.stream`) and a wound stream (`Injury.stream`).
+    # Each person also has a temper stream (`Animosity.stream`), a wound stream (`Injury.stream`) and
+    # a cover stream (`Cover.stream`).
     def build_rngs(seed)
       streams = (@nodes.keys + @control_points.keys + @diagnostics.keys + @minions.keys).to_h do |id|
         shared = @nodes[id].respond_to?(:shared_stream) ? @nodes[id].shared_stream : nil
         [ id, Rng.stream(seed, shared || "#{@id}/#{id}") ]
       end
-      personal = @minions.keys.flat_map { |id| [ Animosity.stream(id), Injury.stream(id) ] }
+      personal = @minions.keys.flat_map { |id| [ Animosity.stream(id), Injury.stream(id), Cover.stream(id) ] }
       streams.merge(personal.to_h { |stream| [ stream, Rng.stream(seed, "#{@id}/#{stream}") ] })
     end
 
