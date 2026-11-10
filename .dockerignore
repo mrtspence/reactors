@@ -49,3 +49,12 @@
 # Ignore Docker-related files
 /.dockerignore
 /Dockerfile*
+
+# Ignore my infrastructure files
+/infra
+
+# Ignore docs
+/docs
+
+# Ignore specs
+/spec
