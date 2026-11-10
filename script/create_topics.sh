@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates the four match topics (docs/architecture.md §6).
 #
-# Partition count is fixed at 12 and must stay that way: key -> partition mapping is
+# Partition count is fixed (docs/architecture.md §6) and must stay that way: key -> partition mapping is
 # only stable at a fixed partition count, so raising it later would reshuffle which
 # runner owns which in-flight match.
 #
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-PARTITIONS="${PARTITIONS:-12}"
+PARTITIONS="${PARTITIONS:-6}"
 RETENTION_MS="${RETENTION_MS:-604800000}" # 7 days
 RPK=(docker compose exec -T redpanda rpk)
 
