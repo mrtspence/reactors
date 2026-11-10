@@ -7,11 +7,6 @@ resource "aws_ecr_repository" "reactor" {
   force_delete = false
 }
 
-output "reactor_ecr_repository_url" {
-  description = "The URL of the reactor ECR repository"
-  value       = aws_ecr_repository.reactor.repository_url
-}
-
 resource "aws_ecr_lifecycle_policy" "reactor" {
   repository = aws_ecr_repository.reactor.name
   policy = jsonencode({
