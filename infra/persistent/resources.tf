@@ -75,8 +75,3 @@ resource "aws_budgets_budget" "reactor_monthly" {
     }
   }
 }
-
-moved {
-  from = aws_budgets_budget.reactor-monthly
-  to = aws_budgets_budget.reactor_monthly
-}
