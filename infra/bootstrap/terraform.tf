@@ -6,4 +6,11 @@ terraform {
       version = "~> 6.23"
     }
   }
+  backend "s3" {
+    bucket       = "reactor-337903911763-us-east-2-an"
+    key          = "global/s3/terraform.tfstate"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }

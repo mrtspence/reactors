@@ -1,1 +1,1 @@
-data "aws_caller_identify" "current" {}
+data "aws_caller_identity" "current" {}
