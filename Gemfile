@@ -44,7 +44,7 @@ gem "solid_cable"
 #   * karafka drives the egress consumers, which genuinely are message-driven. Its Web
 #     UI is also where consumer lag and partition assignment become visible.
 gem "rdkafka", "~> 0.19"
-gem "karafka", "~> 2.4"
+gem "karafka", "~> 2.6"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false
