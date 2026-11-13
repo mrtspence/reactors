@@ -153,8 +153,10 @@ Kafka, via Redpanda locally (single binary, Kafka wire-compatible, ships a conso
 
 ### Topics
 
-All keyed by `match_id`. **12 partitions, fixed** — key→partition mapping is only stable at a fixed
-partition count, and changing it later reshuffles every match's ownership.
+All keyed by `match_id`. **6 partitions per topic, fixed** — key→partition mapping is only stable
+at a fixed partition count, and changing it later reshuffles every match's ownership. Four topics at
+6 is 24 partitions, inside the 30 that one Confluent Cloud Basic eCKU allows; the first eCKU is free.
+Six is also the ceiling on concurrent runners.
 
 | Topic | Retention | Purpose |
 |---|---|---|

@@ -28,6 +28,7 @@ content/           YAML data the sim reads once, at boot.
 app/               Rails delivery tier. May call into the sim; the sim never calls back.
 spec/              Sim specs are Rails-free (spec_helper); web specs use rails_helper.
 docs/              See docs/README.md for the map.
+infra/             Terraform. One folder per layer, each its own state: bootstrap, persistent, confluent, ephemeral.
 ```
 
 The sim is **deliberately outside Zeitwerk** (`config/application.rb` ignores it). Its load

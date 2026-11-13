@@ -36,3 +36,9 @@
 
 /app/assets/builds/*
 !/app/assets/builds/.keep
+
+# no terraform secrets!
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
