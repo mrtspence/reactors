@@ -58,3 +58,6 @@
 
 # Ignore specs
 /spec
+
+# kcat testing
+.config/kcat
