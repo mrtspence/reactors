@@ -35,7 +35,7 @@ create match.events    --topic-config "retention.ms=$RETENTION_MS"
 # Latest full state per match. Compacted, so recovery is "read the newest value for
 # this key" — each record carries the command offset it was taken at.
 create match.snapshots --topic-config "cleanup.policy=compact" \
-                       --topic-config "min.cleanable.dirty.ratio=0.1"
+                       --topic-config "min.cleanable.dirty.ratio=0.5"
 
 # created / started / ended.
 create match.lifecycle --topic-config "retention.ms=$RETENTION_MS"

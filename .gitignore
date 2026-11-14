@@ -42,3 +42,6 @@
 *.tfstate
 *.tfstate.*
 *.tfvars
+
+# kcat testing
+.config/kcat
