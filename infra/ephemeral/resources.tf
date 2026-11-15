@@ -126,15 +126,6 @@ resource "aws_vpc_endpoint" "s3" {
   }
 }
 
-
-# TODO: PROLLY NEED LATER, REMOVE COMMENT ONCE ATTACHED OR REMOVE IF NOT USED
-data "aws_route53_zone" "this" {
-  name = "play.reactor-game.dev"
-}
-data "aws_ecr_repository" "this" {
-  name = "reactor"
-}
-
 data "aws_db_snapshot" "source" {
   count = var.restore_rds_snapshot ? 1 : 0
 
@@ -205,4 +196,176 @@ resource "aws_db_instance" "reactor" {
     RestoredAt     = time_static.restore_point.rfc3339
     SourceSnapshot = one(data.aws_db_snapshot.source[*].id)
   }
+}
+
+
+
+### EKS STUFF TODO: SPLIT OUT LATER
+
+data "aws_iam_policy_document" "eks_cluster" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["eks.amazonaws.com"]
+    }
+
+    actions = [
+      "sts:AssumeRole",
+      "sts:TagSession"
+    ]
+  }
+}
+
+resource "aws_iam_role" "eks_cluster" {
+  name               = "eks-cluster-role"
+  assume_role_policy = data.aws_iam_policy_document.eks_cluster.json
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster.name
+}
+
+resource "aws_eks_cluster" "reactor" {
+  name                          = "reactor"
+  version                       = "1.37"
+  role_arn                      = aws_iam_role.eks_cluster.arn
+  bootstrap_self_managed_addons = false
+  enabled_cluster_log_types     = []
+
+  access_config {
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = false
+  }
+
+  upgrade_policy {
+    support_type = "STANDARD"
+  }
+
+  vpc_config {
+    subnet_ids              = [for s in aws_subnet.private : s.id]
+    endpoint_private_access = true
+    endpoint_public_access  = true
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster,
+    aws_internet_gateway.reactor,
+    aws_nat_gateway.reactor,
+    aws_route_table.private,
+    aws_route_table_association.private
+  ]
+}
+
+# TODO: Get this its own proper iam role later
+data "aws_iam_session_context" "current" {
+  arn = data.aws_caller_identity.current.arn
+}
+
+resource "aws_eks_access_entry" "eks_cluster" {
+  cluster_name  = aws_eks_cluster.reactor.name
+  principal_arn = data.aws_iam_session_context.current.issuer_arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "eks_cluster" {
+  cluster_name  = aws_eks_cluster.reactor.name
+  policy_arn    = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  principal_arn = aws_eks_access_entry.eks_cluster.principal_arn
+
+  access_scope {
+    type = "cluster"
+  }
+}
+
+resource "aws_eks_addon" "eks_cluster_vpc_cni" {
+  cluster_name = aws_eks_cluster.reactor.name
+  addon_name   = "vpc-cni"
+}
+
+resource "aws_eks_addon" "eks_cluster_kube_proxy" {
+  cluster_name = aws_eks_cluster.reactor.name
+  addon_name   = "kube-proxy"
+}
+
+resource "aws_eks_addon" "eks_cluster_eks_pod_identity_agent" {
+  cluster_name = aws_eks_cluster.reactor.name
+  addon_name   = "eks-pod-identity-agent"
+}
+
+data "aws_iam_policy_document" "eks_node" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+
+    actions = [
+      "sts:AssumeRole"
+    ]
+  }
+}
+
+resource "aws_iam_role" "eks_node" {
+  name               = "eks-node-role"
+  assume_role_policy = data.aws_iam_policy_document.eks_node.json
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node.name
+}
+
+# TODO: Move this off here onto the vpc-cni add on identity later
+resource "aws_iam_role_policy_attachment" "eks_node_cni" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_ecr_read" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
+  role       = aws_iam_role.eks_node.name
+}
+
+resource "aws_eks_node_group" "reactor" {
+  cluster_name    = aws_eks_cluster.reactor.name
+  node_group_name = "reactor"
+  node_role_arn   = aws_iam_role.eks_node.arn
+  capacity_type   = "ON_DEMAND"
+  instance_types  = ["t4g.medium"] # switch to large if runing up surplus cpu charges
+  ami_type        = "AL2023_ARM_64_STANDARD"
+  subnet_ids      = [for s in aws_subnet.private : s.id]
+
+  scaling_config {
+    desired_size = 1
+    max_size     = 2
+    min_size     = 1
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_node_policy,
+    aws_iam_role_policy_attachment.eks_node_cni,
+    aws_iam_role_policy_attachment.eks_node_ecr_read
+  ]
+}
+
+# this needs to be wired up after the node group
+resource "aws_eks_addon" "eks_cluster_coredns" {
+  cluster_name = aws_eks_cluster.reactor.name
+  addon_name   = "coredns"
+  depends_on   = [aws_eks_node_group.reactor]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "node_to_rds" {
+  security_group_id            = aws_security_group.rds.id
+  referenced_security_group_id = aws_eks_cluster.reactor.vpc_config[0].cluster_security_group_id
+  description                  = "Allow rds/postgres access from EKS nodes"
+
+  ip_protocol = "tcp"
+  from_port   = 5432
+  to_port     = 5432
 }
