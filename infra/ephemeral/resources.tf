@@ -127,12 +127,82 @@ resource "aws_vpc_endpoint" "s3" {
 }
 
 
-
 # TODO: PROLLY NEED LATER, REMOVE COMMENT ONCE ATTACHED OR REMOVE IF NOT USED
 data "aws_route53_zone" "this" {
   name = "play.reactor-game.dev"
 }
-
 data "aws_ecr_repository" "this" {
   name = "reactor"
+}
+
+data "aws_db_snapshot" "source" {
+  count = var.restore_rds_snapshot ? 1 : 0
+
+  snapshot_type          = "manual"
+  db_instance_identifier = "reactor-db"
+  most_recent            = true
+}
+
+resource "time_static" "restore_point" {}
+
+locals {
+  timestamp = formatdate("YYYYMMDD-hhmm", time_static.restore_point.rfc3339)
+}
+
+ephemeral "aws_ssm_parameter" "rds_db_password" {
+  arn = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/reactor/production/rds/master_password"
+}
+
+
+resource "aws_db_subnet_group" "rds" {
+  name        = "rds-subnet-group"
+  description = "Subnet group for the rds instance"
+  subnet_ids  = values(aws_subnet.private)[*].id
+}
+
+resource "aws_security_group" "rds" {
+  name        = "rds-private-sg"
+  description = "Security group for rds instance"
+  vpc_id      = aws_vpc.reactor.id
+
+  tags = {
+    Name = "rds-private-sg"
+  }
+}
+
+resource "aws_db_instance" "reactor" {
+  identifier        = "reactor-db"
+  engine            = "postgres"
+  engine_version    = "16"
+  instance_class    = "db.t4g.micro"
+  allocated_storage = 20
+  storage_type      = "gp3"
+
+  username            = "postgres"
+  password_wo         = ephemeral.aws_ssm_parameter.rds_db_password.value
+  password_wo_version = 1 # Rotation: docs/reference/infrastructure.md
+  storage_encrypted   = true
+
+  multi_az               = false
+  publicly_accessible    = false
+  db_subnet_group_name   = aws_db_subnet_group.rds.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  snapshot_identifier       = var.restore_rds_snapshot ? data.aws_db_snapshot.source[0].id : null
+  backup_retention_period   = 0
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "reactor-db-${local.timestamp}"
+  deletion_protection       = false
+  copy_tags_to_snapshot     = false # TODO: circle back to add tags from elsewhere later
+
+  lifecycle {
+    ignore_changes = [
+      snapshot_identifier
+    ]
+  }
+
+  tags = {
+    RestoredAt     = time_static.restore_point.rfc3339
+    SourceSnapshot = one(data.aws_db_snapshot.source[*].id)
+  }
 }
