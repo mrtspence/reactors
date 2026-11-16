@@ -198,8 +198,6 @@ resource "aws_db_instance" "reactor" {
   }
 }
 
-
-
 ### EKS STUFF TODO: SPLIT OUT LATER
 
 data "aws_iam_policy_document" "eks_cluster" {
@@ -248,7 +246,7 @@ resource "aws_eks_cluster" "reactor" {
     subnet_ids              = [for s in aws_subnet.private : s.id]
     endpoint_private_access = true
     endpoint_public_access  = true
-    public_access_cidrs     = var.eks_cluster_public_access_ip
+    public_access_cidrs     = var.admin_cidrs
   }
 
   depends_on = [
@@ -372,4 +370,156 @@ resource "aws_vpc_security_group_ingress_rule" "node_to_rds" {
   ip_protocol = "tcp"
   from_port   = 5432
   to_port     = 5432
+}
+
+### Certificates etc. TODO: slice out later
+
+resource "aws_acm_certificate" "reactor" {
+  domain_name       = "play.reactor-game.dev"
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+data "aws_route53_zone" "subdomain" {
+  name         = "play.reactor-game.dev"
+  private_zone = false
+}
+
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.reactor.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  zone_id = data.aws_route53_zone.subdomain.id
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = 60
+  records = [each.value.record]
+  allow_overwrite = true
+}
+
+resource "aws_acm_certificate_validation" "reactor" {
+  certificate_arn = aws_acm_certificate.reactor.arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
+}
+
+resource "aws_security_group" "alb" {
+  name        = "reactor-alb-sg"
+  description = "Security group for the ALB"
+  vpc_id      = aws_vpc.reactor.id
+
+  tags = {
+    Name = "reactor-alb-sg"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_http_in" {
+  for_each = toset(var.admin_cidrs)
+
+  security_group_id = aws_security_group.alb.id
+  description       = "Allow HTTP from admin CIDR ${each.value}"
+  cidr_ipv4         = each.value
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_https_in" {
+  for_each = toset(var.admin_cidrs)
+
+  security_group_id = aws_security_group.alb.id
+  description       = "Allow HTTPS from admin CIDR ${each.value}"
+  cidr_ipv4         = each.value
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_to_eks" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "Allow ALB to forward traffic to EKS cluster on port 80"
+  referenced_security_group_id = aws_eks_cluster.reactor.vpc_config[0].cluster_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 80
+  to_port                      = 80
+}
+
+resource "aws_vpc_security_group_ingress_rule" "eks_from_alb" {
+  security_group_id = aws_eks_cluster.reactor.vpc_config[0].cluster_security_group_id
+  description       = "Allow HTTP from ALB into the EKS cluster"
+  referenced_security_group_id = aws_security_group.alb.id
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+}
+
+resource "aws_lb" "reactor" {
+  name = "reactor-alb"
+  internal = false
+  load_balancer_type = "application"
+  idle_timeout = 60
+  drop_invalid_header_fields = true
+  subnets = [for s in aws_subnet.public : s.id]
+  security_groups = [aws_security_group.alb.id]
+}
+
+# TODO: This isn't gonna be used until I get the target group binding in later. Untested rn
+resource "aws_lb_target_group" "eks" {
+  name        = "reactor-eks-lb-target-group"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.reactor.id
+  target_type = "ip"
+  deregistration_delay = 30
+
+  health_check {
+    path = "/up"
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.reactor.arn
+  port = "443"
+  protocol = "HTTPS"
+  ssl_policy = "ELBSecurityPolicy-TLS13-1-3-PQ-2025-09"
+  certificate_arn = aws_acm_certificate_validation.reactor.certificate_arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.eks.arn
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.reactor.arn
+  port = "80"
+  protocol = "HTTP"
+
+  default_action {
+    type             = "redirect"
+    redirect {
+      port = "443"
+      protocol = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+resource "aws_route53_record" "apex" {
+  name = data.aws_route53_zone.subdomain.name
+  type = "A"
+  zone_id = data.aws_route53_zone.subdomain.zone_id
+
+  alias {
+    name = aws_lb.reactor.dns_name
+    zone_id = aws_lb.reactor.zone_id
+    evaluate_target_health = false
+  }
 }
