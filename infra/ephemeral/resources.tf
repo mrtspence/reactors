@@ -219,7 +219,7 @@ data "aws_iam_policy_document" "eks_cluster" {
 }
 
 resource "aws_iam_role" "eks_cluster" {
-  name               = "eks-cluster-role"
+  name               = "reactor-eks-cluster-role"
   assume_role_policy = data.aws_iam_policy_document.eks_cluster.json
 }
 
@@ -248,14 +248,11 @@ resource "aws_eks_cluster" "reactor" {
     subnet_ids              = [for s in aws_subnet.private : s.id]
     endpoint_private_access = true
     endpoint_public_access  = true
+    public_access_cidrs     = var.eks_cluster_public_access_ip
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.eks_cluster,
-    aws_internet_gateway.reactor,
-    aws_nat_gateway.reactor,
-    aws_route_table.private,
-    aws_route_table_association.private
+    aws_iam_role_policy_attachment.eks_cluster
   ]
 }
 
@@ -272,7 +269,7 @@ resource "aws_eks_access_entry" "eks_cluster" {
 
 resource "aws_eks_access_policy_association" "eks_cluster" {
   cluster_name  = aws_eks_cluster.reactor.name
-  policy_arn    = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
   principal_arn = aws_eks_access_entry.eks_cluster.principal_arn
 
   access_scope {
@@ -311,7 +308,7 @@ data "aws_iam_policy_document" "eks_node" {
 }
 
 resource "aws_iam_role" "eks_node" {
-  name               = "eks-node-role"
+  name               = "reactor-eks-node-role"
   assume_role_policy = data.aws_iam_policy_document.eks_node.json
 }
 
@@ -336,7 +333,7 @@ resource "aws_eks_node_group" "reactor" {
   node_group_name = "reactor"
   node_role_arn   = aws_iam_role.eks_node.arn
   capacity_type   = "ON_DEMAND"
-  instance_types  = ["t4g.medium"] # switch to large if runing up surplus cpu charges
+  instance_types  = ["t4g.medium"] # switch to non-burstable like m7g large etc if runing up surplus cpu charges
   ami_type        = "AL2023_ARM_64_STANDARD"
   subnet_ids      = [for s in aws_subnet.private : s.id]
 
@@ -349,7 +346,14 @@ resource "aws_eks_node_group" "reactor" {
   depends_on = [
     aws_iam_role_policy_attachment.eks_node_policy,
     aws_iam_role_policy_attachment.eks_node_cni,
-    aws_iam_role_policy_attachment.eks_node_ecr_read
+    aws_iam_role_policy_attachment.eks_node_ecr_read,
+    aws_eks_addon.eks_cluster_eks_pod_identity_agent,
+    aws_eks_addon.eks_cluster_vpc_cni,
+    aws_eks_addon.eks_cluster_kube_proxy,
+    aws_internet_gateway.reactor,
+    aws_nat_gateway.reactor,
+    aws_route_table.private,
+    aws_route_table_association.private
   ]
 }
 

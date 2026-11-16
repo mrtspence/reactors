@@ -3,3 +3,12 @@ variable "restore_rds_snapshot" {
   type        = bool
   default     = true
 }
+
+variable "eks_cluster_public_access_ip" {
+  description = "The ip address allowed to access the eks cluster control plane"
+  type        = list(string)
+  validation {
+    condition     = !contains(var.eks_cluster_public_access_ip, "0.0.0.0/0")
+    error_message = "Must pass a specific address. Get using curl -s https://checkip.amazonaws.com (then add /32)"
+  }
+}
